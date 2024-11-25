@@ -30,6 +30,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
+from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import (
     add_compilation_metrics_to_chromium,
     CompileTimeInstructionCounter,
@@ -665,7 +666,11 @@ def _compile(
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
-        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
+        except (
+            exc.SpeculationRestartAnalysis,
+            exc.TensorifyScalarRestartAnalysis,
+            exc.SkipFrame,
+        ):
             raise
         except Exception:
             if translation_validation_enabled():
@@ -747,6 +752,8 @@ def _compile(
                 out_code = transform_code_object(code, transform)
                 break
             except exc.RestartAnalysis as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.info(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
@@ -758,6 +765,8 @@ def _compile(
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
+                if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
+                    TensorifyState.clear()
                 log.debug(
                     "Skipping frame %s %s \
                     %s %s",

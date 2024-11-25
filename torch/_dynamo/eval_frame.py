@@ -399,6 +399,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        enter_exit_hooks=None,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -410,7 +411,7 @@ class _TorchDynamoContext:
         self._dynamic = dynamic
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
-        self.enter_exit_hooks = []
+        self.enter_exit_hooks = enter_exit_hooks or []
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
@@ -631,6 +632,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        enter_exit_hooks=None,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -644,6 +646,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            enter_exit_hooks=enter_exit_hooks,
         )
 
         if config.compiled_autograd:
@@ -742,6 +745,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    enter_exit_hooks=None,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -751,6 +755,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        enter_exit_hooks=enter_exit_hooks,
     )
 
 
@@ -822,6 +827,7 @@ def _optimize(
     guard_fail_fn=None,
     disable=False,
     dynamic=None,
+    enter_exit_hooks=None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -875,6 +881,7 @@ def _optimize(
             dynamic=dynamic,
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
+            enter_exit_hooks=enter_exit_hooks,
         )
     # The backend function is stashed in the callable returned by
     # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
@@ -890,6 +897,7 @@ def _optimize(
             else None
         ),
         rebuild_ctx=rebuild_ctx,
+        enter_exit_hooks=enter_exit_hooks,
     )
 
 
@@ -1715,6 +1723,7 @@ def optimize_assert(
     export_constraints=None,
     dynamic=None,
     rebuild_ctx=None,
+    enter_exit_hooks=None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1733,6 +1742,7 @@ def optimize_assert(
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        enter_exit_hooks=enter_exit_hooks,
     )
 
 
