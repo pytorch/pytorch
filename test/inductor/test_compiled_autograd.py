@@ -86,7 +86,7 @@ class TestCompiledAutograd(TestCase):
         compiled_autograd.reset()
 
     def check_output_and_recompiles(
-        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
+        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False, dynamic=False,
     ):
         if isinstance(count, list):
             captures, compiles = count
@@ -98,7 +98,7 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd._enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn, dynamic):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
@@ -3322,15 +3322,18 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.check_output_and_recompiles(fn)
 
-    def  test_mark_unbacked(self):
+    def test_mark_unbacked(self):
         # zero-one specialization on dim arg causes recompiles
         def fn():
-            t = torch.tensor([[[[1., 2.], [3., 4.]], [[5., 6.], [7., 8.]]], [[[9., 10.], [11., 12.]], [[13., 14.], [15., 16.]]]], requires_grad=True)
-            out = torch.gather(t, 0, torch.tensor([[[[0, 0], [1, 0]], [[0, 0], [1, 0]]], [[[0, 0], [1, 0]], [[0, 0], [1, 0]]]]))
-            out.sum().backward()
-            yield t.grad
+            for i in range(3):
+                x = torch.randn(i, requires_grad=True)
+                y = x + 10
+                out = y.sum()
+                out.backward()
+                yield x.grad
 
-        self.check_output_and_recompiles(fn)
+        # dynamo still recompiles 3 times... because of the specialized symint input
+        self.check_output_and_recompiles(fn, dynamic=True, count=[1, 3])
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
