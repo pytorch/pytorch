@@ -9,8 +9,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <string>
 #include <ATen/cuda/llvm_jit_strings.h>
+#include <string>
 
 namespace at::cuda {
 
@@ -27,70 +27,6 @@ template <class _Tp>
 _Tp __declval(long);
 template <class _Tp>
 decltype(__declval<_Tp>(0)) declval() noexcept;
-
-template <class _Tp, _Tp __v>
-struct integral_constant {
-  static const _Tp value = __v;
-  typedef _Tp value_type;
-  typedef integral_constant type;
-};
-
-typedef integral_constant<bool, true> true_type;
-typedef integral_constant<bool, false> false_type;
-
-// is_same, functional
-template <class _Tp, class _Up> struct is_same : public false_type {};
-template <class _Tp> struct is_same<_Tp, _Tp> : public true_type {};
-
-// is_integral, for some types.
-template <class _Tp> struct is_integral
-    : public integral_constant<bool, false> {};
-template <> struct is_integral<bool>
-    : public integral_constant<bool, true> {};
-template <> struct is_integral<char>
-    : public integral_constant<bool, true> {};
-template <> struct is_integral<short>
-    : public integral_constant<bool, true> {};
-template <> struct is_integral<int>
-    : public integral_constant<bool, true> {};
-template <> struct is_integral<long>
-    : public integral_constant<bool, true> {};
-template <> struct is_integral<long long>
-    : public integral_constant<bool, true> {};
-
-// enable_if, functional
-template <bool _C, typename _Tp> struct enable_if{};
-template <typename _Tp> struct enable_if<true, _Tp>{
-  using type = _Tp;
-};
-template <bool b, class T=void>
-using enable_if_t = typename enable_if<b,T>::type;
-
-template <class _Tp> struct remove_const            {typedef _Tp type;};
-template <class _Tp> struct remove_const<const _Tp> {typedef _Tp type;};
-template <class _Tp> using remove_const_t = typename remove_const<_Tp>::type;
-
-template <class _Tp> struct remove_volatile               {typedef _Tp type;};
-template <class _Tp> struct remove_volatile<volatile _Tp> {typedef _Tp type;};
-template <class _Tp> using remove_volatile_t = typename remove_volatile<_Tp>::type;
-
-template <class _Tp> struct remove_cv
-{typedef typename remove_volatile<typename remove_const<_Tp>::type>::type type;};
-template <class _Tp> using remove_cv_t = typename remove_cv<_Tp>::type;
-
-template <class _Tp> struct __libcpp_is_floating_point              : public false_type {};
-template <>          struct __libcpp_is_floating_point<float>       : public true_type {};
-template <>          struct __libcpp_is_floating_point<double>      : public true_type {};
-template <>          struct __libcpp_is_floating_point<long double> : public true_type {};
-
-template <class _Tp> struct is_floating_point
-    : public __libcpp_is_floating_point<typename remove_cv<_Tp>::type> {};
-
-template <class _Tp> struct is_arithmetic
-    : public integral_constant<bool, is_integral<_Tp>::value      ||
-                                     is_floating_point<_Tp>::value> {};
-template <class _Tp>
-inline constexpr bool is_arithmetic_v = is_arithmetic<_Tp>::value;
 
 template <class _Tp>
 struct __numeric_type
@@ -167,8 +103,8 @@ class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
 )ESCAPE";
 
-const std::string &get_traits_string() {
-    return traits;
+const std::string& get_traits_string() {
+  return traits;
 }
 
 // This is copy-pasted from the following llvm file:
@@ -316,8 +252,8 @@ using ::truncf;
 
 )ESCAPE";
 
-const std::string &get_cmath_string() {
-    return cmath;
+const std::string& get_cmath_string() {
+  return cmath;
 }
 
 } // namespace at::cuda
