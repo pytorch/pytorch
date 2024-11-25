@@ -52,7 +52,9 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # CMP0074 - find_package will respect <PackageName>_ROOT variables
 cmake_policy(PUSH)
-cmake_policy(SET CMP0074 NEW)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.12.0)
+  cmake_policy(SET CMP0074 NEW)
+endif()
 
 find_package(CUDAToolkit REQUIRED)
 
