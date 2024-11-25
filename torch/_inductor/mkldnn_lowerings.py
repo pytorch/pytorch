@@ -9,7 +9,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
-from .codegen.cpp_mlp_template import CppPackedMLPTemplate
+from .codegen.cpp_group_gemm_template import CppGroupGEMMTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -60,7 +60,7 @@ def mlp_linear_silu_linear_mul(
     input_nodes = [x, w[0], w[1]]
     input_nodes.extend([bias for bias in b if bias is not None])
 
-    CppPackedMLPTemplate.add_choices(
+    CppGroupGEMMTemplate.add_choices(
         choices,
         layout,
         input_nodes,
