@@ -99,7 +99,6 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
-    ExceptionVariable,
     GetAttrVariable,
     NewCellVariable,
     NullVariable,
@@ -2174,16 +2173,6 @@ class InstructionTranslatorBase(
     def LIST_TO_TUPLE(self, inst):
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
-    def STOPITERATION_ERROR(self, inst):
-        # wrap the generator body in a try: ... except StopIteration: ... which
-        # converts the StopIteration into a RuntimeError
-        # https://peps.python.org/pep-0479/
-        # https://github.com/python/cpython/pull/99006
-        # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
-        assert isinstance(inst, ExceptionVariable)
-        if inst.exc_type is StopIteration:
-            exc.raise_observed_exception(RuntimeError, self)
-
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -2468,10 +2457,7 @@ class InstructionTranslatorBase(
             self._load_attr(inst)
 
     def CALL_INTRINSIC_1(self, inst):
-        if inst.argval == 3:
-            # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(self.pop())
-        elif inst.argval == 5:
+        if inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
