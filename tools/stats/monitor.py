@@ -22,7 +22,7 @@ def get_processes_running_python_tests() -> list[Any]:
     return python_processes
 
 
-def get_per_process_cpu_info() -> list[dict[str, Any]]:
+def get_process_info() -> list[dict[str, Any]]:
     processes = get_processes_running_python_tests()
     per_process_info = []
     for p in processes:
@@ -155,6 +155,7 @@ if __name__ == "__main__":
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
                 "total_cpu_percent": psutil.cpu_percent(),
                 "total_memory_percent":memory_info.percent,
+                "processes": get_process_info(),
             }
             if has_pynvml:
                 # Iterate over the available GPUs
