@@ -31,11 +31,6 @@ import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
-from torch._dynamo.utils import (
-    add_compilation_metrics_to_chromium,
-    CompileTimeInstructionCounter,
-    get_metrics_context,
-)
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -109,12 +104,14 @@ from .symbolic_convert import (
 )
 from .trace_rules import is_numpy
 from .utils import (
+    chromium_event_timed,
     CleanupManager,
+    CompileTimeInstructionCounter,
     counters,
     dynamo_timed,
     format_bytecode,
     gen_record_file_name,
-    get_chromium_event_logger,
+    get_metrics_context,
     increment_frame,
     is_namedtuple,
     istype,
@@ -874,17 +871,11 @@ def _compile(
 
         return guarded_code
 
-    chromium_event_log = get_chromium_event_logger()
-
-    chromium_event_log.reset()
-    chromium_start_time = time.time_ns()
-    chromium_event_log.log_event_start(
-        "dynamo", chromium_start_time, {}, log_pt2_compile_event=True
-    )
-
     metrics_context = get_metrics_context()
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
+    ), chromium_event_timed(
+        "dynamo", reset_event_log=True, log_pt2_compile_event=True
     ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
@@ -1007,11 +998,11 @@ def _compile(
 
             return guarded_code
         except Exception as e:
-            # TODO(masnesral): Populating the exception info should be automatic
+            # NB: e's msg is mutated here to add user stack, but we DON'T want
+            # that stack in the Scuba logged fail_reason. So we grab the fail
+            # info here and add it to the metrics context below.
             fail_type = type(e).__qualname__
             fail_reason = str(e)
-            # NB: e's msg is mutated here to add user stack, but we DON'T want
-            # that stack in the Scuba logged fail_reason
             exception_handler(e, code, frame, export=export)
             # NB: this is the post-mutation exception
             torch._logging.trace_structured(
@@ -1050,15 +1041,9 @@ def _compile(
             # If you commit a bug here, it will suppress writing to
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
-            #
-            # TODO to masnesral: feel free to delete these comments
-            # to resolve any merge conflict you have
 
             if tracer:
                 tracer.output.local_scope = {}
-
-            end_time_ns = time.time_ns()
-            duration_ns = end_time_ns - start_time_ns
 
             from .utils import curr_frame
 
@@ -1084,11 +1069,7 @@ def _compile(
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
-                dynamo_time_before_restart = duration_ns / 1e9
-
-            structured_logging_overhead_s = (
-                torch._logging.get_structured_logging_overhead()
-            )
+                dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
 
             def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
                 blocklist = {
@@ -1120,7 +1101,6 @@ def _compile(
 
             config_dict = clean_for_json(config.get_config_copy())
             metrics = {
-                "compile_id": str(compile_id),
                 "frame_key": frame_key,
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
@@ -1132,9 +1112,6 @@ def _compile(
                 "graph_op_count": graph_op_count,
                 "graph_node_count": graph_node_count,
                 "graph_input_count": graph_input_count,
-                # TODO(masnesral): start_time and end_time shouldn't need to be
-                # populated manually.
-                "start_time": start_time_ns / 1e9,
                 "fail_type": fail_type,
                 "fail_reason": fail_reason,
                 "fail_user_frame_filename": fail_user_frame_filename,
@@ -1144,27 +1121,16 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "structured_logging_overhead_s": structured_logging_overhead_s,
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
                 "specialize_float": config.specialize_float,
                 "dynamo_config": json.dumps(config_dict),
                 "is_forward": True,
-                "start_time_us": start_time_ns // 1000,
-                "end_time_us": end_time_ns // 1000,
-                "duration_us": duration_ns // 1000,
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
-                "structured_logging_overhead_us": to_int_us(
-                    structured_logging_overhead_s
-                ),
             }
             metrics_context.update_outer(metrics)
-            add_compilation_metrics_to_chromium(metrics)
-            chromium_event_log.log_event_end(
-                "dynamo", time.time_ns(), {}, chromium_start_time, True
-            )
             # === END WARNING WARNING WARNING ===
 
 
