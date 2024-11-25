@@ -1805,7 +1805,7 @@ class CompiledFxGraph:
                     self.get_constants(gm),
                 ).call
         except OSError:
-            log.error("Failed to load cached artifact: %s", artifact_path)
+            log.error("Failed to load artifact: %s", artifact_path)
             raise
 
         return artifact_path
