@@ -79,6 +79,7 @@ CPU_TEST_FAILURES = {
     "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
     "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
+    "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
@@ -179,6 +180,7 @@ CPU_TEST_FAILURES = {
     "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
+    "test_issue_140766": fail_minimal_arrayref_interface(),
 }
 
 

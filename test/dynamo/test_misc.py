@@ -2832,6 +2832,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_dict_subclass_get_method(self):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        config = dotdict({"a": 1, "b": 2})
+
+        def fn(x):
+            x2 = x * 2
+            x3 = x * config.get("a", 3)
+            return x3
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_dict_order_keys(self):
         def fn(d):
             c = 0
@@ -11125,6 +11144,8 @@ fn
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
+        DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
+
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super(Mod, self).__init__()
@@ -11160,19 +11181,21 @@ fn
         # delete center of cache
         del m3
         c3 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c3), 2)
-        self.assertIs(c3[0], c2[0])
-        self.assertIs(c3[1], c2[2])
+        self.assertEqual(len(c3), 3)
+        self.assertTrue(isinstance(c3[2].guard_manager, DeletedGuardManagerWrapper))
 
         # delete end of cache
         del m1
         c4 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c4), 1)
-        self.assertIs(c4[0], c3[0])
+        self.assertEqual(len(c4), 3)
+        self.assertTrue(isinstance(c4[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c4[2].guard_manager, DeletedGuardManagerWrapper))
 
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c5), 0)
+        self.assertTrue(isinstance(c5[0].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[2].guard_manager, DeletedGuardManagerWrapper))
 
     def test_inspect_signature_bind(self):
         import inspect

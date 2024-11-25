@@ -10546,6 +10546,22 @@ class TestConvolutionMPS(TestCaseMPS):
         helper(shape=(1024, 376, 9), in_channels=9, out_channels=1, groups=1)
         helper(shape=(1024, 376, 9), in_channels=9, out_channels=9, groups=3)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/140902
+        ic, oc, ks, f = 2, 5, 3, 7
+        conv = torch.nn.Conv1d(ic, oc, kernel_size=ks, padding=1).to("mps")
+        inp = torch.rand(1, ic, f, device="mps")
+        out = conv(inp)
+        grad_in = torch.rand(1, oc, f, device="mps")
+        grad_in_cl = torch.empty(1, f, oc, device="mps").transpose(1, 2)
+        grad_in_cl[:] = grad_in
+
+        # It does not matter whether grad_in contigous, or channels last, results should equal to each other
+        grad_rc = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in,), retain_graph=True)
+        grad_rc_cl = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
+
+        self.assertEqual(grad_rc[0], grad_rc_cl[0])
+        self.assertEqual(grad_rc[1], grad_rc_cl[1])
+
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
         a_cpu = torch.ones(128, 1, 176)
