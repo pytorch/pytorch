@@ -96,7 +96,7 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
   );
 }
 
-REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
-REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
+REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda)
+REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda)
 
 } // namespace at::native

@@ -48,8 +48,6 @@ runs:
       run: |
         # detached container should get cleaned up by teardown_ec2_linux
         set -exo pipefail
-        # Fetch aws credential from IMDs
-        eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
         export container_name
         container_name=$(docker run \
           -e BUILD_ENVIRONMENT \

@@ -17,18 +17,15 @@ import logging
 import math
 import operator
 import types
-import typing
 from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
-
-if typing.TYPE_CHECKING:
-    import onnxscript
 
 _DEFAULT_OPSET_VERSION = 18
 
@@ -153,17 +150,20 @@ class ONNXRegistry:
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
-                if qualified_name.startswith("internal::"):
-                    # Skip the custom defined internal functions
-                    continue
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
+
+                if isinstance(overload_func, onnxscript.OnnxFunction):
+                    opset_version = overload_func.opset.version
+                else:
+                    opset_version = 1
 
                 overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                     overload_func,
                     domain,
                     name,
+                    opset_version=opset_version,
                 )
                 onnx_decomposition = OnnxDecompMeta(
                     onnx_function=overload_func,
@@ -175,6 +175,21 @@ class ONNXRegistry:
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
+        # Gather ops from the internal torchlib registry
+        # TODO(justinchuby): Make this the main registry after torchlib is migrated to PyTorch
+        # Trigger registration
+        from torch.onnx._internal.exporter._torchlib import ops
+
+        del ops
+        for target, implementations in _torchlib_registry.registry.items():  # type: ignore[assignment]
+            for impl in implementations:
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=impl,
+                    fx_target=target,  # type: ignore[arg-type]
+                )
+                registry._register(target, onnx_decomposition)  # type: ignore[arg-type]
+
         return registry
 
     def _register(
@@ -203,7 +218,7 @@ class ONNXRegistry:
     def register_op(
         self,
         target: TorchOp,
-        function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+        function: Callable,
         is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
@@ -213,6 +228,25 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
+        if not hasattr(function, "signature"):
+            try:
+                # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
+                if isinstance(function, onnxscript.OnnxFunction):
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        function,
+                        function.function_ir.domain,
+                        function.name,
+                        opset_version=function.opset.version,
+                    )
+                else:
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        function, "__custom", function.__name__
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to infer the signature for function '%s'", function
+                )
+
         onnx_decomposition = OnnxDecompMeta(
             onnx_function=function,
             fx_target=target,

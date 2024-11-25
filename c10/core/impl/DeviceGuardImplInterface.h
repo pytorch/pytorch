@@ -8,6 +8,7 @@
 // Just for C10_ANONYMOUS_VARIABLE
 #include <c10/util/Registry.h>
 
+#include <array>
 #include <atomic>
 
 namespace c10 {
@@ -327,10 +328,10 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
 // in a Meyer singleton), it implies that you must *leak* objects when
 // putting them in the registry.  This is done by deleting the destructor
 // on DeviceGuardImplInterface.
-// NOLINTNEXTLINE(*c-arrays*)
-extern C10_API std::atomic<const DeviceGuardImplInterface*>
-    device_guard_impl_registry[static_cast<size_t>(
-        DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+extern C10_API std::array<
+    std::atomic<const DeviceGuardImplInterface*>,
+    static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    device_guard_impl_registry;
 
 // I can't conveniently use c10/util/Registry.h for the following reason:
 // c10/util/Registry.h gives me a slow way of Create'ing a object of some

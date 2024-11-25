@@ -106,7 +106,7 @@ TEST(StringViewTest, testConversionToString) {
 } // namespace test_conversion_to_string
 
 namespace test_conversion_to_std_string_view {
-TEST(StringViewTest, testConversionToString) {
+TEST(StringViewTest, testConversionToStringView) {
   c10::string_view empty;
   EXPECT_EQ(0, std::string_view(empty).size());
   c10::string_view hello_sv = "hello";

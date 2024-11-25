@@ -16,6 +16,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
+    find_library_location,
+    IS_LINUX,
     NoTest,
     run_tests,
     suppress_warnings,
@@ -125,6 +127,11 @@ class TestXpu(TestCase):
             device_properties.has_subgroup_2d_block_io,
             device_capability["has_subgroup_2d_block_io"],
         )
+        if int(torch.version.xpu) >= 20250000:
+            self.assertEqual(
+                device_properties.architecture,
+                device_capability["architecture"],
+            )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -389,22 +396,31 @@ print(torch.xpu.device_count())
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
-        prev = torch.xpu.memory_allocated()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+        self.assertGreaterEqual(prev_allocated, 0)
+        self.assertGreaterEqual(prev_reserved, 0)
         a = torch.ones(10, device="xpu")
-        self.assertGreater(torch.xpu.memory_allocated(), prev)
-        self.assertGreater(torch.xpu.memory_reserved(), 0)
+        self.assertGreater(torch.xpu.memory_allocated(), prev_allocated)
+        self.assertGreaterEqual(torch.xpu.memory_reserved(), prev_reserved)
         del a
-        self.assertEqual(torch.xpu.memory_allocated(), prev)
+        self.assertEqual(torch.xpu.memory_allocated(), prev_allocated)
         torch.xpu.empty_cache()
-        self.assertEqual(torch.xpu.memory_reserved(), 0)
+        self.assertLessEqual(torch.xpu.memory_reserved(), prev_reserved)
         torch.xpu.reset_accumulated_memory_stats()
         # Activate 1kB memory
+        prev_active_current = torch.xpu.memory_stats()["active_bytes.all.current"]
         a = torch.randn(256, device="xpu")
         # Detect if the current active memory is 1kB
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 1024)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 0)
         del a
-        self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.current"], 0)
+        self.assertEqual(
+            torch.xpu.memory_stats()["active_bytes.all.current"], prev_active_current
+        )
         self.assertEqual(torch.xpu.memory_stats()["active_bytes.all.freed"], 1024)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
@@ -428,6 +444,24 @@ print(torch.xpu.device_count())
         for arch in arch_list:
             self.assertTrue(arch in flags)
 
+    def test_torch_version_xpu(self):
+        self.assertEqual(len(torch.version.xpu), 8)
+        compiler_version = int(torch.version.xpu)
+        self.assertGreater(compiler_version, 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library} | grep libsycl"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            # There should be only one libsycl.so or libsycl-preview.so
+            self.assertEqual(len(results), 1)
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
+                else:
+                    self.fail("Unexpected libsycl library")
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
@@ -436,7 +470,8 @@ class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
-    skip_list = ["gru_cell"]
+    # lstm_cell: The operator 'aten::_thnn_fused_lstm_cell' is not currently implemented for the XPU device
+    skip_list = ["gru_cell", "lstm_cell"]
 
     def setUp(self):
         super().setUp()

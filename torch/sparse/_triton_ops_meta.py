@@ -233,8 +233,7 @@ def dump():
     for op_key in sorted(_operation_device_version_data, key=sort_key):
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        for key in sorted(op_data):
-            data_part.append(f"        {key}: {op_data[key]},")
+        data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:

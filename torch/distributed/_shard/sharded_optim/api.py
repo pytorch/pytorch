@@ -31,8 +31,9 @@ class ShardedOptimizer(optim.Optimizer):
         tensors: List[Tensor] = []
         for value in named_params.values():
             if isinstance(value, ShardedTensor):
-                for local_shard in value.local_shards():
-                    tensors.append(local_shard.tensor)
+                tensors.extend(
+                    local_shard.tensor for local_shard in value.local_shards()
+                )
             else:
                 tensors.append(value)
 
