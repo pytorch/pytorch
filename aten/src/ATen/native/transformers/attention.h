@@ -5,8 +5,7 @@
 #include <ATen/native/transformers/attention.h>
 #include <optional>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
         const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale, bool enable_gqa);
@@ -68,5 +67,4 @@ using flash_attention_backward_fn = void (*)(
 DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel)
 DECLARE_DISPATCH(flash_attention_backward_fn, flash_attention_backward_kernel)
 
-} // namespace native
 } // namespace at
