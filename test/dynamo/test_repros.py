@@ -956,6 +956,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
         self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
         self.assertTrue(cloned_root.check(f_locals))
+        if guard_manager_wrapper.diff_guard_root:
+            self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
@@ -1240,13 +1242,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(cnt.op_count, 13)
 
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         expected_op_count = (
-            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+            """13""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
         )
 
         self.assertExpectedInline(cnt.frame_count, """1""")
@@ -1723,7 +1725,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(12, cnt.op_count)
+        self.assertEqual(18, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
@@ -6384,6 +6386,34 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         t = torch.randn(2)
         res = f(t, [1, 2])
         self.assertEqual(t + 1, res)
+
+    def test_symint_bitwise(self):
+        def fn(x):
+            z = x.shape[0]
+            z |= z >> 1
+            z |= z << 1
+            z &= z | (z > 1)
+            y = (z > 1) | (z <= 1)
+            # test composition with non-bitwise ops
+            z = (z | z) % 6
+            return y, z
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_bitwise_op_guard(self):
+        # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
+        def fn(x):
+            if x.shape[0] | x.shape[1] > 4:
+                x = x + 1
+            if x.shape[0] & x.shape[1] > 2:
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -864,6 +864,15 @@ class CompilationMetrics:
     joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = None
+    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -874,46 +883,47 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 )
 
 
-def add_compilation_metrics_to_chromium(c: Dict[str, Any]) -> None:
+def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     event_logger = get_chromium_event_logger()
-    # The following compilation metrics are related to
-    # dynamo, so go with the "entire frame compile" event
+    event_name = event_logger.get_top()
+    if not event_name:
+        return
     event_logger.add_event_data(
-        event_name="dynamo",
-        frame_key=c["frame_key"],
-        co_name=c["co_name"],
-        co_filename=c["co_filename"],
-        co_firstlineno=c["co_firstlineno"],
-        cache_size=c["cache_size"],
-        accumulated_cache_size=c["accumulated_cache_size"],
-        guard_count=c["guard_count"],
-        shape_env_guard_count=c["shape_env_guard_count"],
-        graph_op_count=c["graph_op_count"],
-        graph_node_count=c["graph_node_count"],
-        graph_input_count=c["graph_input_count"],
-        fail_type=c["fail_type"],
-        fail_reason=c["fail_reason"],
-        fail_user_frame_filename=c["fail_user_frame_filename"],
-        fail_user_frame_lineno=c["fail_user_frame_lineno"],
+        event_name=event_name,
+        frame_key=c.frame_key,
+        co_name=c.co_name,
+        co_filename=c.co_filename,
+        co_firstlineno=c.co_firstlineno,
+        cache_size=c.cache_size,
+        accumulated_cache_size=c.accumulated_cache_size,
+        guard_count=c.guard_count,
+        shape_env_guard_count=c.shape_env_guard_count,
+        graph_op_count=c.graph_op_count,
+        graph_node_count=c.graph_node_count,
+        graph_input_count=c.graph_input_count,
+        fail_type=c.fail_type,
+        fail_reason=c.fail_reason,
+        fail_user_frame_filename=c.fail_user_frame_filename,
+        fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c["non_compliant_ops"])
-        if c["non_compliant_ops"] is not None
+        non_compliant_ops=list(c.non_compliant_ops)
+        if c.non_compliant_ops is not None
         else None,
-        compliant_custom_ops=list(c["compliant_custom_ops"])
-        if c["compliant_custom_ops"] is not None
+        compliant_custom_ops=list(c.compliant_custom_ops)
+        if c.compliant_custom_ops is not None
         else None,
-        restart_reasons=list(c["restart_reasons"])
-        if c["restart_reasons"] is not None
+        restart_reasons=list(c.restart_reasons)
+        if c.restart_reasons is not None
         else None,
-        dynamo_time_before_restart_s=c["dynamo_time_before_restart_s"],
-        has_guarded_code=c["has_guarded_code"],
-        dynamo_config=c["dynamo_config"],
+        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
+        has_guarded_code=c.has_guarded_code,
+        dynamo_config=c.dynamo_config,
     )
 
 
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
-    Method to parse and scrub unintersting configs from inductor config
+    Method to parse and scrub uninteresting configs from inductor config
     """
 
     # TypeSafeSerializer for json.dumps()
@@ -952,7 +962,13 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     return inductor_conf_str
 
 
-def record_compilation_metrics(metrics: Dict[str, Any]):
+def record_compilation_metrics(
+    start_time_ns: int,
+    end_time_ns: int,
+    metrics: Dict[str, Any],
+    exc_type: Optional[Type[BaseException]],
+    exc_value: Optional[BaseException],
+):
     def us_to_s(field):
         metric = metrics.get(field, None)
         return metric / 1e6 if metric is not None else None
@@ -961,12 +977,47 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         metric = metrics.get(field, None)
         return metric // 1000 if metric is not None else None
 
+    def _convert_collection_to_str(field: str) -> Optional[str]:
+        def safe_str(item: Any) -> str:
+            try:
+                return str(item)
+            except Exception:
+                return str(None)
+
+        metric = metrics.get(field, None)
+        if metric is None:
+            return None
+
+        # Remove this field (list/set) from metrics to avoid clashes
+        del metrics[field]
+        if not isinstance(metric, set) and not isinstance(metric, list):
+            return None
+        return ",".join(safe_str(item) for item in metric)
+
+    structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
     common_metrics = {
+        "compile_id": str(torch._guards.CompileContext.current_compile_id()),
+        "start_time_us": start_time_ns // 1000,
+        "end_time_us": end_time_ns // 1000,
+        "duration_us": (end_time_ns - start_time_ns) // 1000,
+        "fail_type": exc_type.__qualname__ if exc_type else None,
+        "fail_reason": str(exc_value) if exc_value else None,
+        "structured_logging_overhead_us": to_int_us(structured_logging_overhead_s),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
-        # -------- Any future common metircs go here --------
-        #
-        # Legacy metircs go here(TODO: Temporary; populate legacy fields from their replacements.)
-        # Remove when we decide we can really deprecate them.
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
+        "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_hit_keys"
+        ),
+        "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_miss_keys"
+        ),
+    }
+
+    # TODO: The following are legacy fields, populated from the fields that replace
+    # them. Remove these when we decide we can really deprecate them.
+    legacy_metrics = {
+        "start_time": start_time_ns / 1e9,
         "entire_frame_compile_time_s": us_to_s("dynamo_cumulative_compile_time_us"),
         "backend_compile_time_s": us_to_s("aot_autograd_cumulative_compile_time_us"),
         "inductor_compile_time_s": us_to_s("inductor_cumulative_compile_time_us"),
@@ -978,10 +1029,14 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         "remote_fx_graph_cache_put_time_ms": us_to_ms(
             "remote_fx_graph_cache_put_time_us"
         ),
+        "structured_logging_overhead_s": structured_logging_overhead_s,
     }
 
-    compilation_metrics = CompilationMetrics(**{**metrics, **common_metrics})
+    compilation_metrics = CompilationMetrics(
+        **{**legacy_metrics, **common_metrics, **metrics}
+    )
     _compilation_metrics.append(compilation_metrics)
+
     if compilation_metrics.is_forward:
         name = "compilation_metrics"
     else:
@@ -995,6 +1050,11 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         # we ignore the (hopefully small) time spent logging compilation metrics
         record_logging_overhead=False,
     )
+
+    # If there's a chromium event in flight, add the CompilationMetrics to it.
+    add_compilation_metrics_to_chromium(compilation_metrics)
+
+    # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
 
@@ -1037,6 +1097,13 @@ class ChromiumEventLogger:
         else:
             self.tls.stack = []
             return self.tls.stack
+
+    def get_top(self) -> str:
+        """
+        Get the top event name or None if the stack is empty.
+        """
+        stack = self.get_stack()
+        return stack[-1] if stack else None
 
     def get_pt2_compile_substack(self):
         """
@@ -1269,6 +1336,39 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     if CHROMIUM_EVENT_LOG is None:
         CHROMIUM_EVENT_LOG = ChromiumEventLogger()
     return CHROMIUM_EVENT_LOG
+
+
+@contextmanager
+def chromium_event_timed(
+    event_name: str,
+    reset_event_log: bool = False,
+    log_pt2_compile_event: bool = False,
+) -> Generator[Any, None, None]:
+    """
+    Context manager that creates a chromium start and end event. Chromium event
+    logging is integrated with dynamo_timed, so you probably want to use that
+    instead. Use this context manager only if you want to avoid dynamo_timed.
+    """
+    chromium_event_log = get_chromium_event_logger()
+    if reset_event_log:
+        chromium_event_log.reset()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start(
+        event_name,
+        chromium_start_time,
+        {},
+        log_pt2_compile_event,
+    )
+    try:
+        yield
+    finally:
+        chromium_event_log.log_event_end(
+            event_name,
+            time.time_ns(),
+            {},
+            chromium_start_time,
+            log_pt2_compile_event,
+        )
 
 
 @dataclasses.dataclass
@@ -1535,9 +1635,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = []
-        for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, param._version, torch.clone(param)))
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():
@@ -3268,7 +3369,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
@@ -3557,3 +3658,13 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    # Note that sometimes (tests etc...) we're not in a context which we can record into
+    if get_metrics_context().in_progress():
+        get_metrics_context().set_key_value("feature_usage", feature, usage)
