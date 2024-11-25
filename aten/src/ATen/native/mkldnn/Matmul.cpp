@@ -93,8 +93,7 @@ void mkldnn_matmul_i8i8i32(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool use_mkldnn_bf16_matmul() {
   return at::globalContext().userEnabledMkldnn() && mkldnn_bf16_device_check();
@@ -513,7 +512,6 @@ void mkldnn_matmul_i8i8i32(
   }
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
