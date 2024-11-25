@@ -455,7 +455,11 @@ class ListVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             sorted_items_with_keys = sorted(
                 (
-                    (x, k.as_python_constant(), -i if reverse else i)
+                    (
+                        x,
+                        k.as_python_constant(),
+                        -i if reverse else i,  # extra key to ensure stable sort
+                    )
                     for i, (k, x) in enumerate(zip(keys, self.items))
                 ),
                 key=operator.itemgetter(1, 2),
