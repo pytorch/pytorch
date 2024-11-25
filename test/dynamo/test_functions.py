@@ -1868,12 +1868,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         )
 
     @make_test
-    def test_sorted_const_key_non_const_items(x):
-        tmp = {1: x, 10: x - 1, 3: 2 * x, 0: torch.ones(3, 4)}
+    def test_sorted_const_key_non_const_items(x, y):
+        tmp = {1: x, 10: x - 1, 3: 2 * x, -1: y + 2, 0: torch.ones(3, 4)}
         return (
             sorted(tmp),
+            sorted(tmp, key=lambda k: tmp[k].shape),
+            sorted(tmp, key=lambda k: tmp[k].shape, reverse=True),
             sorted(tmp.items(), key=operator.itemgetter(0)),
             sorted(tmp.items(), key=operator.itemgetter(0), reverse=True),
+            sorted(tmp.values(), key=lambda t: t.shape),
+            sorted(tmp.values(), key=lambda t: t.shape, reverse=True),
         )
 
     def test_dict_hasattr(self):
