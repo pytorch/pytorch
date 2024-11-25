@@ -3322,6 +3322,15 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.check_output_and_recompiles(fn)
 
+    def  test_mark_unbacked(self):
+        # zero-one specialization on dim arg causes recompiles
+        def fn():
+            t = torch.tensor([[[[1., 2.], [3., 4.]], [[5., 6.], [7., 8.]]], [[[9., 10.], [11., 12.]], [[13., 14.], [15., 16.]]]], requires_grad=True)
+            out = torch.gather(t, 0, torch.tensor([[[[0, 0], [1, 0]], [[0, 0], [1, 0]]], [[[0, 0], [1, 0]], [[0, 0], [1, 0]]]]))
+            out.sum().backward()
+            yield t.grad
+
+        self.check_output_and_recompiles(fn)
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent

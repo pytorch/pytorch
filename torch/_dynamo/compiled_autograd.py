@@ -308,6 +308,13 @@ class AutogradCompilerInstance:
 
         return []
 
+    def mark_dims_unbacked(self):
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.scatter_add.default
+        ):
+            assert len(node.args) == 4
+            breakpoint()
+
     def is_sym_node(self, node):
         return (
             isinstance(node, torch.fx.Node)
@@ -372,6 +379,9 @@ class AutogradCompilerInstance:
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
+        # TODO(xmfan): find a way to actually land this
+        runtime_input_dims_to_mark_unbacked: List[int, List[int]] = self.mark_dims_unbacked()
+
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
@@ -389,6 +399,7 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
+
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
             global in_compiled_autograd_region
