@@ -76,7 +76,9 @@ namespace torch::jit {
  *
  *  So why does debug handle map to DebugInfoTuple = {source range and inlined
  *  cs}? {debug_handle, source_range_tag, serialized_callstack} Take this
- *  example: class L(nn.Module): def __init__(self) -> None:
+ *  example: 
+ *  class L(nn.Module): 
+ *    def __init__(self) -> None:
  *      ...
  *    def forward(self, x):
  *      return x * 5
@@ -87,11 +89,13 @@ namespace torch::jit {
  *      return x - 2
  *  class N(nn.Module):
  *    def __init__(self) -> None:
+ *      self.l = L()
  *      self.m = M()
  *    def forward(self, x):
- *      return self.m(x) + 3
+ *      return self.m(self.l(x)) + 3
  *  m = torch.jit.script(N())
- *  Once you inline m's forward method, m.forward.graph will look something
+ *   
+ *  Once you inline l's and m's forward method, m.forward.graph will look something
  *  like this
  *  graph(%self...):
  *   %x = aten::mul(..)
