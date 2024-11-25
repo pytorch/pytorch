@@ -162,6 +162,16 @@ bool has_large_prime_factor(int64_t n) {
   return n != 1;
 }
 
+static void copy_tensor_for_diff_strides(const Tensor& out, const Tensor& in) {
+  for(int i = 0; i < out.sizes()[0]; i ++){
+    if(out.dim() == 1){
+      out[i] = in[i];
+    } else {
+      copy_tensor_for_diff_strides(out[i], in[i]);
+    }
+  }
+}
+
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
@@ -283,7 +293,21 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
-  return out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  out = out.as_strided_(out_sizes, out_strides, out.storage_offset());
+  bool strides_equal = true;
+  for(int i = 0; i < ndim; i ++){
+    if(out_strides[i] != self.strides()[i]){
+      strides_equal= false;
+      break;
+    }
+  }
+  if(!strides_equal) {
+    // We should modify the return tensor to make its stride align with input.
+    Tensor out_bkp = out.clone(MemoryFormat::Contiguous);
+    out = out.as_strided_(out_sizes, self.strides(), out.storage_offset());
+    copy_tensor_for_diff_strides(out, out_bkp);
+  }
+  return out;
 }
 
 // Calculates the normalization constant and applies it in-place to self
