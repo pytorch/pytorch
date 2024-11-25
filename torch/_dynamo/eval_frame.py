@@ -52,6 +52,7 @@ from torch import _guards
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_guard_error_hook,
+    set_skip_guard_eval_unsafe,
     skip_code,
     unsupported,
 )
@@ -122,6 +123,7 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
 @dataclass
 class DynamoStance:
     stance: str = "default"
+    skip_guard_eval_unsafe: bool = False
     backend: Union[str, Callable[..., Any], None] = None
 
 
@@ -181,6 +183,10 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _is_skip_guard_eval_unsafe_stance():
+    return _stance.skip_guard_eval_unsafe
 
 
 def _reset_guarded_backend_cache():
@@ -446,10 +452,14 @@ class _TorchDynamoContext:
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+        self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+            _is_skip_guard_eval_unsafe_stance()
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         _maybe_set_eval_frame(self.prior)
+        set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -541,6 +551,9 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(_callback_from_stance(callback))
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -561,6 +574,7 @@ class _TorchDynamoContext:
                 )
 
                 _maybe_set_eval_frame(prior)
+                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                 for cleanup in cleanups:
                     cleanup()
 
@@ -717,10 +731,14 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
                 _maybe_set_eval_frame(prior)
+                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 

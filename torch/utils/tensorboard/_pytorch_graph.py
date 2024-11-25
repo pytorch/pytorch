@@ -55,11 +55,11 @@ class NodeBase:
     def __repr__(self):
         repr = []
         repr.append(str(type(self)))
-        for m in dir(self):
-            if "__" not in m:
-                repr.append(
-                    m + ": " + str(getattr(self, m)) + str(type(getattr(self, m)))
-                )
+        repr.extend(
+            m + ": " + str(getattr(self, m)) + str(type(getattr(self, m)))
+            for m in dir(self)
+            if "__" not in m
+        )
         return "\n".join(repr) + "\n\n"
 
 
@@ -216,17 +216,16 @@ class GraphPy:
         """Convert graph representation of GraphPy object to TensorBoard required format."""
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
-        nodes = []
-        for v in self.nodes_io.values():
-            nodes.append(
-                node_proto(
-                    v.debugName,
-                    input=v.inputs,
-                    outputsize=v.tensor_size,
-                    op=v.kind,
-                    attributes=v.attributes,
-                )
+        nodes = [
+            node_proto(
+                v.debugName,
+                input=v.inputs,
+                outputsize=v.tensor_size,
+                op=v.kind,
+                attributes=v.attributes,
             )
+            for v in self.nodes_io.values()
+        ]
         return nodes
 
 

@@ -2615,9 +2615,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
     view_map: dict[OperatorName, NativeFunction] = {
         f.func.name: f for f in concatMap(lambda g: list(g.functions()), view_groups)
     }
-    for f in native_functions:
-        if f.func.name not in structured_map and f.func.name not in view_map:
-            all_groups.append(f)
+    all_groups.extend(
+        f
+        for f in native_functions
+        if f.func.name not in structured_map and f.func.name not in view_map
+    )
 
     cpu_fm.write_sharded(
         "RegisterFunctionalization.cpp",

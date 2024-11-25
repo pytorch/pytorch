@@ -69,6 +69,15 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
 
+    # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
+    # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
+    # for common patterns see _optimized_add.
+
+    # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
+    # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
+    # a weak dictionary key either! So instead, we attach the attribute here to the SymNode.
+    _optimized_summation: bool = False
+
     def __init__(
         self,
         expr,
@@ -77,10 +86,12 @@ class SymNode:
         hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
+        optimized_summation=False,
     ):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+        self._optimized_summation = optimized_summation
 
         # What's the difference between hint and constant?
         #
@@ -755,8 +766,91 @@ def _sympy_rshift(a, b):
     return RShift(a, b)
 
 
+def _binary_search_insert_arg(ordered_args, new_arg):
+    """
+    If new_arg is found in ordered_args None is returned, else the new
+    ordered_args with new_arg inserted
+    """
+    if len(ordered_args) == 0:
+        return [new_arg]
+
+    from sympy.core.basic import _args_sortkey as sort_key, Basic
+
+    # Fast path when new_arg > ordered_args[-1].
+    if sort_key(ordered_args[-1]) < sort_key(new_arg):
+        return ordered_args + [new_arg]
+
+    # Fast path when new_arg < ordered_args[0].
+    if sort_key(ordered_args[0]) > sort_key(new_arg):
+        return [new_arg] + ordered_args
+
+    low, high = 0, len(ordered_args) - 1
+
+    while low <= high:
+        mid = (low + high) // 2
+        compare_result = Basic.compare(ordered_args[mid], new_arg)
+        if compare_result == 0:
+            return None
+        elif compare_result < 0:
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    ordered_args.insert(low, new_arg)
+    return ordered_args
+
+
+def _optimized_add(
+    lhs, rhs, lhs_is_optimized_summation=False, rhs_is_optimized_summation=False
+):
+    """
+    Custom optimization for Add used to optimize incremental binary summations of certain properties. The idea
+    is when we know the expression is a summation of unique symbols all we need to know is the correct order of symbols,
+    and no other optimizations are needed. We pass evaluate=false, with the correct order of args and save the following.
+    1. Avoid running other optimizations when the Add is constructed.
+    2. Manually figure out the order of the args for the new expression in log(n) comparisons instead of nLog(n)
+    (comparing terms is expensive and shows in the profiles).
+    The function returns a tuple of (1) a boolean that indicates whether the output is a summation of unique symbols,
+    (2) the result sympy expression.
+    """
+    import sympy
+    from sympy.core.basic import _args_sortkey as sortkey
+
+    def make_optimized(ordered_args):
+        result = sympy.Add(*ordered_args, evaluate=False)
+        return (True, result)
+
+    from torch.utils._sympy.functions import _is_symbols_binary_summation
+
+    lhs_is_optimized_summation |= _is_symbols_binary_summation(lhs)
+    rhs_is_optimized_summation |= _is_symbols_binary_summation(rhs)
+
+    if lhs_is_optimized_summation and rhs_is_optimized_summation:
+        # (a0+a1..) + (a2+a3..) => (a0+a1+a2+a3)
+        if sortkey(lhs._args[-1]) < sortkey(rhs._args[0]):
+            return make_optimized(lhs._args + rhs._args)
+        #  (a2+a3..) + (a0+a1..) => (a0+a1+a2+a3)
+        if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
+            return make_optimized(rhs._args + lhs._args)
+
+    # (a0+a2) + a1 => (a0+a1+a2)
+    if lhs_is_optimized_summation and rhs.is_symbol:
+        new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        if new_args is not None:
+            return make_optimized(new_args)
+
+    # a1 + (a0+a2)=> (a0+a1+a2)
+    if rhs_is_optimized_summation and lhs.is_symbol:
+        new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        if new_args is not None:
+            return make_optimized(new_args)
+
+    result = sympy.Add(lhs, rhs)
+    return (_is_symbols_binary_summation(result), result)
+
+
 reflectable_magic_methods = {
-    "add": operator.add,
+    "add": _optimized_add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
@@ -1117,6 +1211,7 @@ def _make_node_magic(method, func):
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
         assert isinstance(other, SymNode)
+        optimized_summation = False
         try:
             if method == "mod":
                 from torch.utils._sympy.functions import Mod, PythonMod
@@ -1134,6 +1229,14 @@ def _make_node_magic(method, func):
                     out = Mod(self.expr, other.expr)
                 else:
                     out = PythonMod(self.expr, other.expr)
+            elif method == "add":
+                # see Note [optimized_summation]
+                (optimized_summation, out) = func(
+                    self.expr,
+                    other.expr,
+                    self._optimized_summation,
+                    other._optimized_summation,
+                )
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
@@ -1170,7 +1273,16 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+
+        result = SymNode(
+            out,
+            self.shape_env,
+            pytype,
+            out_hint,
+            fx_node=fx_node,
+            optimized_summation=optimized_summation,  # see Note [optimized_summation]
+        )
+        return result
 
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
