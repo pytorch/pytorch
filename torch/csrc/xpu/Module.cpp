@@ -276,7 +276,7 @@ PyObject* THXPModule_resetAccumulatedMemoryStats(
 
 PyObject* THXPModule_getMemoryInfo(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
-#ifdef SYCL_COMPILER_VERSION >= 20250000
+#if SYCL_COMPILER_VERSION >= 20250000
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to mem_get_info");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
   auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
