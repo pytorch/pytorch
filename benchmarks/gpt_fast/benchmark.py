@@ -5,10 +5,8 @@ import os
 
 from generate import (
     get_arch_name,
-    run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
-    run_mixtral_8x7b_autoquant,
     run_mixtral_8x7b_int8,
 )
 
@@ -270,8 +268,10 @@ all_experiments = {
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
-    run_mixtral_8x7b_autoquant,
-    run_llama2_7b_autoquant,
+    # waiting for A100-80G machine to be available in CI
+    # https://github.com/pytorch/pytorch/actions/runs/12018005803/job/33503683582?pr=140627
+    # run_mixtral_8x7b_autoquant,
+    # run_llama2_7b_autoquant,
     # A list of micro-benchmarks.
     run_mlp_layer_norm_gelu,
     run_layer_norm,
