@@ -276,6 +276,7 @@ PyObject* THXPModule_resetAccumulatedMemoryStats(
 
 PyObject* THXPModule_getMemoryInfo(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
+#ifdef SYCL_COMPILER_VERSION >= 20250000
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to mem_get_info");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
   auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
@@ -285,6 +286,11 @@ PyObject* THXPModule_getMemoryInfo(PyObject* self, PyObject* arg) {
   PyTuple_SET_ITEM(ret.get(), 0, THPUtils_packUInt64(free));
   PyTuple_SET_ITEM(ret.get(), 1, THPUtils_packUInt64(total));
   return ret.release();
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
   END_HANDLE_TH_ERRORS
 }
 

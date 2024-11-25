@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     onlyXPU,
     OpDTypes,
     ops,
+    skipXPUif,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
@@ -436,6 +437,10 @@ print(torch.xpu.device_count())
             )
         )
 
+    @skipXPUif(
+        int(torch.version.xpu) < 20250000,
+        "Test requires SYCL compiler version 2025.0.0 or newer.",
+    )
     def test_mem_get_info(self):
         torch.xpu.synchronize()
         before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
