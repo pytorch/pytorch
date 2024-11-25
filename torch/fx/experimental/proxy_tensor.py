@@ -911,20 +911,6 @@ def proxy_call(
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 
-    # [Note: Metadata mutation in proxy tracing]
-    # Input node has a meta['val'] field that needs to have its storage mutated, which
-    # proxy tensor needs to deal with. This happens only for sacrificial parameter
-    # specifically the `set_` op. This motivates banning metadata mutation from
-    # proxy tracing.
-    if torch.Tag.inplace_view in func.tags:
-        # convention: all inplace_view ops mutate the metadata of their first argument
-        arg = flat_args_kwargs[0]
-        proxy_arg = proxy_flat_args_kwargs[0]
-        assert isinstance(arg, torch.Tensor) and isinstance(
-            proxy_arg, Proxy
-        ), f"invalid inplace_view op: {str(func)}"
-        set_meta(proxy_arg, arg)
-
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
     # you run torch.tensor; deterministic factory functions like torch.arange
