@@ -7869,6 +7869,30 @@ FORWARD_SKIPS_AND_XFAILS = [
         },
         name="not_implemented",
     ),
+    # expected: torch.where() support has some limitations
+    # 1. condition must be an NJT
+    # 2. no dense tensors of higher dim than the NJT
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected condition to be a jagged layout NestedTensor",
+        op_match_fn=lambda device, op: op.full_name == "where",
+        sample_match_fn=lambda device, sample: not sample.kwargs["condition"].is_nested,
+    ),
+    XFailRule(
+        error_type=ValueError,
+        error_msg="broadcasting nested tensors with dense tensors of equal or higher dim",
+        op_match_fn=lambda device, op: op.full_name == "where",
+        sample_match_fn=lambda device, sample: (
+            (
+                not sample.input.is_nested
+                and sample.input.dim() >= sample.kwargs["condition"].dim()
+            )
+            or (
+                not sample.kwargs["other"].is_nested
+                and sample.kwargs["other"].dim() >= sample.kwargs["condition"].dim()
+            )
+        ),
+    ),
     # expected: masked ops don't support jagged layout
     XFailRule(
         error_type=ValueError,
