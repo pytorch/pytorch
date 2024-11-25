@@ -253,7 +253,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_mlp_silu_mul_fusion():
+    def _is_valid_computation_linear_silu_mul_fusion():
         def fn(match):
             computation_nodes = filter_nodes(
                 match.nodes, mkldnn._linear_pointwise.default
@@ -290,25 +290,36 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_mlp_silu_mul_lowering(pattern):
+    def _register_linear_silu_linear_mul_lowering(pattern):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_mlp_silu_mul_fusion(),
+            extra_check=_is_valid_computation_linear_silu_mul_fusion(),
             pass_number=0,
         )
         def fn(match, *args, **kwargs):
+            r"""
+            Supported linear-silu-linear-mul patterns
+
+                linear(X)   linear(X)
+                    \          /
+                    silu
+                     \
+                        mul
+                         |
+                         Y
+            """
             computation_args = [
                 args[0],
                 [args[1], kwargs["w2"]],
                 [args[2], kwargs["b2"]],
-                "mlp_silu_mul",
+                "linear_silu_linear_mul",
                 None,
                 None,
             ]
 
-            from ..mkldnn_lowerings import mlp_linear_silu_linear_mul
+            from ..mkldnn_lowerings import linear_silu_linear_mul
 
-            return mlp_linear_silu_linear_mul(*computation_args)
+            return linear_silu_linear_mul(*computation_args)
 
         return fn
 
@@ -426,8 +437,14 @@ if torch._C._has_mkldnn:
             for n in binary_nodes
         ):
             return False
+
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
+            or not all(
+                get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
+                for i in range(get_meta_value(n.args[0]).dim())
+            )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -597,7 +614,9 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other):
+            if not _can_be_inplace(other) or other.data.shape != list(
+                match.nodes[0].meta["val"].size()
+            ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -786,7 +805,7 @@ if torch._C._has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
-    def _register_mlp_silu_mul_fusion():
+    def _register_linear_silu_linear_mul_fusion():
         linear_silu_pattern = _unary_fusion_pattern(
             _silu_fusion,
             _linear_call,
@@ -807,7 +826,7 @@ if torch._C._has_mkldnn:
                 _users=1,
             ),
         )
-        _register_mlp_silu_mul_lowering(
+        _register_linear_silu_linear_mul_lowering(
             linear_mul_pattern,
         )
 
@@ -1352,7 +1371,7 @@ if torch._C._has_mkldnn:
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
-            _register_mlp_silu_mul_fusion()
+            _register_linear_silu_linear_mul_fusion()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

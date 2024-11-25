@@ -22,6 +22,7 @@ import logging
 import math
 import operator
 import os
+import pathlib
 import platform
 import random
 import re
@@ -366,13 +367,30 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc,
-                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
+    def __init__(
+        self,
+        child_iter,
+        input_type_desc,
+        item_callback=None,
+        track_callback=None,
+        set_seed=True,
+        restrict_to_index=None
+    ):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
-        # Callback is run on each iterated thing to get the thing to track.
-        self.callback = callback
+        # NB: The two types of callbacks below exist because the thing we want to track isn't
+        # always the same as the thing we want returned from the iterator. An example of this
+        # is ErrorInput, which we want returned from the iterator, but which contains a
+        # SampleInput that we want to track.
+        # Item callback is run on each (iterated thing, index) to get the thing to return.
+        self.item_callback = item_callback
+        if self.item_callback is None:
+            self.item_callback = lambda x, i: x
+        # Track callback is run on each iterated thing to get the thing to track.
+        self.track_callback = track_callback
+        if self.track_callback is None:
+            self.track_callback = lambda x: x
         self.test_fn = extract_test_fn()
         # Indicates whether the random seed should be set before each call to the iterator
         self.set_seed = set_seed
@@ -401,10 +419,10 @@ class TrackedInputIter:
 
         self._set_tracked_input(
             TrackedInput(
-                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
+                index=input_idx, val=self.track_callback(input_val), type_desc=self.input_type_desc
             )
         )
-        return input_val
+        return self.item_callback(input_val, input_idx)
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -1340,6 +1358,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_S390X = platform.machine() == "s390x"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1403,6 +1422,7 @@ TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
+MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
@@ -1842,6 +1862,9 @@ def runOnRocmArch(arch: Tuple[str, ...]):
         return wrap_fn
     return dec_fn
 
+def xfailIfS390X(func):
+    return unittest.expectedFailure(func) if IS_S390X else func
+
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
         reason = f"skipIfXpu: {msg}"
@@ -1865,6 +1888,17 @@ def skipIfMPS(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+def skipIfMPSOnMacOS13(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_MPS and int(MACOS_VERSION) == 13:
+            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 
 def skipIfHpu(fn):
     @wraps(fn)
@@ -4299,6 +4333,39 @@ class TestCase(expecttest.TestCase):
         _stdout, stderr = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
+    def _attempt_load_from_subprocess(
+        self,
+        file: pathlib.Path,
+        import_string: str,
+        expected_failure_message: Optional[str] = None
+    ) -> None:
+        """
+        Attempts weights_only `torch.load` in a subprocess. This is used to test that
+        weights_only `torch.load` works as expected without global imports.
+
+        Args:
+            file (pathlib.Path): The path to the checkpoint to load.
+            import_string (str): import string to add to the script
+            exected_failure_message (str, optional): The expected failure message if the
+                checkpoint fails to load. If None, the test will pass
+        """
+        script = f"import torch;{import_string}torch.load(r'{file}', weights_only=True)"
+        cm = (
+            self.assertRaisesRegex(RuntimeError, re.escape(expected_failure_message))
+            if expected_failure_message else contextlib.nullcontext()
+        )
+        with cm:
+            try:
+                subprocess.check_output(
+                    [sys.executable, "-c", script],
+                    # On Windows, opening the subprocess with the default CWD makes `import torch`
+                    # fail, so just set CWD to this script's directory
+                    cwd=os.path.dirname(os.path.realpath(__file__)),
+                    stderr=subprocess.STDOUT,
+                )
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(e.output.decode("utf-8")) from None
+
 
 class TestCaseBase(TestCase):
     # Calls to super() in dynamically created classes are a bit odd.
@@ -4606,8 +4673,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -5102,9 +5168,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 
