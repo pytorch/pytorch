@@ -710,6 +710,7 @@ def _compile(
             stack.enter_context(
                 _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
             )
+            stack.enter_context(torch._dynamo.callback_handler.install_callbacks())
             stack.enter_context(CompileTimeInstructionCounter.record())
             return _compile_inner(code, one_graph, hooks, transform)
 
@@ -883,7 +884,6 @@ def _compile(
             distributed_state = DistributedState(compile_pg, LocalState())
         else:
             distributed_state = None
-        torch._dynamo.callback_handler.run_start_callbacks()
 
         # Check recompilations
         recompile_reasons = None
@@ -1131,7 +1131,6 @@ def _compile(
                 ),
             }
             metrics_context.update_outer(metrics)
-            torch._dynamo.callback_handler.run_end_callbacks()
             # === END WARNING WARNING WARNING ===
 
 
