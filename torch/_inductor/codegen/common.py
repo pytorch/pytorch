@@ -2013,11 +2013,15 @@ class Kernel(CodeGen):
                     output_idx = 0
 
                     def do_cse(v):
-                        # TODO - throw on default
-                        output_dtype = getattr(
-                            dtype_handler,
-                            name,
-                        )(*args)
+
+                        if name == "masked":
+                            nonlocal value
+                            output_dtype = value.dtype
+                        else:
+                            output_dtype = getattr(
+                                dtype_handler,
+                                name,
+                            )(*args)
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,

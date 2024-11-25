@@ -73,6 +73,13 @@ class TestCase(InductorTestCase):
             out_c = torch.compile(run)(op.get_op(), args, kwargs)
             self.assertEqual(out, out_c)
 
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_constant(self):
+        def fn():
+            return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
+
+        self.assertEqual(fn(), torch.compile(fn)())
+
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
 

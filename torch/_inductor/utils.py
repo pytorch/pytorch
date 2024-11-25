@@ -2247,3 +2247,12 @@ def register_op_dtype_propagation_rules(
     op_dtype_propagation_rules[name] = OpDtypeRule(
         type_promotion_kind, override_return_dtype
     )
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype == torch.float16 or dtype == torch.bfloat16
+    ):
+        return torch.float32
+    return dtype
