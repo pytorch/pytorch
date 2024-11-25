@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
+    "get_x86_inductor_linear_dynamic_fp16_config",
 ]
 
 
