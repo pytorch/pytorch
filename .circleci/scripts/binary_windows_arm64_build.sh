@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eux -o pipefail
 
-source "${BINARY_ENV_FILE:-/c/w/env}"
+# source "${BINARY_ENV_FILE:-/c/w/env}"
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
 echo "Free space on filesystem before build:"
