@@ -204,6 +204,7 @@ class UsageLog:
                 time_diff = collecting_end_time - collecting_start_time
                 stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
                 self.log_json(stats)
+                
                 # sleep for the remaining time to meet the log interval.
                 if time_diff < self._log_interval:
                     time.sleep(self._log_interval - time_diff)
