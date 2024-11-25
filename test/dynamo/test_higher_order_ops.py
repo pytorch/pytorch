@@ -360,8 +360,8 @@ class GraphModule(torch.nn.Module):
         actual_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
-            ifdynstaticdefault(2, 3),
-            expected_opcount=2,
+            ifdynstaticdefault(3, 4),
+            expected_opcount=3,
             return_graph=True,
         )
         if torch._dynamo.config.assume_static_by_default:
@@ -369,18 +369,20 @@ class GraphModule(torch.nn.Module):
                 actual_graph,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 1]"):
+    def forward(self, L_x_: "f32[3, 1]", L_y_: "f64[]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
+        item: "Sym(zf0)" = l_y_.item();  l_y_ = None
         wrap_body_0 = self.wrap_body_0
-        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, item);  wrap_body_0 = l_x_ = item = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
-        def forward(self, l_x_: "f32[3, 1]"):
+        def forward(self, l_x_: "f32[3, 1]", item: "Sym(zf0)"):
             view: "f32[3]" = l_x_.view(3);  l_x_ = None
-            add: "f32[3]" = view + 0.5;  view = None
+            add: "f32[3]" = view + item;  view = item = None
             return (add,)
 """,
             )
@@ -389,18 +391,20 @@ class GraphModule(torch.nn.Module):
                 actual_graph,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]"):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0, 1]", L_y_: "f64[]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
+        item: "Sym(zf1)" = l_y_.item();  l_y_ = None
         wrap_body_0 = self.wrap_body_0
-        wrap = torch.ops.higher_order.wrap(wrap_body_0, s0, l_x_);  wrap_body_0 = s0 = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, s0, l_x_, item);  wrap_body_0 = s0 = l_x_ = item = None
         getitem: "f32[s0]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
-        def forward(self, s0: "Sym(s0)", l_x_: "f32[s0, 1]"):
+        def forward(self, s0: "Sym(s0)", l_x_: "f32[s0, 1]", item: "Sym(zf1)"):
             view: "f32[s0]" = l_x_.view(s0);  l_x_ = s0 = None
-            add: "f32[s0]" = view + 0.5;  view = None
+            add: "f32[s0]" = view + item;  view = item = None
             return (add,)
 """,
             )
@@ -2405,7 +2409,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.zeros([])
         # Numbers don't get lifted, so args is still 2.
-        self._test_wrap_simple(f, default_args_generator((x,)), 2)
+        self._test_wrap_simple(f, default_args_generator((x,)), 3)
 
     def test_capture_global_num_adds_guard(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -2428,7 +2432,7 @@ class GraphModule(torch.nn.Module):
         x = torch.zeros([])
         y = 3.14
         # Numbers don't get lifted, so args is still 2.
-        self._test_wrap_simple(f, default_args_generator((x, y)), 2)
+        self._test_wrap_simple(f, default_args_generator((x, y)), 3, expected_opcount=3)
 
     def test_side_effect_in_body(self):
         counters.clear()
@@ -5966,6 +5970,60 @@ class GraphModule(torch.nn.Module):
             "Calling torch.func.vmap\\(compiled_fn\\) function from eager mode is not supported",
         ):
             torch.func.vmap(fn)(x)
+
+    def test_vmap_call_compiled_backward_fn(self):
+        # See PyTorch issue #138422
+        @torch.compile
+        def f(x):
+            return x**2
+
+        x = torch.randn(2, requires_grad=True)
+        y = f(x)
+
+        def get_vjp(v):
+            return torch.autograd.grad(y, x, v)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, which isn't supported",
+        ):
+            torch.func.vjp(get_vjp, x)
+
+    def test_vjp_call_compiled_backward_fn(self):
+        # See PyTorch issue #138422
+        @torch.compile
+        def f(x):
+            return x**2
+
+        x = torch.randn(2, requires_grad=True)
+        y = f(x)
+
+        def get_vjp(v):
+            return torch.autograd.grad(y, x, v)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, which isn't supported",
+        ):
+            torch.func.vjp(get_vjp, x)
+
+    def test_grad_call_compiled_backward_fn(self):
+        # See PyTorch issue #138422
+        @torch.compile
+        def f(x):
+            return x**2
+
+        x = torch.randn(2, requires_grad=True)
+        y = f(x)
+
+        def get_vjp(v):
+            return torch.autograd.grad(y, x, v)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, which isn't supported",
+        ):
+            torch.func.grad(get_vjp)(x)
 
     def test_grad_call_torch_compile_fn(self):
         def wrapped_fn(x):
