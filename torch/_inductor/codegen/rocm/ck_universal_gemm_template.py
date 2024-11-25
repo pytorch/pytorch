@@ -131,6 +131,9 @@ class CKGemmTemplate(CKTemplate):
 
     extern "C" {
     int run_main(int argc, char** argv) {
+        {% if is_batched %}
+        const int32_t B = {{B}};
+        {% endif %}
         const int32_t M = {{M}};
         const int32_t N = {{N}};
         const int32_t K = {{K}};
@@ -168,19 +171,40 @@ class CKGemmTemplate(CKTemplate):
         using BiasLayout = {{bias_layout}};
         {% endif %}
 
+        {% if is_batched %}
+        using strides_t = std::array<int32_t, 3>;
+        auto get_strides = [](int32_t batch_stride, int32_t leading_dimension, auto layout) constexpr -> strides_t {
+            if constexpr (std::is_same_v<decltype(layout), Row>) {
+                return {batch_stride, leading_dimension, 1};
+            }
+            return {batch_stride, 1, leading_dimension};
+        };
+        auto a_size = strides_t{B, M, K};
+        auto a_stride = get_strides(M * K, LDA, ALayout{});
+        auto b_size = strides_t{B, N, K};
+        auto b_stride = get_strides(N * K, LDB, BLayout{});
+        auto c_size = strides_t{B, M, N};
+        auto c_stride = get_strides(M * N, LDC, CLayout{});
+        {% else %}
         using strides_t = std::array<int32_t, 2>;
-
         auto get_strides = [](int32_t leading_dimension, auto layout) constexpr -> strides_t {
             if constexpr (std::is_same_v<decltype(layout), Row>) {
                 return {leading_dimension, 1};
             }
             return {1, leading_dimension};
         };
+        auto a_size = strides_t{M, K};
+        auto a_stride = get_strides(LDA, ALayout{});
+        auto b_size = strides_t{N, K};
+        auto b_stride = get_strides(LDB, BLayout{});
+        auto c_size = strides_t{M, N};
+        auto c_stride = get_strides(LDC, CLayout{});
+        {% endif %}
 
-        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( strides_t{M, K}, get_strides(LDA, ALayout{}) ) );
-        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( strides_t{N, K}, get_strides(LDB, BLayout{}) ) );
+        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( a_size, a_stride ) );
+        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( b_size, b_stride ) );
         {% if has_bias %}
-        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, BiasLayout{}) ) );
+        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( c_size, get_strides(LDD, BiasLayout{}) ) );
         {% endif %}
         {% if has_scale %}
         // NB: these are hardcoded
@@ -188,8 +212,8 @@ class CKGemmTemplate(CKTemplate):
         Tensor<ScaleAElementType> s_b_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(0, Col{}) ));
         {% endif %}
 
-        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
-        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
+        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( c_size, c_stride ) );
+        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( c_size, c_stride ) );
 
         a_m_k.GenerateTensorValue(GeneratorTensor_2<AElementType>());
         b_k_n.GenerateTensorValue(GeneratorTensor_2<BElementType>());
@@ -232,6 +256,9 @@ class CKGemmTemplate(CKTemplate):
             static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
             {% endif %}
             static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
+            {% if is_batched %}
+            B,
+            {% endif %}
             M,
             N,
             K,
@@ -656,27 +683,26 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            M, N, K, LDA, LDB, LDC, LDD = (
+            if self.is_batched:
+                size_arg_strs = ["B", "M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            else:
+                size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            size_arg_vals = (
                 self.size_args()
                 if is_static_problem
                 else (
                     f"std::stoi(argv[{k}])" for k, _ in enumerate(self.size_args(), 1)
                 )
             )
+            size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
                 inline_utils=self.inline_utils().getvalue(),
                 kernel_name=kernel.kernel_name,
-                M=M,
-                N=N,
-                K=K,
-                LDA=LDA,
-                LDB=LDB,
-                LDC=LDC,
-                LDD=LDD,
                 has_bias=has_bias,
                 has_scale=has_scale,
+                is_batched=self.is_batched,
                 a_ck_dtype=op.a_element_dtype,
                 b_ck_dtype=op.b_element_dtype,
                 c_ck_dtype=op.c_element_dtype,
@@ -708,6 +734,7 @@ class CKGemmTemplate(CKTemplate):
                 compile_cmd=rocm_compile_command(
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
+                **size_args,
             )
             res += runner_code
 
