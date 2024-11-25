@@ -267,7 +267,7 @@ def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
             else:
                 return SymFloat.create(
                     as_expr=SymExpr(
-                        _print_sympy(s), 
+                        _print_sympy(s),
                         hint=SymExprHint.create(as_float=s.node.hint),
                     )
                 )
