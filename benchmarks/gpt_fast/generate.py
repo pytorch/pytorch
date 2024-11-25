@@ -249,7 +249,7 @@ def run_experiment(
             manual=True,
             error_on_unseen=False,
             example_input=example_input,
-            batch_size=x.batch_size
+            batch_size=x.batch_size,
         )
         torch.compiler.cudagraph_mark_step_begin()
         generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
