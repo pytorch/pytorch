@@ -1,5 +1,16 @@
 #pragma once
+#ifdef __OBJC__
 #include <Metal/Metal.h>
+typedef id<MTLLibrary> MTLLibrary_t;
+typedef id<MTLFunction> MTLFunction_t;
+typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
+#else
+typedef void MTLCompileOptions;
+typedef void* MTLLibrary_t;
+typedef void* MTLFunction_t;
+typedef void* MTLComputePipelineState_t;
+#endif
+
 #include <unordered_map>
 #include <vector>
 
@@ -19,19 +30,19 @@ class MetalShaderLibrary {
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
   virtual ~MetalShaderLibrary() = default;
-  inline id<MTLComputePipelineState> getPipelineStateForFunc(
+  inline MTLComputePipelineState_t getPipelineStateForFunc(
       const std::string& fname) {
     return getLibraryPipelineState(getLibrary(), fname).first;
   }
-  id<MTLComputePipelineState> getPipelineStateForFunc(
+  MTLComputePipelineState_t getPipelineStateForFunc(
       const std::string& fname,
       const std::initializer_list<std::string>& params) {
     return getLibraryPipelineState(getLibrary(params), fname).first;
   }
-  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
+  inline MTLFunction_t getMTLFunction(const std::string& fname) {
     return getLibraryPipelineState(getLibrary(), fname).second;
   }
-  id<MTLFunction> getMTLFunction(
+  MTLFunction_t getMTLFunction(
       const std::string& fname,
       const std::initializer_list<std::string>& params) {
     return getLibraryPipelineState(getLibrary(params), fname).second;
@@ -39,23 +50,23 @@ class MetalShaderLibrary {
   static MetalShaderLibrary& getBundledLibrary();
 
  protected:
-  virtual id<MTLLibrary> getLibrary();
-  virtual id<MTLLibrary> getLibrary(
+  virtual MTLLibrary_t getLibrary();
+  virtual MTLLibrary_t getLibrary(
       const std::initializer_list<std::string>& params);
-  id<MTLLibrary> library = nil;
+  MTLLibrary_t library = nullptr;
 
  private:
-  std::pair<id<MTLComputePipelineState>, id<MTLFunction>>
-  getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
-
-  id<MTLLibrary> compileLibrary(const std::string& src);
+  std::pair<MTLComputePipelineState_t, MTLFunction_t> getLibraryPipelineState(
+      MTLLibrary_t lib,
+      const std::string& fname);
+  MTLLibrary_t compileLibrary(const std::string& src);
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;
-  std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  std::unordered_map<std::string, MTLLibrary_t> libMap;
   std::unordered_map<
       std::string,
-      std::pair<id<MTLComputePipelineState>, id<MTLFunction>>>
+      std::pair<MTLComputePipelineState_t, MTLFunction_t>>
       cplMap;
 };
 
