@@ -29,8 +29,8 @@ endif()
 find_package(CUDA)
 if(NOT CUDA_FOUND)
   message(WARNING
-    "Pytorch: CUDA cannot be found. Depending on whether you are building "
-    "Pytorch or a Pytorch dependent library, the next warning / error will "
+    "PyTorch: CUDA cannot be found. Depending on whether you are building "
+    "PyTorch or a PyTorch dependent library, the next warning / error will "
     "give you more info.")
   set(CAFFE2_USE_CUDA OFF)
   return()
@@ -101,9 +101,9 @@ if(CUDA_FOUND)
       COMPILE_OUTPUT_VARIABLE output_var
       )
     if(NOT compile_result)
-      message(FATAL_ERROR "Pytorch: Couldn't determine version from header: " ${output_var})
+      message(FATAL_ERROR "PyTorch: Couldn't determine version from header: " ${output_var})
     endif()
-    message(STATUS "Pytorch: Header version is: " ${cuda_version_from_header})
+    message(STATUS "PyTorch: Header version is: " ${cuda_version_from_header})
     if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
       # Force CUDA to be processed for again next time
       # TODO: I'm not sure if this counts as an implementation detail of
