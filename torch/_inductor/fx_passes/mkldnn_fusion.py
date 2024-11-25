@@ -367,8 +367,14 @@ if torch._C._has_mkldnn:
             for n in binary_nodes
         ):
             return False
+
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
+            or not all(
+                get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
+                for i in range(get_meta_value(n.args[0]).dim())
+            )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -538,7 +544,9 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other):
+            if not _can_be_inplace(other) or other.data.shape != list(
+                match.nodes[0].meta["val"].size()
+            ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
