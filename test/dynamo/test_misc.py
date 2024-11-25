@@ -4854,6 +4854,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn(x), x)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_set_update(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, int_set, int_list):
+            int_set.update(map(int, int_list))
+            return x + 1
+
+        int_set = set()
+        int_list = [1, 2, 1]
+        res = run(torch.ones(1), int_set, int_list)
+        self.assertTrue(same(res, torch.ones(1) + 1))
+        self.assertEqual(int_set, set([1, 2]))
+        self.assertEqual(int_list, [1, 2, 1])
+
     def test_frozenset_torch_func_contains(self):
         funcs = frozenset([torch.add])
 
