@@ -213,7 +213,7 @@ struct ReduceJitOp {
     uint32_t input_idx = config.input_idx();
     auto base_offsets1 = output_calc.get(output_idx)[1];
 
-    using arg_vec_t = Array<arg_t, ${output_vec_size}>;
+    using arg_vec_t = std::array<arg_t, ${output_vec_size}>;
     arg_vec_t value;
 
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
@@ -229,8 +229,8 @@ struct ReduceJitOp {
       value = block_x_reduce<${output_vec_size}>(value, shared_memory);
     }
 
-    using out_ptr_vec_t = Array<out_scalar_t*, ${output_vec_size}>;
-    using offset_vec_t = Array<uint32_t, ${output_vec_size}>;
+    using out_ptr_vec_t = std::array<out_scalar_t*, ${output_vec_size}>;
+    using offset_vec_t = std::array<uint32_t, ${output_vec_size}>;
     offset_vec_t base_offsets;
     out_ptr_vec_t out;
 
@@ -287,7 +287,7 @@ struct ReduceJitOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE Array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
+  C10_DEVICE std::array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
     if (config.vectorize_input) {
       assert(output_vec_size == 1);
       // reduce at the header of input_slice where memory is not aligned,
@@ -371,13 +371,13 @@ struct ReduceJitOp {
   }
 
   template <int output_vec_size, typename offset_calc_t>
-  C10_DEVICE Array<arg_t, output_vec_size> thread_reduce_impl(const scalar_t* data_, offset_calc_t calc) const {
+  C10_DEVICE std::array<arg_t, output_vec_size> thread_reduce_impl(const scalar_t* data_, offset_calc_t calc) const {
     uint32_t idx = config.input_idx();
     const uint32_t end = config.num_inputs;
     const uint32_t stride = config.step_input;
     const int vt0=${vt0};
 
-    using arg_vec_t = Array<arg_t, output_vec_size>;
+    using arg_vec_t = std::array<arg_t, output_vec_size>;
     using load_t = aligned_vector<scalar_t, output_vec_size>;
     const load_t* data = reinterpret_cast<const load_t*>(data_);
 
@@ -443,8 +443,8 @@ struct ReduceJitOp {
     return value_list[0];
   }
   template <int output_vec_size>
-  C10_DEVICE Array<arg_t, output_vec_size> block_x_reduce(Array<arg_t, output_vec_size> value, char* shared_memory) const {
-    using args_vec_t = Array<arg_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> block_x_reduce(std::array<arg_t, output_vec_size> value, char* shared_memory) const {
+    using args_vec_t = std::array<arg_t, output_vec_size>;
     int dim_x = blockDim.x;
     args_vec_t* shared = (args_vec_t*)shared_memory;
     if (dim_x > warpSize) {
@@ -477,8 +477,8 @@ struct ReduceJitOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE Array<arg_t, output_vec_size> block_y_reduce(Array<arg_t, output_vec_size> value, char* shared_memory) const {
-    using args_vec_t = Array<arg_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> block_y_reduce(std::array<arg_t, output_vec_size> value, char* shared_memory) const {
+    using args_vec_t = std::array<arg_t, output_vec_size>;
     args_vec_t* shared = (args_vec_t*)shared_memory;
     shared[config.shared_memory_offset(0)] = value;
     for (int offset = blockDim.y / 2; offset > 0; offset >>= 1) {
@@ -513,11 +513,11 @@ struct ReduceJitOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE Array<arg_t, output_vec_size> accumulate_in_output(
-    Array<out_scalar_t*, output_vec_size> out,
-    Array<arg_t, output_vec_size> value
+  C10_DEVICE std::array<arg_t, output_vec_size> accumulate_in_output(
+    std::array<out_scalar_t*, output_vec_size> out,
+    std::array<arg_t, output_vec_size> value
   ) const {
-    Array<arg_t, output_vec_size> ret;
+    std::array<arg_t, output_vec_size> ret;
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       ret[i] = reducer::combine(*(out[i]), value[i]);
@@ -558,7 +558,7 @@ struct ReduceJitOp {
 //   }
 
   template <int output_vec_size>
-  C10_DEVICE void set_results_to_output(Array<arg_t, output_vec_size> value, Array<uint32_t, output_vec_size> base_offset) const {
+  C10_DEVICE void set_results_to_output(std::array<arg_t, output_vec_size> value, std::array<uint32_t, output_vec_size> base_offset) const {
     assert(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
@@ -567,10 +567,10 @@ struct ReduceJitOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE Array<arg_t, output_vec_size> global_reduce(Array<arg_t, output_vec_size> value, Array<arg_t, output_vec_size> *acc, char* shared_memory) const {
-    using arg_vec_t = Array<arg_t, output_vec_size>;
-    using out_ptr_vec_t = Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = Array<uint32_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> global_reduce(std::array<arg_t, output_vec_size> value, std::array<arg_t, output_vec_size> *acc, char* shared_memory) const {
+    using arg_vec_t = std::array<arg_t, output_vec_size>;
+    using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
+    using offset_vec_t = std::array<uint32_t, output_vec_size>;
 
     arg_vec_t* reduce_buffer = (arg_vec_t*)cta_buf;
     uint32_t output_idx = config.output_idx<output_vec_size>();
