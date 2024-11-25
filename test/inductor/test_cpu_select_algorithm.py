@@ -1743,7 +1743,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             device_type="cpu"
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_concat_linear": True})
@@ -1783,7 +1783,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             device_type="cpu"
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": False})
     @patches
@@ -1942,7 +1942,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             device_type="cpu"
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

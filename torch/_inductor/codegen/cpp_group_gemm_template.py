@@ -57,17 +57,9 @@ extern "C" {{export_declaration}}
 {%- endif %}
     if (horizontal_transverse) {
         for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-            const int64_t n_start = nc * Nr;
-            const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
-            const int64_t n_size = n_end - n_start;
-            // NB: assume we pad N, nc_block_end won't exceed padded N here.
-            const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+            {{ template.codegen_n_loop_param()|indent(12, false) }}
             for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-                const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
-                const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
-                const int64_t m_start = mc * Mr;
-                const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
-                const int64_t m_size = m_end - m_start;
+                {{ template.codegen_m_loop_param()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
@@ -119,17 +111,6 @@ extern "C" {{export_declaration}}
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
 {%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
-{%- if has_gate_bias %}
-{%- set tile_inp = kernel.slice_nd(inp, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp = tile_Y %}
-{%- endif %}
-{%- if has_up_bias %}
-{%- set tile_inp1 = kernel.slice_nd(inp1, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp1 = tile_Y %}
-{%- endif %}
-                    // silu-mul epilogues
                     {{ kernel.store_output(
                         tile_Y,
                         (tile_acc, tile_acc1),
@@ -192,17 +173,6 @@ extern "C" {{export_declaration}}
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
 {%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
-{%- if has_gate_bias %}
-{%- set tile_inp = kernel.slice_nd(inp, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp = tile_Y %}
-{%- endif %}
-{%- if has_up_bias %}
-{%- set tile_inp1 = kernel.slice_nd(inp1, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp1 = tile_Y %}
-{%- endif %}
-                    // silu-mul epilogues
                     {{ kernel.store_output(
                         tile_Y,
                         (tile_acc, tile_acc1),
@@ -222,7 +192,7 @@ extern "C" {{export_declaration}}
 """
 
 
-class CppPackedMLPTemplate(CppPackedGemmTemplate):
+class CppGroupGEMMTemplate(CppPackedGemmTemplate):
     def __init__(
         self,
         input_nodes,
@@ -453,7 +423,7 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             return output
 
         template = DataProcessorTemplateWrapper(
-            CppPackedMLPTemplate,
+            CppGroupGEMMTemplate,
             preprocessor,
             postprocessor,
             input_nodes=input_nodes,
@@ -493,7 +463,7 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             W = template_buffer_node.inputs[1]
             W1 = template_buffer_node.inputs[2]
             Y = template_buffer_node
-            counters["inductor"]["cpp_mlp_template"] += 1
+            counters["inductor"]["cpp_group_gemm_template"] += 1
 
         template_buffer = Y
         gemm_output_buffer = template_buffer
