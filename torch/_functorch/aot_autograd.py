@@ -631,7 +631,7 @@ def _create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx:
+                with ctx, dynamo_timed("run_functionalized_fw_and_collect_metadata", log_pt2_compile_event=True):
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
                         static_input_indices=aot_config.static_input_indices,
