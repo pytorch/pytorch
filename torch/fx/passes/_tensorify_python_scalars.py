@@ -238,7 +238,9 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
-            if node.op == "call_function" and (replacement_op := SUPPORTED_OPS.get(node.target)):
+            if node.op == "call_function" and (
+                replacement_op := SUPPORTED_OPS.get(node.target)
+            ):
                 args: List[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
@@ -259,7 +261,13 @@ def tensorify_python_scalars(
                         # We use _expr instead of expr b/c we want the symbol not the replacement
                         tensorified_symbols.add(a.meta["val"].node._expr)
 
-                        if proxy.node.meta["val"].dtype != compute_dtype:
+                        # The upcasting is irrelevant when the compute dtype is bool. This happens
+                        # in cases where we are tensorifying a comparison operator such as
+                        # torch.ops.aten.gt.Tensor
+                        if (
+                            compute_dtype != torch.bool
+                            and proxy.node.meta["val"].dtype != compute_dtype
+                        ):
                             proxy = torch.ops.prims.convert_element_type.default(
                                 proxy, compute_dtype
                             )
