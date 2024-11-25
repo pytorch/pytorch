@@ -1630,7 +1630,6 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @skipIfRocm(msg='enable_gqa=True unsupported')
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("fused_kernel", [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sdpa_kernel_grouped_query_attention_cuda(self, device, fused_kernel):
@@ -1646,7 +1645,6 @@ class TestSDPAFailureModes(NNTestCase):
                                                    is_causal=False, enable_gqa=True)
 
     @onlyCPU
-    @skipIfRocm(msg='enable_gqa=True unsupported')
     def test_invalid_sdpa_kernel_grouped_query_attention_cpu(self, device):
         rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
         rand_key = torch.rand(8, 4, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
@@ -3289,7 +3287,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
-    @parametrize("enable_gqa", [True, False] if not TEST_WITH_ROCM else [False])
+    @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
@@ -3618,9 +3616,6 @@ class TestSDPACudaOnly(NNTestCase):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=dtype)
         batch, num_heads, head_dim = 32, 8, 64
         head_dim_v = 32 if is_efficient else head_dim
-        if TEST_WITH_ROCM and head_dim != head_dim_v:
-            unittest.skip("Efficient Attention on ROCM does not support head_dim != head_dim_v for now.")
-            return
         seq_lens_q = (torch.randint(low=1, high=5, size=(1,)).item()
                       if expand_q_batch
                       else torch.randint(low=1, high=32, size=(batch,)).tolist())
