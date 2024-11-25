@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         builtins as builtins,
         functools as functools,
         itertools as itertools,
+        operator as operator,
         os as os,
         sys as sys,
     )

@@ -1,7 +1,9 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/mps/operations/FusedOptimizerOps.h>
+#include <ATen/native/mps/OperationUtils.h>
+
+static_assert(sizeof(bool) == 1);
 
 namespace at::native::mps {
 
@@ -25,21 +27,8 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    float lr_lv = lr;
-    float beta1_lv = beta1;
-    float beta2_lv = beta2;
-    float weight_decay_lv = weight_decay;
-    float eps_lv = eps;
-    uint8_t maximize_lv = maximize;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, lr_lv, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -51,20 +40,8 @@ struct FusedAdamEncodingFunctor {
                   const double weight_decay,
                   const double eps,
                   const bool maximize) const {
-    float beta1_lv = beta1;
-    float beta2_lv = beta2;
-    float weight_decay_lv = weight_decay;
-    float eps_lv = eps;
-    uint8_t maximize_lv = maximize;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBuffer(computeEncoder, lr, 2);
-    mtl_setBytes(computeEncoder, beta1_lv, 3);
-    mtl_setBytes(computeEncoder, beta2_lv, 4);
-    mtl_setBytes(computeEncoder, weight_decay_lv, 5);
-    mtl_setBytes(computeEncoder, eps_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
+    mtl_setArgs(
+        computeEncoder, tensorArgumentBuffer, metadata_arguments, lr, beta1, beta2, weight_decay, eps, maximize);
   }
 };
 
@@ -83,23 +60,16 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    float weight_decay_lv = weight_decay;
-    float momentum_lv = momentum;
-    float lr_lv = lr;
-    float dampening_lv = dampening;
-    uint8_t nesterov_lv = nesterov;
-    uint8_t maximize_lv = maximize;
-    uint8_t is_first_step_lv = is_first_step;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, momentum_lv, 3);
-    mtl_setBytes(computeEncoder, lr_lv, 4);
-    mtl_setBytes(computeEncoder, dampening_lv, 5);
-    mtl_setBytes(computeEncoder, nesterov_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
-    mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+    mtl_setArgs(computeEncoder,
+                tensorArgumentBuffer,
+                metadata_arguments,
+                weight_decay,
+                momentum,
+                lr,
+                dampening,
+                nesterov,
+                maximize,
+                is_first_step);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -112,22 +82,16 @@ struct FusedSgdEncodingFunctor<true> {
                   const bool nesterov,
                   const bool maximize,
                   const bool is_first_step) const {
-    float weight_decay_lv = weight_decay;
-    float momentum_lv = momentum;
-    float dampening_lv = dampening;
-    uint8_t nesterov_lv = nesterov;
-    uint8_t maximize_lv = maximize;
-    uint8_t is_first_step_lv = is_first_step;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, momentum_lv, 3);
-    mtl_setBuffer(computeEncoder, lr, 4);
-    mtl_setBytes(computeEncoder, dampening_lv, 5);
-    mtl_setBytes(computeEncoder, nesterov_lv, 6);
-    mtl_setBytes(computeEncoder, maximize_lv, 7);
-    mtl_setBytes(computeEncoder, is_first_step_lv, 8);
+    mtl_setArgs(computeEncoder,
+                tensorArgumentBuffer,
+                metadata_arguments,
+                weight_decay,
+                momentum,
+                lr,
+                dampening,
+                nesterov,
+                maximize,
+                is_first_step);
   }
 };
 
@@ -139,15 +103,7 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const double lr,
                   const bool maximize) const {
-    float weight_decay_lv = weight_decay;
-    float lr_lv = lr;
-    uint8_t maximize_lv = maximize;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBytes(computeEncoder, lr_lv, 3);
-    mtl_setBytes(computeEncoder, maximize_lv, 4);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 
   void operator()(id<MTLComputeCommandEncoder>& computeEncoder,
@@ -156,17 +112,11 @@ struct FusedSgdEncodingFunctor<false> {
                   const double weight_decay,
                   const at::Tensor& lr,
                   const bool maximize) const {
-    float weight_decay_lv = weight_decay;
-    uint8_t maximize_lv = maximize;
-
-    [computeEncoder setBuffer:tensorArgumentBuffer offset:0 atIndex:0];
-    [computeEncoder setBytes:&metadata_arguments length:sizeof(MetadataArguments) atIndex:1];
-    mtl_setBytes(computeEncoder, weight_decay_lv, 2);
-    mtl_setBuffer(computeEncoder, lr, 3);
-    mtl_setBytes(computeEncoder, maximize_lv, 4);
+    mtl_setArgs(computeEncoder, tensorArgumentBuffer, metadata_arguments, weight_decay, lr, maximize);
   }
 };
 
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname);
 template <int depth, uint32_t kThreadGroupSize, typename encoder_func_t, typename... ArgTypes>
 static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_name,
                                                    std::vector<std::vector<at::Tensor>>& tensor_lists,
@@ -181,9 +131,9 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
 
   TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth");
   for (const auto& d : c10::irange(depth)) {
-    TORCH_CHECK(tensor_lists[d][0].scalar_type() == at::ScalarType::Float ||
-                    tensor_lists[d][0].scalar_type() == at::ScalarType::Half,
-                "Only float and half are supported");
+    const auto scalar_type = tensor_lists[d][0].scalar_type();
+    TORCH_CHECK(scalar_type == kFloat || scalar_type == kHalf || scalar_type == kBFloat16,
+                "Only float, bfloat and half are supported");
   }
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
@@ -202,7 +152,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
