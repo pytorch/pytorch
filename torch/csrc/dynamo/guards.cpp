@@ -2957,7 +2957,7 @@ class TENSOR_MATCH : public LeafGuard {
       py::object tensor_name,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
-        _tensor_name(py::cast<py::str>(std::move(tensor_name))) {
+        _tensor_name(py::cast<std::string>(std::move(tensor_name))) {
     root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -3528,18 +3528,23 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
     at::Tensor tensor = THPVariable_Unpack(obj);
-    int64_t value;
+    std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
-      value = tensor.size(_index);
+      opt_value = tensor.sym_size(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STRIDE) {
-      value = tensor.stride(_index);
+      opt_value = tensor.sym_stride(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
-      value = tensor.storage_offset();
+      opt_value = tensor.sym_storage_offset().maybe_as_int();
     } else {
       throw std::runtime_error("Unknown property");
     }
 
-    PyObject* py_value = PyLong_FromLongLong(value); // New reference
+    if (!opt_value.has_value()) {
+      return false;
+    }
+
+    PyObject* py_value =
+        PyLong_FromLongLong(opt_value.value()); // New reference
     bool result = _guard_manager->check_nopybind(py_value);
     Py_DECREF(py_value);
     return result;
@@ -3552,18 +3557,23 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
       return GuardDebugInfo(false, "not a tensor" + get_source(), 0);
     }
     at::Tensor tensor = THPVariable_Unpack(obj);
-    int64_t value;
+    std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
-      value = tensor.size(_index);
+      opt_value = tensor.sym_size(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STRIDE) {
-      value = tensor.stride(_index);
+      opt_value = tensor.sym_stride(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
-      value = tensor.storage_offset();
+      opt_value = tensor.sym_storage_offset().maybe_as_int();
     } else {
-      GuardDebugInfo(false, "unknown property", 0);
+      return GuardDebugInfo(false, "unknown property", 0);
     }
 
-    PyObject* py_value = PyLong_FromLongLong(value); // New reference
+    if (!opt_value.has_value()) {
+      return GuardDebugInfo(false, "symbolic values found", 0);
+    }
+
+    PyObject* py_value =
+        PyLong_FromLongLong(opt_value.value()); // New reference
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(py_value);
     Py_DECREF(py_value);
     return result;
@@ -4823,6 +4833,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
+      .def("fail_count", &GuardManager::fail_count)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
