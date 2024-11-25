@@ -669,7 +669,9 @@ class OptimizeContext(_TorchDynamoContext):
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+                ctx = torch._dynamo.compiled_autograd._enable(
+                    compiler_fn, dynamic=self._dynamic
+                )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
 
@@ -796,8 +798,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
