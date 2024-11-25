@@ -30,7 +30,7 @@ from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_
 from .virtualized import ops, V
 
 
-def mlp_linear_silu_linear_mul(
+def linear_silu_linear_mul(
     x: TensorBox,
     w: List[TensorBox],
     b: List[TensorBox],
@@ -706,7 +706,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(input, output_dtype)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
@@ -729,7 +729,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(clamped, torch.uint8)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=functools.partial(
                                     inner_fn_requant,
@@ -1003,7 +1003,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(input, output_dtype)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
@@ -1026,7 +1026,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(clamped, torch.uint8)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=torch.uint8,
                                 inner_fn=functools.partial(
                                     inner_fn_requant,

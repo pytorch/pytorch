@@ -2285,9 +2285,7 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         ((0, 1, 0), 2),)
 
     for shape, num_tensors in cases:
-        tensors = []
-        for _ in range(num_tensors):
-            tensors.append(make_arg(shape))
+        tensors = [make_arg(shape) for _ in range(num_tensors)]
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
@@ -2328,9 +2326,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
     )
     for sizes, dim, num_chunks in same_ndim_cases:
-        tensors = []
-        for size in sizes:
-            tensors.append(make_arg(size))
+        tensors = [make_arg(size) for size in sizes]
         yield SampleInput(tensors, args=(dim, num_chunks))
 
     different_ndim_case = [
@@ -14594,7 +14590,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_out=False,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
         ),
     ),

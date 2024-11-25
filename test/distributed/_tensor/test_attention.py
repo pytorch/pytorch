@@ -89,10 +89,6 @@ class RingAttentionTest(DTensorTestBase):
             torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
         )
 
-        if is_causal and compiled and self.world_size > 2:
-            # TODO: Fix this after we move `wait_tensor` to use `with_effect`.
-            return
-
         _cp_options.enable_load_balance = load_balance
 
         q = torch.rand(
