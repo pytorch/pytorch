@@ -1,3 +1,7 @@
+"""
+A Python script that monitors the usage of a system's resources, including CPU, memory, and GPU utilization, and logs the data to a JSON file.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -10,73 +14,18 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
-def get_processes_running_python_tests() -> list[Any]:
-    python_processes = []
-    for process in psutil.process_iter():
-        try:
-            if "python" in process.name() and process.cmdline():
-                python_processes.append(process)
-        except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
-            # access denied or the process died
-            pass
-    return python_processes
-
-
-def get_process_info() -> list[dict[str, Any]]:
-    processes = get_processes_running_python_tests()
-    per_process_info = []
-    for p in processes:
-        try:
-            cmdline = p.cmdline()
-            info = {
-            "pid": p.pid,
-            "cmd": " ".join(cmdline),
-        }
-        except (psutil.ZombieProcess, psutil.NoSuchProcess,psutil.AccessDenied):
-            continue
-        # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
-        # requires higher user privileges and could throw AccessDenied error, i.e. mac
-        try:
-            memory_full_info = p.memory_full_info()
-            info["uss_memory"] = memory_full_info.uss
-            if "pss" in memory_full_info:
-                # only availiable in linux
-                info["pss_memory"] = memory_full_info.pss
-        except psutil.AccessDenied as e:
-            # It's ok to skip this
-            pass
-
-        per_process_info.append(info)
-    return per_process_info
-
-def get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
-    processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
-    per_process_info = []
-    for p in processes:
-        info = {"pid": p.pid, "gpu_memory": p.usedGpuMemory}
-        per_process_info.append(info)
-    return per_process_info
-
-def rocm_get_per_process_gpu_info(handle: Any) -> list[dict[str, Any]]:
-    processes = amdsmi.amdsmi_get_gpu_process_list(handle)
-    per_process_info = []
-    for p in processes:
-        try:
-            proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)
-        except AttributeError:
-            # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
-            # BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
-            proc_info = p
-        info = {
-            "pid": proc_info["pid"],
-            "gpu_memory": proc_info["memory_usage"]["vram_mem"],
-        }
-        per_process_info.append(info)
-    return per_process_info
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=" Test Utilization Monitoring")
-    args = parser.parse_args()
+    """
+    Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments.
+    """
+    parser = argparse.ArgumentParser(description=" Git Job Test Usage Monitoring")
+
+    # debug mode used in local to gracefully exit the script when ctrl+c is pressed.
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     parser.add_argument(
         "--log-interval",
@@ -87,111 +36,284 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
-if __name__ == "__main__":
-    args = parse_args()
-    interval = args.log_interval
-    has_pynvml = False
-    has_amdsmi = False
+class UsageLogSummaryInfo:
+    """
+    A class to store and manage summary information for usage logs. It normally used before and after log loops.
+    """
+    def __init__(self, log_interval,level) -> None:
+        """
+        Initializes a new instance of the UsageLogSummaryInfo class.
 
-    try:
-        import pynvml  # type: ignore[import]
-        try:
-            pynvml.nvmlInit()
-            has_pynvml = True
-        except pynvml.NVMLError:
-            pass
-    except ModuleNotFoundError:
-        pass
-
-    try:
-        import amdsmi  # type: ignore[import]
-        try:
-            amdsmi.amdsmi_init()
-            has_amdsmi = True
-        except amdsmi.AmdSmiException:
-            pass
-    except ModuleNotFoundError:
-        # no amdsmi is available
-        pass
-
-    gpu_handles = []
-    kill_now = False
-    def exit_gracefully(*args: Any) -> None:
-        global kill_now
-        kill_now = True
-    signal.signal(signal.SIGTERM, exit_gracefully)
-
-    monitor_start_time = datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
-    try:
-        gpu_libs_detected = []
-        if has_pynvml:
-            gpu_libs_detected.append("pynvml")
-            num_of_gpu = pynvml.nvmlDeviceGetCount()
-            gpu_handles = [pynvml.nvmlDeviceGetHandleByIndex(i) for i in range(pynvml.nvmlDeviceGetCount())]
-        if has_amdsmi:
-            gpu_libs_detected.append("amdsmi")
-            gpu_handles  = amdsmi.amdsmi_get_processor_handles()
-        num_cpus = psutil.cpu_count()
-
-        # log info
-        info = {
-            "type": "metadata",
-            "log_interval": f"{interval} seconds",
-            "gpu":  gpu_libs_detected,
-            "num_of_gpus":len(gpu_handles),
-            "num_of_cpus": psutil.cpu_count(logical=False),
+        Args:
+            log_interval (int): The time interval for logging utilization data in seconds.
+        """
+        self._summary_info = {
+            "level": level,
+            "log_interval": f"{log_interval} seconds",
         }
+    def upsert(self, key, value) -> None:
+        """
+        Updates the summary information with a new key-value pair.
 
-        print(json.dumps(info))
-    except Exception as e:
-        info = {
-            "error": str(e)
-        }
-        print(json.dumps(info))
+        Args:
+            key (str): The key to update.
+            value (Any): The value to update.
+        """
+        self._summary_info[key] = value
 
-    while not kill_now:
+    def get(self) -> dict[str, Any]:
+        """
+        Returns the current summary information.
+
+        Returns:
+            dict[str, Any]: A dictionary containing the summary information.
+        """
+        return self._summary_info
+
+class UsageLog:
+    def __init__(self, log_interval, is_debug_mode = False) -> None:
+        """
+        Initializes a new instance of the UsageLog class.
+
+        Args:
+            log_interval (int): The time interval for logging utilization data in seconds.
+        """
+        self._log_interval = log_interval
+        self._summary_info = UsageLogSummaryInfo(log_interval,"metadata")
+        self._has_pynvml = False
+        self._has_amdsmi = False
+        self._kill_now = False
+        self._gpu_handles = []
+        self._gpu_libs_detected = []
+        self._num_of_cpus = 0
+        self._debug_mode = is_debug_mode
+
+        # initialize gpu connections
         try:
-            memory_info = psutil.virtual_memory()
-            stats = {
-                "type": "log",
-                "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
-                "total_cpu_percent": psutil.cpu_percent(),
-                "total_memory_percent":memory_info.percent,
-                "processes": get_process_info(),
-            }
-            if has_pynvml:
-                # Iterate over the available GPUs
-                for idx,gpu_handle in enumerate(gpu_handles):
-                    gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
-                    stats[f"total_gpu_utilization_{idx}"] = gpu_utilization.gpu
-                    stats[f"total_gpu_mem_utilization_{idx}"] = gpu_utilization.memory
-            if has_amdsmi:
-                for idx,handle in enumerate(gpu_handles):
-                    stats[f"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-                    stats[f"total_gpu_mem_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+            import pynvml  # type: ignore[import]
 
-        except Exception as e:
-            stats = {
-                "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
-                "error": str(e),
-            }
-        finally:
+            try:
+                pynvml.nvmlInit()
+                self._has_pynvml = True
+            except pynvml.NVMLError:
+                pass
+        except ModuleNotFoundError:
+            pass
+        try:
+            import amdsmi  # type: ignore[import]
+
+            try:
+                amdsmi.amdsmi_init()
+                self._has_amdsmi = True
+            except amdsmi.AmdSmiException:
+                pass
+        except ModuleNotFoundError:
+            # no amdsmi is available
+            pass
+        self._initialGpuHanlders()
+
+    def log_json(self, stats) -> None:
+        """
+        Logs the given statistics as JSON.
+
+        Args:
+            stats (dict): A dictionary containing the statistics to be logged.
+        """
+        if self._debug_mode:
+            # pretty print the json for debug mode
+            print(json.dumps(stats, indent=4))
+        else:
             print(json.dumps(stats))
-            time.sleep(interval)
-    info = {
-        "type": "metadata",
-        "monitor_start_time": monitor_start_time,
-        "monitor_end_time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
-    }
-    print(json.dumps(info))
-    # close the connection
-    if has_amdsmi:
+
+    def exit_gracefully(self, *args: Any) -> None:
+        """
+        Exits the program gracefully. this shuts down the logging loops in execute()
+        """
+        self._kill_now = True
+
+    def execute(self) -> None:
+        """
+        Executes the main loop of the program.
+        """
+        # logs start_time for execution
+        self._summary_info.upsert(
+            "start_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
+        )
+
+        # prints log summary info before execution
+        self.log_json(self._summary_info.get())
+
+        # execute the main loop
+        while not self._kill_now:
+            start_time = time.time()
+            stats = {
+                "level": "record",}
+            try:
+                memory_info = psutil.virtual_memory()
+                stats = {
+                    "level": "record",
+                    "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
+                    "total_cpu_percent": psutil.cpu_percent(),
+                    "total_memory_percent": memory_info.percent,
+                    "processes": self._get_process_info(),
+                }
+                if self._has_pynvml:
+                    # Iterate over the available GPUs
+                    for idx, gpu_handle in enumerate(self._gpu_handles):
+                        gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
+                            gpu_handle
+                        )
+                        stats[f"total_gpu_utilization_{idx}"] = gpu_utilization.gpu
+                        stats[
+                            f"total_gpu_mem_utilization_{idx}"
+                        ] = gpu_utilization.memory
+                if self._has_amdsmi:
+                    for idx, handle in enumerate(self._gpu_handles):
+                        stats[
+                            f"total_gpu_utilization_{idx}"
+                        ] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+                        stats[
+                            f"total_gpu_mem_utilization_{idx}"
+                        ] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+
+            except Exception as e:
+                stats = {
+                    "level": "record",
+                    "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
+                    "error": str(e),
+                }
+            finally:
+                end_time = time.time()
+                self.log_json(stats)
+
+                time_diff = end_time - start_time
+                # sleep for the remaining time to meet the log interval.
+                if time_diff < self._log_interval:
+                    time.sleep(self._log_interval- time_diff)
+                else:
+                    # if the collecting time interval is longer than the log interval, log the info
+                    stats["collecting_time_interval"] = f"{time_diff*1000:.2f}ms"
+
+        # prints complete log summary info to terminal
+        self._summary_info.upsert(
+            "end_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
+        )
+        self.log_json(self._summary_info.get())
+        # shut down gpu connections
+        self._shutdown_gpu_connections()
+
+    def _initialGpuHanlders(self) -> None:
+        """
+        Initializes the GPU handlers if available.
+        """
+
         try:
-            amdsmi.amdsmi_shut_down()
-        except amdsmi.AmdSmiException as e:
-            pass
-    if has_pynvml:
-        try:
-            pynvml.nvmlShutdown()
-        except pynvml.NVMLError as e:
-            pass
+            if self._has_pynvml:
+                self._gpu_libs_detected.append("pynvml")
+                self._gpu_handles = [
+                    pynvml.nvmlDeviceGetHandleByIndex(i)
+                    for i in range(pynvml.nvmlDeviceGetCount())
+                ]
+            if self._has_amdsmi:
+                self._gpu_libs_detected.append("amdsmi")
+                self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
+            self._num_of_cpus = psutil.cpu_count(logical=False)
+
+            # log summary info for handlers
+            self._summary_info.upsert("gpu_libs_detected", self._gpu_libs_detected)
+            self._summary_info.upsert("num_of_gpus", len(self._gpu_handles))
+            self._summary_info.upsert("num_of_cpus", self._num_of_cpus)
+        except Exception as e:
+            self._summary_info.upsert("error", str(e))
+
+    def _shutdown_gpu_connections(self) -> None:
+        if self._has_amdsmi:
+            try:
+                amdsmi.amdsmi_shut_down()
+            except amdsmi.AmdSmiException as e:
+                pass
+        if self._has_pynvml:
+            try:
+                pynvml.nvmlShutdown()
+            except pynvml.NVMLError as e:
+                pass
+
+    def _get_per_process_gpu_info(self,handle: Any) -> list[dict[str, Any]]:
+        processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        per_process_info = []
+        for p in processes:
+            info = {"pid": p.pid, "gpu_memory": p.usedGpuMemory}
+            per_process_info.append(info)
+        return per_process_info
+
+    def _rocm_get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
+        processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+        per_process_info = []
+        for p in processes:
+            try:
+                proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)
+            except AttributeError:
+                # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
+                # BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
+                proc_info = p
+            info = {
+                "pid": proc_info["pid"],
+                "gpu_memory": proc_info["memory_usage"]["vram_mem"],
+            }
+            per_process_info.append(info)
+        return per_process_info
+
+    def _get_processes_running_python_tests(self) -> list[Any]:
+        python_processes = []
+        for process in psutil.process_iter():
+            try:
+                if "python" in process.name() and process.cmdline():
+                    python_processes.append(process)
+            except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
+                # access denied or the process died
+                pass
+        return python_processes
+
+    def _get_process_info(self) -> list[dict[str, Any]]:
+        processes = self._get_processes_running_python_tests()
+        per_process_info = []
+        for p in processes:
+            try:
+                cmdline = p.cmdline()
+                info = {
+                    "pid": p.pid,
+                    "cmd": " ".join(cmdline),
+                }
+            except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
+            # requires higher user privileges and could throw AccessDenied error, i.e. mac
+            try:
+                memory_full_info = p.memory_full_info()
+                info["uss_memory"] = memory_full_info.uss
+                if "pss" in memory_full_info:
+                    # only availiable in linux
+                    info["pss_memory"] = memory_full_info.pss
+            except psutil.AccessDenied as e:
+                # It's ok to skip this
+                pass
+            per_process_info.append(info)
+        return per_process_info
+
+def main():
+    """
+    Main function of the program.
+    """
+    try:
+        args = parse_args()
+        usagelog = UsageLog(args.log_interval,args.debug)
+        # gracefully exit the script when pid is killed
+        signal.signal(signal.SIGTERM, usagelog.exit_gracefully)
+        # gracefully exit the script when keyboard ctrl+c is pressed.
+        signal.signal(signal.SIGINT, usagelog.exit_gracefully)
+        usagelog.execute()
+    except Exception as e:
+        json.dumps({"level": "main", "error": f"Failed to execute the usage log: {str(e)}"})
+
+if __name__ == "__main__":
+    main()
