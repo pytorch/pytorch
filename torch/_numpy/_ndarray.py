@@ -489,8 +489,10 @@ class ndarray:
     def __dlpack_device__(self):
         return self.tensor.__dlpack_device__()
 
-    # Since we do not model numpy scalars define these methods which numpy scalars define. This allows improved compatibility with code using numpy scalars
-    __round__ = create_method(_funcs.round, '__round__')
+    # Since we do not model numpy scalars define these methods which numpy
+    # scalars define. This allows improved compatibility with code using numpy
+    # scalars
+    __round__ = create_method(_funcs.round, "__round__")
 
 
 def _tolist(obj):

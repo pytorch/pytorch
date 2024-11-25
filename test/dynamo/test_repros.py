@@ -4366,7 +4366,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_numpy_scalar_methods(self):
-
         def fn(n, x):
             p = int(round(np.floor(n)))
             return p + x
@@ -4375,9 +4374,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = fn(scalar, torch.ones(1))
 
         opt_fn = torch._dynamo.optimize()(fn)
-        opt_result = opt_fn(scalar, torch.ones(1)) 
+        opt_result = opt_fn(scalar, torch.ones(1))
         self.assertEqual(opt_result, ref)
-
 
     @parametrize(
         "backend",
