@@ -687,7 +687,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- endif %}
         {%- if tile_row == 0 %}
         if constexpr (horizontal_transverse) {
-            _tile_stream_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
+            _tile_stream_loadd(
+                {{tile_idx_b}},
+                B + k * ldb + {{tile_col * 16 * vnni_size}},
+                ldb * {{vnni_size}} * sizeof({{input_t}})
+            );
         } else {
             _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         }

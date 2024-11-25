@@ -29,7 +29,7 @@ class CppTemplate(KernelTemplate):
         input_nodes,
         layout: ir.Layout,
         num_threads: int,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
