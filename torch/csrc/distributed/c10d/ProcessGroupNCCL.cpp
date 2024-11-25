@@ -306,6 +306,9 @@ static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
+// Whether an exception has been fired.
+static std::atomic<bool> exceptionFired(false);
+
 static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -688,6 +691,8 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     }
 
     if (SHOULD_TEAR_DOWN(errorHandling)) {
+      // Ask PG destructor not to call `shutdown`
+      exceptionFired.store(true);
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << logPrefix() << tearDownMsg;
@@ -1438,44 +1443,68 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (!terminateProcessGroup_.load()) {
-    if (rank_ % localDeviceCount_ == 0) {
-      TORCH_WARN_ONCE(
-          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL operations have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.4");
-    }
-    // If user haven't explicitly destroy/shutdown process group, destructor
-    // needs to do so
-    // Note: we have rewritten `shutdown` to represent the destroy behavior.
-    // Here we route to `abort()` explicitly to maintain the old behavior, until
-    // we fix everything.
-    abort();
+  if (terminateProcessGroup_.load())
+    // `shutdown()` or `abort` already called. Skip the favor of disposing
+    // communicators.
+    goto join_threads;
+
+  if (exceptionFired.load())
+    // `handleException()` already called teardown. Skip the favor of disposing
+    // communicators.
+    goto join_threads;
+
+  // If user haven't explicitly destroy/shutdown process group, destructor
+  // needs to do so
+  // First print warning on first rank of each node
+  if (rank_ % localDeviceCount_ == 0) {
+    TORCH_WARN_ONCE(
+        "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
+        "On normal program exit, the application should call destroy_process_group to ",
+        "ensure that any pending NCCL operations have finished in this process. "
+        "In rare cases this process can exit before this point and block the progress of "
+        "another member of the process group. This constraint has always been present, "
+        " but this warning has only been added since PyTorch 2.4");
   }
+
+  // Note 1: we have rewritten `shutdown` to represent the destroy behavior
+  // (blocking). Thus we route to `abort()` explicitly here to maintain the old
+  // behavior. We should re-validate the choice and document the rationale
+  // better. (TODO)
+  // Note 2: normally we should avoid making CUDA calls in a destructor because
+  // CUDA context can be exiting. Here we can make the `abort()` call because
+  // watchdog thread (joined below) keeps the CUDA context alive.
+  if (ncclCommWatchdogThread_.joinable())
+    abort();
+
+join_threads:
+  // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
+  // Tell watchdog and onCompletionHook:
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  // Tell heartbeat thread:
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 
   // Wait for all threads to finish before returning
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (!blockingWait_) {
     if (ncclCommWatchdogThread_.joinable()) {
       ncclCommWatchdogThread_.join();
-      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+      LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
     }
     if (ncclHeartbeatMonitorThread_.joinable()) {
       ncclHeartbeatMonitorThread_.join();
-      VLOG(2) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
+      LOG(INFO) << logPrefix()
+                << "ProcessGroupNCCL heart beat monitor thread joined.";
     }
   }
 #endif
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    VLOG(2) << logPrefix()
-            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
