@@ -1396,7 +1396,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 6)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -1491,7 +1491,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn_ret(1.5)[0], -459)
         self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 7)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_tensor_dict1(self):
         def fn(inputs):
@@ -2420,6 +2420,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")
+            warnings.simplefilter("ignore", category=DeprecationWarning)  # from asyncio
             y = fn(x)
         self.assertTrue(y.flags.writeable)  # XXX: differs from numpy
 
@@ -2831,6 +2832,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_subclass_get_method(self):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        config = dotdict({"a": 1, "b": 2})
+
+        def fn(x):
+            x2 = x * 2
+            x3 = x * config.get("a", 3)
+            return x3
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_dict_order_keys(self):
         def fn(d):
@@ -3697,7 +3717,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertAlmostEqual(cell1 + 1, result1)
         self.assertTrue(torch.allclose(cell2 + 3, result2))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 4)
 
     def test_closure_out_of_scope_cell_with_mutation(self):
         cell1 = torch.rand(1).item()
@@ -3725,8 +3745,12 @@ utils_device.CURRENT_DEVICE == None""".split(
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
-            self.assertEqual(cnts.frame_count, 1)
-            self.assertEqual(cnts.op_count, 3)
+            if i == 1:
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 6)
+            else:
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(cnts.op_count, 0)
             cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):
@@ -11125,6 +11149,8 @@ fn
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
+        DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
+
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super(Mod, self).__init__()
@@ -11160,19 +11186,21 @@ fn
         # delete center of cache
         del m3
         c3 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c3), 2)
-        self.assertIs(c3[0], c2[0])
-        self.assertIs(c3[1], c2[2])
+        self.assertEqual(len(c3), 3)
+        self.assertTrue(isinstance(c3[2].guard_manager, DeletedGuardManagerWrapper))
 
         # delete end of cache
         del m1
         c4 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c4), 1)
-        self.assertIs(c4[0], c3[0])
+        self.assertEqual(len(c4), 3)
+        self.assertTrue(isinstance(c4[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c4[2].guard_manager, DeletedGuardManagerWrapper))
 
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c5), 0)
+        self.assertTrue(isinstance(c5[0].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[2].guard_manager, DeletedGuardManagerWrapper))
 
     def test_inspect_signature_bind(self):
         import inspect
