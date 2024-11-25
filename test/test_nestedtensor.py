@@ -7904,31 +7904,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="no_linear_noncontig_holes_support",
     ),
-    # Some kinda reduction bug that needs to be fixed!
-    XFailRule(
-        error_type=IndexError,
-        error_msg="tuple index out of range",
-        op_match_fn=lambda device, op: (
-            # min.reduction_with_dim and max.reduction_with_dim aren't associated with
-            # ReductionOpInfo entries sadly even though they're reductions
-            isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name
-        ),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_transposed" in sample.name
-            and "normal dim reduction with keepdim=False" in sample.name
-        ),
-        name="transposed_reduction_bug",
-    ),
-    # likely related to previous: similar error when operating on select() with dim=0
-    XFailRule(
-        error_type=IndexError,
-        error_msg="tuple index out of range",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_transposed" in sample.name and "normal_dim" in sample.name
-        ),
-        name="select_batch_dim_bug",
-    ),
     # nanmean sometimes hits an unimplemented nansum() path and other times hits an
     # unimplemented sum() path
     XFailRule(
