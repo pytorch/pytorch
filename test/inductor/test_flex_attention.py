@@ -4230,7 +4230,17 @@ def get_params(dtypes: List[torch.dtype]) -> List[Params]:
     return params
 
 
-@supported_platform
+# ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
+supports_learnable_bias = unittest.skipUnless(
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+    and not TEST_WITH_ROCM,
+    "Requires CUDA and Triton, and is not supported on ROCm",
+)
+
+
+@supports_learnable_bias
 class TestLearnableBiases(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -4572,10 +4582,6 @@ class TestLearnableBiases(InductorTestCase):
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
     def test_indirect_bias(self, params):
-        if TEST_WITH_ROCM:
-            self.skipTest(
-                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
-            )
         query, key, value = self._init_tensors(params)
         bias = torch.randn(
             params.seq_length,
