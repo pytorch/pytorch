@@ -19,7 +19,7 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, dynamo_timed, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
@@ -423,9 +423,10 @@ def aot_dispatch_autograd(
             fake_mode = detect_fake_mode()
             if fake_mode is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
-            fw_module, bw_module = aot_config.partition_fn(
-                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
-            )
+            with dynamo_timed("jit_compile_runtime_wrappers.partition_fn"):
+                fw_module, bw_module = aot_config.partition_fn(
+                    fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
+                )
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
             if config.unlift_effect_tokens and (

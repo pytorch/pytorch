@@ -51,7 +51,7 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
         export=aot_config.is_export,
         # Allow token discovery for joint fn tracing as tokens can be used in backward.
         _allow_token_discovery=True,
-    ), dynamo_timed("_create_graph", log_pt2_compile_event=True):
+    ), dynamo_timed("dispatch_and_compile_graph._create_graph"):
         fx_g = make_fx(
             f,
             decomposition_table=aot_config.decompositions,
