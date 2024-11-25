@@ -469,57 +469,61 @@ class P2POp:
             The type of ``op`` is either ``torch.distributed.isend`` or
             ``torch.distributed.irecv``.
         tensor (Tensor): Tensor to send or receive.
-        peer (int): Destination or source rank.
+        peer (int, optional): Destination or source rank.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with recv.
+        group_peer (int, optional): Destination or source rank.
     """
 
     def __init__(
         self,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int] = None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int] = None,
     ):
         """Init."""
         self.op = op
         self.tensor = tensor
-        self.peer = peer
-        self.group = group
+        self.group = _group_or_default_group(group)
+        self.peer = _canonicalize_group_rank(
+            self.group, peer, group_peer, return_global=True
+        )
         self.tag = tag
+        self.group_peer = _canonicalize_group_rank(self.group, peer, group_peer)
 
     def __new__(
         cls,
         op: Callable,
         tensor: torch.Tensor,
-        peer: int,
+        peer: Optional[int] = None,
         group: Optional[ProcessGroup] = None,
         tag: int = 0,
+        group_peer: Optional[int] = None,
     ):
         """Create and return a new instance of the class."""
         _check_op(op)
         _check_single_tensor(tensor, "tensor")
+
         return object.__new__(cls)
 
     def __repr__(self):
         my_group_rank = get_rank(self.group)
-        peer_group_rank = (
-            get_group_rank(self.group, self.peer) if self.group else self.peer
-        )
         op_name = self.op.__name__
         group_name = self.group.group_name if self.group else "default_pg"
         if "send" in op_name:
             s = my_group_rank
-            d = peer_group_rank
+            d = self.group_peer
         elif "recv" in op_name:
-            s = peer_group_rank
+            s = self.group_peer
             d = my_group_rank
         else:
             return super().__repr__()
 
-        return f"P2POp({op_name} pg={group_name}, s={s}, d={d},  {self.tensor.shape}, {self.tensor.dtype})"
+        return f"P2POp({op_name} pg={group_name}, group_src={s}, group_dst={d},  {self.tensor.shape}, {self.tensor.dtype})"
 
 
 class _CollOp:
@@ -949,8 +953,9 @@ def _store_based_barrier(
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
             logger.debug(
-                "Waiting in store based barrier to initialize process group for "
+                "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                time.time() - start,
                 rank,
                 store_key,
                 world_size,
@@ -1371,9 +1376,9 @@ def _get_all_pg_configs() -> List[Dict[str, Any]]:
     Return the pg configuration of all the process groups.
 
     """
-    config_info: List[Dict[str, Any]] = []
-    for pg in _world.pg_map.keys():
-        config_info.append(_get_pg_config(pg))
+    config_info: List[Dict[str, Any]] = [
+        _get_pg_config(pg) for pg in _world.pg_map.keys()
+    ]
     return config_info
 
 
@@ -2508,9 +2513,7 @@ def _coalescing_manager(
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if op0 == all_reduce:
-            tensors = []
-            for op in op_list:
-                tensors.append(op.tensor)
+            tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
@@ -2546,7 +2549,7 @@ def _coalescing_manager(
         work.wait()  # type: ignore[possibly-undefined]
 
 
-def batch_isend_irecv(p2p_op_list):
+def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
@@ -2589,17 +2592,33 @@ def batch_isend_irecv(p2p_op_list):
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
+
+    def peer_kwarg(op: P2POp) -> Dict[str, int]:
+        key = "group_dst" if op.op == isend else "group_src"
+        return {key: op.group_peer}
+
     if device.type == "cuda":
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
-                p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+                p2p_op.op(
+                    p2p_op.tensor,
+                    group=p2p_op.group,
+                    tag=p2p_op.tag,
+                    **peer_kwarg(p2p_op),
+                )
+
         return cm.works
     else:
         # Backward support for Gloo
         reqs = []
         for p2p_op in p2p_op_list:
-            work = p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
+            work = p2p_op.op(
+                p2p_op.tensor,
+                group=p2p_op.group,
+                tag=p2p_op.tag,
+                **peer_kwarg(p2p_op),
+            )
             if work:
                 reqs.append(work)
         return reqs
