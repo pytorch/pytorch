@@ -11,7 +11,7 @@ class ImplementedSparsifier(BaseSparsifier):
         super().__init__(defaults=kwargs)
 
     def update_mask(self, module: nn.Module, tensor_name: str, **kwargs: Dict[str, Any]) -> None:
-        module.parametrizations.weight[0].mask[0] = 0
+        module.parametrizations.weight[0].mask[0] = 0  # type: ignore[index, union-attr]
         linear_state = self.state['linear1.weight']
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
