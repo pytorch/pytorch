@@ -356,6 +356,8 @@ class GeneratorFunctionVariable(UserFunctionVariable):
 
 
 class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
+    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+
     """functions that behaves like iterators
 
     .. note::
@@ -403,8 +405,9 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
         tracer = self.inline_tracer
 
         try:
-            # inline_call_ has a try/except block that does the same thing
-            # TODO: figure it out why it is not working for this usecase
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_().next_variable(tx)
         except exc.ObservedException as e:
