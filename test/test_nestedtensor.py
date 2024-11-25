@@ -68,7 +68,6 @@ from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     ReductionOpInfo,
     sample_skips_and_xfails,
-    SkipRule,
     XFailRule,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
@@ -8139,64 +8138,6 @@ FORWARD_SKIPS_AND_XFAILS = [
 
 BACKWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # I don't know why these fail in CI only and I just want to land this; investigate this later.
-    SkipRule(
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_max",
-                "clamp_min",
-                "float_power",
-                "pow",
-                "sinc",
-                "special.i1",
-                "special.i1e",
-            }
-        ),
-        name="skip_things_that_break_in_ci_but_not_locally",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for these binary ops
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="== Layout::Strided INTERNAL ASSERT FAILED",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_min",
-                "clamp_max",
-                "float_power",
-                "pow",
-            }
-        ),
-        sample_match_fn=lambda device, sample: (
-            "(NT, T) broadcasting all 1s" in sample.name
-            or "(NT, T) mixed broadcasting" in sample.name
-            or (
-                "(NT, T) broadcasting 1 over ragged" in sample.name
-                and "noncontig_holes" not in sample.name
-            )
-        ),
-        name="binary_empty_with_jagged_layout",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for this op when cached seqlen metadata is present
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="== Layout::Strided INTERNAL ASSERT FAILED",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "special.i1",
-                "special.i1e",
-                "sinc",
-            }
-        ),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="binary_empty_with_jagged_layout_with_cached_seqlens",
-    ),
     XFailRule(
         error_type=RuntimeError,
         error_msg="reducing across the ragged dimension is not supported for non-contiguous",
@@ -8263,33 +8204,11 @@ BACKWARD_SKIPS_AND_XFAILS = [
             op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
         ),
         sample_match_fn=lambda device, sample: (
-            sample.name
-            in {
-                "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting 1 over ragged",
-                "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting all 1s",
-            }
-            or (
-                (
-                    "(NT, T) broadcasting all 1s" in sample.name
-                    or "(NT, T) broadcasting 1 over ragged" in sample.name
-                    or "(NT, T) mixed broadcasting" in sample.name
-                )
-                and "noncontig" not in sample.name
-            )
-        ),
-        name="unimplemented_masked_fill",
-    ),
-    XFailRule(
-        error_type=ValueError,
-        error_msg="expected condition to be a contiguous jagged layout NestedTensor",
-        op_match_fn=lambda device, op: (
-            op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
-        ),
-        sample_match_fn=lambda device, sample: (
             "(NT, T) broadcasting all 1s" in sample.name
             or "(NT, T) broadcasting 1 over ragged" in sample.name
+            or "(NT, T) mixed broadcasting" in sample.name
         ),
-        name="no_where_noncontig_support",
+        name="unimplemented_masked_fill",
     ),
 ]
 
@@ -8352,48 +8271,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
 ]
 
 COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for these binary ops
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="non-strided meta tensors not supported yet",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "__rpow__",
-                "clamp_max",
-                "clamp_min",
-                "float_power",
-                "pow",
-                "sinc",
-            }
-        ),
-        sample_match_fn=lambda device, sample: (
-            "noncontig_holes" not in sample.name
-            and (
-                "(NT, T) broadcasting 1 over ragged" in sample.name
-                or "(NT, T) broadcasting all 1s" in sample.name
-                or "(NT, T) mixed broadcasting" in sample.name
-            )
-        ),
-        name="empty_with_jagged_layout_for_some_binary_ops",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for this op when cached seqlen metadata is present
-    XFailRule(
-        error_type=NotImplementedError,
-        error_msg="non-strided meta tensors not supported yet",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "special.i1",
-                "special.i1e",
-                "sinc",
-            }
-        ),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="empty_with_jagged_layout_with_cached_seqlens",
-    ),
     # in compile, these complex ops use view_as_real(), which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
