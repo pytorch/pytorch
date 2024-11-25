@@ -1743,7 +1743,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             device_type="cpu"
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_mlp_template"], 1)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": False})
     @patches

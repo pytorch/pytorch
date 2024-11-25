@@ -92,17 +92,6 @@ extern "C" {{export_declaration}}
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
 {%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
-{%- if has_gate_bias %}
-{%- set tile_inp = kernel.slice_nd(inp, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp = tile_Y %}
-{%- endif %}
-{%- if has_up_bias %}
-{%- set tile_inp1 = kernel.slice_nd(inp1, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- else %}
-{%- set tile_inp1 = tile_Y %}
-{%- endif %}
-                    // silu-mul epilogues
                     {{ kernel.store_output(
                         tile_Y,
                         (tile_acc, tile_acc1),
@@ -121,7 +110,7 @@ extern "C" {{export_declaration}}
 """
 
 
-class CppPackedMLPTemplate(CppPackedGemmTemplate):
+class CppGroupGEMMTemplate(CppPackedGemmTemplate):
     def __init__(
         self,
         input_nodes,
@@ -351,7 +340,7 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             return output
 
         template = DataProcessorTemplateWrapper(
-            CppPackedMLPTemplate,
+            CppGroupGEMMTemplate,
             preprocessor,
             postprocessor,
             input_nodes=input_nodes,
@@ -391,7 +380,7 @@ class CppPackedMLPTemplate(CppPackedGemmTemplate):
             W = template_buffer_node.inputs[1]
             W1 = template_buffer_node.inputs[2]
             Y = template_buffer_node
-            counters["inductor"]["cpp_mlp_template"] += 1
+            counters["inductor"]["cpp_group_gemm_template"] += 1
 
         template_buffer = Y
         gemm_output_buffer = template_buffer
