@@ -12014,6 +12014,22 @@ fn
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
 
+    def test_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Foo:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, foo0):
+            if dataclasses.is_dataclass(foo0):
+                foo1 = dataclasses.replace(foo0, **{"x": 1})
+                return x + 1, foo1
+            return x + 2, foo0
+
+        res, foo = run(torch.zeros(1), Foo(0))
+        self.assertTrue(res, torch.ones(1))
+        self.assertEqual(foo.x, 1)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
