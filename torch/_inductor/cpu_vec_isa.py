@@ -363,7 +363,15 @@ def x86_isa_checker() -> list[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE128(), VecSVE256(), VecSVE512()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE128(),
+    VecSVE256(),
+    VecSVE512(),
+]
 
 
 def get_isa_from_cpu_capability(

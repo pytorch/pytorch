@@ -94,7 +94,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     # Include necessary modules for checking C and C++ source compilations
     INCLUDE(CheckCSourceCompiles)
     INCLUDE(CheckCXXSourceCompiles)
-    
+
     # Test code for SVE support
     SET(SVE_CODE "
       #include <arm_sve.h>
