@@ -996,6 +996,35 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
+        elif isinstance(value, torch.SymInt):
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                value.node.hint,
+                self.source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
+                new_symint,
+                source=self.source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                self.source,
+                new_symint,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symint,
+            )
+            sym_expr = new_symint.node.expr
+            assert isinstance(
+                sym_expr, sympy.Symbol
+            ), f"{sym_expr} is not a basic Symbol."
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, self.source, None)
+            )
+            return SymNodeVariable.create(self.tx, sym_node_proxy, new_symint)
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
