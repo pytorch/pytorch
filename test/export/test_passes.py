@@ -247,6 +247,17 @@ def _with_autocast_tests():
                 e = d - 1
             return d, e
 
+    class NestedAutocastOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                c = x.sin().sum()
+                with torch.autocast(device_type="cpu", enabled=False):
+                    d = c + 1
+            with torch.autocast(device_type="cpu", enabled=True):
+                e = d - 1
+            return d, e
+
     x = torch.randn(2, 2)
 
     def _get_predispatch_module(mod, args):
@@ -266,6 +277,40 @@ def _with_autocast_tests():
         "ctx_manager_split": (
             SplitAutocastOp(),
             _get_predispatch_module(SplitAutocastOp(), (x,)),
+            (x,),
+        ),
+        "ctx_manager_nested": (
+            NestedAutocastOp(),
+            _get_predispatch_module(NestedAutocastOp(), (x,)),
+            (x,),
+        ),
+    }
+
+
+def _with_mixed_autocast_set_grad_tests():
+    from torch.export._trace import _export
+
+    class WithAutocastSetGradOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            torch._C._set_grad_enabled(True)
+            c = x.sin()
+            torch._C._set_grad_enabled(False)
+            c = c.cos()
+            with torch.autocast(device_type="cpu", enabled=False):
+                d = c + 1
+            e = d - 1
+            return d, e
+
+    x = torch.randn(2, 2)
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    return {
+        "multi_ctx_manager": (
+            WithAutocastSetGradOp(),
+            _get_predispatch_module(WithAutocastSetGradOp(), (x,)),
             (x,),
         ),
     }
@@ -330,17 +375,23 @@ def _sequential_split_inline_tests():
 class TestPasses(TestCase):
     def setUp(self):
         super().setUp()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS = _with_mixed_autocast_set_grad_tests()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
         self.WITH_AUTOCAST_TESTS = _with_autocast_tests()
-
         init_torchbind_implementations()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
         self.SET_GRAD_ENABLED_TESTS.clear()
         self.WITH_AUTOCAST_TESTS.clear()
+        self.MIXED_AUTOCAST_SET_GRAD_TESTS.clear()
         super().tearDown()
+
+    def _check_node_users_in_the_same_graph(self, gm):
+        for node in gm.graph.nodes:
+            for user in node.users:
+                self.assertTrue(user.graph is gm.graph)
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -562,7 +613,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        ep = torch.export.export(m, inputs, strict=False)
+        ep = export(m, inputs, strict=False).run_decompositions({})
         without_token_ep = _remove_effect_tokens(ep)
         self.assertExpectedInline(
             without_token_ep.graph_module.code.strip(),
@@ -733,13 +784,8 @@ def forward(self, token, obj_attr, x):
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
     def test_predispatch_set_grad(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
-
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -758,7 +804,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -777,7 +823,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -796,7 +842,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -816,7 +862,7 @@ def forward(self, x):
         )
 
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -841,7 +887,7 @@ def forward(self, x):
         mod_orig, mod, args = self.SET_GRAD_ENABLED_TESTS[
             "ctx_manager_multi_dep_no_grad"
         ]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -929,14 +975,79 @@ def forward(self, sin, cos):
     """,
         )
 
+    def test_predispatch_autocast_and_set_grad(self):
+        mod_orig, mod, args = self.MIXED_AUTOCAST_SET_GRAD_TESTS["multi_ctx_manager"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    submod_3 = self.submod_3
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    sin = torch.ops.higher_order.wrap_with_set_grad_enabled(True, submod_3, add);  submod_3 = add = None
+    getitem_2 = sin[0];  sin = None
+    cos = torch.ops.aten.cos.default(getitem_2);  getitem_2 = None
+    submod_4 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_4, cos);  submod_4 = cos = None
+    getitem = add_1[0];  add_1 = None
+    sub = torch.ops.aten.sub.Tensor(getitem, 1)
+    return pytree.tree_unflatten((getitem, sub), self._out_spec)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_3.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    return (sin,)
+    """,
+        )
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, cos):
+    add_1 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    return (add_1,)
+    """,
+        )
+
     def test_predispatch_autocast(self):
-        def _check_node_users_in_the_same_graph(gm):
-            for node in gm.graph.nodes:
-                for user in node.users:
-                    self.assertTrue(user.graph is gm.graph)
+        mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_nested"]
+        self._check_node_users_in_the_same_graph(mod)
+        self.assertEqual(mod_orig(*args), mod(*args))
+        self.assertExpectedInline(
+            mod.code.strip("\n"),
+            """\
+def forward(self, x):
+    x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
+    submod_3 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_3, add);  submod_3 = add = None
+    getitem = add_1[0];  add_1 = None
+    submod_4 = self.submod_2
+    sub = torch.ops.higher_order.wrap_with_autocast('cpu', None, True, None, submod_4, getitem);  submod_4 = None
+    getitem_1 = sub[0];  sub = None
+    return pytree.tree_unflatten((getitem, getitem_1), self._out_spec)
+    """,
+        )
+
+        self.assertExpectedInline(
+            mod.submod_1.code.strip("\n"),
+            """\
+def forward(self, add):
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_2 = self.submod_1
+    add_1 = torch.ops.higher_order.wrap_with_autocast('cpu', None, False, None, submod_2, sum_1);  submod_2 = sum_1 = None
+    getitem = add_1[0];  add_1 = None
+    return (getitem,)
+    """,
+        )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -986,7 +1097,7 @@ def forward(self, add_1):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_multi_dep"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -1043,7 +1154,7 @@ def forward(self, add_1, add_2):
         )
 
         mod_orig, mod, args = self.WITH_AUTOCAST_TESTS["ctx_manager_split"]
-        _check_node_users_in_the_same_graph(mod)
+        self._check_node_users_in_the_same_graph(mod)
         self.assertEqual(mod_orig(*args), mod(*args))
         self.assertExpectedInline(
             mod.code.strip("\n"),
@@ -1164,7 +1275,7 @@ def forward(self, add_1):
 
             mod = M()
             x = torch.randn([3, 3])
-            ep = export(mod, (x,))
+            ep = export(mod, (x,)).run_decompositions({})
             inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
             graph_text = str(inplace_ep.graph)
             self.assertExpectedInline(

@@ -630,13 +630,14 @@ def merge_splits(
                     user.args[1]: user for user in node.users.keys()
                 }
                 # It is not necessary all getitems from the split node are used.
-                # We use the num of users to check the getitems to be merged.
-                for next_split_num in range(len(node.users.keys())):
+                for next_split_num in range(len(next_split_sections)):
                     with graph.inserting_after(new_split):
                         new_getitem = graph.call_function(
                             operator.getitem, args=(new_split, new_split_num)
                         )
                     new_split_num += 1
+                    if next_split_num not in next_split_num_to_user:
+                        continue
                     next_getitem = next_split_num_to_user[next_split_num]
                     new_getitem.meta.update(next_getitem.meta)
                     next_getitem.replace_all_uses_with(new_getitem)
@@ -948,7 +949,7 @@ class SplitCatSimplifier:
 
     def replace_cat(
         self,
-        graph: torch.fx.GraphModule,
+        graph: torch.fx.Graph,
         split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
         user_inputs_list_new,
@@ -1081,7 +1082,7 @@ class SplitCatSimplifier:
 
     def erase_old_nodes(
         self,
-        graph: torch.fx.GraphModule,
+        graph: torch.fx.Graph,
         split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
     ):
@@ -1116,9 +1117,9 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = []
-        for getitem_node in unbind_node.users.keys():
-            getitem_indices.append(getitem_node.args[1])
+        getitem_indices = [
+            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
+        ]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(
@@ -1493,9 +1494,8 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             ):
                 continue
             # find the index of getitems to be cated/stacked
-            indices = []
-            for arg in cat_user.args[0]:  # type: ignore[union-attr]
-                indices.append(arg.args[1])  # type: ignore[union-attr]
+            # type: ignore[union-attr]
+            indices = [arg.args[1] for arg in cat_user.args[0]]  # type: ignore[union-attr]
             # the gettitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
             if not is_sorted_and_consecutive(indices):
