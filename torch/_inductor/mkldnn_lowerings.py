@@ -60,10 +60,37 @@ def linear_silu_linear_mul(
     input_nodes = [x, w[0], w[1]]
     input_nodes.extend([bias for bias in b if bias is not None])
 
+    def epilogue_creator(buf, buf1, inp, inp1):
+        input_loader = buf.make_loader()
+        input_loader1 = buf1.make_loader()
+        if inp:
+            inp_loader = inp.make_loader()
+        if inp1:
+            inp_loader1 = inp1.make_loader()
+        dtype = buf.get_dtype()
+
+        def inner_fn(index):
+            input = input_loader(index)
+            input1 = input_loader1(index)
+            if inp:
+                input = input + inp_loader(index)
+            if inp1:
+                input1 = input1 + inp_loader1(index)
+            input = ops.mul(ops.sigmoid(input), input)
+            return ops.mul(input, input1)
+
+        return ir.Pointwise(
+            device=buf.get_device(),
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=buf.get_size(),
+        )
+
     CppGroupGEMMTemplate.add_choices(
         choices,
         layout,
         input_nodes,
+        epilogue_creator=epilogue_creator,
         **kwargs,  # type: ignore[arg-type]
     )
 

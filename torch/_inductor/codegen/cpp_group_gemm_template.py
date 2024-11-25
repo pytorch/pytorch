@@ -120,7 +120,7 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         beta=1,
         alpha=1,
         has_bias=False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
     ) -> None:
         super().__init__(
             input_nodes,
@@ -140,10 +140,10 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         input_nodes,
         beta=1,
         alpha=1,
-        has_bias=(False, False),
+        has_bias: tuple[bool, ...] = (False, False),
         trans_w=False,
         input_indices=None,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
     ):
         assert len(input_nodes) >= 3  # x, w0, w1, optional[b0], optional[b1]
 
@@ -248,7 +248,7 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                     blocked_w = ir.Buffer(
                         name=W.get_name(),  # Borrow the registered buffer name
                         layout=ir.FixedLayout(
-                            W.get_device(),
+                            W.get_device_or_error(),
                             W.get_dtype(),
                             new_size,
                             ir.FlexibleLayout.contiguous_strides(new_size),
@@ -426,57 +426,31 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
 
-        def epilogue_creator(buf, buf1):
-            from ..virtualized import ops
-
-            input_loader = buf.make_loader()
-            input_loader1 = buf1.make_loader()
-            if has_gate_bias:
-                assert inp is not None
-                inp_loader = inp.make_loader()
-            if has_up_bias:
-                assert inp1 is not None
-                inp_loader1 = inp1.make_loader()
-            dtype = buf.get_dtype()
-
-            def inner_fn(index):
-                input = input_loader(index)
-                input1 = input_loader1(index)
-                if has_gate_bias:
-                    input = input + inp_loader(index)
-                if has_up_bias:
-                    input1 = input1 + inp_loader1(index)
-                input = ops.mul(ops.sigmoid(input), input)
-                return ops.mul(input, input1)
-
-            return ir.Pointwise(
-                device=buf.get_device(),
-                dtype=dtype,
-                inner_fn=inner_fn,
-                ranges=buf.get_size(),
-            )
-
         gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
         gemm_output_buffer = ir.Buffer(
             name=gemm_output_name, layout=template_buffer.layout
         )
-        current_input_buffer = gemm_output_buffer
 
         gemm_output_name1 = f"{template_buffer.get_name()}_GemmOut1"
         gemm_output_buffer1 = ir.Buffer(
             name=gemm_output_name1, layout=template_buffer.layout
         )
-        current_input_buffer1 = gemm_output_buffer1
 
         buffer_name = template_buffer.get_name()
-        epilogues.append(
-            ir.ComputedBuffer(
-                name=buffer_name,
-                layout=template_buffer.layout,
-                data=epilogue_creator(current_input_buffer, current_input_buffer1),
+        if self.epilogue_creator:
+            epilogues.append(
+                ir.ComputedBuffer(
+                    name=buffer_name,
+                    layout=template_buffer.layout,
+                    data=self.epilogue_creator(
+                        gemm_output_buffer,
+                        gemm_output_buffer1,
+                        inp,
+                        inp1,
+                    ),
+                )
             )
-        )
-        reindexers.append(None)
+            reindexers.append(None)
 
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
