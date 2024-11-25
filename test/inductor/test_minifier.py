@@ -265,17 +265,24 @@ def forward(self, linear):
     return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch(
+        {
+            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_cpu_compile_error_unflatten(self):
         res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
+        ep_file_path = res.get_exported_program_path()
+        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            res.repro_module(),
+            str(gm.code).strip(),
             """\
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, linear):
-        relu = torch.ops.aten.relu.default(linear);  linear = None
-        return (relu,)""",
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
     @requires_gpu
@@ -299,17 +306,25 @@ def forward(self, linear):
     return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
+    @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
+    @inductor_config.patch(
+        {
+            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_gpu_compile_error_unflatten(self):
         res = self._test_aoti_unflattened_inputs(GPU_TYPE, "SyntaxError")
+        ep_file_path = res.get_exported_program_path()
+        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            res.repro_module(),
+            str(gm.code).strip(),
             """\
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, linear):
-        relu = torch.ops.aten.relu.default(linear);  linear = None
-        return (relu,)""",
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
 
