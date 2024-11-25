@@ -69,10 +69,11 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
         self._update_num_of_instances()
 
     def _update_num_of_instances(self):
-        sorted_sharding_groups = []
-        for key in sorted(self.groups.keys()):
-            if self.sharding_group_filter is None or key == self.sharding_group_filter:
-                sorted_sharding_groups.append(self.groups[key])
+        sorted_sharding_groups = [
+            self.groups[key]
+            for key in sorted(self.groups.keys())
+            if self.sharding_group_filter is None or key == self.sharding_group_filter
+        ]
 
         sorted_sharding_groups.reverse()
 
