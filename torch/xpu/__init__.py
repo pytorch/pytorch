@@ -122,9 +122,7 @@ def _lazy_init():
         # just return without initializing in that case.
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
