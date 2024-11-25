@@ -169,7 +169,8 @@ def create_cherry_pick_branch(
     repo.create_branch_and_checkout(branch=cherry_pick_branch)
 
     # We might want to support ghstack later
-    repo._run_git("cherry-pick", "-x", "-X", "theirs", commit_sha)
+    # We don't want to resolve conflicts here.
+    repo._run_git("cherry-pick", "-x", commit_sha)
     repo.push(branch=cherry_pick_branch, dry_run=False)
 
     return cherry_pick_branch

@@ -1,13 +1,14 @@
-# mypy: allow-untyped-defs
 import contextlib
 import threading
+from typing import Generator
+
 
 # Global variable to identify which SubgraphTracer we are in.
 # It is sometimes difficult to find an InstructionTranslator to use.
 _current_scope_id = threading.local()
 
 
-def current_scope_id():
+def current_scope_id() -> int:
     global _current_scope_id
     if not hasattr(_current_scope_id, "value"):
         _current_scope_id.value = 1
@@ -15,7 +16,7 @@ def current_scope_id():
 
 
 @contextlib.contextmanager
-def enter_new_scope():
+def enter_new_scope() -> Generator[None, None, None]:
     global _current_scope_id
     try:
         _current_scope_id.value = current_scope_id() + 1

@@ -40,6 +40,8 @@
   }
 
 #endif // defined(USE_GTEST)
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {

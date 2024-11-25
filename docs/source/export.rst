@@ -291,6 +291,178 @@ torch.export>`), but seeing as the context manager does not affect the tensor
 computations in the model, we can go with the non-strict mode's result.
 
 
+.. _Training Export:
+
+Export for Training and Inference
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In PyTorch 2.5, we introduced a new API called :func:`export_for_training`.
+It's still going through hardening, so if you run into any issues, please file
+them to Github with the "oncall: export" tag.
+
+In this API, we produce the most generic IR that contains all ATen operators
+(including both functional and non-functional) which can be used to train in
+eager PyTorch Autograd. This API is intended for eager training use cases such as PT2 Quantization
+and will soon be the default IR of torch.export.export. To read further about
+the motivation behind this change, please refer to
+https://dev-discuss.pytorch.org/t/why-pytorch-does-not-need-a-new-standardized-operator-set/2206
+
+When this API is combined with :func:`run_decompositions()`, you should be able to get inference IR with
+any desired decomposition behavior.
+
+To show some examples:
+
+::
+
+    class ConvBatchnorm(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.conv = torch.nn.Conv2d(1, 3, 1, 1)
+            self.bn = torch.nn.BatchNorm2d(3)
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.bn(x)
+            return (x,)
+
+    mod = ConvBatchnorm()
+    inp = torch.randn(1, 1, 3, 3)
+
+    ep_for_training = torch.export.export_for_training(mod, (inp,))
+    print(ep_for_training)
+
+.. code-block::
+
+    ExportedProgram:
+        class GraphModule(torch.nn.Module):
+            def forward(self, p_conv_weight: "f32[3, 1, 1, 1]", p_conv_bias: "f32[3]", p_bn_weight: "f32[3]", p_bn_bias: "f32[3]", b_bn_running_mean: "f32[3]", b_bn_running_var: "f32[3]", b_bn_num_batches_tracked: "i64[]", x: "f32[1, 1, 3, 3]"):
+                conv2d: "f32[1, 3, 3, 3]" = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+                add_: "i64[]" = torch.ops.aten.add_.Tensor(b_bn_num_batches_tracked, 1);  b_bn_num_batches_tracked = add_ = None
+                batch_norm: "f32[1, 3, 3, 3]" = torch.ops.aten.batch_norm.default(conv2d, p_bn_weight, p_bn_bias, b_bn_running_mean, b_bn_running_var, True, 0.1, 1e-05, True);  conv2d = p_bn_weight = p_bn_bias = b_bn_running_mean = b_bn_running_var = None
+                return (batch_norm,)
+
+    Graph signature:
+        ExportGraphSignature(
+            input_specs=[
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_weight'), target='conv.weight', persistent=None),
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_bias'), target='conv.bias', persistent=None),
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_weight'), target='bn.weight', persistent=None),
+                InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_bias'), target='bn.bias', persistent=None),
+                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_mean'), target='bn.running_mean', persistent=True),
+                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_var'), target='bn.running_var', persistent=True),
+                InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_num_batches_tracked'), target='bn.num_batches_tracked', persistent=True),
+                InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)
+            ],
+            output_specs=[
+                OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='batch_norm'), target=None)
+            ]
+        )
+    Range constraints: {}
+
+
+From the above output, you can see that :func:`export_for_training` produces pretty much the same ExportedProgram
+as :func:`export` except for the operators in the graph. You can see that we captured batch_norm in the most general
+form. This op is non-functional and will be lowered to different ops when running inference.
+
+You can also go from this IR to an inference IR via :func:`run_decompositions` with arbitrary customizations.
+
+::
+
+    # Lower to core aten inference IR, but keep conv2d
+    decomp_table = torch.export.default_decompositions()
+    del decomp_table[torch.ops.aten.conv2d.default]
+    ep_for_inference = ep_for_training.run_decompositions(decomp_table)
+
+    print(ep_for_inference)
+
+.. code-block::
+
+    ExportedProgram:
+        class GraphModule(torch.nn.Module):
+            def forward(self, p_conv_weight: "f32[3, 1, 1, 1]", p_conv_bias: "f32[3]", p_bn_weight: "f32[3]", p_bn_bias: "f32[3]", b_bn_running_mean: "f32[3]", b_bn_running_var: "f32[3]", b_bn_num_batches_tracked: "i64[]", x: "f32[1, 1, 3, 3]"):
+                conv2d: "f32[1, 3, 3, 3]" = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+                add: "i64[]" = torch.ops.aten.add.Tensor(b_bn_num_batches_tracked, 1);  b_bn_num_batches_tracked = None
+                _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, p_bn_weight, p_bn_bias, b_bn_running_mean, b_bn_running_var, True, 0.1, 1e-05);  conv2d = p_bn_weight = p_bn_bias = b_bn_running_mean = b_bn_running_var = None
+                getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+                getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+                getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+                return (getitem_3, getitem_4, add, getitem)
+
+    Graph signature: ExportGraphSignature(
+        input_specs=[
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_weight'), target='conv.weight', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_bias'), target='conv.bias', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_weight'), target='bn.weight', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_bias'), target='bn.bias', persistent=None),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_mean'), target='bn.running_mean', persistent=True),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_var'), target='bn.running_var', persistent=True),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_num_batches_tracked'), target='bn.num_batches_tracked', persistent=True),
+            InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)
+        ],
+        output_specs=[
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='getitem_3'), target='bn.running_mean'),
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='getitem_4'), target='bn.running_var'),
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='bn.num_batches_tracked'),
+            OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='getitem'), target=None)
+        ]
+    )
+    Range constraints: {}
+
+Here you can see that we kept `conv2d` op in the IR while decomposing the rest. Now the IR is a functional IR
+containing core aten operators except for `conv2d`.
+
+You can do even more customization by directly registering your chosen decomposition behaviors.
+
+You can do even more customizations by directly registering custom decomp behaviour
+
+::
+
+    # Lower to core aten inference IR, but customize conv2d
+    decomp_table = torch.export.default_decompositions()
+
+    def my_awesome_custom_conv2d_function(x, weight, bias, stride=[1, 1], padding=[0, 0], dilation=[1, 1], groups=1):
+        return 2 * torch.ops.aten.convolution(x, weight, bias, stride, padding, dilation, False, [0, 0], groups)
+
+    decomp_table[torch.ops.aten.conv2d.default] = my_awesome_conv2d_function
+    ep_for_inference = ep_for_training.run_decompositions(decomp_table)
+
+    print(ep_for_inference)
+
+.. code-block::
+
+    ExportedProgram:
+        class GraphModule(torch.nn.Module):
+            def forward(self, p_conv_weight: "f32[3, 1, 1, 1]", p_conv_bias: "f32[3]", p_bn_weight: "f32[3]", p_bn_bias: "f32[3]", b_bn_running_mean: "f32[3]", b_bn_running_var: "f32[3]", b_bn_num_batches_tracked: "i64[]", x: "f32[1, 1, 3, 3]"):
+                convolution: "f32[1, 3, 3, 3]" = torch.ops.aten.convolution.default(x, p_conv_weight, p_conv_bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1);  x = p_conv_weight = p_conv_bias = None
+                mul: "f32[1, 3, 3, 3]" = torch.ops.aten.mul.Tensor(convolution, 2);  convolution = None
+                add: "i64[]" = torch.ops.aten.add.Tensor(b_bn_num_batches_tracked, 1);  b_bn_num_batches_tracked = None
+                _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(mul, p_bn_weight, p_bn_bias, b_bn_running_mean, b_bn_running_var, True, 0.1, 1e-05);  mul = p_bn_weight = p_bn_bias = b_bn_running_mean = b_bn_running_var = None
+                getitem: "f32[1, 3, 3, 3]" = _native_batch_norm_legit_functional[0]
+                getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
+                getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
+                return (getitem_3, getitem_4, add, getitem)
+
+    Graph signature: ExportGraphSignature(
+        input_specs=[
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_weight'), target='conv.weight', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_conv_bias'), target='conv.bias', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_weight'), target='bn.weight', persistent=None),
+            InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='p_bn_bias'), target='bn.bias', persistent=None),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_mean'), target='bn.running_mean', persistent=True),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_running_var'), target='bn.running_var', persistent=True),
+            InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='b_bn_num_batches_tracked'), target='bn.num_batches_tracked', persistent=True),
+            InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='x'), target=None, persistent=None)
+        ],
+        output_specs=[
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='getitem_3'), target='bn.running_mean'),
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='getitem_4'), target='bn.running_var'),
+            OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='bn.num_batches_tracked'),
+            OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='getitem'), target=None)
+        ]
+    )
+    Range constraints: {}
+
+
 Expressing Dynamism
 ^^^^^^^^^^^^^^^^^^^
 
@@ -505,7 +677,7 @@ Input Tensor Shapes
 
 By default, ``torch.export`` will trace the program specializing on the input
 tensors' shapes, unless a dimension is specified as dynamic via the
-``dynamic_shapes`` argumen to ``torch.export``. This means that if there exists
+``dynamic_shapes`` argument to ``torch.export``. This means that if there exists
 shape-dependent control flow, ``torch.export`` will specialize on the branch
 that is being taken with the given sample inputs. For example:
 
@@ -538,7 +710,7 @@ The conditional of (``x.shape[0] > 5``) does not appear in the
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
-:func:`torch.export.dynamic_dim` will need to be used to specify the dimension
+:func:`torch.export.Dim` will need to be used to specify the dimension
 of the input tensor (``x.shape[0]``) to be dynamic, and the source code will
 need to be :ref:`rewritten <Data/Shape-Dependent Control Flow>`.
 
@@ -673,11 +845,11 @@ API Reference
 
 .. automodule:: torch.export
 .. autofunction:: export
-.. autofunction:: torch.export.dynamic_shapes.dynamic_dim
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
 .. autofunction:: torch.export.dynamic_shapes.Dim
+.. autofunction:: torch.export.exported_program.default_decompositions
 .. autofunction:: dims
 .. autoclass:: torch.export.dynamic_shapes.ShapesCollection
 
@@ -700,12 +872,24 @@ API Reference
 .. autoclass:: ModuleCallEntry
 
 
+.. automodule:: torch.export.decomp_utils
+.. autoclass:: CustomDecompTable
+
+    .. automethod:: copy
+    .. automethod:: items
+    .. automethod:: keys
+    .. automethod:: materialize
+    .. automethod:: pop
+    .. automethod:: update
+
 .. automodule:: torch.export.exported_program
 .. automodule:: torch.export.graph_signature
 .. autoclass:: InputKind
 .. autoclass:: InputSpec
 .. autoclass:: OutputKind
 .. autoclass:: OutputSpec
+.. autoclass:: SymIntArgument
+.. autoclass:: SymBoolArgument
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses
@@ -721,3 +905,5 @@ API Reference
 .. automodule:: torch.export.custom_obj
 
 .. automodule:: torch.export.experimental
+.. automodule:: torch.export.passes
+.. autofunction:: torch.export.passes.move_to_device_pass

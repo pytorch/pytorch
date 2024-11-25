@@ -11,6 +11,7 @@ import torch
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, skipIfMetaOr
 
+
 try:
     from torchvision.models import resnet18
 
@@ -27,6 +28,7 @@ except ImportError:
     from common import PackageTestCase
 
 from pathlib import Path
+
 
 packaging_directory = Path(__file__).parent
 

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Callable, Dict
 
 import torch
 
@@ -66,6 +66,9 @@ class GuardManager:
         verbose_code_parts: list[str],
     ) -> None: ...
     def add_global_state_guard(self, verbose_code_parts: list[str]) -> None: ...
+    def add_torch_function_mode_stack_guard(
+        self, initial_stack, verbose_code_parts: list[str]
+    ) -> None: ...
 
 class RootGuardManager(GuardManager):
     def get_epilogue_lambda_guards(self) -> list[LeafGuard]: ...
@@ -74,6 +77,9 @@ class RootGuardManager(GuardManager):
         guard: LeafGuard,
         verbose_code_parts: list[str],
     ) -> None: ...
+    def clone_manager(
+        self, clone_filter_fn: Callable[[GuardManager], bool]
+    ) -> RootGuardManager: ...
 
 class DictGuardManager(GuardManager):
     def get_key_manager(
@@ -101,6 +107,10 @@ def install_no_tensor_aliasing_guard(
     tensor_names: list[str],
     verbose_code_parts: list[str],
 ): ...
+def profile_guard_manager(
+    guard_manager: GuardManager,
+    f_locals: Dict[str, Any],
+) -> float: ...
 
 class TensorGuards:
     def __init__(

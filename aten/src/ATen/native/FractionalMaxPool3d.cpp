@@ -16,7 +16,6 @@
 #include <ATen/ops/fractional_max_pool3d_native.h>
 #endif
 
-#include <vector>
 
 namespace at::meta {
 TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(

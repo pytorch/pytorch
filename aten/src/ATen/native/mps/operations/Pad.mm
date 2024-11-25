@@ -232,13 +232,6 @@ static Tensor& pad_out_template(Tensor& output,
         endsVec[padIdx] = @(input.size(padIdx) + padding[rightIdx]);
         endMask &= ~(1U << padIdx);
       }
-      // workaround for the right padding bug in Monterey
-    } else if (!is_macos_13_or_newer()) {
-      if (padding[rightIdx] == 1 && padding[leftIdx] == 0) {
-        rightPadVec[padIdx] = @(2);
-        endsVec[padIdx] = @(input.size(padIdx) + 2);
-        endMask &= ~(1U << padIdx);
-      }
     }
   }
   MPSShape* leftPadding = [NSArray arrayWithObjects:leftPadVec.data() count:ndims];

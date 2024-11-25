@@ -27,7 +27,7 @@ add_library(backend_with_compiler SHARED
         )
 if(USE_KINETO)
   set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
-  "-DUSE_KINETO -DTMP_USE_TSC_AS_TIMESTAMP")
+  "-DUSE_KINETO")
 endif()
 target_link_libraries(backend_with_compiler torch)
 
@@ -143,14 +143,15 @@ if(USE_CUDA)
   endif()
 elseif(USE_ROCM)
   target_link_libraries(test_jit PRIVATE
-    ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_LIBRARIES}
+    hiprtc::hiprtc
+    hip::amdhip64
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_jit DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

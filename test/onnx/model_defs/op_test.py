@@ -29,7 +29,7 @@ class PermuteNet(nn.Module):
 
 
 class PReluNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.features = nn.Sequential(
             nn.PReLU(3),
@@ -41,7 +41,7 @@ class PReluNet(nn.Module):
 
 
 class FakeQuantNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fake_quant = torch.ao.quantization.FakeQuantize()
         self.fake_quant.disable_observer()

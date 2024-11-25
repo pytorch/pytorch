@@ -47,7 +47,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
 
-    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_convs(gm)
+    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
+        gm
+    )
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
@@ -59,7 +61,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
             break
         binary_folding = counters["inductor"]["binary_folding"]
 
-    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_convs(gm)
+    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_computation_ops(
+        gm
+    )
 
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
@@ -119,6 +123,9 @@ def addmm_patterns_init():
         device = "cuda"
     else:
         device = "cpu"
+        if not config.cpp.enable_concat_linear:
+            return
+
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
@@ -223,5 +230,5 @@ def unnecessary_dtype_convert(match: Match, **kwargs):
     """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
     graph = match.graph
     node = match.output_node()
-    node.replace_all_uses_with(node.args[0])
+    node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
     graph.erase_node(node)

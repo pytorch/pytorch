@@ -27,6 +27,7 @@ from torch import _C
 from torch.onnx import _type_utils, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
 
+
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
@@ -66,10 +67,9 @@ def col2im(
     stride: Sequence[int],
 ):
     # convert [i0, i1, ..., in] into [i0, i0, i1, i1, ..., in, in]
-    adjusted_padding = []
+    adjusted_padding: List[int] = []
     for pad in padding:
-        for _ in range(2):
-            adjusted_padding.append(pad)
+        adjusted_padding.extend(pad for _ in range(2))
 
     num_dimensional_axis = symbolic_helper._get_tensor_sizes(output_size)[0]
     if not adjusted_padding:

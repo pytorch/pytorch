@@ -2,6 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import pathlib
+import tempfile
+import unittest
 
 from numpy.testing import assert_array_equal
 
@@ -14,7 +17,7 @@ from torch.distributed._tensor import (
     DTensor,
     init_device_mesh,
 )
-from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed._tensor.experimental import implicit_replication
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Partial,
@@ -22,12 +25,13 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -535,18 +539,38 @@ class DTensorTest(DTensorTestBase):
         buffer = io.BytesIO()
         torch.save(sharded_tensor, buffer)
         buffer.seek(0)
-        reloaded_st = torch.load(buffer)
+        reloaded_st = torch.load(buffer, weights_only=False)
         self.assertEqual(sharded_tensor, reloaded_st)
-        # Test weights_only load
-        try:
-            torch.serialization.add_safe_globals(
-                [DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]
-            )
-            buffer.seek(0)
-            reloaded_st = torch.load(buffer, weights_only=True)
-            self.assertEqual(sharded_tensor, reloaded_st)
-        finally:
-            torch.serialization.clear_safe_globals()
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=True)
+        self.assertEqual(sharded_tensor, reloaded_st)
+
+    @with_comms
+    @unittest.skipIf(
+        IS_FBCODE,
+        "subprocess import torch fails with ModuleNotFoundError: No module named 'torch' in fbcode",
+    )
+    def test_dtensor_save_load_import(self):
+        for should_import in [True, False]:
+            device_mesh = self.build_device_mesh()
+            placements = [Shard(0)]
+            local_tensor = torch.randn(3, 3)
+            sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(sharded_tensor, f)
+                import_string = (
+                    "import torch.distributed.tensor;" if should_import else ""
+                )
+                filename = pathlib.Path(f.name)
+                err_msg = (
+                    (
+                        "_pickle.UnpicklingError: Weights only load failed. "
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
+                    if not should_import
+                    else None
+                )
+                self._attempt_load_from_subprocess(filename, import_string, err_msg)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -782,8 +806,6 @@ class DTensorMeshTest(DTensorTestBase):
         local_tensor1 = torch.ones(4, 3)
         sharded_dtensor = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
 
-        from torch.distributed._tensor.experimental import implicit_replication
-
         with implicit_replication():
             # We put the scalar tensor as the left operand so we can test out
             # when a non-dtensor is a the arg in the args list.
@@ -819,6 +841,41 @@ class DTensorMeshTest(DTensorTestBase):
         self.assertEqual(
             (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
         )
+
+    @with_comms
+    def test_implicit_replication_for_foreach_ops(self):
+        mesh = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        global_tensor1 = torch.randn(4, 2)
+        dtensor_2d = distribute_tensor(global_tensor1, mesh, [Shard(0), Shard(1)])
+        self.assertEqual(dtensor_2d.full_tensor(), global_tensor1)
+        global_tensor2 = torch.randn(4)
+        dtensor_1d = distribute_tensor(global_tensor2, mesh["dp"], [Shard(0)])
+        dtensor_list = [dtensor_2d, dtensor_1d]
+
+        # Check without implicit replication, cross mesh error raises.
+        with self.assertRaisesRegex(
+            RuntimeError, "DTensor does not support cross-mesh operation yet!"
+        ):
+            torch._foreach_mul(dtensor_list, 2.0)
+
+        # Check dtensor result matches tensor result.
+        with implicit_replication():
+            torch._foreach_mul_(dtensor_list, 2.0)
+            self.assertEqual(dtensor_list[0].full_tensor(), global_tensor1 * 2.0)
+            self.assertEqual(dtensor_list[1].full_tensor(), global_tensor2 * 2.0)
+
+        mesh_1d = DeviceMesh.from_group(mesh["tp"].get_group(), self.device_type)
+        dtensor_1d = distribute_tensor(global_tensor2, mesh_1d, [Shard(0)])
+        dtensor_list = [dtensor_2d, dtensor_1d]
+
+        # Check even with implicit replication, cross mesh error raises if different device mesh don't
+        # belong to the same root mesh.
+        with self.assertRaisesRegex(
+            RuntimeError, "DTensor does not support cross-mesh operation yet!"
+        ):
+            torch._foreach_mul_(dtensor_list, 2.0)
 
     @with_comms
     def test_metadata_consistency_check(self):
@@ -913,12 +970,14 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 ]
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
-                from torch.distributed._tensor._collective_utils import unpad_tensor
+                from torch.distributed.tensor._collective_utils import unpad_tensor
 
                 unpadded_list = [
-                    unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
-                    if pad_sizes[i] > 0
-                    else tensor
+                    (
+                        unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
+                        if pad_sizes[i] > 0
+                        else tensor
+                    )
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [

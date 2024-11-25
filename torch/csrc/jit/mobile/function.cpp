@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 char const* toString(OpCode op);
 namespace mobile {
@@ -27,7 +26,11 @@ const c10::QualifiedName& Function::qualname() const {
   return name_;
 }
 
-void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
+void Function::append_instruction(
+    OpCode op,
+    int64_t X,
+    int64_t N,
+    int64_t dbg_handle) {
   TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
@@ -36,7 +39,7 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
   code_.debug_handles_.emplace_back(dbg_handle);
 }
 
-void Function::append_instruction(OpCode op, int X, int N) {
+void Function::append_instruction(OpCode op, int64_t X, int64_t N) {
   TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
@@ -166,7 +169,7 @@ const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
 }
 
 std::optional<std::function<void(Stack&)>> makeOperatorFunction(
-    c10::OperatorName opname,
+    const c10::OperatorName& opname,
     std::optional<int> num_specified_args) {
   std::function<void(Stack&)> fn;
   const auto full_name = c10::toString(opname);
@@ -269,5 +272,4 @@ Function& Function::registerFunc(
 }
 
 } // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -173,7 +173,7 @@ class _server_process_global_profile(profile):
         )
         self.function_events = torch.autograd.profiler_util.EventList(
             flattened_function_events,
-            use_cuda=self.use_cuda,
+            use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
         )
         self.function_events._build_tree()

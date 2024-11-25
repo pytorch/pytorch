@@ -10,7 +10,7 @@
 namespace at::functorch {
 
 namespace{
-std::tuple<Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 clone_batch_rule(
     const Tensor& self,
     std::optional<int64_t> self_bdim,
@@ -48,7 +48,7 @@ clone_batch_rule(
   return std::make_tuple(result, self_bdim);
 }
 
-std::tuple<Tensor,optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 view_as_complex_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.

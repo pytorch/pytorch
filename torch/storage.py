@@ -8,12 +8,28 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    cast,
+    Dict as _Dict,
+    Optional as _Optional,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Self
 
 import torch
 from torch._utils import _to, _type
 from torch.types import _bool, _int, Storage
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
+
+
+__all__ = ["TypedStorage", "UntypedStorage"]
 
 
 try:
@@ -36,6 +52,8 @@ class _StorageBase:
     is_sparse: _bool = False
     is_sparse_csr: _bool = False
     device: torch.device
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -268,9 +286,9 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(
-        self, *, device: torch.device, non_blocking: _bool = False
-    ) -> Union[_StorageBase, TypedStorage]:
+    def to(self, *, device: DeviceLikeType, non_blocking: _bool = False):
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -530,6 +548,9 @@ def _new_dtypes():
         torch.bits2x4,
         torch.bits4x2,
         torch.complex32,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
     }
 
 
@@ -646,6 +667,8 @@ def _get_device_from_module(module: str):
 
 class TypedStorage:
     is_sparse: _bool = False
+    # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
+    _fake_device: _Optional[torch.device] = None
 
     dtype: torch.dtype
 
@@ -1051,8 +1074,10 @@ class TypedStorage:
         hpu_storage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> Self:
+    def to(self, *, device: DeviceLikeType, non_blocking: bool = False) -> Self:
         _warn_typed_storage_removal()
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
         if self.dtype in [
             torch.quint8,
             torch.quint4x2,

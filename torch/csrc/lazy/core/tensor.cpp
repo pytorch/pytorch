@@ -12,8 +12,9 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-namespace torch {
-namespace lazy {
+#include <utility>
+
+namespace torch::lazy {
 namespace {
 LazyTensorPtr GetOrCreateLtcTensor(
     const at::Tensor& tensor,
@@ -47,9 +48,9 @@ LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
   return lazy_tensor;
 }
 
-LazyTensorPtr LazyTensor::Create(BackendDataPtr handle) {
+LazyTensorPtr LazyTensor::Create(const BackendDataPtr& handle) {
   LazyTensorPtr lazy_tensor =
-      c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
+      c10::make_intrusive<LazyTensor>(LazyTensor(handle));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data());
   return lazy_tensor;
 }
@@ -61,7 +62,7 @@ LazyTensorPtr LazyTensor::Create(std::shared_ptr<Data> data) {
 LazyTensor::LazyTensor(const at::Tensor& tensor, const BackendDevice& device)
     : LazyTensor(std::make_shared<Data>(tensor, device)) {}
 
-LazyTensor::LazyTensor(BackendDataPtr handle)
+LazyTensor::LazyTensor(const BackendDataPtr& handle)
     : LazyTensor(std::make_shared<Data>(handle, handle->device())) {}
 
 LazyTensor::LazyTensor(Value ir_value, const BackendDevice& device)
@@ -78,8 +79,8 @@ auto LazyTensor::data() const -> const std::shared_ptr<Data>& {
 
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
-  int rank = tensor_shape.Get().dim();
-  int dim_index = GetCanonicalDimensionIndex(dim, rank);
+  auto rank = tensor_shape.Get().dim();
+  auto dim_index = GetCanonicalDimensionIndex(dim, rank);
   return tensor_shape.Get().size(dim_index);
 }
 
@@ -231,7 +232,7 @@ Value LazyTensor::GetIrValueForTensor(
     TORCH_LAZY_TIMED("IrValueTensorToDataHandle");
     data = TensorToDataHandle(tensor, device);
   }
-  return CreateTensorNode(std::move(data), read_only);
+  return CreateTensorNode(data, read_only);
 }
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
@@ -264,17 +265,17 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
   return tensor;
 }
 
-void LazyTensor::ShallowCopyTo(LazyTensorPtr dest) const {
+void LazyTensor::ShallowCopyTo(const LazyTensorPtr& dest) const {
   dest->SetIrValue(GetIrValue());
 }
 
 void LazyTensor::SetTensor(at::Tensor tensor) {
-  SetTensorData(tensor);
+  SetTensorData(std::move(tensor));
   data()->handle = nullptr;
   AssignIrValue(Value());
 }
 
-void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
+void LazyTensor::UpdateFromTensor(const at::Tensor& tensor, bool sync) {
   if (sync) {
     at::Tensor typed_tensor = CopyTensor(tensor, dtype(), /*copy=*/false);
     SetIrValue(GetIrValueForTensor(typed_tensor, GetDevice()));
@@ -285,21 +286,23 @@ void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
   }
 }
 
-void LazyTensor::UpdateFromTensorOut(at::Tensor tensor) {
-  UpdateFromTensor(std::move(tensor), /*sync=*/false);
+void LazyTensor::UpdateFromTensorOut(const at::Tensor& tensor) {
+  UpdateFromTensor(tensor, /*sync=*/false);
 }
 
 void LazyTensor::UpdateFromTensorOut(const LazyTensorPtr& tensor) {
   SetIrValue(tensor->GetIrValue());
 }
 
-Value LazyTensor::CreateTensorNode(BackendDataPtr data, bool read_only) const {
+Value LazyTensor::CreateTensorNode(const BackendDataPtr& data, bool read_only)
+    const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
-  return MakeDeviceData(std::move(data));
+  return MakeDeviceData(data);
 }
 
-std::vector<LazyTensorPtr> LazyTensor::MakeOutputTensors(NodePtr node) const {
+std::vector<LazyTensorPtr> LazyTensor::MakeOutputTensors(
+    const NodePtr& node) const {
   std::vector<LazyTensorPtr> tensors;
   tensors.reserve(node->num_outputs());
   for (const auto i : c10::irange(node->num_outputs())) {
@@ -343,7 +346,7 @@ torch::lazy::Value GetTensorList(at::ITensorListRef tensors) {
     values.push_back(impl->tensor()->GetIrValue());
   }
 
-  return torch::lazy::Value(torch::lazy::MakeTensorList(std::move(values)));
+  return torch::lazy::Value(torch::lazy::MakeTensorList(values));
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
@@ -420,5 +423,4 @@ at::Tensor to_lazy_tensor(
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

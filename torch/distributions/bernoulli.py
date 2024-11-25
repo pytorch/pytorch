@@ -13,6 +13,7 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 
+
 __all__ = ["Bernoulli"]
 
 

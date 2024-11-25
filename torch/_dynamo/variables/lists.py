@@ -9,16 +9,12 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch._guards import Source
 
-if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
-
-from ..._guards import Source
-
-from .. import polyfill, variables
+from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_user_stop_iteration, unimplemented
-from ..source import AttrSource, GetItemSource
+from ..exc import raise_observed_exception, unimplemented
+from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
@@ -30,10 +26,15 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class BaseListVariable(VariableTracker):
@@ -61,7 +62,7 @@ class BaseListVariable(VariableTracker):
         self,
         items: List[VariableTracker],
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -87,7 +88,7 @@ class BaseListVariable(VariableTracker):
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
@@ -96,17 +97,12 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
-            if self.source is not None:
-                return self.clone(
-                    items=self.items[index],
-                    source=GetItemSource(self.source, index),
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
-            else:
-                return self.clone(
-                    items=self.items[index],
-                    mutable_local=MutableLocal() if self.mutable_local else None,
-                )
+            # Set source to None because slicing a list gives a new local
+            return self.clone(
+                items=self.items[index],
+                source=None,
+                mutation_type=ValueMutationNew() if self.mutation_type else None,
+            )
         else:
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
@@ -133,16 +129,14 @@ class BaseListVariable(VariableTracker):
                     unimplemented("__getitem__ with non-constant tensor")
             else:
                 value = args[0]
-            return self.getitem_const(value)
+            return self.getitem_const(tx, value)
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
-            from .builder import SourcelessBuilder
-
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfill.index),
+                VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -151,13 +145,13 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def list_compare(tx: "InstructionTranslator", op, left, right):
-        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+        return variables.UserFunctionVariable(polyfills.list_cmp).call_function(
             tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
 
 class RangeVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start = variables.ConstantVariable.create(0)
         stop = None
@@ -279,14 +273,14 @@ class RangeVariable(BaseListVariable):
                 variables.ConstantVariable.create(x)
                 for x in [sub_start, sub_stop, sub_step]
             ],
-            mutable_local=MutableLocal() if self.mutable_local else None,
+            mutation_type=ValueMutationNew() if self.mutation_type else None,
         )
         return result
 
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
-    def getitem_const(self, arg: VariableTracker):
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
         index = arg.as_python_constant()
 
@@ -301,7 +295,7 @@ class RangeVariable(BaseListVariable):
     def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "range" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(range))
@@ -330,7 +324,7 @@ class CommonListMethodsVariable(BaseListVariable):
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
-        if name == "append" and self.mutable_local:
+        if name == "append" and self.is_mutable():
             assert not kwargs
             (arg,) = args
             tx.output.side_effects.mutation(self)
@@ -338,7 +332,7 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif (
             name == "extend"
-            and self.mutable_local
+            and self.is_mutable()
             and args
             and args[0].has_force_unpack_var_sequence(tx)
         ):
@@ -348,7 +342,7 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
-        elif name == "insert" and self.mutable_local:
+        elif name == "insert" and self.is_mutable():
             assert not kwargs
             idx, value = args
             if isinstance(idx, SymNodeVariable):
@@ -358,18 +352,18 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
-        elif name == "pop" and self.mutable_local:
+        elif name == "pop" and self.is_mutable():
             assert not kwargs
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
-        elif name == "clear" and self.mutable_local:
+        elif name == "clear" and self.is_mutable():
             assert not kwargs and not args
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
-            and self.mutable_local
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
@@ -386,8 +380,8 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not kwargs
             assert not args
             items = list(self.items)
-            return self.modified(items, mutable_local=MutableLocal())
-        elif name == "reverse" and self.mutable_local:
+            return self.modified(items, mutation_type=ValueMutationNew())
+        elif name == "reverse" and self.is_mutable():
             assert not kwargs
             assert not args
             self.items.reverse()
@@ -401,13 +395,13 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def debug_repr(self):
         return self.debug_repr_helper("[", "]")
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
@@ -420,7 +414,7 @@ class ListVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutable_local
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
@@ -438,8 +432,48 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        else:
-            return super().call_method(tx, name, args, kwargs)
+
+        if name == "sort" and self.is_mutable():
+            assert len(args) == 0
+            key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
+            reverse = kwargs.pop(
+                "reverse", ConstantVariable.create(False)
+            ).as_python_constant()
+            assert len(kwargs) == 0
+
+            if not all(x.is_python_constant() for x in self.items):
+                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
+                #       be a pure function and should not have any side effects.
+                return super().call_method(tx, name, args, kwargs)  # try next handler
+
+            if (
+                key_fn_var.is_python_constant()
+                and key_fn_var.as_python_constant() is None
+            ):
+
+                def key_fn(x):
+                    return x.as_python_constant()
+
+            else:
+
+                def key_fn(x):
+                    return key_fn_var.call_function(tx, [x], {}).as_python_constant()
+
+            tx.output.side_effects.mutation(self)
+            self.items.sort(key=key_fn, reverse=reverse)
+            return ConstantVariable.create(None)
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is list:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not list:
@@ -448,13 +482,35 @@ class ListVariable(CommonListMethodsVariable):
 
 
 class DequeVariable(CommonListMethodsVariable):
+    def __init__(self, items, maxlen=None, **kwargs) -> None:
+        if maxlen is None:
+            maxlen = ConstantVariable.create(None)
+        assert (
+            maxlen.is_python_constant()
+        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        self.maxlen = maxlen
+        items = list(items)
+        if self.maxlen.as_python_constant() is not None:
+            items = items[-maxlen.as_python_constant() :]
+        super().__init__(items, **kwargs)
+
     def python_type(self):
         return collections.deque
 
     def debug_repr(self):
+        if self.maxlen.as_python_constant() is None:
+            return self.debug_repr_helper(
+                "deque([", "], maxlen=" + self.maxlen.debug_repr() + ")"
+            )
         return self.debug_repr_helper("deque([", "])")
 
-    def reconstruct(self, codegen):
+    def as_python_constant(self):
+        return self.python_type()(
+            [x.as_python_constant() for x in self.items],
+            maxlen=self.maxlen.as_python_constant(),
+        )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "deque" not in codegen.tx.f_globals
         codegen.add_push_null(
             lambda: codegen.append_output(
@@ -462,12 +518,14 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
-        )
+        codegen.extend_output([create_instruction("BUILD_LIST", arg=len(self.items))])
+        codegen(self.maxlen)
+        codegen.extend_output(codegen.create_call_function_kw(2, ("maxlen",), False))
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        if name == "maxlen":
+            return self.maxlen
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -478,55 +536,73 @@ class DequeVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutable_local
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
+            assert len(args) == 2
             assert not kwargs
             key, value = args
-            assert key.is_python_constant() and isinstance(
-                key.as_python_constant(), int
-            )
+            assert key.is_python_constant()
+            assert isinstance(key.as_python_constant(), int)
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif (
+
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            slice_within_maxlen = slice(-maxlen, None)
+        else:
+            slice_within_maxlen = None
+
+        if (
             name == "extendleft"
-            and self.mutable_local
+            and self.is_mutable()
+            and len(args) > 0
             and args[0].has_force_unpack_var_sequence(tx)
         ):
+            assert len(args) == 1
             assert not kwargs
-
-            (arg,) = args
-            prefix = arg.force_unpack_var_sequence(tx)
-            prefix.reverse()
+            prefix = args[0].force_unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
-            self.items = prefix + list(self.items)
-            return ConstantVariable.create(None)
-        elif name == "popleft" and self.mutable_local:
+            self.items[:] = [*reversed(prefix), *self.items]
+            slice_within_maxlen = slice(None, maxlen)
+            result = ConstantVariable.create(None)
+        elif name == "popleft" and self.is_mutable():
             assert not args
             assert not kwargs
-            item = self.items[0]
             tx.output.side_effects.mutation(self)
-            self.items = self.items[1:]
-            return item
-        elif name == "appendleft" and self.mutable_local:
+            result, *self.items[:] = self.items
+        elif name == "appendleft" and len(args) > 0 and self.is_mutable():
+            assert len(args) == 1
             assert not kwargs
             tx.output.side_effects.mutation(self)
-            self.items = [args[0]] + list(self.items)
-            return ConstantVariable.create(None)
+            self.items[:] = [args[0], *self.items]
+            slice_within_maxlen = slice(None, maxlen)
+            result = ConstantVariable.create(None)
         else:
-            return super().call_method(tx, name, args, kwargs)
+            result = super().call_method(tx, name, args, kwargs)
+
+        if (
+            slice_within_maxlen is not None
+            and maxlen is not None
+            and len(self.items) > maxlen
+        ):
+            self.items[:] = self.items[slice_within_maxlen]
+        return result
 
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.items)})"
+
     def debug_repr(self):
         return self.debug_repr_helper("(", ")")
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
 
@@ -538,6 +614,16 @@ class TupleVariable(BaseListVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name == "__class__":
+            source = AttrSource(self.source, name) if self.source else None
+            class_type = self.python_type()
+            if class_type is tuple:
+                return variables.BuiltinVariable(class_type, source=source)
+            else:
+                return variables.UserDefinedClassVariable(class_type, source=source)
+        return super().var_getattr(tx, name)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.python_type() is not tuple:
@@ -558,7 +644,7 @@ class SizeVariable(TupleVariable):
         items: List[VariableTracker],
         proxy: Optional[torch.fx.Proxy] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.proxy = proxy
         super().__init__(items, **kwargs)
 
@@ -615,7 +701,7 @@ class SizeVariable(TupleVariable):
         )
         return proxy
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
@@ -678,6 +764,7 @@ class SizeVariable(TupleVariable):
             index = arg.sym_num
         else:
             index = arg.as_python_constant()
+
         if isinstance(index, slice):
             return SizeVariable(self.items[index])
         else:
@@ -691,28 +778,57 @@ class SizeVariable(TupleVariable):
 class NamedTupleVariable(TupleVariable):
     _nonvar_fields = {
         "tuple_cls",
+        "dynamic_attributes",
         *TupleVariable._nonvar_fields,
     }
 
-    def __init__(self, items, tuple_cls, **kwargs):
+    def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
+        self.dynamic_attributes = {}
+
+    def is_namedtuple(self):
+        return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
+            getattr(self.tuple_cls, "_make", None)
+        )
+
+    def is_structseq(self):
+        return not self.is_namedtuple()
+
+    def fields(self):
+        return namedtuple_fields(self.tuple_cls)
 
     def debug_repr(self):
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return repr(self.tuple_cls([Lit(x.debug_repr()) for x in self.items]))
+        # NamedTupleType(*iterable)
         return repr(self.tuple_cls(*(Lit(x.debug_repr()) for x in self.items)))
 
     def python_type(self):
         return self.tuple_cls
 
     def as_python_constant(self):
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return self.python_type()([x.as_python_constant() for x in self.items])
+        # NamedTupleType(*iterable)
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
+        if self.is_structseq():
+            # StructSequenceType(iterable)
+            return self.python_type()(self._as_proxy())
+        # NamedTupleType(*iterable)
         return self.python_type()(*self._as_proxy())
 
-    def reconstruct(self, codegen):
-        create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Constructors:
+        #   StructSequenceType(iterable)
+        #   NamedTupleType(*iterable)
+        #   NamedTupleType._make(iterable)
+        create_fn = self.tuple_cls if self.is_structseq() else self.tuple_cls._make
         codegen.add_push_null(
             lambda: codegen.append_output(codegen._create_load_const(create_fn))
         )
@@ -723,6 +839,33 @@ class NamedTupleVariable(TupleVariable):
             ]
             + create_call_function(1, False)
         )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__":
+            assert len(args) == 2
+            assert len(kwargs) == 0
+            attr, value = args
+            attr = attr.as_python_constant()
+            if (
+                # structseq is immutable
+                self.is_structseq()
+                # namedtuple directly created by `collections.namedtuple` is immutable
+                or self.tuple_cls.__bases__ == (tuple,)
+                # fields are immutable
+                or attr in self.fields()
+            ):
+                raise_observed_exception(AttributeError, tx)
+            # Subclass of namedtuple type can have dynamic attributes
+            tx.output.side_effects.mutation(self)
+            self.dynamic_attributes[attr] = value
+            return ConstantVariable.create(None)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         def check_and_create_method():
@@ -740,20 +883,25 @@ class NamedTupleVariable(TupleVariable):
             else:
                 return None
 
-        fields = namedtuple_fields(self.tuple_cls)
+        if name in self.dynamic_attributes:
+            return self.dynamic_attributes[name]
+
+        fields = self.fields()
         if name not in fields:
             method = check_and_create_method()
             if not method:
-                super().var_getattr(tx, name)
+                return super().var_getattr(tx, name)
             return method
         return self.items[fields.index(name)]
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        return variables.ConstantVariable.create(hasattr(self.tuple_cls, name))
+        return variables.ConstantVariable.create(
+            name in self.dynamic_attributes or hasattr(self.tuple_cls, name)
+        )
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, items, **kwargs):
+    def __init__(self, items, **kwargs) -> None:
         items_to_map = items
         start, stop, step = [variables.ConstantVariable.create(None)] * 3
 
@@ -785,7 +933,7 @@ class SliceVariable(BaseListVariable):
     def as_python_constant(self):
         return slice(*[guard_if_dyn(x) for x in self.items])
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
@@ -802,7 +950,7 @@ class ListIteratorVariable(IteratorVariable):
         *IteratorVariable._nonvar_fields,
     }
 
-    def __init__(self, items, index: int = 0, **kwargs):
+    def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
@@ -812,14 +960,14 @@ class ListIteratorVariable(IteratorVariable):
         self.items = items
         self.index = index
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
-        assert self.mutable_local
+        assert self.is_mutable()
         old_index = self.index
         if old_index >= len(self.items):
-            raise_observed_user_stop_iteration(self, tx)
+            raise_observed_exception(StopIteration, tx)
 
         tx.output.side_effects.mutation(self)
         self.index += 1
@@ -853,7 +1001,7 @@ class ListIteratorVariable(IteratorVariable):
     def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
         return self.unpack_var_sequence(tx)
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         codegen.extend_output(
@@ -916,7 +1064,9 @@ class RestrictedListSubclassVariable(ListVariable):
     def is_matching_cls(cls, user_cls: type):
         return cls._is_non_conflicting_subclass(user_cls, list)
 
-    def __init__(self, items, *, user_cls: type, user_cls_source: Source, **kwargs):
+    def __init__(
+        self, items, *, user_cls: type, user_cls_source: Source, **kwargs
+    ) -> None:
         super().__init__(items=items, **kwargs)
         self.user_cls = user_cls
         self.user_cls_source = user_cls_source
@@ -956,7 +1106,7 @@ class RestrictedListSubclassVariable(ListVariable):
             **kwargs,
         )
 
-    def reconstruct(self, codegen):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.user_cls_source))
         super().reconstruct(codegen)
         codegen.extend_output(create_call_function(1, False))

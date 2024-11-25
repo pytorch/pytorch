@@ -154,39 +154,39 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<List<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported input type: List<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<c10::ArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<c10::OptionalArrayRef<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported input type: OptionalArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported input type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same_v<float, T>>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported input type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same_v<const char*, T>>> {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported input type: const char*. Please use c10::string_view instead.");
   };
@@ -196,12 +196,12 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: vector<bool>. Please use List<bool> instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral_v<T> && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const c10::SymInt&, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same_v<const c10::SymInt&, T>>> {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel taking c10::SymInt by reference. Please accept it by value instead.");
   };
@@ -238,7 +238,7 @@ namespace impl {
   : assert_is_valid_output_type<Value, AllowDeprecatedTypes> {
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value,
       "You tried to register a kernel with an unsupported output type: Dict<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
-    static_assert(!std::is_same<Value, at::Scalar>::value,
+    static_assert(!std::is_same_v<Value, at::Scalar>,
       "You tried to register a kernel with an unsupported output type: Dict<Key, Scalar>. Please use Dict<Key, int64_t> or Dict<Key, double>.");
   };
 
@@ -249,21 +249,21 @@ namespace impl {
       "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value>. Please use Dict<Key, Value> instead.");
     static_assert(guts::typelist::contains<impl::valid_dict_key_types, Key>::value,
       "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Value> where Key is invalid. We only support int64_t, double, bool, and string.");
-    static_assert(!std::is_same<Value, at::Scalar>::value,
+    static_assert(!std::is_same_v<Value, at::Scalar>,
       "You tried to register a kernel with an unsupported output type: std::unordered_map<Key, Scalar>. Please use Dict<Key, int64_t> or Dict<Key, double>.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<List<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported output type: List<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<std::vector<T>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
     // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use List<T> instead.");
   };
@@ -271,7 +271,7 @@ namespace impl {
   template<class T, size_t N, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<std::array<T, N>, AllowDeprecatedTypes>
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
-    static_assert(!std::is_same<T, at::Scalar>::value,
+    static_assert(!std::is_same_v<T, at::Scalar>,
       "You tried to register a kernel with an unsupported output type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
@@ -280,13 +280,13 @@ namespace impl {
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same_v<float, T>>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported output type: float. Please use double instead; you should use `double` in the C++ function signature and `float` in the schema string.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same_v<const char*, T>>> {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported output type: const char*. Please use c10::string_view instead.");
   };
@@ -296,7 +296,7 @@ namespace impl {
       "You tried to register a kernel with an unsupported output type: vector<bool>. Please use List<bool> instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral_v<T> && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead; you should use `int64_t` in the C++ function signature and `int` in the schema string.");
   };
@@ -392,7 +392,7 @@ namespace impl {
     }
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct ivalue_to_arg<optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
+  struct ivalue_to_arg<std::optional<ArrayRef<T>>, AllowDeprecatedTypes> final {
     // If an argument is std::optional<ArrayRef<T>>, convert the IValue to an std::optional<std::vector<T>> and pass that
     // to the operator. OptionalArray<T> is basically a std::optional<std::vector<T>> but implicitly convertible
     // to std::optional<ArrayRef<T>>.
@@ -417,7 +417,7 @@ namespace impl {
   struct return_to_ivalue final {};
 
   template<class T, bool AllowDeprecatedTypes>
-  struct return_to_ivalue<T, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<at::Tensor&, T>::value>> final {
+  struct return_to_ivalue<T, AllowDeprecatedTypes, std::enable_if_t<!std::is_same_v<at::Tensor&, T>>> final {
     static IValue call(T&& v) {
       assert_is_valid_output_type<T, AllowDeprecatedTypes>();
       return c10::ivalue::from(std::move(v));
@@ -564,7 +564,7 @@ namespace impl {
 
   template<class KernelFunctor, bool AllowDeprecatedTypes>
   struct make_boxed_from_unboxed_functor final {
-    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value,
+    static_assert(std::is_base_of_v<OperatorKernel, KernelFunctor>,
       "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, DispatchKeySet dispatchKeySet, Stack* stack) {
@@ -574,7 +574,7 @@ namespace impl {
       // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
       // See Note [Plumbing Keys Through The Dispatcher] for the background.
       using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
-      constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
+      constexpr bool has_outputs = !std::is_same_v<void, ReturnType>;
       constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
       if constexpr (has_outputs) {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value

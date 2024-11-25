@@ -7,7 +7,6 @@ import traceback
 from typing import Any, Callable, Union
 
 from torch._logging import LazyString
-
 from torch.onnx._internal.diagnostics.infra import sarif
 
 

@@ -1,7 +1,7 @@
 import os
 import sys
-
 from typing import Optional
+
 
 # [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
@@ -52,6 +52,14 @@ extended_debug_create_symbol = os.environ.get(
 # [@compile_ignored: debug]
 extended_debug_cpp = os.environ.get("TORCHDYNAMO_EXTENDED_DEBUG_CPP", "") != ""
 
+# Give extended debug information (line of code) when a torch function
+# is called during export.  This is useful for showing progress and detecting
+# where export might be stuck. Currently only works for strict=False.
+# [@compile_ignored: debug]
+extended_debug_current_loc = (
+    os.environ.get("TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC", "0") == "1"
+)
+
 # [@compile_ignored: debug] Show a warning for every specialization
 print_specializations = False
 
@@ -75,5 +83,6 @@ symbol_guard_limit_before_specialize: Optional[int] = None
 use_duck_shape = True
 
 from torch.utils._config_module import install_config_module
+
 
 install_config_module(sys.modules[__name__])

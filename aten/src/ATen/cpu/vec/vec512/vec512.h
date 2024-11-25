@@ -274,6 +274,18 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
   return flip8(v);
 }
 
+inline Vectorized<bool> operator&&(
+    const Vectorized<bool>& self,
+    const Vectorized<bool>& other) {
+  const __m512i* self_ = reinterpret_cast<const __m512i*>(self.as_bytes());
+  const __m512i* other_ = reinterpret_cast<const __m512i*>(other.as_bytes());
+  __m512i out = _mm512_and_si512(*self_, *other_);
+  Vectorized<bool> ret;
+  // We do not have a constructer that takes __m512i, so we need to memcpy
+  std::memcpy(ret, &out, ret.size() * sizeof(bool));
+  return ret;
+}
+
 #endif // defined(CPU_CAPABILITY_AVX512)
 
 }}}

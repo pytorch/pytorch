@@ -1,22 +1,22 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import deque
-from typing import Dict, List, Set, NamedTuple, Tuple, Deque
+from typing import Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
-from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 from torch.fx.experimental.partitioner_utils import (
-    Partition,
     Device,
-    PartitionerConfig,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
-    NodeLatency,
     get_extra_size_of,
+    get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping,
+    NodeLatency,
+    Partition,
+    PartitionerConfig,
     PartitionMode,
 )
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, map_arg
+from torch.fx.node import map_arg, Node
+from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 from torch.fx.passes.split_module import split_module
 
 
@@ -260,7 +260,9 @@ def get_device_to_partitions_mapping(
     # Find devices for all the partitions without a device
     found_device = True
     for partition in no_device_partitions:
-        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1)))
+        device_to_left_mem_bytes = dict(
+            sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1))
+        )
         found_device = find_device_for(partition)
         if not found_device:
             break
@@ -463,8 +465,6 @@ class Partitioner:
                             # Check if no device is left
                             if len(self.partitions) == len(self.devices):
                                 # No device is left
-                                # Put the previous partitions into a list (non_single_node_partitions)
-                                non_single_node_partitions = self.partitions[:]
                                 # Create the first single node partition for the current node
                                 self.create_single_node_partition(node)
                                 continue
@@ -1015,10 +1015,11 @@ class Partitioner:
         # Keep tracking the partition pair of node pair
         partition_pair: List[Partition] = []
         # Collect all the op nodes from the graph
-        op_nodes = []
-        for n in self.graph_module.graph.nodes:
-            if n.op not in {"placeholder", "get_attr", "output"}:
-                op_nodes.append(n)
+        op_nodes = [
+            n
+            for n in self.graph_module.graph.nodes
+            if n.op not in {"placeholder", "get_attr", "output"}
+        ]
         for node in op_nodes:
             # Find which partition the current node belongs
             p0_index = self.node_to_partition[node]

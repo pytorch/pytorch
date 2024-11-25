@@ -19,9 +19,9 @@ Tensor& _sparse_mm_mkl_(
     const Scalar& alpha,
     const Scalar& beta) {
 #if __APPLE__ || __MACH__
-  AT_ERROR("sparse_mm_mkl: MKL support is disabled on macos/iOS.");
+  TORCH_CHECK(false, "sparse_mm_mkl: MKL support is disabled on macos/iOS.");
 #else
-  AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
+  TORCH_CHECK(false, "sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
   return self; // for stopping compiler warnings.
 }
@@ -40,8 +40,7 @@ Tensor& _sparse_mm_mkl_(
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorImpl.h>
 
-namespace at {
-namespace sparse_csr {
+namespace at::sparse_csr {
 
 #ifdef MKL_ILP64
 static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
@@ -257,7 +256,6 @@ Tensor& _sparse_mm_mkl_(
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKL_ENABLED

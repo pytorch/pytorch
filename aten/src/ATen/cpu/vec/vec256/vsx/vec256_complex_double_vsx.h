@@ -554,6 +554,30 @@ Vectorized<ComplexDbl> inline minimum(
   // return _mm256_or_ps(min, isnan);
 }
 
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator+(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  return Vectorized<ComplexDbl>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator-(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  return Vectorized<ComplexDbl>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator&(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  return Vectorized<ComplexDbl>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator|(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  return Vectorized<ComplexDbl>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexDbl> C10_ALWAYS_INLINE operator^(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  return Vectorized<ComplexDbl>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
 
 } // namespace
 } // namespace vec

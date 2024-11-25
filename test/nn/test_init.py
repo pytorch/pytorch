@@ -9,7 +9,6 @@ from operator import mul
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
-
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfNoLapack,
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TEST_SCIPY,
     TestCase,
 )
+
 
 if TEST_SCIPY:
     from scipy import stats

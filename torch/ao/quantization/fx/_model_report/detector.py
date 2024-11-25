@@ -137,7 +137,7 @@ class DetectorBase(ABC):
         - Should return a str-based report and dict info in Tuple[str,Dict] format
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.detector_config_info = None
 
@@ -150,12 +150,10 @@ class DetectorBase(ABC):
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict.
             This dict maps string keys to detector specific information
         """
-        pass
 
     @abstractmethod
     def get_detector_name(self) -> str:
         r"""Returns the name of the current detector"""
-        pass
 
     @abstractmethod
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
@@ -166,7 +164,6 @@ class DetectorBase(ABC):
         Returns a Dict mapping from unique observer fqns (where we want to insert them) to:
             A DetectorQConfigInfo with the information to generate a QConfig for a specific module
         """
-        pass
 
     def _get_targeting_node(
         self, prepared_fx_model: GraphModule, target_fqn: str
@@ -217,7 +214,6 @@ class DetectorBase(ABC):
             Str: string report of the suggested improvements
             Dict: contains useful data collected by the observer pertinent to this report
         """
-        pass
 
 
 class PerChannelDetector(DetectorBase):

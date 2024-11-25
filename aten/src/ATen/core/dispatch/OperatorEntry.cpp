@@ -3,8 +3,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/ObservedOperators.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 namespace {
 #ifndef STRIP_ERROR_MESSAGES
@@ -152,7 +151,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
     if (dispatch_key != DispatchKey::Meta) {
-      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overrided.\n",
+      TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
             "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
@@ -510,7 +509,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
-};
+}
 
 #ifndef STRIP_ERROR_MESSAGES
 static std::string post_process_dispatch_key_str(std::string dispatch_key) {
@@ -629,5 +628,4 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
-}
 }

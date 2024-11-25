@@ -27,7 +27,7 @@ struct ShapeComputeGraphMapping {
         enclosing_graph_value_to_shape_graph_input_(
             std::move(enclosing_graph_value_to_shape_graph_input)),
         graph_output_to_symbolic_shape_dim_(
-            std::move(graph_output_to_symbolic_shape_dim)){};
+            std::move(graph_output_to_symbolic_shape_dim)) {}
 
   std::shared_ptr<Graph> partial_eval_shape_graph;
   std::unordered_map<Value*, Value*>

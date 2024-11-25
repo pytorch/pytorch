@@ -1,10 +1,10 @@
 import logging
-
 from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
 from torch.utils._sympy.functions import FloorDiv
+
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def try_solve(
     thing: sympy.Basic,
     trials: int = 5,
     floordiv_inequality: bool = True,
-) -> Optional[Tuple[sympy.Rel, sympy.Basic]]:
+) -> Optional[Tuple[sympy.Rel, sympy.Expr]]:
     mirror = mirror_rel_op(type(expr))
 
     # Ignore unsupported expressions:
@@ -115,7 +115,10 @@ def _try_isolate_lhs(
 
         # If we can't tell whether 'other' is negative or positive, we do nothing.
         # That is because we don't know whether we have mirror the operation or not.
-        if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None):
+        # We also divide only when we know 'rhs' is not zero.
+        if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None) and not (
+            not isinstance(e, INEQUALITY_TYPES) and rhs.is_zero
+        ):
             # Divide both sides by 'other'.
             lhs = lhs / other
             rhs = rhs / other

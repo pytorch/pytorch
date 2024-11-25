@@ -83,7 +83,7 @@ static inline void compare_base_kernel(const Tensor& result1, const Tensor& resu
     auto* result1_data_bytes = data[0];
     auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
-    for (const auto i C10_UNUSED : c10::irange(n)) {
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
       f((scalar_t*)result1_data_bytes,
         (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes,
@@ -253,7 +253,7 @@ static void mode_kernel_impl(
 
           std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-          for (const auto k C10_UNUSED : c10::irange(n)) {
+          for ([[maybe_unused]] const auto k : c10::irange(n)) {
             scalar_t* values_data = (scalar_t*)values_data_bytes;
             int64_t* indices_data = (int64_t*)indices_data_bytes;
             const scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -325,7 +325,7 @@ static void isin_default_kernel_cpu(
     .check_all_same_dtype(false)
     .build();
   // Dispatch based on promoted type.
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
       const auto* test_element_data = test_elements_flat.const_data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
@@ -400,17 +400,17 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
-REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
+REGISTER_DISPATCH(max_stub, &max_kernel_impl)
+REGISTER_DISPATCH(min_stub, &min_kernel_impl)
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel)
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(mode_stub, &mode_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
+REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu)
 
 } // namespace at::native

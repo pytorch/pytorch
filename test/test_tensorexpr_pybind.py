@@ -197,7 +197,6 @@ graph(%a : Tensor, %b : Tensor):
             # Graph doesn't have shape info for inputs => compilation should
             # fail
             exception_thrown = True
-            pass
         assert exception_thrown
 
         # Inject shape info and try compiling again
@@ -227,7 +226,6 @@ graph(%a : Tensor, %b : Tensor):
             kernel = te.TensorExprKernel(graph)
         except RuntimeError:
             exception_thrown = True
-            pass
         assert exception_thrown
 
         # Try injecting shape info for graph inputs
@@ -239,7 +237,6 @@ graph(%a : Tensor, %b : Tensor):
         except RuntimeError:
             # Graph has a 'self' argument for which we can't set shapes
             exception_thrown = True
-            pass
         assert exception_thrown
 
         # Remove 'self' argument and try annotating shapes one more time

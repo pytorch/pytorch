@@ -10,7 +10,7 @@
 
 namespace c10d {
 
-// callback function will be given arguments (optional<string> oldValue,
+// callback function will be given arguments (std::optional<string> oldValue,
 // std::optional<string> newValue)
 using WatchKeyCallback =
     std::function<void(std::optional<std::string>, std::optional<std::string>)>;
@@ -75,6 +75,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
   // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       WatchKeyCallback /* unused */) {
     TORCH_CHECK(false, "watchKey is deprecated, no implementation support it.");
   }

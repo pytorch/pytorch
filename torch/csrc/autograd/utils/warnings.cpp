@@ -1,8 +1,6 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 void DelayWarningHandler::process(const c10::Warning& warning) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -19,6 +17,4 @@ void DelayWarningHandler::replay_warnings() {
   }
 }
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

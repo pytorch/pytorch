@@ -7,8 +7,8 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar
-from typing_extensions import Concatenate, ParamSpec
+from typing import Any, Callable, Literal, NoReturn, Sequence, TypeVar as _TypeVar
+from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -19,12 +19,13 @@ from torch.onnx import _constants, _type_utils, errors, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils
 
+
 if typing.TYPE_CHECKING:
     from torch.types import Number
 
-_T = TypeVar("_T")
-_U = TypeVar("_U")
-_P = ParamSpec("_P")
+_T = _TypeVar("_T")
+_U = _TypeVar("_U")
+_P = _ParamSpec("_P")
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -204,7 +205,7 @@ def _is_packed_list(list_value: Any) -> bool:
 
 def parse_args(
     *arg_descriptors: _ValueDescriptor,
-) -> Callable[[Callable[Concatenate[_U, _P], _T]], Callable[Concatenate[_U, _P], _T]]:
+) -> Callable[[Callable[_Concatenate[_U, _P], _T]], Callable[_Concatenate[_U, _P], _T]]:
     """A decorator which converts args from torch._C.Value to built-in types.
 
     For example:
@@ -233,8 +234,8 @@ def parse_args(
     """
 
     def decorator(
-        fn: Callable[Concatenate[_U, _P], _T]
-    ) -> Callable[Concatenate[_U, _P], _T]:
+        fn: Callable[_Concatenate[_U, _P], _T],
+    ) -> Callable[_Concatenate[_U, _P], _T]:
         fn._arg_descriptors = arg_descriptors  # type: ignore[attr-defined]
 
         @functools.wraps(fn)
@@ -355,12 +356,14 @@ def quantized_args(
                 return descriptor and _is_value(arg) and _is_tuple_construct(arg)
 
             # Run regular symbolic function if none of the argument is QTensor.
-            is_quantized = []
+            is_quantized: typing.List[bool] = []
             for descriptor, arg in descriptor_args:
                 # ListConstruct
                 if _is_packed_list(arg):
-                    for arg_input in arg.node().inputs():
-                        is_quantized.append(_is_arg_quantized(descriptor, arg_input))
+                    is_quantized.extend(
+                        _is_arg_quantized(descriptor, arg_input)
+                        for arg_input in arg.node().inputs()
+                    )
                 else:
                     is_quantized.append(_is_arg_quantized(descriptor, arg))
 
@@ -805,7 +808,10 @@ def _interpolate_warning(interpolate_mode):
 
 
 def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
-    if _is_constant(axes_i[0]):
+    if len(axes_i) == 0:
+        # unnecessary unsqueeze if axes length==0
+        return input
+    elif _is_constant(axes_i[0]):
         if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
@@ -1987,7 +1993,7 @@ def _embedding_bag_helper(
 
     # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
     block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
+    utils._add_input_to_block(loop_block)
 
     indices_start = loop_context.op(
         "Gather", offsets_starts, block_input_iter, axis_i=0

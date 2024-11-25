@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
@@ -72,6 +72,7 @@ class ProfilerConfig:
         with_flops: bool,
         with_modules: bool,
         experimental_config: _ExperimentalConfig,
+        trace_id: Optional[str] = None,
     ) -> None: ...
 
 class _ProfilerEvent:
@@ -80,7 +81,15 @@ class _ProfilerEvent:
     children: list[_ProfilerEvent]
 
     # TODO(robieta): remove in favor of `self.typed`
-    extra_fields: _ExtraFields_TorchOp | _ExtraFields_Backend | _ExtraFields_Allocation | _ExtraFields_OutOfMemory | _ExtraFields_PyCall | _ExtraFields_PyCCall | _ExtraFields_Kineto
+    extra_fields: (
+        _ExtraFields_TorchOp
+        | _ExtraFields_Backend
+        | _ExtraFields_Allocation
+        | _ExtraFields_OutOfMemory
+        | _ExtraFields_PyCall
+        | _ExtraFields_PyCCall
+        | _ExtraFields_Kineto
+    )
 
     @property
     def typed(

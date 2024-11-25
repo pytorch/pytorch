@@ -6,7 +6,8 @@
 #include <iostream>
 #include <sstream>
 
-namespace at { namespace native {
+// NOLINTBEGIN(*c-arrays*)
+namespace at::native {
 
 namespace {
 
@@ -98,10 +99,10 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims;
+  int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
   int strideA[CUDNN_DIM_MAX];
-  cudnnDataType_t dtype;
+  cudnnDataType_t dtype{};
   cudnnGetTensorNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &nbDims, dimA, strideA);
   out << "    type = " << cudnnTypeToString(dtype) << "\n";
   out << "    nbDims = " << nbDims << "\n";
@@ -143,7 +144,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     size[i] = (int) 1;
   }
   dim = std::max(dim, pad);
-  cudnnTensorFormat_t filter_format;
+  cudnnTensorFormat_t filter_format{};
   switch(memory_format) {
     case at::MemoryFormat::Contiguous:
       filter_format = CUDNN_TENSOR_NCHW;
@@ -155,7 +156,8 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     default:
       TORCH_INTERNAL_ASSERT(false, "unsupported memory_format for cuDNN filters");
   }
-  set(getDataType(t), (int) dim, size, filter_format);
+  // NOLINTNEXTLINE(*narrowing-conversions)
+  set(getDataType(t), static_cast<int64_t>(dim), size, filter_format);
 }
 
 std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
@@ -173,10 +175,10 @@ std::string cudnnMemoryFormatToString(cudnnTensorFormat_t tformat) {
 
 std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
   out << "FilterDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims;
+  int nbDims = 0;
   int dimA[CUDNN_DIM_MAX];
-  cudnnDataType_t dtype;
-  cudnnTensorFormat_t tformat;
+  cudnnDataType_t dtype{};
+  cudnnTensorFormat_t tformat{};
   cudnnGetFilterNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &tformat, &nbDims, dimA);
   out << "    type = " << cudnnTypeToString(dtype) << "\n";
   out << "    tensor_format = " << cudnnMemoryFormatToString(tformat) << "\n";
@@ -192,4 +194,5 @@ std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d) {
 
 void FilterDescriptor::print() { std::cout << *this; }
 
-}}
+}
+// NOLINTEND(*c-arrays*)

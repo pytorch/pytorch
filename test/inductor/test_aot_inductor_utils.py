@@ -1,14 +1,20 @@
 # Owner(s): ["module: inductor"]
 
+import copy
 import os
 import shutil
 import tempfile
+import types
 
 import torch
 import torch._export
 import torch._inductor
 import torch.export._trace
 import torch.fx._pytree as fx_pytree
+from torch._dynamo.testing import same
+from torch._inductor import config
+from torch._inductor.test_case import TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils import _pytree as pytree
 
@@ -67,7 +73,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def load_runner(device, so_path):
         if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
+            from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 # copy *.so file to a unique path just before loading
@@ -75,6 +81,12 @@ class AOTIRunnerUtil:
                 # from the same path is loaded repetitively in a test
                 temp_so_path = os.path.join(temp_dir, "model.so")
                 shutil.copy(so_path, temp_so_path)
+
+                # We also need to copy over the serialized extern_kernel_nodes for custom ops
+                extern_kernel_nodes_path = f"{so_path[:-3]}.json"
+                if os.path.isfile(extern_kernel_nodes_path):
+                    temp_extern_kernel_nodes_path = os.path.join(temp_dir, "model.json")
+                    shutil.copy(extern_kernel_nodes_path, temp_extern_kernel_nodes_path)
 
                 return test_aot_inductor_model_runner_pybind.Runner(
                     temp_so_path, device == "cpu"
@@ -143,3 +155,90 @@ class AOTIRunnerUtil:
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors
+
+
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    options=None,
+    dynamic_shapes=None,
+    disable_constraint_solver=False,
+    atol=None,
+    rtol=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(example_inputs)
+        expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
+        actual = AOTIRunnerUtil.run(
+            self.device,
+            model,
+            example_inputs,
+            options,
+            dynamic_shapes,
+            disable_constraint_solver,
+        )
+
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+
+def check_model_with_multiple_inputs(
+    self: TestCase,
+    model,
+    list_example_inputs,
+    options=None,
+    dynamic_shapes=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(list_example_inputs)
+        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
+        list_actual = AOTIRunnerUtil.run_multiple(
+            self.device, model, list_example_inputs, options, dynamic_shapes
+        )
+
+    self.assertTrue(same(list_actual, list_expected))
+
+
+def code_check_count(
+    self: TestCase,
+    model,
+    example_inputs,
+    target_str: str,
+    target_count: int,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "allow_stack_allocation": self.allow_stack_allocation,
+            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        so_path = torch._export.aot_compile(model, example_inputs)
+
+    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+        src_code = cpp.read()
+        FileCheck().check_count(
+            target_str,
+            target_count,
+            exactly=True,
+        ).run(src_code)

@@ -14,7 +14,7 @@ namespace at::functionalization {
 
 static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseReturnMode inverse_return_mode) {
   // invert the permutation
-  auto ndims = dims.size();
+  auto ndims = static_cast<int64_t>(dims.size());
   std::vector<int64_t> dims_(ndims);
   for(const auto i : c10::irange(ndims)) {
     dims_[at::maybe_wrap_dim(dims[i], ndims)] = i;
@@ -29,7 +29,7 @@ static Tensor permute_inverse(const Tensor& self, IntArrayRef dims, InverseRetur
 static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
   auto result = self;
   bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
-  int64_t nDims = sizes.size();
+  int64_t nDims = static_cast<int64_t>(sizes.size());
   for(const auto dim : c10::irange(nDims)) {
     if (sizes[dim] == 1) {
       need_alias = false;
@@ -46,7 +46,7 @@ static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, 
 }
 
 static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, InverseReturnMode inverse_return_mode) {
-  const auto ndim = sizes.size();
+  const auto ndim = static_cast<int64_t>(sizes.size());
   const auto mask = at::dim_list_to_bitset(dim, ndim);
   Tensor result = self;
   bool need_alias = (inverse_return_mode == InverseReturnMode::AlwaysView);
@@ -231,6 +231,7 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
@@ -255,7 +256,7 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
     dim = at::maybe_wrap_dim(dim, base.dim());
     auto dim_size = base.sym_size(dim);
     c10::SymInt start = 0;
-    for (auto i = 0; i < mutated_view_idx; ++i) {
+    for (int64_t i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
@@ -391,7 +392,7 @@ Tensor FunctionalInverses::unbind_int_inverse(const Tensor& base, const Tensor& 
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      dim = at::maybe_wrap_dim(dim, base.sizes().size());
+      dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(base.sizes().size()));
       return base.select_scatter(mutated_view, dim, mutated_view_idx);
     }
 }
@@ -452,14 +453,15 @@ Tensor FunctionalInverses::chunk_inverse(const at::Tensor & base, const at::Tens
     return split_with_sizes_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.slice_inverse_symint(base, dim, std::move(start), start + length, 1);
+      return mutated_view.slice_inverse_symint(base, dim, start, start + length, 1);
     } else {
       return base.slice_scatter_symint(
-          mutated_view, dim, std::move(start), start + length, 1);
+          mutated_view, dim, start, start + length, 1);
     }
 }
 

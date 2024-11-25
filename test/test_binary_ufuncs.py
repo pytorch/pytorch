@@ -4,6 +4,7 @@ import itertools
 import math
 import operator
 import random
+import sys
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -156,9 +157,17 @@ class TestBinaryUfuncs(TestCase):
             numpy_sample = sample.numpy()
             l_numpy = numpy_sample.input
             r_numpy = numpy_sample.args[0]
-
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
+
+            # Dtype promo rules have changed since NumPy 2.
+            # Specialize the backward-incompatible cases.
+            if (
+                np.__version__ > "2"
+                and op.name in ("sub", "_refs.sub")
+                and isinstance(l_numpy, np.ndarray)
+            ):
+                expected = expected.astype(l_numpy.dtype)
 
             # Crafts a custom error message for smaller, printable tensors
             def _numel(x):
@@ -1475,7 +1484,7 @@ class TestBinaryUfuncs(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "Found dtype \\w+ but expected \\w+",
+                        r"result type \w+ can't be cast to the desired output type \w+",
                         lambda: actual.pow_(exponent),
                     )
 
@@ -3200,7 +3209,12 @@ class TestBinaryUfuncs(TestCase):
         ):
             shift_left_expected = torch.zeros_like(input)
             shift_right_expected = torch.clamp(input, -1, 0)
-            for shift in chain(range(-100, -1), range(bits, 100)):
+            # NumPy 2 does not support negative shift values.
+            if np.__version__ > "2":
+                iterator = range(bits, 100)
+            else:
+                iterator = chain(range(-100, -1), range(bits, 100))
+            for shift in iterator:
                 shift_left = input << shift
                 self.assertEqual(shift_left, shift_left_expected, msg=f"<< {shift}")
                 self.compare_with_numpy(
@@ -3407,29 +3421,41 @@ class TestBinaryUfuncs(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
-    @onlyCPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
         exponents = torch.randint(-31, 31, (64,), device=device, dtype=torch.int32)
 
         # basic test
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome_1 = torch.ldexp(mantissas, exponents)
         pt_outcome_2 = mantissas.ldexp(exponents)
-        self.assertEqual(np_outcome, pt_outcome_1)
-        self.assertEqual(np_outcome, pt_outcome_2)
+        self.assertEqual(np_outcome, pt_outcome_1.cpu())
+        self.assertEqual(np_outcome, pt_outcome_2.cpu())
         mantissas.ldexp_(exponents)
-        self.assertEqual(np_outcome, mantissas)
+        self.assertEqual(np_outcome, mantissas.cpu())
 
         # test bounds
         mantissas = torch.tensor(
             [float("inf"), float("-inf"), float("inf"), float("nan")], device=device
         )
         exponents = torch.randint(0, 31, (4,), device=device, dtype=torch.int32)
-        np_outcome = np.ldexp(mantissas.numpy(), exponents.numpy())
+        np_outcome = np.ldexp(mantissas.cpu().numpy(), exponents.cpu().numpy())
         pt_outcome = torch.ldexp(mantissas, exponents)
-        self.assertEqual(np_outcome, pt_outcome)
+        self.assertEqual(np_outcome, pt_outcome.cpu())
+
+        # test half dtype behavior
+        mantissas = torch.randn(64, device=device, dtype=torch.half)
+        exponents = torch.randint(-5, 5, (64,), device=device)
+        self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
+
+        # test float64 computation
+        mantissas = torch.tensor([1], dtype=torch.float64, device=device)
+        exponents = torch.tensor([128], dtype=torch.int64, device=device)
+        expected = torch.pow(
+            torch.full((1,), 2, device=device, dtype=torch.float64), 128
+        )
+        self.assertEqual(torch.ldexp(mantissas, exponents), expected)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_lerp(self, device, dtype):
@@ -3546,6 +3572,8 @@ class TestBinaryUfuncs(TestCase):
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
     )
     def test_logaddexp(self, device, dtype):
+        if sys.version_info >= (3, 12) and dtype in (torch.complex64, torch.complex128):
+            return self.skipTest("complex flaky in 3.12")
         self._test_logaddexp(device, dtype, base2=False)
 
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
@@ -4423,9 +4451,7 @@ class TestBinaryUfuncs(TestCase):
             test_helper(x, q)
 
     @onlyCUDA
-    @dtypes(
-        torch.chalf,
-    )
+    @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.
         # Ideally, this should be covered by `test_complex_half_reference_testing`

@@ -12,8 +12,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <type_traits>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 //
 // utils
@@ -383,7 +382,7 @@ struct BoxedKernelWrapper<
     // that the last RetCount elements are of type `Tensor&`.
     auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
     static_assert(
-        std::is_same<Result, decltype(result)>::value,
+        std::is_same_v<Result, decltype(result)>,
         "The parameter list of an op returning a tuple of Tensor references "
             "must end with an equal number of Tensor reference parameters."
     );
@@ -391,5 +390,4 @@ struct BoxedKernelWrapper<
   }
 };
 
-} // impl
 } // c10

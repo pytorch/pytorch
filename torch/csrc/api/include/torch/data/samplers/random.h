@@ -7,16 +7,12 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 
 /// A `Sampler` that returns random indices.
 class TORCH_API RandomSampler : public Sampler<> {
@@ -31,7 +27,7 @@ class TORCH_API RandomSampler : public Sampler<> {
   ~RandomSampler() override;
 
   /// Resets the `RandomSampler` to a new set of indices.
-  void reset(optional<size_t> new_size = nullopt) override;
+  void reset(std::optional<size_t> new_size = std::nullopt) override;
 
   /// Returns the next batch of indices.
   std::optional<std::vector<size_t>> next(size_t batch_size) override;
@@ -49,6 +45,4 @@ class TORCH_API RandomSampler : public Sampler<> {
   at::Tensor indices_;
   int64_t index_ = 0;
 };
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

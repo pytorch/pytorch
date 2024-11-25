@@ -4,7 +4,6 @@ import unittest
 import unittest.mock as mock
 
 import torch
-
 import torch.nn as nn
 import torch.nn.utils.prune as prune
 from torch.testing._internal.common_nn import NNTestCase
@@ -776,7 +775,8 @@ class TestPruningNN(NNTestCase):
 
         with TemporaryFileName() as fname:
             torch.save(model, fname)
-            new_model = torch.load(fname)
+            # weights_only=False as this is legacy code that saves the model
+            new_model = torch.load(fname, weights_only=False)
 
         # check that the original weight and the new mask are present
         self.assertIn("0.weight_orig", new_model.state_dict())

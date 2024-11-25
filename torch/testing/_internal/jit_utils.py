@@ -230,7 +230,7 @@ class JitTestCase(JitCommonTestCase):
                 # and it's easier to just work with a fresh copy each time.
                 buffer_copy = buffer.getvalue()
 
-                code_files, debug_files = extract_files(buffer)
+                code_files, _debug_files = extract_files(buffer)
 
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
@@ -247,7 +247,7 @@ class JitTestCase(JitCommonTestCase):
             torch.jit.save(imported, saved_module_buffer_2)
 
             saved_module_buffer_2.seek(0)
-            code_files_2, debug_files_2 = extract_files(saved_module_buffer_2)
+            code_files_2, _debug_files_2 = extract_files(saved_module_buffer_2)
 
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
@@ -503,7 +503,7 @@ class JitTestCase(JitCommonTestCase):
                 if capture_output:
                     with self.capture_stdout() as script_stdout:
                         script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout() as opt_script_stdout:
+                    with self.capture_stdout():
                         opt_script_outputs = scripted_fn(*recording_inputs)
                     with self.capture_stdout() as _python_stdout:
                         python_outputs = python_fn(*inputs)
@@ -740,7 +740,7 @@ def attrs_with_prefix(module, prefix):
 def warmup_backward(f, *args):
     profiling_count = 3
     results = []
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         if len(args) > 0:
             r = torch.autograd.grad(f, *args)
             results.append(r)
@@ -770,7 +770,7 @@ def _get_py3_code(code, fn_name):
         return fn
 
 class TensorExprTestOptions:
-    def __init__(self):
+    def __init__(self) -> None:
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
 

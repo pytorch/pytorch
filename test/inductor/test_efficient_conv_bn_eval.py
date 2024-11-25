@@ -4,7 +4,6 @@ import importlib
 import itertools
 import os
 import sys
-import unittest
 
 import torch
 from torch import nn
@@ -14,25 +13,20 @@ from torch import nn
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from inductor.test_torchinductor import copy_tests
+from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+    copy_tests,
+)
 
 
 class ConvOp(nn.Module):
@@ -101,6 +95,9 @@ class MultiUserConvOp(nn.Module):
 
 
 class EfficientConvBNEvalTemplate(TestCase):
+    # With specialize_float = False, momentum becomes an input and so
+    # the number of bytes accessed wobbles
+    @dynamo_config.patch(specialize_float=True)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_basic(self):
         def test_conv_bn_eval(
@@ -214,17 +211,17 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class EfficientConvBNEvalCudaTests(TestCase):
-        device = "cuda"
+    class EfficientConvBNEvalGpuTests(TestCase):
+        device = GPU_TYPE
 
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCudaTests, "cuda")
+    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalGpuTests, GPU_TYPE)
 
 del EfficientConvBNEvalTemplate
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import numpy as np
+
 import onnx
 import parameterized
 import pytorch_test_common
@@ -184,7 +185,9 @@ class TestVerificationOnWrongExport(pytorch_test_common.ExportTestCase):
         # {"onnx_backend": verification.OnnxBackend.ONNX},
         {"onnx_backend": verification.OnnxBackend.ONNX_RUNTIME_CPU},
     ],
-    class_name_func=lambda cls, idx, input_dicts: f"{cls.__name__}_{input_dicts['onnx_backend'].name}",
+    class_name_func=lambda cls,
+    idx,
+    input_dicts: f"{cls.__name__}_{input_dicts['onnx_backend'].name}",
 )
 class TestFindMismatch(pytorch_test_common.ExportTestCase):
     onnx_backend: verification.OnnxBackend
@@ -205,7 +208,7 @@ class TestFindMismatch(pytorch_test_common.ExportTestCase):
         )
 
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(3, 4),

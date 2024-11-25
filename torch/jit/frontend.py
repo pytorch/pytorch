@@ -73,6 +73,7 @@ from torch._sources import (
 from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
 
+
 _IS_ASTUNPARSE_INSTALLED = False
 try:
     import astunparse  # type: ignore[import]

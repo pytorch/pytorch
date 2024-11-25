@@ -56,8 +56,8 @@ Node* traceNode(Node* node, TracingData& td, Stack& stack) {
 }
 
 void eraseAllOutputs(Node* opt_pn) {
-  // NOLINTNEXTLINE
-  for (int i = opt_pn->outputs().size() - 1; i >= 0; i--) {
+  for (auto i = static_cast<int64_t>(opt_pn->outputs().size()) - 1; i >= 0;
+       i--) {
     opt_pn->eraseOutput(i);
   }
 }
@@ -275,10 +275,12 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
 // nodes and the outputs of the node in the scripted graph.
 // There are a few subtleties with tracing Ifs and Loops
 // discussed above
-std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
+std::shared_ptr<Graph> TraceGraph(
+    const std::shared_ptr<Graph>& graph,
+    Stack& stack) {
   TracingData td;
   GRAPH_DUMP("Before Inline:", graph);
-  Inline(*graph.get());
+  Inline(*graph);
   EliminateDeadCode(graph);
   GRAPH_DUMP("After Inline:", graph);
   auto pr = ProfilingRecord::instrumentGraph(graph);

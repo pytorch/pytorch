@@ -20,7 +20,6 @@
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
 
-#include <algorithm>
 #include <cstring>
 #include <tuple>
 #include <utility>
@@ -107,7 +106,7 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -123,7 +122,6 @@ index_select_add(
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -148,9 +146,8 @@ index_select_add(
       at::native::cpublas::axpy<data_t>(ddim, 1,
               src_data + src_stride0 * idx, src_stride1,
               output_data + output_stride0 * add_indices_data[i], output_stride1);
-    } else if (bag_size.defined()) {
+    } else if (bag_size_data) {
       // Decrement bag_size to reflect that the index is padded
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
@@ -187,10 +184,9 @@ void fbgemm_spmdm_report_error_(
 } // namespace
 
 template <typename data_t, typename index_t>
-typename std::enable_if<
-    std::is_same<data_t, at::Half>::value ||
-        std::is_same<data_t, at::BFloat16>::value,
-    void>::type
+std::enable_if_t<
+    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
+    void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -284,7 +280,7 @@ index_select_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same_v<data_t, at::Half>) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -312,7 +308,6 @@ index_select_add(
     TORCH_CHECK(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<data_t>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -354,9 +349,8 @@ index_select_add(
             output_data_fp32 + ddim * add_indices_data[i],
             1);
 
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -371,7 +365,7 @@ index_select_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if<std::is_same<data_t, float>::value, void>::type
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
@@ -459,7 +453,6 @@ index_select_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -486,9 +479,8 @@ index_select_add(const Tensor &select_indices,
             src_stride1,
             output_data + output_stride0 * add_indices_data[i],
             output_stride1);
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -500,7 +492,7 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -517,7 +509,6 @@ index_select_scale_add(
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
     bag_size_data = bag_size.data_ptr<index_t>();
@@ -548,19 +539,17 @@ index_select_scale_add(
       for (const auto j : c10::irange(ddim)) {
         output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
       }
-    } else if (bag_size.defined()) {
+    } else if (bag_size_data) {
       // Decrement bag_size to reflect that the index is padded
-      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
       bag_size_data[add_indices_data[i]]--;
     }
   }
 }
 
 template <typename data_t, typename index_t>
-typename std::enable_if<
-    std::is_same<data_t, at::Half>::value ||
-        std::is_same<data_t, at::BFloat16>::value,
-    void>::type
+std::enable_if_t<
+    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
+    void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -673,7 +662,7 @@ index_select_scale_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same_v<data_t, at::Half>) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -701,7 +690,6 @@ index_select_scale_add(
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<data_t>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -735,9 +723,8 @@ index_select_scale_add(
           output_base_fp32[j] += static_cast<float>(src_base[j * src_stride1]) *
               static_cast<float>(scale);
         }
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -752,7 +739,7 @@ index_select_scale_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if<std::is_same<data_t, float>::value, void>::type
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_scale_add(const Tensor &select_indices,
                                           const Tensor &add_indices,
                                           const Tensor &scale,
@@ -840,7 +827,6 @@ index_select_scale_add(const Tensor &select_indices,
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto* src_data = src.const_data_ptr<float>();
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
       bag_size_data = bag_size.data_ptr<index_t>();
@@ -869,9 +855,8 @@ index_select_scale_add(const Tensor &select_indices,
         for (const auto j : c10::irange(ddim)) {
           output_base[j * output_stride1] += src_base[j * src_stride1] * scale;
         }
-      } else if (bag_size.defined()) {
+      } else if (bag_size_data) {
         // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         bag_size_data[add_indices_data[i]]--;
       }
     }
@@ -1266,7 +1251,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
   }
   return out;
-};
+}
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,

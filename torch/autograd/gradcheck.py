@@ -12,6 +12,7 @@ from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
 
+
 # Note: `get_*_jacobian` functions are added here even though we didn't intend to make them public
 # since they have been exposed from before we added `__all__`  and we already maintain BC for them
 # We should eventually deprecate them and remove them from `__all__`
@@ -27,8 +28,6 @@ __all__ = [
 
 class GradcheckError(RuntimeError):
     r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
-
-    pass
 
 
 def _is_sparse_compressed_tensor(obj: torch.Tensor):
@@ -56,10 +55,11 @@ def _allocate_jacobians_with_inputs(
     # of `t.numel` and width of `numel_output`. Otherwise, for each tensor, returns
     # a 1-d tensor with size `(t.numel,)`. Each new tensor will be strided and have
     # the same dtype and device as those of the corresponding input.
-    out: List[torch.Tensor] = []
-    for t in input_tensors:
-        if _is_float_or_complex_tensor(t) and t.requires_grad:
-            out.append(t.new_zeros((t.numel(), numel_output), layout=torch.strided))
+    out: List[torch.Tensor] = [
+        t.new_zeros((t.numel(), numel_output), layout=torch.strided)
+        for t in input_tensors
+        if _is_float_or_complex_tensor(t) and t.requires_grad
+    ]
     return tuple(out)
 
 
@@ -70,11 +70,12 @@ def _allocate_jacobians_with_outputs(
     # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
     # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
     # (t.numel,).
-    out: List[torch.Tensor] = []
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
-    for t in output_tensors:
-        if _is_float_or_complex_tensor(t):
-            out.append(t.new_zeros((numel_input, t.numel()), **options))
+    out: List[torch.Tensor] = [
+        t.new_zeros((numel_input, t.numel()), **options)
+        for t in output_tensors
+        if _is_float_or_complex_tensor(t)
+    ]
     return tuple(out)
 
 
@@ -323,10 +324,11 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
-        input: input to `fn`
+        inputs: input to `fn`
         target: the Tensors wrt whom Jacobians are calculated (default=`input`)
         eps: the magnitude of the perturbation during finite differencing
              (default=`1e-3`)
+        grad_out: defaults to 1.0.
 
     Returns:
         A list of Jacobians of `fn` (restricted to its first output) with respect to
@@ -904,10 +906,10 @@ def _compute_analytical_jacobian_rows(
 def _get_analytical_vjps_wrt_specific_output(
     vjp_fn, sample_output, v
 ) -> List[List[Optional[torch.Tensor]]]:
-    vjps: List[List[Optional[torch.Tensor]]] = []
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
-    for vjp in grad_inputs:
-        vjps.append([vjp.clone() if isinstance(vjp, torch.Tensor) else None])
+    vjps: List[List[Optional[torch.Tensor]]] = [
+        [vjp.clone() if isinstance(vjp, torch.Tensor) else None] for vjp in grad_inputs
+    ]
     return vjps
 
 
@@ -1996,7 +1998,7 @@ def gradcheck(
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
        different indices pointing to the same memory address (e.g., from
-       :func:`torch.expand`), this check will likely fail because the numerical
+       :func:`torch.Tensor.expand`), this check will likely fail because the numerical
        gradients computed by point perturbation at such indices will change
        values at all other indices that share the same memory address.
 
@@ -2150,7 +2152,7 @@ def gradgradcheck(
     .. warning::
        If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
        overlapping memory, i.e., different indices pointing to the same memory
-       address (e.g., from :func:`torch.expand`), this check will likely fail
+       address (e.g., from :func:`torch.Tensor.expand`), this check will likely fail
        because the numerical gradients computed by point perturbation at such
        indices will change values at all other indices that share the same
        memory address.

@@ -287,7 +287,7 @@ class PythonArgument:
                     "::std::nullopt": "None",
                     "std::nullopt": "None",
                     "{}": "None",
-                    "MemoryFormat::Contiguous": "contiguous_format",
+                    "c10::MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
             return f"{name}: {type_str} = {default}"
@@ -551,9 +551,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),

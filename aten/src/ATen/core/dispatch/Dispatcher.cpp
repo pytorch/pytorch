@@ -1,10 +1,9 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <chrono>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <list>
-#include <sstream>
 #include <utility>
 
+#include <c10/util/env.h>
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
 #endif
@@ -17,8 +16,22 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+  static const auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
+
+  if (envar.has_value()) {
+    if (envar == "0") {
+      return false;
+    }
+    if (envar == "1") {
+      return true;
+    }
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar.value(),
+        " valid values are 0 or 1.");
+  }
+
+  return false;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
@@ -53,7 +66,13 @@ public:
 private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
+
+void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
+  auto nesting_value = dispatch_trace_nesting_value();
+  for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
+  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
 }
+} // namespace detail
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 

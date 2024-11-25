@@ -8,8 +8,8 @@
 #include <c10/util/irange.h>
 
 // FakeQuantize Op for PerChannelAffine quantization scheme.
-namespace at {
-namespace native {
+
+namespace at::native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_per_channel_cachemask_stub);
@@ -79,7 +79,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
 
-  std::vector<int64_t> expected_shape(self.dim(), 1);
+  c10::DimVector expected_shape(self.dim(), 1);
   expected_shape[axis] = self.size(axis);
 
   TensorIterator iter = TensorIteratorConfig()
@@ -214,18 +214,17 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
   auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  int numDimensions = X.ndimension();
+  auto numDimensions = X.ndimension();
 
   // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
   // into the same shapes as X along the channel axis.
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
+  c10::DimVector axis_mask(numDimensions);
   for (const auto i : c10::irange(numDimensions)) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
   }
   auto X_shape = X.sizes();
-  auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
-  auto zero_point_vectorized = zero_point_rounded.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
+  auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask.data(), numDimensions)).expand(X_shape);
+  auto zero_point_vectorized = zero_point_rounded.reshape(at::IntArrayRef(axis_mask.data(), numDimensions)).expand(X_shape);
 
   auto iter = TensorIteratorConfig()
     .add_output(dX)
@@ -244,8 +243,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  int64_t* axis_for_reduction = (int64_t*) calloc(numElements, sizeof(int64_t));
+  c10::DimVector axis_for_reduction(numElements);
   for (const auto i : c10::irange(axis)) {
     axis_for_reduction[i] = i;
   }
@@ -253,14 +251,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
     axis_for_reduction[i] = i + 1;
   }
 
-  auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
-  auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
+  auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
+  auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  free(axis_mask);
-  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  free(axis_for_reduction);
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

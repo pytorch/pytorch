@@ -7,7 +7,9 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.replicate import replicate
+from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -16,7 +18,7 @@ from torch.testing._internal.common_utils import run_tests
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(2, 2)
         self.fc2 = nn.Linear(2, 2)
@@ -154,7 +156,7 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.a = nn.Linear(2, 2)
 
@@ -250,6 +252,42 @@ class ReplicateTest(MultiProcessTestCase):
             RuntimeError, "Expected device_id to be int or torch.device"
         ):
             replicate(model, device_id=[torch.device("cpu")])
+
+
+class ReplicateFullyShardInit(ReplicateTest):
+    @skip_if_lt_x_gpu(2)
+    def test_replicate_fully_shard_init(self):
+        class ToyModel(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.linears = nn.Sequential(
+                    nn.Linear(dim, dim, bias=False),
+                    nn.Linear(dim, dim, bias=False),
+                    nn.Linear(dim, dim, bias=False),
+                )
+                self.proj = nn.Linear(dim, dim, bias=False)
+
+            def forward(self, x: torch.Tensor):
+                y = self.linears(x)
+                y = self.proj(y)
+                return y
+
+        self._init_pg()
+        torch.cuda.set_device(self.rank)
+        dim = 3
+        bz = 2
+        model = ToyModel(dim).cuda()
+        for linear in model.linears:
+            fully_shard(linear)
+        fully_shard(model.linears)
+        replicate(model, device_id=torch.cuda.current_device())
+        for linear in model.linears:
+            self.assertTrue(isinstance(linear.weight, DTensor))
+        inp = torch.rand(bz, dim)
+        # trigger lazy init
+        model(inp).sum()
+        for linear in model.linears:
+            self.assertTrue(isinstance(linear.weight, DTensor))
 
 
 if __name__ == "__main__":

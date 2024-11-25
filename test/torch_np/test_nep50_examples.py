@@ -5,6 +5,7 @@
 import itertools
 from unittest import skipIf as skipif, SkipTest
 
+
 try:
     import numpy as _np
 
@@ -16,19 +17,18 @@ except ImportError:
 import torch._numpy as tnp
 from torch._numpy import (  # noqa: F401
     array,
-    bool_,  # noqa: F401
+    bool_,
     complex128,
     complex64,
     float32,
     float64,
     inf,
     int16,
-    int32,  # noqa: F401
+    int32,
     int64,
     uint8,
 )
 from torch._numpy.testing import assert_allclose
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -46,6 +46,7 @@ uint16 = uint8  # can be anything here, see below
 # np._set_promotion_state('weak')
 
 from pytest import raises as assert_raises
+
 
 unchanged = None
 

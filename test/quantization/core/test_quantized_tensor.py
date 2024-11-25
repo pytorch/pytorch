@@ -21,7 +21,7 @@ import itertools
 import tempfile
 
 class Foo(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
@@ -1348,8 +1348,8 @@ class TestQuantizedTensor(TestCase):
         torch.save(f, buf)
 
         buf.seek(0)
-        # Don't test weights_only here as this is loading a Module (legacy)
-        f2 = torch.load(buf)
+        # weights_only=False as this is legacy code that saves the model
+        f2 = torch.load(buf, weights_only=False)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
@@ -1414,7 +1414,7 @@ class TestQuantizedTensor(TestCase):
             class M(torch.jit.ScriptModule):
                 __constants__ = ['fname']
 
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
                     self.fname = fname
 
@@ -1452,7 +1452,7 @@ class TestQuantizedTensor(TestCase):
                     s = torch.rand(5, dtype=torch.float64) + 0.1
                     zp = torch.randint(5, 15, (5,))
                     x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
-                self.register_buffer('x', x_q)
+                self.x = torch.nn.Buffer(x_q)
 
             @torch.jit.script_method
             def forward(self):

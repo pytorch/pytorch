@@ -34,6 +34,8 @@ class DeviceGuard {
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
 
+  ~DeviceGuard() = default;
+
   /// Copy is disallowed
   DeviceGuard(const DeviceGuard&) = delete;
   DeviceGuard& operator=(const DeviceGuard&) = delete;
@@ -135,7 +137,7 @@ class OptionalDeviceGuard {
 
   /// Initialize the guard if a Device is passed; otherwise leave the
   /// guard uninitialized.
-  explicit OptionalDeviceGuard(optional<Device> device) : guard_(device) {}
+  explicit OptionalDeviceGuard(std::optional<Device> device) : guard_(device) {}
 
   /// Constructor for testing only.
   explicit OptionalDeviceGuard(
@@ -143,6 +145,7 @@ class OptionalDeviceGuard {
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
 
+  ~OptionalDeviceGuard() = default;
   /// Copy is disallowed
   OptionalDeviceGuard(const OptionalDeviceGuard&) = delete;
   OptionalDeviceGuard& operator=(const OptionalDeviceGuard&) = delete;

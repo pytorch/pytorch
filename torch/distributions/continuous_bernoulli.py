@@ -13,6 +13,8 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _size
+
 
 __all__ = ["ContinuousBernoulli"]
 
@@ -166,7 +168,7 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)

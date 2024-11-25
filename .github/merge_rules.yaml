@@ -86,6 +86,18 @@
   - pull
   - inductor
 
+- name: OSS CI / pytorchbot / slow tests
+  patterns:
+  - test/slow_tests.json
+  approved_by:
+  - pytorchbot
+  ignore_flaky_failures: false
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+  - slow
+
 - name: OSS CI /pytorchbot / Executorch
   patterns:
   - .ci/docker/ci_commit_pins/executorch.txt
@@ -107,8 +119,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-focal-py3_8-clang9-xla / build
-  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-focal-py3_9-clang9-xla / build
+  - pull / linux-focal-py3_9-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -282,9 +294,11 @@
   - torch/_C/_distributed*
   - torch/csrc/distributed/**
   - torch/testing/_internal/distributed/**
+  - torch/multiprocessing/**
   - test/distributed/**
   - test/cpp/dist_autograd/**
   - test/cpp/rpc/**
+  - test/*multiprocessing*
   approved_by:
   - wconstab
   - mrshenli
@@ -315,6 +329,7 @@
 
 - name: DCP
   patterns:
+  - docs/source/distributed.checkpoint.rst
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC
@@ -523,6 +538,14 @@
   - Skylion007
   - ngimel
   - peterbell10
+  - eqy
+  - jansel
+  - jeffdaily
+  - eellison
+  - anijain2305
+  - bdhirsh
+  - zou3519
+  - isuruf
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -537,6 +560,8 @@
   - ezyang
   - dzhulgakov
   - malfet
+  - albanD
+  - ptrblck
   mandatory_checks_name:
   - EasyCLA
   - Lint

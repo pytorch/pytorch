@@ -15,9 +15,7 @@ REPO_DIR = SCRIPT_DIR.parent.parent
 
 def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
-    if device == "rocm":
-        triton_file = "triton-rocm.txt"
-    elif device == "xpu":
+    if device == "xpu":
         triton_file = "triton-xpu.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
@@ -64,13 +62,6 @@ def build_triton(
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
 
-    version_suffix = ""
-    if not release:
-        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
-        # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
-        version += version_suffix
-
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
@@ -105,8 +96,8 @@ def build_triton(
                     file=meta,
                 )
                 print(
-                    "requirements:\n  host:\n    - python\n    - setuptools\n  run:\n    - python\n"
-                    "    - filelock\n    - pytorch\n",
+                    "requirements:\n  host:\n    - python\n    - setuptools\n    - pybind11\n"
+                    "  run:\n    - python\n    - filelock\n    - pytorch\n",
                     file=meta,
                 )
                 print(
@@ -142,7 +133,8 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
+        if device == "cuda":
+            env["TRITON_BUILD_WITH_CLANG_LLD"] = "1"
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",

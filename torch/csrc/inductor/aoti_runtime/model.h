@@ -8,6 +8,7 @@
 #include <regex>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
@@ -32,7 +33,9 @@
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
 // The constants are NOT readonly because they may be mutated.
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_start[];
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
@@ -54,8 +57,15 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 
 } // anonymous namespace
 
-namespace torch {
-namespace aot_inductor {
+namespace torch::aot_inductor {
+enum ConstantType : uint8_t {
+  Unknown = 0,
+  Parameter = 1,
+  Buffer = 2,
+  TensorConstant = 3,
+  FoldedConstant = 4,
+};
+
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
@@ -101,16 +111,20 @@ class AOTInductorModelBase {
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(cubin_dir) {
+        cubin_dir_(std::move(cubin_dir)) {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+    } else {
+      // If device_idx_ is passed in, we need to set the current device to it
+      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
@@ -226,7 +240,7 @@ class AOTInductorModelBase {
       auto opaque_metadata_ptr = this->opaque_metadata(i);
       auto opaque_metadata_size = this->opaque_metadata_size(i);
 
-      AtenTensorHandle tensor_handle;
+      AtenTensorHandle tensor_handle = nullptr;
 #ifdef AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
       // When opaque_metadata_size is not 0, we need to have the
       // aoti_torch_create_tensor_from_blob_v2 available
@@ -275,7 +289,7 @@ class AOTInductorModelBase {
     return constants_;
   }
 
-  const int32_t get_device_idx() const {
+  int32_t get_device_idx() const {
     return device_idx_;
   }
 
@@ -392,6 +406,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).from_folded;
   }
 
+  int32_t constant_type(int64_t idx) const {
+    return constants_info_.at(idx).type;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
@@ -473,6 +491,7 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+    // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
 #else
     if (self_mmap) {
@@ -518,14 +537,15 @@ class AOTInductorModelBase {
     const char* name = nullptr;
     std::vector<int64_t> shape;
     std::vector<int64_t> stride;
-    int32_t dtype;
-    int64_t offset;
-    size_t data_size;
-    int32_t layout;
+    int32_t dtype{};
+    int64_t offset{};
+    size_t data_size{};
+    int32_t layout{};
     std::vector<uint8_t> opaque_metadata;
-    int64_t opaque_metadata_size;
+    int64_t opaque_metadata_size{};
     const char* original_fqn = nullptr;
-    bool from_folded;
+    bool from_folded{};
+    int32_t type{};
   };
 
   std::vector<ParamInfo> inputs_info_;
@@ -553,12 +573,12 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
   std::optional<cudaEvent_t> run_finished_;
 #else // !USE_CUDA
-  bool run_finished_;
+  bool run_finished_{};
 #endif
 
   // Generated model uses this device index to create CUDA guards.
-  int32_t device_type_;
-  int32_t device_idx_;
+  int32_t device_type_{};
+  int32_t device_idx_{};
 };
 
 // Codegen-ed classes can derive from this to keep pointers to loaded kernels.
@@ -611,12 +631,11 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
         std::move(constants_map),
         std::move(constants_array),
         device_str,
-        cubin_dir);
+        std::move(cubin_dir));
   }
 
  private:
   std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
 };
 
-} // namespace aot_inductor
-} // namespace torch
+} // namespace torch::aot_inductor

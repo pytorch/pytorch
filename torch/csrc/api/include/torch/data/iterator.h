@@ -11,8 +11,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 namespace detail {
 // For increased safety and more separated logic, this implementation of
 // `Iterator` consists of a `ValidIterator` and a `SentinelIterator`. A
@@ -41,7 +40,7 @@ struct IteratorImpl {
 
 template <typename Batch>
 struct ValidIterator : public IteratorImpl<Batch> {
-  using BatchProducer = std::function<optional<Batch>()>;
+  using BatchProducer = std::function<std::optional<Batch>()>;
 
   explicit ValidIterator(BatchProducer next_batch)
       : next_batch_(std::move(next_batch)) {}
@@ -101,12 +100,14 @@ struct ValidIterator : public IteratorImpl<Batch> {
 template <typename Batch>
 struct SentinelIterator : public IteratorImpl<Batch> {
   void next() override {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Incrementing the DataLoader's past-the-end iterator is not allowed");
   }
 
   Batch& get() override {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Dereferencing the DataLoader's past-the-end iterator is not allowed");
   }
 
@@ -174,5 +175,4 @@ class Iterator {
   /// Points either to a `ValidIterator` or to a `SentinelIterator`.
   std::shared_ptr<detail::IteratorImpl<Batch>> impl_;
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

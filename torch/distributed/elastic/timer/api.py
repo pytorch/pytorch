@@ -67,7 +67,6 @@ class TimerClient(abc.ABC):
         given the scope_id and expiration_time. Typically registers
         the timer with the TimerServer.
         """
-        pass
 
     @abc.abstractmethod
     def release(self, scope_id: str):
@@ -76,7 +75,6 @@ class TimerClient(abc.ABC):
         client represents. After this method is
         called, the countdown timer on the scope is no longer in effect.
         """
-        pass
 
 
 class RequestQueue(abc.ABC):
@@ -103,7 +101,6 @@ class RequestQueue(abc.ABC):
         res = q.get(size * 2, timeout=1)
         assert size <= len(res) <= size * 2
         """
-        pass
 
     @abc.abstractmethod
     def get(self, size: int, timeout: float) -> List[TimerRequest]:
@@ -111,7 +108,6 @@ class RequestQueue(abc.ABC):
         Gets up to ``size`` number of timer requests in a blocking fashion
         (no more than ``timeout`` seconds).
         """
-        pass
 
 
 class TimerServer(abc.ABC):
@@ -145,14 +141,12 @@ class TimerServer(abc.ABC):
         Timer requests with a negative expiration_time should be interpreted
         as a release-timer request.
         """
-        pass
 
     @abc.abstractmethod
     def clear_timers(self, worker_ids: Set[Any]) -> None:
         """
         Clears all timers for the given ``worker_ids``.
         """
-        pass
 
     @abc.abstractmethod
     def get_expired_timers(self, deadline: float) -> Dict[str, List[TimerRequest]]:
@@ -161,7 +155,6 @@ class TimerServer(abc.ABC):
         is a timer for which the expiration_time is less than or equal to
         the provided deadline.
         """
-        pass
 
     @abc.abstractmethod
     def _reap_worker(self, worker_id: Any) -> bool:

@@ -10,6 +10,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
+from torch.types import _size
 
 
 __all__ = ["Wishart"]
@@ -235,7 +236,9 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
+    def rsample(
+        self, sample_shape: _size = torch.Size(), max_try_correction=None
+    ) -> torch.Tensor:
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.
@@ -309,7 +312,6 @@ class Wishart(ExponentialFamily):
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1)
             * (

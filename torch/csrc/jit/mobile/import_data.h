@@ -9,8 +9,7 @@
 #include <map>
 #include <string>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /**
  * Loads named parameters from the serialized data in @p in.
@@ -34,5 +33,4 @@ TORCH_API std::map<std::string, at::Tensor> _load_parameters(
 TORCH_API std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
     const mobile::Module& module);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

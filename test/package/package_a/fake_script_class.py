@@ -22,7 +22,7 @@ def uses_script_class(x):
 
 
 class IdListFeature:
-    def __init__(self):
+    def __init__(self) -> None:
         self.id_list = torch.ones(1, 1)
 
     def returns_self(self) -> "IdListFeature":

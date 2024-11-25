@@ -47,7 +47,7 @@ def contract(state_cls: Type[_State] = _State):
         >>> import torch.nn as nn
         >>>
         >>> class MyModel(nn.Module):
-        >>>     def __init__(self):
+        >>>     def __init__(self) -> None:
         >>>         super().__init__()
         >>>         self.l1 = nn.Linear(10, 10)
         >>>         self.l2 = nn.Linear(10, 10)
@@ -128,7 +128,7 @@ def contract(state_cls: Type[_State] = _State):
             if isinstance(updated, nn.Module):
                 updated_modules = [updated]
             else:
-                updated_modules = _get_root_modules(list(inp_module))
+                updated_modules = _get_root_modules(list(inp_module))  # type: ignore[arg-type]
 
             all_new_named_params: List[Dict[str, nn.Parameter]] = []
             all_new_named_buffers: List[Dict[str, torch.Tensor]] = []

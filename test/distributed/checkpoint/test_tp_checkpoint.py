@@ -97,11 +97,14 @@ class TestTpCheckpoint(DTensorTestBase):
         model = UnevenShardedModel(self.device_type).cuda(self.rank)
         # Parallelize the module based on the given Parallel Style.
         parallelize_plan = {
-            "net1": RowwiseParallel(),
-            "net2": ColwiseParallel(),
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+            "net3": ColwiseParallel(),
         }
         model = parallelize_module(model, tp_mesh, parallelize_plan=parallelize_plan)
-        original_state_dict = deepcopy(model.state_dict())
+        original_state_dict = {
+            "model": model.state_dict(),
+        }
 
         dcp.save(
             state_dict=original_state_dict,
@@ -111,20 +114,37 @@ class TestTpCheckpoint(DTensorTestBase):
         model2 = parallelize_module(
             UnevenShardedModel("meta"), tp_mesh, parallelize_plan=parallelize_plan
         )
-        state_dict_to_load = model2.state_dict()
+        model2_sd_before_load = model2.state_dict()
+        state_dict_to_load = {"model": model2_sd_before_load}
 
         dcp.load(
             state_dict=state_dict_to_load,
             storage_reader=dcp.FileSystemReader(CHECKPOINT_DIR),
         )
-        model2.load_state_dict(state_dict_to_load, assign=True)
-        state_dict_after_load = model2.state_dict()
+        # We need to make sure state_dict_to_load["model"] is the same as state_dict_after_load["model"],
+        # since we are doing in-place loading.
+        self.assertTrue(state_dict_to_load["model"] is model2_sd_before_load)
 
-        # After loading, check whether params in state_dict_after_load are equal to original_state_dict.
-        for param1, param2 in zip(
-            original_state_dict.values(), state_dict_after_load.values()
-        ):
-            self.assertEqual(param1, param2)
+        model2.load_state_dict(state_dict_to_load["model"], assign=True)
+        state_dict_after_load = {"model": model2.state_dict()}
+
+        self.assertEqual(
+            len(original_state_dict["model"]), len(state_dict_to_load["model"])
+        )
+        self.assertEqual(
+            len(original_state_dict["model"]), len(state_dict_after_load["model"])
+        )
+
+        for name, param in original_state_dict["model"].items():
+            param_to_load = state_dict_to_load["model"][name]
+            param_after_load = state_dict_after_load["model"][name]
+
+            # we need to explicitly check the device is not meta as the assertEqual check
+            # currently doesn't handle DTensor with meta device.
+            self.assertTrue(not param_to_load.is_meta)
+            self.assertTrue(not param_after_load.is_meta)
+            self.assertEqual(param.to_local(), param_to_load.to_local())
+            self.assertEqual(param.to_local(), param_after_load.to_local())
 
 
 if __name__ == "__main__":

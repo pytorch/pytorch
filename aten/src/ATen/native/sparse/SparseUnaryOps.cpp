@@ -167,42 +167,42 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
     });                                                                 \
   }
 
-COALESCED_UNARY_UFUNC(abs);
-COALESCED_UNARY_UFUNC(asin);
-COALESCED_UNARY_UFUNC(asinh);
-COALESCED_UNARY_UFUNC(atan);
-COALESCED_UNARY_UFUNC(atanh);
-COALESCED_UNARY_UFUNC(ceil);
-COALESCED_UNARY_UFUNC(deg2rad);
-COALESCED_UNARY_UFUNC(erf);
-COALESCED_UNARY_UFUNC(erfinv);
-COALESCED_UNARY_UFUNC(expm1);
-COALESCED_UNARY_UFUNC(floor);
-COALESCED_UNARY_UFUNC(frac);
-COALESCED_UNARY_UFUNC(log1p);
-COALESCED_UNARY_UFUNC(round);
-COALESCED_UNARY_UFUNC(rad2deg);
-COALESCED_UNARY_UFUNC(sign);
-COALESCED_UNARY_UFUNC(sgn);
-COALESCED_UNARY_UFUNC(sin);
-COALESCED_UNARY_UFUNC(sinh);
-COALESCED_UNARY_UFUNC(sqrt);
-COALESCED_UNARY_UFUNC(tan);
-COALESCED_UNARY_UFUNC(tanh);
-COALESCED_UNARY_UFUNC(trunc);
+COALESCED_UNARY_UFUNC(abs)
+COALESCED_UNARY_UFUNC(asin)
+COALESCED_UNARY_UFUNC(asinh)
+COALESCED_UNARY_UFUNC(atan)
+COALESCED_UNARY_UFUNC(atanh)
+COALESCED_UNARY_UFUNC(ceil)
+COALESCED_UNARY_UFUNC(deg2rad)
+COALESCED_UNARY_UFUNC(erf)
+COALESCED_UNARY_UFUNC(erfinv)
+COALESCED_UNARY_UFUNC(expm1)
+COALESCED_UNARY_UFUNC(floor)
+COALESCED_UNARY_UFUNC(frac)
+COALESCED_UNARY_UFUNC(log1p)
+COALESCED_UNARY_UFUNC(round)
+COALESCED_UNARY_UFUNC(rad2deg)
+COALESCED_UNARY_UFUNC(sign)
+COALESCED_UNARY_UFUNC(sgn)
+COALESCED_UNARY_UFUNC(sin)
+COALESCED_UNARY_UFUNC(sinh)
+COALESCED_UNARY_UFUNC(sqrt)
+COALESCED_UNARY_UFUNC(tan)
+COALESCED_UNARY_UFUNC(tanh)
+COALESCED_UNARY_UFUNC(trunc)
 // relu function has no declaration, it may be unused in Pytorch.
 // But we keep it and ignore the warning here until verified in the future.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
-COALESCED_UNARY_UFUNC(relu);
+COALESCED_UNARY_UFUNC(relu)
 #pragma clang diagnostic pop
 
-COALESCED_UNARY_UFUNC_NO_INPLACE(signbit);
-COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf);
-COALESCED_UNARY_UFUNC_NO_INPLACE(isposinf);
+COALESCED_UNARY_UFUNC_NO_INPLACE(signbit)
+COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf)
+COALESCED_UNARY_UFUNC_NO_INPLACE(isposinf)
 
-COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan);
-COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf);
+COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan)
+COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 Tensor isinf_sparse_meta(const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(0, "nyi isinf for SparseMeta");
@@ -280,25 +280,6 @@ Tensor& nan_to_num_sparse_(
     std::optional<double> posinf, std::optional<double> neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
-}
-
-bool is_pinned_sparse(const Tensor& self, std::optional<c10::Device> device) {
-  if (device.has_value()) {
-    TORCH_WARN_DEPRECATION(
-        "The argument 'device' of Tensor.is_pinned() ",
-        "is deprecated. Please do not pass this argument.")
-  }
-  // Currently, we don't support pin memory for sparse tensor.
-  // so always return false
-  return false;
-}
-
-Tensor _pin_memory_sparse(const Tensor& self, std::optional<c10::Device> device) {
-  // Here, we throw an error rather than return self tensor. This
-  // is because we always return the pinned memory tensor, while
-  // giving unpinned tensor might mislead users.
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false, "'aten::_pin_memory' is not implemented for sparse tensor.");
 }
 
 }  // namespace at::native

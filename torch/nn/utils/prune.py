@@ -49,7 +49,6 @@ class BasePruningMethod(ABC):
         Returns:
             mask (torch.Tensor): mask to apply to ``t``, of same dims as ``t``
         """
-        pass
 
     def apply_mask(self, module):
         r"""Simply handles the multiplication between the parameter being pruned and the generated mask.

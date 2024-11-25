@@ -15,9 +15,7 @@ static std::vector<VarHandle> squeezeIndices(
   return indices_squeezed;
 }
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
@@ -148,7 +146,6 @@ Tensor computeMax(
   }
   BufHandle ResultBuf("max", outputShape, dtype);
   BufHandle InputBuf = std::get<BufHandle>(inputs[0]);
-  std::vector<ExprHandle> max_dims_expr;
   auto max_dim = std::get<int64_t>(inputs[1]);
   auto keep_dim = std::get<bool>(inputs[2]);
   return Tensor(
@@ -182,6 +179,4 @@ Tensor computeAdaptiveAvgPool2d(
           c10::fmap<ExprHandle>(out_size_param)));
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

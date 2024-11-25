@@ -77,7 +77,7 @@ struct Sections {
     return is_64bit ? data.read<uint64_t>() : data.read<uint32_t>();
   }
 
-  unwind::optional<uint64_t> findDebugInfoOffset(uint64_t address) {
+  std::optional<uint64_t> findDebugInfoOffset(uint64_t address) {
     return debug_info_offsets_.find(address);
   }
   size_t compilationUnitCount() {

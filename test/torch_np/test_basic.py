@@ -8,12 +8,10 @@ import numpy as _np
 from pytest import raises as assert_raises
 
 import torch
-
 import torch._numpy as w
 import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from torch._numpy.testing import assert_allclose, assert_equal
-
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -563,14 +561,19 @@ class TestDefaultDtype(TestCase):
 @skip(_np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23")
 class TestExport(TestCase):
     def test_exported_objects(self):
-        exported_fns = (
+        exported_fns = {
             x
             for x in dir(w)
             if inspect.isfunction(getattr(w, x))
             and not x.startswith("_")
             and x != "set_default_dtype"
-        )
-        diff = set(exported_fns).difference(set(dir(_np)))
+        }
+        if _np.__version__ > "2":
+            # The following methods are removed in NumPy 2.
+            # See https://numpy.org/devdocs/numpy_2_0_migration_guide.html#main-namespace
+            exported_fns -= {"product", "round_", "sometrue", "cumproduct", "alltrue"}
+
+        diff = exported_fns.difference(set(dir(_np)))
         assert len(diff) == 0, str(diff)
 
 

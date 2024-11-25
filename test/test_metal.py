@@ -63,7 +63,7 @@ class TestMetalRewritePass(TestCase):
         conv_bias_shape = (output_channels)
 
         class Conv2D(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
@@ -83,7 +83,7 @@ class TestMetalRewritePass(TestCase):
         TestMetalRewritePass.validate_transformed_module(Conv2D(), pattern_count_map, data_shape)
 
         class Conv2DRelu(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
@@ -122,7 +122,7 @@ class TestMetalRewritePass(TestCase):
 
 
         class Conv2DHardtanh(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
                 self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)

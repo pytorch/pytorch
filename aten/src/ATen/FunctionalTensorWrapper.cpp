@@ -281,7 +281,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   set_sizes_and_strides(sizes_, strides_, storage_offset_);
 }
 
-void FunctionalTensorWrapper::storage_resize_(c10::SymInt new_size) {
+void FunctionalTensorWrapper::storage_resize_(const c10::SymInt& new_size) {
   auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
   // storage resizing is severely limited: we only support resizing either to zero, or from zero bytes.
   TORCH_CHECK(new_size == 0 || curr_storage_size == 0, "new_size: ", new_size, ". curr_storage_size: ", curr_storage_size);
@@ -638,7 +638,7 @@ void replace_(const ITensorListRef functional_tensor, ITensorListRef other) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
+  for ([[maybe_unused]] const auto i : c10::irange(functional_tensor.size())) {
     replace_(*functional_tensor_it++, *other_it++);
   }
 }
@@ -655,8 +655,23 @@ void propagate_xla_data(const ITensorListRef functional_tensor, ITensorListRef o
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_tensor.size() == other.size());
   auto functional_tensor_it = functional_tensor.begin();
   auto other_it = other.begin();
-  for (C10_UNUSED const auto i : c10::irange(functional_tensor.size())) {
+  for ([[maybe_unused]] const auto i : c10::irange(functional_tensor.size())) {
     propagate_xla_data(*functional_tensor_it++, *other_it++);
+  }
+}
+
+void propagate_xla_data_direct(const Tensor& tensor, const Tensor& other) {
+  if (tensor.key_set().has(c10::DispatchKey::XLA)) {
+    at::_propagate_xla_data(tensor, other);
+  }
+ }
+
+void propagate_xla_data_direct(const ITensorListRef tensor,
+                               ITensorListRef other) {
+  auto tensor_it = tensor.begin();
+  auto other_it = other.begin();
+  for ([[maybe_unused]] const auto i : c10::irange(tensor.size())) {
+    propagate_xla_data_direct(*tensor_it++, *other_it++);
   }
 }
 
@@ -692,7 +707,12 @@ bool are_all_mutations_under_no_grad_or_inference_mode(const Tensor& functional_
 }
 
 bool isFunctionalTensor(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
+bool isBaseTensor(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isFunctionalTensor(tensor));
+  return unsafeGetFunctionalWrapper(tensor)->isBaseTensor();
 }
 
 bool isFunctionalTensor(const std::optional<Tensor>& t) {
@@ -707,8 +727,9 @@ bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
-    if (!t_list[i].has_value() || !t_list[i]->defined()) continue;
-    if (isFunctionalTensor(t_list[i])) {
+    auto const & e= t_list[i];
+    if (!e.has_value() || !e->defined()) continue;
+    if (isFunctionalTensor(e)) {
       ++functional_count;
     }
   }
