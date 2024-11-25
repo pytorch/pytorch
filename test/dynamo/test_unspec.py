@@ -659,7 +659,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
             cnt = CompileCounterWithBackend("aot_eager")
             fn_opt = torch._dynamo.optimize(cnt)(fn)
-            x = torch.tensor(9.734375, dtype=dtype, requires_grad=True)
+            x = torch.randn(5, dtype=dtype, requires_grad=True)
             y1 = 1.00048828125
             y2 = 1.00048828126
 
