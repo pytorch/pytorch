@@ -135,6 +135,8 @@ class WorkspaceArg:
     def get_device(self):
         return self.device
 
+    get_device_or_error = get_device
+
     def get_dtype(self):
         return self.dtype
 
@@ -151,6 +153,10 @@ class WorkspaceArg:
     @property
     def layout(self):
         return self.get_layout()
+
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
 
     def get_size(self):
         return [self.count]
@@ -302,7 +308,9 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(device: Union[torch.device, str, None]):
+    if device is None:
+        return {}
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -1811,8 +1819,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, torch._prims_common.Number):
             return inp
         else:
-            assert hasattr(inp, "dtype")
-
             # construct a tmp tensor to use dtype promotion util function
             return torch.empty([1], dtype=inp.dtype)
 

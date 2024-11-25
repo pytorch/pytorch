@@ -401,13 +401,12 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             # ensure we get the same number of returns for each invocation
             assert all(len(o) == num_returns for o in out_ref_components)
             # construct NJTs from same index returns from each invocation
-            njt_returns = []
-            for r in range(num_returns):
-                njt_returns.append(
-                    torch.nested.as_nested_tensor(
-                        [o[r] for o in out_ref_components], layout=torch.jagged
-                    )
+            njt_returns = [
+                torch.nested.as_nested_tensor(
+                    [o[r] for o in out_ref_components], layout=torch.jagged
                 )
+                for r in range(num_returns)
+            ]
             return type(out_ref_components[0])(njt_returns)
         return torch.nested.as_nested_tensor(out_ref_components, layout=torch.jagged)
 
@@ -484,11 +483,10 @@ def reduction_reference(op, sample):
             # ensure we get the same number of returns for each invocation
             assert all(len(o) == num_returns for o in out_ref_components)
             # stack same index returns from each invocation
-            stacked_returns = []
-            for r in range(num_returns):
-                stacked_returns.append(
-                    torch.stack([o[r] for o in out_ref_components], dim=0)
-                )
+            stacked_returns = [
+                torch.stack([o[r] for o in out_ref_components], dim=0)
+                for r in range(num_returns)
+            ]
             return type(out_ref_components[0])(stacked_returns)
         return torch.stack(out_ref_components, dim=0)
 

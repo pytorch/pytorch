@@ -24,7 +24,7 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_impls import (
     _deregister_op_impl,
     _is_op_registered_to_fake_rule,
@@ -381,7 +381,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
-        fake_args = []
+        retracing_args = []
         for node in mod.graph.nodes:
             if node.op == "placeholder":
                 if isinstance(node.meta["val"], CustomObjArgument):
@@ -390,11 +390,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         real_script_obj = ep.constants[node.meta["val"].name]
                     else:
                         real_script_obj = node.meta["val"].fake_val.real_obj
-                    fake_args.append(maybe_to_fake_obj(fake_mode, real_script_obj))
+                    retracing_args.append(real_script_obj)
                 else:
-                    fake_args.append(node.meta["val"])
+                    retracing_args.append(node.meta["val"])
 
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        retracing_args_unwrapped = pytree.tree_unflatten(retracing_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
@@ -417,33 +417,56 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the exported module will store constants & non-persistent buffers such that
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
-        constant_attrs = _collect_and_set_constant_attrs(
-            ep.graph_signature, ep.constants, mod
-        )
+        _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
         params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
-        with _ignore_backend_decomps(), (
+        # TODO (tmanlaibaatar) Ideally run_decomp should just call _non_strict_export
+        # but due to special handling of constants as non-persistent buffers make it little
+        # diffucult. But we should unify this code path together. T206837815
+        from torch._export.non_strict_utils import _fakify_script_objects
+
+        with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
         ):
-            aten_export_artifact = _export_to_aten_ir(
+            # this requires empty kwargs, but not in pytree.flattened format
+            with _fakify_script_objects(
                 mod,
-                # this requires empty kwargs, but not in pytree.flattened format
                 (
-                    *fake_args_unwrapped[0],
-                    *fake_args_unwrapped[1].values(),
+                    *retracing_args_unwrapped[0],
+                    *retracing_args_unwrapped[1].values(),
                 ),
                 {},
-                fake_params_buffers,
-                constant_attrs,
-                decomp_table=python_decomp_table,
-                _check_autograd_state=False,
-            )
+                fake_mode,
+            ) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ):
+                aten_export_artifact = _export_to_aten_ir(
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    new_fake_constant_attrs,
+                    decomp_table=python_decomp_table,
+                    _check_autograd_state=False,
+                )
+
+                # aten_export_artifact.constants contains only fake script objects, we need to map them back
+                aten_export_artifact.constants = {
+                    fqn: map_fake_to_real[obj]
+                    if isinstance(obj, FakeScriptObject)
+                    else obj
+                    for fqn, obj in aten_export_artifact.constants.items()
+                }
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -571,7 +594,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     output_specs = [
         OutputSpec(
-            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
+            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )
