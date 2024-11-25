@@ -2157,7 +2157,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_differentiable_logsumexp_gradcheck(self):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -2310,7 +2310,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     ):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -3081,6 +3081,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
 
         attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
+    @supported_platform
+    def test_non_divisible_with_captured_buffer(self):
+        Q_S = S + 3
+        KV_S = S + 3
+
+        multiplier = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+
+        def apply_multiplicative_bias(score, b, h, q_idx, kv_idx):
+            return score * multiplier[q_idx]
+
+        attention = functools.partial(
+            flex_attention, score_mod=apply_multiplicative_bias
+        )
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
 
