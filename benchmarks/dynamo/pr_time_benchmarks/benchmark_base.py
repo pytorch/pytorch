@@ -1,5 +1,7 @@
 import csv
 import gc
+import json
+import os
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -65,6 +67,22 @@ class BenchmarkBase(ABC):
     # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
     _num_iterations = 5
 
+    def __init__(
+        self,
+        category: str,
+        device: str,
+        backend: str = "",
+        mode: str = "",
+        dynamic=None,
+    ):
+        # These individual attributes are used to support different filters on the
+        # dashboard later
+        self._category = category
+        self._device = device
+        self._backend = backend
+        self._mode = mode  # Training or inference
+        self._dynamic = dynamic
+
     def with_iterations(self, value):
         self._num_iterations = value
         return self
@@ -79,6 +97,21 @@ class BenchmarkBase(ABC):
 
     def name(self):
         return ""
+
+    def backend(self):
+        return self._backend
+
+    def mode(self):
+        return self._mode
+
+    def category(self):
+        return self._category
+
+    def device(self):
+        return self._device
+
+    def is_dynamic(self):
+        return self._dynamic
 
     def description(self):
         return ""
@@ -134,6 +167,46 @@ class BenchmarkBase(ABC):
         finally:
             gc.enable()
 
+    def _write_to_json(self, output_dir: str):
+        """
+        Write the result into JSON format, so that it can be uploaded to the benchmark database
+        to be displayed on OSS dashboard. The JSON format is defined at
+        https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+        """
+        records = []
+        for entry in self.results:
+            metric_name = entry[1]
+            value = entry[2]
+
+            if not metric_name or value is None:
+                continue
+
+            records.append(
+                {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "mode": self.mode(),
+                        "extra_info": {
+                            "is_dynamic": self.is_dynamic(),
+                            "device": self.device(),
+                            "description": self.description(),
+                        },
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": self.category(),
+                        "backend": self.backend(),
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
+                }
+            )
+
+        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
+            json.dump(records, f)
+
     def append_results(self, path):
         with open(path, "a", newline="") as csvfile:
             # Create a writer object
@@ -141,6 +214,10 @@ class BenchmarkBase(ABC):
             # Write the data to the CSV file
             for entry in self.results:
                 writer.writerow(entry)
+
+        # TODO (huydhn) This requires the path to write to, so it needs to be in the same place
+        # as the CSV writer for now
+        self._write_to_json(os.path.dirname(os.path.abspath(path)))
 
     def print(self):
         for entry in self.results:
