@@ -47,6 +47,7 @@ from torch._dynamo.utils import (
     flatten_graph_inputs,
     get_chromium_event_logger,
     lazy_format_graph_code,
+    set_feature_use,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -747,6 +748,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -764,6 +766,7 @@ def _compile_fx_inner(
                 remote=fx_graph_remote_cache,
             )
         else:
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
