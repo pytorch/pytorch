@@ -41,7 +41,7 @@ def _extract_tensor_metadata(
     shape = result.shape
     dtype = result.dtype
     requires_grad = result.requires_grad
-    stride = result.stride() if not is_sparse_any(result) else None
+    stride = result.stride() if not is_sparse_any(result) else ()
 
     memory_format = None
 

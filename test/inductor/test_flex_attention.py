@@ -2157,7 +2157,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_differentiable_logsumexp_gradcheck(self):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -2310,7 +2310,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     ):
         make_tensor = functools.partial(
             torch.randn,
-            (2, 2, 128, 4),
+            (2, 2, 11, 4),
             device="cuda",
             dtype=torch.float64,
             requires_grad=True,
@@ -2970,6 +2970,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention(query, key, value)
 
     @supported_platform
+    def test_captured_wrong_device_error_message(self):
+        means = torch.randn(64, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8)
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_cant_lower_error_message(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(64, 256).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_reduction_unrolled(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(S, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, H).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
+
+    @supported_platform
     def test_invalid_block_size(self):
         # Create tensors on different devices
         q, k, v = (torch.randn(1, 8, 128, 64, device="cuda") for _ in range(3))
@@ -3026,6 +3081,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(mask_mod, B, 1, Q_S, KV_S)
 
         attention = functools.partial(flex_attention, block_mask=block_mask)
+
+        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+
+    @supported_platform
+    def test_non_divisible_with_captured_buffer(self):
+        Q_S = S + 3
+        KV_S = S + 3
+
+        multiplier = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+
+        def apply_multiplicative_bias(score, b, h, q_idx, kv_idx):
+            return score * multiplier[q_idx]
+
+        attention = functools.partial(
+            flex_attention, score_mod=apply_multiplicative_bias
+        )
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
 
