@@ -77,7 +77,7 @@ jobs:
     {%- endif %}
     steps:
       !{{ set_runner_specific_vars() }}
-      - name: Git checkout workflow
+      - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
           repository:  "ozanMSFT/builder"
@@ -134,6 +134,42 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  !{{ config["build_name"] }}-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
+    runs-on: "windows-11-arm64"
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config, True) }}
+    steps:
+      !{{ set_runner_specific_vars() }}
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  "ozanMSFT/builder"
+          ref: "users/ozanMSFT/win-arm64"
+          path: "builder"      
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Test PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True, False) }}
   {%- endif %}
