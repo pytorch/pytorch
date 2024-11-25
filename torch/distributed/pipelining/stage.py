@@ -177,6 +177,8 @@ class _PipelineStageBase(ABC):
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
+        # map microbatch ID to list of backward grad tensor args
+        self.bwd_cache: Dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
 
@@ -381,10 +383,7 @@ class _PipelineStageBase(ABC):
         assert not self.is_first, "can't get bwd output if this stage is first"
 
         self._check_chunk_id(mb_index)
-        # TODO(whc) we should be indexing mb_index into self.grads_input, but it appears we are only storing
-        # the most recently created grads which needs to be fixed not only here but also for get_bwd_send_ops.
-
-        return self.grads_input
+        return self.bwd_cache.pop(mb_index)
 
     def set_local_bwd_input(
         self, next_stage_bwd_outputs: Tuple[Optional[torch.Tensor], ...], mb_index: int
@@ -481,7 +480,8 @@ class _PipelineStageBase(ABC):
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
 
         ops: List[dist.P2POp] = []
-        for grad, grad_recv_stage in zip(self.grads_input, self.grad_send_info):
+        grads_input = self.bwd_cache.pop(bwd_chunk_id)
+        for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
@@ -771,11 +771,13 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
+        grads_input: Tuple[Optional[torch.Tensor], ...] = ()
+
         # Custom backward function
         if self.dw_builder:
             # TODO: We may want to change our semantics so we are allowed to ignore
             # the 'dw_builder' and call full_backward directly when it is a full_backward op.
-            self.grads_input, _ = self.backward_maybe_with_nosync(
+            grads_input, _ = self.backward_maybe_with_nosync(
                 "full", bwd_kwargs, last_backward=last_backward
             )
             if full_backward:
@@ -784,11 +786,10 @@ class _PipelineStageBase(ABC):
                 self.dw_runner[bwd_chunk_id] = self.dw_builder()
         else:
             if full_backward:
-                self.grads_input, _ = self.backward_maybe_with_nosync(
+                grads_input, _ = self.backward_maybe_with_nosync(
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                grads_input: Tuple[torch.Tensor | None, ...] = ()
                 param_groups: List[Dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
@@ -809,9 +810,10 @@ class _PipelineStageBase(ABC):
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
                 )
-                self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
+
+        self.bwd_cache[bwd_chunk_id] = grads_input
 
         if self.is_last and not self.is_first:
             # Autograd dependencies:
