@@ -432,8 +432,38 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        else:
-            return super().call_method(tx, name, args, kwargs)
+
+        if name == "sort" and self.is_mutable():
+            assert len(args) == 0
+            key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
+            reverse = kwargs.pop(
+                "reverse", ConstantVariable.create(False)
+            ).as_python_constant()
+            assert len(kwargs) == 0
+
+            if not all(x.is_python_constant() for x in self.items):
+                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
+                #       be a pure function and should not have any side effects.
+                return super().call_method(tx, name, args, kwargs)  # try next handler
+
+            if (
+                key_fn_var.is_python_constant()
+                and key_fn_var.as_python_constant() is None
+            ):
+
+                def key_fn(x):
+                    return x.as_python_constant()
+
+            else:
+
+                def key_fn(x):
+                    return key_fn_var.call_function(tx, [x], {}).as_python_constant()
+
+            tx.output.side_effects.mutation(self)
+            self.items.sort(key=key_fn, reverse=reverse)
+            return ConstantVariable.create(None)
+
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
         if name == "__class__":
@@ -800,7 +830,9 @@ class NamedTupleVariable(TupleVariable):
         #   NamedTupleType._make(iterable)
         create_fn = self.tuple_cls if self.is_structseq() else self.tuple_cls._make
         codegen.add_push_null(
-            lambda: codegen.append_output(codegen._create_load_const(create_fn))
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(create_fn)
+            )
         )
         codegen.foreach(self.items)
         codegen.extend_output(
