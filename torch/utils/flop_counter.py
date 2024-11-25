@@ -623,7 +623,7 @@ class FlopCounterMode:
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
-        self.mode = None
+        self.mode: Optional[_FlopCounterMode] = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -718,6 +718,7 @@ class FlopCounterMode:
         return self
 
     def __exit__(self, *args):
+        assert self.mode is not None
         b = self.mode.__exit__(*args)
         self.mode = None  # break cycles
         self.mod_tracker.__exit__()
