@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/util/CallOnce.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
@@ -224,6 +225,14 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_compileShader(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const std::string source = THPUtils_unpackString(args);
+  at::native::mps::DynamicMetalShaderLibrary lib(source);
+  Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -272,6 +281,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
      nullptr},
+    {"_mps_compileShader", MPSModule_compileShader, METH_O, nullptr},
     {nullptr}};
 
 PyMethodDef* python_functions() {
