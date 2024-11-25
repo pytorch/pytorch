@@ -30,6 +30,7 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
+aten::_assert_tensor_metadata
 aten::_batch_norm_no_update.out
 aten::_batch_norm_with_update.out
 aten::_cdist_backward
@@ -57,6 +58,7 @@ aten::_convert_indices_from_coo_to_csr.out
 aten::_convert_indices_from_csr_to_coo
 aten::_convert_indices_from_csr_to_coo.out
 aten::_convert_weight_to_int4pack
+aten::_convert_weight_to_int4pack_for_cpu
 aten::_convolution
 aten::_convolution.out
 aten::_copy_from
@@ -231,9 +233,12 @@ aten::_foreach_frac_
 aten::_foreach_lerp.List
 aten::_foreach_lerp.List_out
 aten::_foreach_lerp.Scalar
+aten::_foreach_lerp.ScalarList
+aten::_foreach_lerp.ScalarList_out
 aten::_foreach_lerp.Scalar_out
 aten::_foreach_lerp_.List
 aten::_foreach_lerp_.Scalar
+aten::_foreach_lerp_.ScalarList
 aten::_foreach_lgamma
 aten::_foreach_lgamma.out
 aten::_foreach_lgamma_
@@ -302,6 +307,9 @@ aten::_foreach_reciprocal_
 aten::_foreach_round
 aten::_foreach_round.out
 aten::_foreach_round_
+aten::_foreach_rsqrt
+aten::_foreach_rsqrt.out
+aten::_foreach_rsqrt_
 aten::_foreach_sigmoid
 aten::_foreach_sigmoid.out
 aten::_foreach_sigmoid_
@@ -637,6 +645,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int4pack_mm_for_cpu
 aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
@@ -689,12 +698,10 @@ aten::batch_norm_stats
 aten::batch_norm_stats.out
 aten::batch_norm_update_stats
 aten::batch_norm_update_stats.out
-aten::bernoulli
 aten::bernoulli.Tensor
 aten::bernoulli.Tensor_out
 aten::bernoulli.float_out
 aten::bernoulli.out
-aten::bernoulli.p
 aten::bernoulli_.Tensor
 aten::bernoulli_.float
 aten::bincount

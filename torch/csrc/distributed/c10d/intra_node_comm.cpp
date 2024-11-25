@@ -176,8 +176,8 @@ bool IntraNodeComm::rendezvous() {
   set_group_info(
       groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
-  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
-  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, std::nullopt);
+  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, groupName);
   isInitialized_ = true;
   return true;
 #endif
