@@ -15,7 +15,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -188,7 +188,6 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def test_dtensor_sharded_optim_load_state_dict(
         self, device, offload_to_cpu, is_even_sharded_model
     ):
-        to_device = self.device_type if TEST_CUDA else device
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(
             device_type, is_even_sharded_model, device_mesh
@@ -242,7 +241,6 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     def test_dtensor_sharded_model_load_state_dict(
         self, device, offload_to_cpu, is_even_sharded_model
     ):
-        to_device = self.device_type if TEST_CUDA else device
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
         model, optim = self._create_model(
             device_type, is_even_sharded_model, device_mesh
@@ -277,12 +275,11 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_raises_warning_or_errors(self, device):
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        to_device = self.device_type if TEST_CUDA else device
         model, optim = self._create_model(
-            to_device, is_even_sharded_model=True, device_mesh=device_type
+            device_type, is_even_sharded_model=True, device_mesh=device_type
         )
         # initialize optim
-        model(model.get_input(to_device)).sum().backward()
+        model(model.get_input(device_type)).sum().backward()
         optim.step()
         with self.assertRaisesRegex(
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
