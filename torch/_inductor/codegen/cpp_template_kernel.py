@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -16,7 +16,7 @@ from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
 from .common import CppWrapperKernelArgs
 from .cpp import CppKernel, CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext, value_to_cpp
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferContext
 from .cpp_wrapper_cpu import CppWrapperCpu
 
 
@@ -198,30 +198,6 @@ class CppTemplateKernel(CppKernel):
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"if (_{name} == nullptr) {{ _{name} = std::make_unique<{ctype}[]>({numel}); {name} = _{name}.get(); }}"
 
-    def silu_mul(
-        self,
-        in_buf0,
-        in_buf1,
-        inp0,
-        inp1,
-        out_buf,
-        has_gate_bias,
-        has_up_bias,
-        name_prefix,
-    ):
-        in_ptr0 = f"&({self.index(in_buf0, [0, 0])})"
-        in_ptr1 = f"&({self.index(in_buf1, [0, 0])})"
-        out_ptr = f"&({self.index(out_buf, [0, 0])})"
-        M = self.size(in_buf0, 0)
-        N = self.size(in_buf0, 1)
-        in_lda = self.stride(in_buf0, 0)
-        out_lda = self.stride(out_buf, 0)
-        inp_ptr0 = f"&({self.index(inp0, [0, 0])})"
-        inp_ptr1 = f"&({self.index(inp1, [0, 0])})"
-        template = f"{value_to_cpp(has_gate_bias, 'bool')}, {value_to_cpp(has_up_bias, 'bool')}"
-        arguments = f"{in_ptr0}, {in_ptr1}, {inp_ptr0}, {inp_ptr1}, {out_ptr}, {M}, {N}, {in_lda}, {out_lda}"
-        return f"{name_prefix}_silu_mul_epilogue_fusion<{template}>({arguments});"
-
     def release_buffer(self, name):
         """Codegen the code to release the ownership of a local buffer to others"""
         assert name in self.local_buffers
@@ -285,8 +261,8 @@ class CppTemplateKernel(CppKernel):
     def store_output(
         self,
         dst: ir.Buffer,
-        src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
+        src: Union[ir.IRNode, Tuple[ir.IRNode]],
+        orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
@@ -311,13 +287,39 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        if isinstance(src, Iterable):
+            # For mlp silu-mul fusion
+            assert all(dst.get_size() == _src.get_size() for _src in src)
+            assert epilogue_nodes
+        else:
+            assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
-                if orig_src.get_name() != src.get_name():
+                if (
+                    isinstance(src, Iterable)
+                    and isinstance(orig_src, Iterable)
+                    and orig_src[0].get_name() != src[0].get_name()
+                ):
+                    assert all(
+                        _orig_src.get_name() != _src.get_name()
+                        for _orig_src, _src in zip(orig_src, src)
+                    )
+                    for _orig_src, _src in zip(orig_src, src):
+                        scope.add_local_buffer(
+                            _src,
+                            [
+                                _orig_src,
+                            ],
+                        )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
+                elif (
+                    isinstance(src, ir.IRNode)
+                    and isinstance(orig_src, ir.IRNode)
+                    and orig_src.get_name() != src.get_name()
+                ):
                     scope.add_local_buffer(
                         src,
                         [
@@ -329,6 +331,8 @@ class CppTemplateKernel(CppKernel):
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
+            assert isinstance(src, ir.IRNode)
+            assert isinstance(dst, ir.IRNode)
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
@@ -336,7 +340,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
+                assert dst.get_layout() == src.get_layout(), f"{dst=}, {src=}"
                 return ""
 
 
