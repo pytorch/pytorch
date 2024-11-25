@@ -95,6 +95,7 @@ def sdpa_kernel(backends: Union[List[SDPBackend], SDPBackend], set_priority : bo
 
     Args:
         backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
+        set_priority_order (bool=False): Whether the ordering of the backends is interpreted as their priority order.
 
     Example:
 
