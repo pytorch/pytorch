@@ -474,8 +474,6 @@ def load(
     :func:`torch.export.save <torch.export.save>`.
 
     Args:
-        ep (ExportedProgram): The exported program to save.
-
         f (Union[str, os.PathLike, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
 
