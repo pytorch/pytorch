@@ -17,12 +17,12 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if !defined(USE_ROCM) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13)))
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
 #define NCCL_HAS_REMOTE_ERROR 1
-#if (NCCL_MAJOR > 2) || (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
+
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
