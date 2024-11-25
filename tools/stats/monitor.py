@@ -16,7 +16,7 @@ def get_processes_running_python_tests() -> list[Any]:
         try:
             if "python" in process.name() and process.cmdline():
                 python_processes.append(process)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+        except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
             # access denied or the process died
             pass
     return python_processes
@@ -32,9 +32,7 @@ def get_process_info() -> list[dict[str, Any]]:
             "pid": p.pid,
             "cmd": " ".join(cmdline),
         }
-        except psutil.AccessDenied:
-            continue
-        except (psutil.ZombieProcess, psutil.NoSuchProcess):
+        except (psutil.ZombieProcess, psutil.NoSuchProcess,psutil.AccessDenied):
             continue
         # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
         # requires higher user privileges and could throw AccessDenied error, i.e. mac
