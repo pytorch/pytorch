@@ -121,6 +121,7 @@ if __name__ == "__main__":
         kill_now = True
     signal.signal(signal.SIGTERM, exit_gracefully)
 
+    monitor_start_time = datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
     try:
         gpu_libs_detected = []
         if has_pynvml:
@@ -134,11 +135,13 @@ if __name__ == "__main__":
 
         # log info
         info = {
+            "type": "metadata",
             "log_interval": f"{interval} seconds",
             "gpu":  gpu_libs_detected,
             "num_of_gpus":len(gpu_handles),
-            "num_of_cpus": psutil.cpu_count(logical=False)
+            "num_of_cpus": psutil.cpu_count(logical=False),
         }
+
         print(json.dumps(info))
     except Exception as e:
         info = {
@@ -150,6 +153,7 @@ if __name__ == "__main__":
         try:
             memory_info = psutil.virtual_memory()
             stats = {
+                "type": "log",
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
                 "total_cpu_percent": psutil.cpu_percent(),
                 "total_memory_percent":memory_info.percent,
@@ -174,7 +178,12 @@ if __name__ == "__main__":
         finally:
             print(json.dumps(stats))
             time.sleep(interval)
-
+    info = {
+        "type": "metadata",
+        "monitor_start_time": monitor_start_time,
+        "monitor_end_time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
+    }
+    print(json.dumps(info))
     # close the connection
     if has_amdsmi:
         try:
