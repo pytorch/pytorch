@@ -64,7 +64,7 @@ MIOPEN_CMAKE_COMMON_FLAGS="
 -DMIOPEN_USE_COMGR=ON
 -DMIOPEN_BUILD_DRIVER=OFF
 "
-if [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60300 ]]; then
+if [[ $ROCM_INT -ge 60200 ]] && [[ $ROCM_INT -lt 60204 ]]; then
     MIOPEN_BRANCH="release/rocm-rel-6.2-staging"
 else
     echo "ROCm ${ROCM_VERSION} does not need any patches, do not build from source"
