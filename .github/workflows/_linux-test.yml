@@ -54,7 +54,7 @@ on:
           since we are investigating the behaviour of the monitor script with different tests.
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
