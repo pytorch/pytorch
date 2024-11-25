@@ -350,17 +350,26 @@ def insert_deferred_runtime_asserts(
                 and (sym_expr := _get_sym_val(node)) is not None
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
-                new_untracked_symbols = sym_expr.free_symbols - expr_to_proxy.keys()
+                def has_new_untracked_symbols():
+                    for symbol in sym_expr.free_symbols:
+                        if symbol not in expr_to_proxy:
+                            return True
+                    return False
+
                 # this guards against deleting calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
                 resolved_unbacked_bindings = resolve_unbacked_bindings(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
+
                 assert resolved_unbacked_bindings is not None
-                new_unbacked_bindings = (
-                    resolved_unbacked_bindings.keys() - expr_to_proxy.keys()
-                )
+
+                def has_new_unbacked_bindings():
+                    for key in resolved_unbacked_bindings.keys():
+                        if key not in expr_to_proxy:
+                            return True
+                    return False
 
                 # maybe re-reify expression, replace current node
                 if (
@@ -368,9 +377,9 @@ def insert_deferred_runtime_asserts(
                     or (  # example value is redundant
                         _is_intermediate_tensor_sym_call(node)
                         # shape call on intermediate tensor, turn into computation on input shapes
-                        and not new_untracked_symbols
+                        and not has_new_untracked_symbols()
                     )
-                ) and not new_unbacked_bindings:
+                ) and not has_new_unbacked_bindings():
                     if _is_intermediate_tensor_sym_call(
                         node
                     ):  # reify from input shapes
