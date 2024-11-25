@@ -391,7 +391,7 @@ def create_submodule_from_subgraph(
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
-                        new_arg_placeholder = gm.placeholder(mod_name)
+                        new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
                         cur_args_copy.append(arg)
