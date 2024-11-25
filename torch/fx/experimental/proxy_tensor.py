@@ -911,16 +911,6 @@ def proxy_call(
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
 
-    # reset meta val if func (e.g., set_) changed the untyped_storage of args
-    for tensor, proxy_tensor in zip(flat_args_kwargs, proxy_flat_args_kwargs):
-        if (
-            isinstance(tensor, FakeTensor)
-            and isinstance(proxy_tensor, Proxy)
-            and tensor.untyped_storage()
-            != proxy_tensor.node.meta["val"].untyped_storage()
-        ):
-            set_meta(proxy_tensor, tensor)
-
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
     # you run torch.tensor; deterministic factory functions like torch.arange
