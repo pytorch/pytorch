@@ -613,19 +613,20 @@ Tensor& multinomial_out_mps(const Tensor& self,
     return result;
   }
 
+  const Tensor& input = self.is_contiguous() ? self : self.contiguous();
   // Fast-path for no replacement (or if only one sample draw).
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
-    auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
+    auto is_valid = ((input.max() < INFINITY) & (input.min() >= 0)).item();
     TORCH_CHECK(is_valid.to<bool>(), "probability tensor contains either `inf`, `nan` or element < 0");
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     bool zero_prob_condition;
-    if (self.dim() == 1) {
-      zero_prob_condition = (self.sum() == 0).item().to<bool>();
+    if (input.dim() == 1) {
+      zero_prob_condition = (input.sum() == 0).item().to<bool>();
     } else {
-      zero_prob_condition = (self.sum(1) == 0).sum().item().to<bool>();
+      zero_prob_condition = (input.sum(1) == 0).sum().item().to<bool>();
     }
     TORCH_CHECK(!zero_prob_condition, "invalid multinomial distribution (sum of probabilities <= 0)");
 
@@ -636,23 +637,23 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, gen);
+    Tensor q = at::empty_like(input).exponential_(1, gen);
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
     // exponential<double>. The probability is about 2^(-DBL_MANT_DIG). We just
     // ignore it here, but there may be some risk to get invalid output on CPU.
-    at::div_out(q, self, q);
+    at::div_out(q, input, q);
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
     } else {
-      Tensor vals = at::empty(result.sizes(), self.options());
+      Tensor vals = at::empty(result.sizes(), input.options());
       at::topk_out(vals, result, q, n_sample);
     }
     return result;
   }
 
-  result = multinomial_with_replacement_mps_kernel(const_cast<Tensor&>(self), n_sample, gen, result);
+  result = multinomial_with_replacement_mps_kernel(const_cast<Tensor&>(input), n_sample, gen, result);
 
   return result;
 }
