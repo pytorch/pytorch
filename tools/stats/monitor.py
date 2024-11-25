@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+from re import L
 import signal
 import time
 from datetime import timezone
@@ -36,42 +37,27 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
-class UsageLogSummaryInfo:
-    """
-    A class to store and manage summary information for usage logs. It normally used before and after log loops.
-    """
-    def __init__(self, log_interval,level) -> None:
-        """
-        Initializes a new instance of the UsageLogSummaryInfo class.
 
-        Args:
-            log_interval (int): The time interval for logging utilization data in seconds.
-        """
-        self._summary_info = {
-            "level": level,
-            "log_interval": f"{log_interval} seconds",
-        }
+class LogRecord:
+    """
+    A class to store log record as dict.
+    """
+    def __init__(self) -> None:
+        self._summary_info = {}
+
     def upsert(self, key, value) -> None:
-        """
-        Updates the summary information with a new key-value pair.
-
-        Args:
-            key (str): The key to update.
-            value (Any): The value to update.
-        """
         self._summary_info[key] = value
 
-    def get(self) -> dict[str, Any]:
-        """
-        Returns the current summary information.
+    def upsert_pairs(self, pairs) -> None:
+        for key, value in pairs.items():
+            self._summary_info[key] = value
 
-        Returns:
-            dict[str, Any]: A dictionary containing the summary information.
-        """
+    def get(self) -> dict[str, Any]:
         return self._summary_info
 
+
 class UsageLog:
-    def __init__(self, log_interval, is_debug_mode = False) -> None:
+    def __init__(self, log_interval, is_debug_mode=False) -> None:
         """
         Initializes a new instance of the UsageLog class.
 
@@ -79,7 +65,13 @@ class UsageLog:
             log_interval (int): The time interval for logging utilization data in seconds.
         """
         self._log_interval = log_interval
-        self._summary_info = UsageLogSummaryInfo(log_interval,"metadata")
+        self._summary_info = LogRecord()
+        self._summary_info.upsert_pairs(
+            {
+                "level": "metadata",
+                "interval": self._log_interval,
+            }
+        )
         self._has_pynvml = False
         self._has_amdsmi = False
         self._kill_now = False
@@ -146,50 +138,63 @@ class UsageLog:
         # execute the main loop
         while not self._kill_now:
             start_time = time.time()
-            stats = {
-                "level": "record",}
+            stats = {}
             try:
-                memory_info = psutil.virtual_memory()
-                stats = {
-                    "level": "record",
-                    "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
-                    "total_cpu_percent": psutil.cpu_percent(),
-                    "total_memory_percent": memory_info.percent,
-                    "processes": self._get_process_info(),
-                }
+                valid_record = LogRecord()
+                valid_record.upsert_pairs(
+                    {
+                        "level": "record",
+                        "time": datetime.datetime.now(timezone.utc).isoformat("T")
+                        + "Z",
+                        "total_cpu_percent": psutil.cpu_percent(),
+                        "total_memory_percent": psutil.virtual_memory(),
+                        "processes": self._get_process_info(),
+                    }
+                )
                 if self._has_pynvml:
                     # Iterate over the available GPUs
                     for idx, gpu_handle in enumerate(self._gpu_handles):
                         gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
                             gpu_handle
                         )
-                        stats[f"total_gpu_utilization_{idx}"] = gpu_utilization.gpu
-                        stats[
-                            f"total_gpu_mem_utilization_{idx}"
-                        ] = gpu_utilization.memory
+                        valid_record.upsert_pairs(
+                            {
+                                f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
+                                f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
+                            }
+                        )
+
                 if self._has_amdsmi:
                     for idx, handle in enumerate(self._gpu_handles):
-                        stats[
-                            f"total_gpu_utilization_{idx}"
-                        ] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-                        stats[
-                            f"total_gpu_mem_utilization_{idx}"
-                        ] = amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
-
+                        valid_record.upsert_pairs(
+                            {
+                                f"total_gpu_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
+                                    handle
+                                )[
+                                    "gfx_activity"
+                                ],
+                                f"total_gpu_mem_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
+                                    handle
+                                )[
+                                    "umc_activity"
+                                ],
+                            }
+                        )
+                stats = valid_record.get()
             except Exception as e:
-                stats = {
+                error_record = {
                     "level": "record",
                     "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
                     "error": str(e),
                 }
+                stats = error_record
             finally:
-                end_time = time.time()
                 self.log_json(stats)
-
+                end_time = time.time()
                 time_diff = end_time - start_time
                 # sleep for the remaining time to meet the log interval.
                 if time_diff < self._log_interval:
-                    time.sleep(self._log_interval- time_diff)
+                    time.sleep(self._log_interval - time_diff)
                 else:
                     # if the collecting time interval is longer than the log interval, log the info
                     stats["collecting_time_interval"] = f"{time_diff*1000:.2f}ms"
@@ -238,7 +243,7 @@ class UsageLog:
             except pynvml.NVMLError as e:
                 pass
 
-    def _get_per_process_gpu_info(self,handle: Any) -> list[dict[str, Any]]:
+    def _get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         per_process_info = []
         for p in processes:
@@ -300,20 +305,24 @@ class UsageLog:
             per_process_info.append(info)
         return per_process_info
 
+
 def main():
     """
     Main function of the program.
     """
     try:
         args = parse_args()
-        usagelog = UsageLog(args.log_interval,args.debug)
+        usagelog = UsageLog(args.log_interval, args.debug)
         # gracefully exit the script when pid is killed
         signal.signal(signal.SIGTERM, usagelog.exit_gracefully)
         # gracefully exit the script when keyboard ctrl+c is pressed.
         signal.signal(signal.SIGINT, usagelog.exit_gracefully)
         usagelog.execute()
     except Exception as e:
-        json.dumps({"level": "main", "error": f"Failed to execute the usage log: {str(e)}"})
+        json.dumps(
+            {"level": "main", "error": f"Failed to execute the usage log: {str(e)}"}
+        )
+
 
 if __name__ == "__main__":
     main()
