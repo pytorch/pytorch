@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -243,6 +244,25 @@ class DistributedState:
     compile_pg: Any
     local_state: LocalState
     all_states: Optional[List[LocalState]] = None
+
+
+class TensorifyState:
+    # These are the set of string symfloats names (eg. "zf0") that we collect
+    # from the tensorify_python_scalars.py joint fx pass to inform us about
+    # which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[str] = set()
+
+    @classmethod
+    def specialize(cls, index: str) -> None:
+        cls.force_specializations.add(index)
+
+    @classmethod
+    def should_specialize(cls, index: str) -> bool:
+        return index in cls.force_specializations
+
+    @classmethod
+    def clear(cls) -> None:
+        cls.force_specializations.clear()
 
 
 @functools.lru_cache(None)
@@ -943,6 +963,8 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
@@ -1031,6 +1053,8 @@ class InstructionTranslatorBase(
                 self.output.push_tx(self)
                 while self.step():
                     pass
+            except TensorifyScalarRestartAnalysis:
+                raise
             except BackendCompilerFailed:
                 raise
             except Exception as e:
@@ -3236,6 +3260,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             distributed_state=parent.distributed_state,
         )
         self.parent = parent
+        self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
