@@ -11,11 +11,7 @@
 
 #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace mkldnn {
-namespace internal {
-namespace convolution {
+namespace at::native::mkldnn::internal::convolution {
 
 c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
@@ -280,10 +276,6 @@ Tensor conv_run(
   return op_context->run(input);
 }
 
-} // namespace convolution
-} // namespace internal
-} // namespace mkldnn
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED()
