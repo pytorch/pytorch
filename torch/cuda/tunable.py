@@ -385,8 +385,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     if underscore_count == 2:
         [op_sig, data_type, layout] = untuned_gemm[0].split("_")
-        transA = True if layout[0] == "T" else False
-        transB = True if layout[1] == "T" else False
+        transA = layout[0] == "T"
+        transB = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
     else:  # ScaledGEMM
         untuned_gemm_temp = untuned_gemm[0].split("_")
@@ -394,8 +394,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
         data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
-        transA = True if untuned_gemm_temp[7][0] == "T" else False
-        transB = True if untuned_gemm_temp[7][1] == "T" else False
+        transA = untuned_gemm_temp[7][0] == "T"
+        transB = untuned_gemm_temp[7][1] == "T"
         dtypeA = dtype_dict.get(data_typeA)
         dtypeB = dtype_dict.get(data_typeB)
         dtypeC = dtype_dict.get(data_typeC)
