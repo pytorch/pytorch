@@ -514,15 +514,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   auto opts = q.options();
   auto softmax_d = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
 
-  at::Tensor dk_expanded, dv_expanded;
-  if (num_heads_k != num_heads) {  // MQA / GQA
-    dk_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-    dv_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-  } else {
-    dk_expanded = dk;
-    dv_expanded = dv;
-  }
-
   at::Tensor q_t = q.permute({0,2,1,3});
   at::Tensor k_t = k.permute({0,2,1,3});
   at::Tensor v_t = v.permute({0,2,1,3});
@@ -564,11 +555,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                    stream);
   }
 
-  // For MQA/GQA we need to sum dK and dV across the groups
-  if (num_heads_k != num_heads) {
-    at::sum_out(dk, at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
-    at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
-  }
   return { dq, dk, dv, softmax_d };
 }
 
