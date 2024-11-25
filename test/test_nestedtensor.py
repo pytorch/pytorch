@@ -1993,7 +1993,7 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             self.assertEqual(actual, expect)
 
     @onlyCUDA
-    @dtypes(torch.float, torch.double, torch.float16)
+    @dtypes(torch.float, torch.double, torch.float16, torch.bfloat16)
     def test_bmm_cuda(self, device, dtype):
         self._test_bmm(device, dtype)
 
@@ -3791,6 +3791,32 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         gradcheck(
             grad_test_func, inputs=(a, b, c, weight, bias), check_batched_grad=False
         )
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_linear_backward_memory_usage(self, device, dtype):
+        # Verify that linear_backward() doesn't use more memory than it should
+        # for higher dim input sizes.
+        # See https://github.com/pytorch/pytorch/issues/141112
+        B, D, max_seq_len = 64, 512, 100
+        m = torch.nn.Linear(D, D, device=device)
+        nt = torch.nested.as_nested_tensor(
+            [
+                torch.rand(size=[seq_len, D])
+                for seq_len in torch.randint(max_seq_len, size=(B,))
+            ],
+            layout=torch.jagged,
+            device=device,
+        )
+
+        # (B, j1, D) -> (B, j1, 1, D) for a higher dim input size
+        nt = nt.unsqueeze(-2)
+        # linear_backward() should not explode the max memory usage
+        torch.cuda.reset_max_memory_allocated()
+        m(nt).sum().backward()
+        # expect under a GB for max memory allocated
+        max_after_gb = torch.cuda.max_memory_allocated(0) // (1024**3)
+        self.assertEqual(max_after_gb, 0)
 
     def test_unary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)

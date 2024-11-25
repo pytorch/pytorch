@@ -2109,6 +2109,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     return None
 
 
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils
+        return distutils._msvccompiler._get_vc_env(vc_arch)
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler
+        return _msvccompiler._get_vc_env(vc_arch)
+
+
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
@@ -2121,9 +2130,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
-
-        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        vc_env = {k.upper(): v for k, v in _get_vc_env(plat_spec).items()}
         for k, v in env.items():
             uk = k.upper()
             if uk not in vc_env:
