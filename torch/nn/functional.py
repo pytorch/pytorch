@@ -3230,7 +3230,7 @@ def poisson_nll_loss(
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Tensor,
+    var: Union[Tensor, float],
     full: bool = False,
     eps: float = 1e-6,
     reduction: str = "mean",
@@ -3243,7 +3243,8 @@ def gaussian_nll_loss(
         input: expectation of the Gaussian distribution.
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
-            in the input (heteroscedastic), or a single one (homoscedastic).
+            in the input (heteroscedastic), or a single one (homoscedastic),
+            or a positive scalar value to be used for all expectations.
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
         reduction (str, optional): specifies the reduction to apply to the output:
@@ -3263,6 +3264,14 @@ def gaussian_nll_loss(
             eps=eps,
             reduction=reduction,
         )
+
+    # Entries of var must be non-negative
+    if isinstance(var, float):
+        if var < 0:
+            raise ValueError("var has negative entry/entries")
+        var = var * torch.ones_like(input)
+    elif torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
 
     # Check var size
     # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
@@ -3290,10 +3299,6 @@ def gaussian_nll_loss(
     # Check validity of reduction mode
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         raise ValueError(reduction + " is not valid")
-
-    # Entries of var must be non-negative
-    if torch.any(var < 0):
-        raise ValueError("var has negative entry/entries")
 
     # Clamp for stability
     var = var.clone()

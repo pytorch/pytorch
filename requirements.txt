@@ -6,10 +6,7 @@ numpy
 psutil
 pyyaml
 requests
-# Setuptools>=74.0.0 stopped support for directly using private funcs(_msvccompiler)
-# and consolidated all compiler logic in distutils used in Pytorch build, so older
-# is required until pytorch build not refactored to work for latest setuptools.
-setuptools<=72.1.0
+setuptools
 types-dataclasses
 typing-extensions>=4.10.0
 sympy==1.13.1 ; python_version >= "3.9"
