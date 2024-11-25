@@ -135,8 +135,8 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_avx512", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
-          { config: "inductor_avx512", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "inductor_amx", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "inductor_amx", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
           { config: "inductor_avx2", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "inductor_avx2", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
         ]}
