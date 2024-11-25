@@ -154,7 +154,6 @@ if __name__ == "__main__":
             stats = {
                 "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
                 "total_cpu_percent": psutil.cpu_percent(),
-                "total_used_memeory":memory_info.used,
                 "total_memory_percent":memory_info.percent,
             }
             if has_pynvml:
@@ -163,7 +162,6 @@ if __name__ == "__main__":
                     gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                     stats[f"total_gpu_utilization_{idx}"] = gpu_utilization.gpu
                     stats[f"total_gpu_mem_utilization_{idx}"] = gpu_utilization.memory
-                    stats[f"process_gpu_info_{idx}"] = get_per_process_gpu_info(gpu_handle)
             if has_amdsmi:
                 for idx,handle in enumerate(gpu_handles):
                     stats[f"total_gpu_utilization_{idx}"] = amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
