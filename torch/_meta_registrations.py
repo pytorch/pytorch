@@ -542,9 +542,6 @@ def meta__cslt_sparse_mm(
     if bias is not None:
         assert m == bias.size(0)
 
-    if is_8bit_input_type:
-        assert not dense_B.is_contiguous()
-
     if out_dtype is not None:
         assert (
             is_8bit_input_type
