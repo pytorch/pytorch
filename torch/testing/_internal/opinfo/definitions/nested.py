@@ -885,6 +885,34 @@ sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
 )
+
+
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # NJTs for input, condition, and other
+        condition = njt > 0.0
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs={
+                "condition": condition,
+                "other": torch.randn_like(njt),
+            },
+        )
+
+        # NJT for input + condition and scalar for other
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs={
+                "condition": condition,
+                "other": 42,
+            },
+        )
+
+        # TODO: Cover broadcasting beyond scalar tensors
+
+
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS ===
 
 
@@ -918,6 +946,7 @@ njt_sample_inputs = {
         sample_inputs_njt_reduction, supports_dimlist=False
     ),
     "prod": partial(sample_inputs_njt_reduction, supports_dimlist=False),
+    "where": sample_inputs_where,
 }
 
 njt_references = {
