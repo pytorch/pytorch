@@ -549,9 +549,17 @@ def linear_backward_default(func, *args, **kwargs):
             torch.matmul(grad_output._values, weight), **extract_kwargs(grad_output)
         )
     if output_mask[1]:
-        dw = torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+        # NB: Fold dims of values for input and grad_output to treat them as 2D. This
+        # trick avoids materializing large intermediates and immediately reducing over
+        # them via sum(). This is equivalent to computing:
+        #     torch.matmul(grad_output._values.transpose(-2, -1), inp._values)
+        # and then summing over the leading dimensions to get a 2D weight grad.
+        grad_2d = grad_output._values.reshape(-1, weight.size(0))
+        input_2d = inp._values.reshape(-1, weight.size(1))
+        dw = torch.matmul(grad_2d.t(), input_2d)
     if output_mask[2]:
-        db = grad_output._values.sum(0)
+        # NB: autograd engine will sum over all but the last dim to get a 1D bias grad.
+        db = grad_output._values
     return (ds, dw, db)
 
 
@@ -2269,41 +2277,6 @@ def new_empty_default(func, *args, **kwargs):
         return func(inp._values, **new_kwargs)
 
     raise RuntimeError("new_empty() not supported for NJT with shape != ()")
-
-
-@register_jagged_func(
-    [
-        torch.ops.aten.elu_backward.default,
-        torch.ops.aten.hardshrink_backward.default,
-        torch.ops.aten.hardsigmoid_backward.default,
-        torch.ops.aten.hardtanh_backward.default,
-        torch.ops.aten.softplus_backward.default,
-        torch.ops.aten.softshrink_backward.default,
-    ],
-    "self: jt_all, ...",
-)
-def activation_backward(func, *args, **kwargs):
-    # first NJT arg is expected to be grad_output
-    grad_output = next(arg for arg in args if isinstance(arg, NestedTensor))
-    return NestedTensor(
-        func(
-            *(arg._values if isinstance(arg, NestedTensor) else arg for arg in args),
-            **kwargs,
-        ),
-        **extract_kwargs(grad_output),
-    )
-
-
-@register_jagged_func(torch.ops.aten.fill_.Scalar, "self: jt_all, value: any")
-def fill__Scalar(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-
-    func(inp._values, **new_kwargs)
-    return inp
 
 
 from torch._higher_order_ops.flex_attention import (

@@ -777,6 +777,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config = self.default_config()
         self.gen_cache_key(fn, config)
 
+    def test_safe_torchfunction(self):
+        def fn(x):
+            a = x.size()
+            b = torch.Size([3, 3])
+            c = a == b
+            x = torch.sym_int(9)
+            y = torch.sym_float(x)
+            z = torch.sym_int(torch.sym_sqrt(y))
+            result = torch.sym_sum([x, y, z])
+            return (c, result)
+
+        config = self.default_config()
+        self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
+
     def test_sanitize_gm_for_cache(self):
         def fn(x):
             y = torch.sin(x)
