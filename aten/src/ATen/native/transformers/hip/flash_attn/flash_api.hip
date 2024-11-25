@@ -189,8 +189,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size = round_multiple(head_size_og, 8);
   const int head_size_rounded = round_multiple(head_size, 32);
-  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
   auto [seed_t, offset_t, philox_state, use_philox_state] =
     prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
@@ -475,8 +473,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size_rounded = round_multiple(head_size, 32);
-  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
   TORCH_CHECK(head_size == round_multiple(head_size_og, 8), "head_size must be head_size_og rounded to a multiple of 8");
 
@@ -516,7 +512,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   }
 
   auto opts = q.options();
-  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
 
   at::Tensor dk_expanded, dv_expanded;
   if (num_heads_k != num_heads) {  // MQA / GQA
@@ -649,9 +645,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
-  const int seqlen_q_rounded = max_seqlen_q;
-  const int seqlen_k_rounded = max_seqlen_k;
-
   if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
   if (window_size_right >= max_seqlen_k) { window_size_right = -1; }
 
@@ -708,7 +701,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   dv_padded = dv.unsqueeze(0).transpose(1, 2);
 
   auto opts = q.options();
-  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+  auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
 
   if( zero_tensors ) {
     dq.zero_();
