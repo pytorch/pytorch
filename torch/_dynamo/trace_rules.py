@@ -3155,7 +3155,6 @@ BUILTIN_SKIPLIST = (
     contextlib,
     copy,
     copyreg,
-    dataclasses,
     enum,
     functools,
     importlib,
