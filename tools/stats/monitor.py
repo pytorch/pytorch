@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
 
 class LogRecord:
     """
-    A class to store log record as dict.
+    A class to manage log data as record.
     """
     def __init__(self) -> None:
         self._summary_info = {}
@@ -136,7 +136,7 @@ class UsageLog:
 
         # execute the main loop
         while not self._kill_now:
-            start_time = time.time()
+            collecting_start_time = time.time()
             stats = {}
             try:
                 valid_record = LogRecord()
@@ -188,15 +188,13 @@ class UsageLog:
                 }
                 stats = error_record
             finally:
+                collecting_end_time = time.time()
+                time_diff = collecting_end_time - collecting_start_time
+                stats["collecting_time_interval"] = f"{time_diff*1000:.2f}ms"
                 self.log_json(stats)
-                end_time = time.time()
-                time_diff = end_time - start_time
                 # sleep for the remaining time to meet the log interval.
                 if time_diff < self._log_interval:
                     time.sleep(self._log_interval - time_diff)
-                else:
-                    # if the collecting time interval is longer than the log interval, log the info
-                    stats["collecting_time_interval"] = f"{time_diff*1000:.2f}ms"
 
         # prints complete log summary info to terminal
         self._summary_info.upsert(
