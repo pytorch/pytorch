@@ -73,10 +73,16 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 SUPPORTED_OPS = {
-    torch.ops.aten.mul.Tensor,
-    torch.ops.aten.add.Tensor,
-    torch.ops.aten.sub.Tensor,
-    torch.ops.aten.div.Tensor,
+    torch.ops.aten.mul.Tensor: torch.ops.aten.mul.Tensor,
+    torch.ops.aten.add.Tensor: torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor: torch.ops.aten.sub.Tensor,
+    torch.ops.aten.div.Tensor: torch.ops.aten.div.Tensor,
+    torch.ops.aten.gt.Scalar: torch.ops.aten.gt.Tensor,
+    torch.ops.aten.lt.Scalar: torch.ops.aten.lt.Tensor,
+    torch.ops.aten.ge.Scalar: torch.ops.aten.ge.Tensor,
+    torch.ops.aten.le.Scalar: torch.ops.aten.le.Tensor,
+    torch.ops.aten.eq.Scalar: torch.ops.aten.eq.Tensor,
+    torch.ops.aten.ne.Scalar: torch.ops.aten.ne.Tensor,
 }
 
 
@@ -232,7 +238,7 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
-            if node.op == "call_function" and node.target in SUPPORTED_OPS:
+            if node.op == "call_function" and (replacement_op := SUPPORTED_OPS.get(node.target)):
                 args: List[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
@@ -265,7 +271,7 @@ def tensorify_python_scalars(
                         args.append(a)
 
                 if transform:
-                    replacement_proxy = node.target(*args)
+                    replacement_proxy = replacement_op(*args)
 
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
