@@ -459,8 +459,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   class CUDAEventCache {
    public:
     CUDAEventCache();
-    CUDAEventCache(CUDAEventCache&& cache) noexcept;
-    CUDAEventCache& operator=(CUDAEventCache&& cache) noexcept;
     std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
     static CUDAEventCache& get(at::DeviceIndex device);
 

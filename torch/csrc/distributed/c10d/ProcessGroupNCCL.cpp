@@ -799,12 +799,6 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
 
 ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 
-ProcessGroupNCCL::CUDAEventCache::CUDAEventCache(
-    CUDAEventCache&& cache) noexcept = default;
-
-ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::
-    CUDAEventCache::operator=(CUDAEventCache&& cache) noexcept = default;
-
 // CUDA event is used to record the start/end of one Work.
 // Instead of let the CUDA event gets destroyed, we now reuse it after the Work
 // has been erased from workMetaList_.
@@ -837,13 +831,25 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
 
 ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
     at::DeviceIndex device) {
-  // Return a singleton map instance of <device index, CUDAEventCache>.
-  static std::unordered_map<at::DeviceIndex, ProcessGroupNCCL::CUDAEventCache>
-      cacheDevice;
-  if (cacheDevice.find(device) == cacheDevice.end()) {
-    cacheDevice.emplace(device, ProcessGroupNCCL::CUDAEventCache());
+  // A per-thread singleton of device-to-CUDAEventCache map.
+  // Map is needed because events cannot be reused across devices.
+  // Per-thread ownership is needed to support multi-threaded case (instead of
+  // multi-process case).
+  static thread_local std::
+      map<at::DeviceIndex, ProcessGroupNCCL::CUDAEventCache>
+          cacheDeviceMap;
+  // Check if device has already been in the map, if not, add a new entry
+  auto it = cacheDeviceMap.find(device);
+  if (it == cacheDeviceMap.end()) {
+    // Use in-place contruction, which avoids move or copy of the cache
+    // (the mutex of the cache is not movable/copiable)
+    it = cacheDeviceMap.emplace_hint(
+        it,
+        std::piecewise_construct,
+        std::forward_as_tuple(device),
+        std::forward_as_tuple());
   }
-  return cacheDevice[device];
+  return it->second;
 }
 
 static std::atomic<size_t> process_group_id = 0;
