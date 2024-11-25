@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_if_async_compile,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -706,7 +705,6 @@ def forward(self, primals_1):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)
-    @skip_if_async_compile
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)

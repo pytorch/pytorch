@@ -109,3 +109,22 @@ vit_base_patch16_224
 Process completed with exit code 255.
 detectron2_fcos_r_50_fpn
 detectron2_maskrcnn_r_50_fpn
+
+REVIEWS:
+split
+top-level interface on inductor - elias or jansel
+
+dig into torch.compile code: multiple graphs - hang off the code object
+registered w/ optimized things need to run dynamo - might graph break. I need to
+actually run backend eager. AOT autograd. Need to set up a new code object htat
+has the bytecode and fx graph. Need to have set up the full aot autograd fw and
+bkwrd. Call into inductor async object. Sometimes FxGraphModule - need to flip
+to compiled version. Calling into the dynamo bytecode & aot autograd
+function. At the point in ttime when I can switch into compiled need to
+test. This is the runtime object - two impls - eager + pending future. Test it
+and eventually future is filled in.
+
+NOT fx_codegen_and_compile() - but internal to that. THe code object it returns
+has to do the check.
+
+START GETTING REVIEWS

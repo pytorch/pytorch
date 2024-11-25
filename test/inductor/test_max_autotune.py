@@ -33,7 +33,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skip_if_async_compile,
     skipIfRocm,
     TEST_WITH_ROCM,
 )
@@ -331,7 +330,6 @@ class TestMaxAutotune(TestCase):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
     @skipIfRocm
-    @skip_if_async_compile
     def test_autotune_conv1x1(self):
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
@@ -578,6 +576,32 @@ class TestMaxAutotune(TestCase):
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
 
+    @config.patch(max_autotune_gemm_backends="TRITON")
+    def test_baddmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(64, 64, 192, dtype=torch.float16)
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(64, 1, 192, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return torch.ops.aten.baddbmm.default(self.bias, x, self.weight)
+
+        x = torch.randn(
+            64, 2048, 64, dtype=torch.float16, requires_grad=False, device="cuda"
+        )
+        mod = M().cuda()
+
+        m_c = torch.compile(mode="max-autotune")(mod)
+        out, code = run_and_get_code(m_c, x)
+        self.assertEqual(out, mod(x))
+
+        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
+
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
         """
@@ -637,12 +661,10 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
-    @skip_if_async_compile
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
-    @skip_if_async_compile
     @config.patch(max_autotune_gemm_backends="TRITON")
     def test_cat_max_autotune_triton(self):
         self._test_cat_max_autotune_impl(using_triton_mm=True)

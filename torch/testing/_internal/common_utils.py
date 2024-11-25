@@ -47,6 +47,7 @@ from itertools import product, chain
 from pathlib import Path
 from statistics import mean
 from typing import (
+    overload,
     Any,
     Callable,
     Dict,
@@ -371,13 +372,30 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc,
-                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
+    def __init__(
+        self,
+        child_iter,
+        input_type_desc,
+        item_callback=None,
+        track_callback=None,
+        set_seed=True,
+        restrict_to_index=None
+    ):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
-        # Callback is run on each iterated thing to get the thing to track.
-        self.callback = callback
+        # NB: The two types of callbacks below exist because the thing we want to track isn't
+        # always the same as the thing we want returned from the iterator. An example of this
+        # is ErrorInput, which we want returned from the iterator, but which contains a
+        # SampleInput that we want to track.
+        # Item callback is run on each (iterated thing, index) to get the thing to return.
+        self.item_callback = item_callback
+        if self.item_callback is None:
+            self.item_callback = lambda x, i: x
+        # Track callback is run on each iterated thing to get the thing to track.
+        self.track_callback = track_callback
+        if self.track_callback is None:
+            self.track_callback = lambda x: x
         self.test_fn = extract_test_fn()
         # Indicates whether the random seed should be set before each call to the iterator
         self.set_seed = set_seed
@@ -406,10 +424,10 @@ class TrackedInputIter:
 
         self._set_tracked_input(
             TrackedInput(
-                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
+                index=input_idx, val=self.track_callback(input_val), type_desc=self.input_type_desc
             )
         )
-        return input_val
+        return self.item_callback(input_val, input_idx)
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -1345,6 +1363,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_S390X = platform.machine() == "s390x"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1847,6 +1866,9 @@ def runOnRocmArch(arch: Tuple[str, ...]):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+def xfailIfS390X(func):
+    return unittest.expectedFailure(func) if IS_S390X else func
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
@@ -4660,8 +4682,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -5156,9 +5177,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 
@@ -5542,12 +5561,72 @@ def scoped_load_inline(func):
     return wrapper
 
 
+@overload
 def skip_if_async_compile(fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    @functools.wraps(fn)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        import torch._inductor.utils
-        if torch._inductor.utils.should_use_fx_graph_async_compile():
-            raise unittest.SkipTest("this test doesn't work on async compile")
-        return fn(*args, **kwargs)
+    ...
 
-    return wrapper
+@overload
+def skip_if_async_compile(*args: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    ...
+
+def skip_if_async_compile(*skip_args: Any) -> Any:
+    if skip_args and callable(skip_args[0]):
+        sub = skip_if_async_compile()
+        return sub(skip_args[0])
+
+    for arg in skip_args:
+        assert arg in ('cpu', 'cuda', 'dynamic-shapes', 'dynamic-shapes-cpu', 'dynamic-shapes-cuda')
+
+    skip_args = set(skip_args)
+
+    # 'dynamic-shapes' means both 'dynamic-shapes-cpu' and 'dynamic-shapes-cuda'
+    if 'dynamic-shapes' in skip_args:
+        skip_args.add('dynamic-shapes-cpu')
+        skip_args.add('dynamic-shapes-cuda')
+
+    # 'cpu' means both 'cpu' and 'dynamic-shapes-cpu'
+    if 'cpu' in skip_args:
+        skip_args.add('dynamic-shapes-cpu')
+
+    # 'cuda' means both 'cuda' and 'dynamic-shapes-cuda'
+    if 'cuda' in skip_args:
+        skip_args.add('dynamic-shapes-cuda')
+
+    def outer(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            import torch._inductor.utils
+            if not torch._inductor.utils.should_use_fx_graph_async_compile():
+                return fn(*args, **kwargs)
+
+            if not skip_args:
+                raise unittest.SkipTest("this test doesn't work on async compile")
+
+            # Use the current test name and the test method name to try to
+            # figure out what parameters our test specialization is running.
+            current_test = fn.__name__
+
+            if args and hasattr(args[0], "_testMethodName"):
+                current_test_with_params = args[0]._testMethodName
+            else:
+                raise NotImplementedError("TODO: no test method name")
+
+            params = ''
+            if current_test != current_test_with_params:
+                assert current_test_with_params.startswith(current_test + '_')
+                params = current_test_with_params[len(current_test) + 1:]
+
+            # The name uses underscores to split parameters, but dynamic shapes
+            # tests also use underscores in the name ("dynamic_shapes_cpu").
+            params = params.replace("dynamic_shapes_cuda", "dynamic-shapes-cuda")
+            params = params.replace("dynamic_shapes_cpu", "dynamic-shapes-cpu")
+            params = params.split('_')
+
+            for arg in skip_args:
+                if arg in params:
+                    raise unittest.SkipTest(f"this test doesn't work on async compile with {arg!r}")
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+    return outer

@@ -7,6 +7,7 @@ import io
 import itertools
 import logging
 import os
+import queue
 import sys
 import time
 import warnings
@@ -24,6 +25,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -52,6 +54,7 @@ from torch._dynamo.utils import (
     flatten_graph_inputs,
     get_chromium_event_logger,
     lazy_format_graph_code,
+    set_feature_use,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -103,6 +106,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import get_device_type, IRNode
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -118,6 +122,8 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    import types
+
     from torch._ops import OpOverload
 
     from .ir import ExternKernelNode
@@ -758,6 +764,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -775,6 +782,7 @@ def _compile_fx_inner(
                 remote=fx_graph_remote_cache,
             )
         else:
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
@@ -1011,12 +1019,13 @@ class _InProcessFxCompile(_FxCompileSync):
                         p = SymExprPrinter()
                         for out in graph.graph_outputs:
                             if (
-                                hasattr(out, "layout")
-                                and len(free_unbacked_symbols(out.layout.stride)) == 0
+                                isinstance(out, IRNode)
+                                and out.has_tensor_output()
+                                and len(free_unbacked_symbols(out.get_stride())) == 0
                             ):
                                 # Convert to string for eval on the load path
                                 output_strides.append(
-                                    tuple(p.doprint(s) for s in out.layout.stride)
+                                    tuple(p.doprint(s) for s in out.get_layout().stride)
                                 )
                             else:
                                 output_strides.append(None)
@@ -1112,6 +1121,7 @@ class _WireProtocolInput:
     config: Dict[str, object]
     # TODO: Ugh - what other random state are we missing?
     deterministic_guard: DeterministicGuard
+    logger_state: _LoggerState
 
     def serialize(self) -> _WireProtocolPickledInput:
         from torch.fx._graph_pickler import _SubprocPickler
@@ -1138,6 +1148,7 @@ class _WireProtocolPickledInput:
 class _WireProtocolOutput:
     graph: Union[CompiledFxGraph, str]
     metrics: CachedMetricsDeltas
+    logs: List[logging.LogRecord]
 
     def serialize(self) -> _WireProtocolPickledOutput:
         from torch.fx._graph_pickler import _SubprocPickler
@@ -1166,6 +1177,83 @@ class _WireProtocolPickledOutput:
         return result
 
 
+class _LoggerState:
+    loggers: Dict[str, int]
+    # This should be None outside of enter/exit
+    _cap: Optional[_CapturedLogs] = None
+
+    def __init__(self) -> None:
+        # Mapping from logger name to level.
+        self.loggers = {}
+
+        # logging.getHandlerNames()/getHandlerByName() doesn't exist until 3.12
+        root = logging.getLogger("torch._inductor")
+        logging._acquireLock()  # type: ignore[attr-defined]
+        try:
+            for name, handler in root.manager.loggerDict.items():
+                # We only want to track torch._inductor logging
+                if not name.startswith("torch._inductor"):
+                    continue
+                # If this handler propagates then assume we'll track its parent
+                if not isinstance(handler, logging.Logger):
+                    # Assume that Placeholders propagate
+                    continue
+                if handler.propagate:
+                    continue
+                self.loggers[name] = handler.level
+        finally:
+            logging._releaseLock()  # type: ignore[attr-defined]
+
+    def __enter__(self) -> _CapturedLogs:
+        assert self._cap is None
+        self._cap = _CapturedLogs(self)
+        self._cap.apply()
+        return self._cap
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[types.TracebackType],
+    ) -> None:
+        assert self._cap is not None
+        self._cap.remove()
+
+
+class _CapturedLogs:
+    state: _LoggerState
+    queue: queue.Queue[logging.LogRecord]
+    handlers: Optional[Dict[str, logging.Handler]]
+
+    def __init__(self, state: _LoggerState) -> None:
+        self.state = state
+        # A queue of the log entries
+        # TODO: For memory purposes should we log to a file and then respond with that?
+        self.queue = queue.Queue(-1)
+        # Mapping from name to handler (only valid when applied)
+        self.handlers = None
+
+    def remove(self) -> None:
+        assert self.handlers is not None
+        handlers, self.handlers = self.handlers, None
+        for name, handler in handlers.items():
+            logger = logging.getLogger(name)
+            logger.removeHandler(handler)
+
+    def apply(self) -> None:
+        from logging.handlers import QueueHandler
+
+        assert self.handlers is None
+        self.handlers = {}
+        for name, level in self.state.loggers.items():
+            logger = logging.getLogger(name)
+            handler = QueueHandler(self.queue)
+            self.handlers[name] = handler
+            logger.addHandler(handler)
+            if level != logging.NOTSET:
+                logger.setLevel(level)
+
+
 class _FxCompileSerialized(FxCompile):
     @override
     async def codegen_and_compile(
@@ -1176,6 +1264,8 @@ class _FxCompileSerialized(FxCompile):
     ) -> Union[CompiledFxGraph, str]:
         context = torch._guards.TracingContext.try_get()
         deterministic_guard = DeterministicGuard._current_state()
+        logger_state = _LoggerState()
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -1184,6 +1274,7 @@ class _FxCompileSerialized(FxCompile):
                 context,
                 config.save_config_portable(),
                 deterministic_guard,
+                logger_state,
             ).serialize()
         except (AttributeError, BypassFxGraphCache):
             # For example: AttributeError: Can't pickle local object
@@ -1237,6 +1328,7 @@ class _FxCompileSerialized(FxCompile):
             input = pickled_input.deserialize()
 
             stack.enter_context(config.patch(input.config))
+            captured_logs = stack.enter_context(input.logger_state)
             stack.enter_context(input.deterministic_guard)
             stack.enter_context(torch._guards.tracing(input.tracing_context))
             stack.enter_context(DebugContext())
@@ -1245,7 +1337,14 @@ class _FxCompileSerialized(FxCompile):
                 input.gm, input.example_inputs, **input.kwargs
             )
 
-            return _WireProtocolOutput(output_graph, metrics.get_deltas()).serialize()
+        logs = []
+        try:
+            while True:
+                logs.append(captured_logs.queue.get_nowait())
+        except queue.Empty:
+            pass
+
+        return _WireProtocolOutput(output_graph, metrics.get_deltas(), logs).serialize()
 
 
 class _DebugFxCompile(_FxCompileSerialized):
@@ -1257,7 +1356,24 @@ class _DebugFxCompile(_FxCompileSerialized):
         return self._run_in_child(pickled_input)
 
 
-class _SubprocessFxCompile(_FxCompileSerialized):
+class _OutOfProcessFxCompile(_FxCompileSerialized):
+    def _postprocess(self, output: _WireProtocolOutput) -> None:
+        # Since our metrics were gathered in a subprocess make sure to add them
+        # here.
+        CachedMetricsHelper.apply_deltas(output.metrics)
+
+        # And forward our collected logs. The cache is cleared when the outer
+        # function exits.
+        @functools.lru_cache(None)
+        def getLogger(name: str) -> logging.Logger:
+            return logging.getLogger(name)
+
+        for record in output.logs:
+            logger = getLogger(record.name)
+            logger.handle(record)
+
+
+class _SubprocessFxCompile(_OutOfProcessFxCompile):
     @override
     async def _send_to_child(
         self, input: _WireProtocolPickledInput
@@ -1286,11 +1402,6 @@ class _SubprocessFxCompile(_FxCompileSerialized):
 
         return output
 
-    def _postprocess(self, output: _WireProtocolOutput) -> None:
-        # Since our metrics were gathered in a subprocess make sure to add them
-        # here.
-        CachedMetricsHelper.apply_deltas(output.metrics)
-
     @classmethod
     def _run_in_child_subprocess(
         cls,
@@ -1316,8 +1427,11 @@ class _SubprocessFxCompile(_FxCompileSerialized):
         #
         clear_inductor_caches()
         torch._inductor.metrics.reset()
+
         # TODO: turn off config.fx_graph_async_compile
-        return cls._run_in_child(pickled_input, extra_env)
+
+        result = cls._run_in_child(pickled_input, extra_env)
+        return result
 
 
 # For debugging - create a _FxCompile which writes the serialized data to a file
@@ -1336,7 +1450,7 @@ class _SubprocessFxCompile(_FxCompileSerialized):
 #     with open(f"/tmp/pytorch_compile_fx_tmp_output_{idx}.bin", "wb") as f:
 #         f.write(result.value)
 #
-class _DebugFileFxCompile(_FxCompileSerialized):
+class _DebugFileFxCompile(_OutOfProcessFxCompile):
     file_index = 0
 
     @override
@@ -1356,14 +1470,15 @@ class _DebugFileFxCompile(_FxCompileSerialized):
             actual = self._run_in_child(pickled_input)
             with open(name, "wb") as f:
                 f.write(actual.value)
+            return actual
+        elif False:
+            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
+            with open(name, "rb") as f:
+                result = _WireProtocolPickledOutput(f.read())
+                print(f"Read from {name}")
+            return result
         else:
             os._exit(-1)
-
-        name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
-        with open(name, "rb") as f:
-            result = _WireProtocolPickledOutput(f.read())
-        print(f"Read from {name}")
-        return result
 
 
 def fx_codegen_and_compile(
@@ -2120,12 +2235,12 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
             tracing_context
-        ), compiled_autograd.disable(), functorch_config.patch(
+        ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
             return aot_autograd(
@@ -2198,7 +2313,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
@@ -2206,8 +2321,10 @@ def handle_dynamo_export_graph(
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
-    def warn_and_skip(device: torch.device) -> Never:
+    def warn_and_skip(device: Optional[torch.device]) -> Never:
         from torch._dynamo.exc import SkipFrame
+
+        assert device is not None
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
@@ -2216,24 +2333,19 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         )
         raise SkipFrame("BF16 is not supported")
 
-    for inp in graph.graph_inputs.values():
-        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
+    for node in itertools.chain(graph.graph_inputs.values(), graph.graph_outputs):
+        if not isinstance(node, IRNode):
+            continue
+        device_type = get_device_type(node)
+        if (
+            not device_type
+            or not is_gpu(device_type)
+            or node.get_dtype() != torch.bfloat16
+        ):
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
+        device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
-        warn_and_skip(device)
-
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
+        warn_and_skip(node.get_device())

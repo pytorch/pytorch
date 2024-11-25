@@ -1658,14 +1658,10 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+        if isinstance(t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
+                t.maybe_get_stride() or ()
             ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
@@ -1887,7 +1883,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: str):
+def is_gpu(device: Optional[str]):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 
@@ -2013,9 +2009,6 @@ def maybe_get_suppress_shape_guards_ctx():
 
 
 def run_and_get_cpp_code(fn, *args, **kwargs):
-    assert (
-        not torch._inductor.utils.should_use_fx_graph_async_compile()
-    ), "TODO: Bad async compile - run_and_get_cpp_code (disable this test)"
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.
