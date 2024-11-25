@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
-from re import L
 import signal
 import time
 from datetime import timezone
