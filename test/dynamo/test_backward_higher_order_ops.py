@@ -117,7 +117,7 @@ class _multiply_invoke(torch.nn.Module):
             fn = torch.compile(fn, backend=backend)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
@@ -182,7 +182,7 @@ class GraphModule(torch.nn.Module):
             fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
@@ -244,7 +244,7 @@ class GraphModule(torch.nn.Module):
                 torch._dynamo.exc.Unsupported,
                 "print",
             ):
-                with compiled_autograd.enable(compiler_fn):
+                with compiled_autograd._enable(compiler_fn):
                     out.backward(grad_out)
 
             graph = None
