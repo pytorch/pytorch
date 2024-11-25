@@ -82,7 +82,7 @@ class TestoneDNNFusion(TestCase):
                     algorithm = pointwise_info.algorithm
                     fused = torch.ops.mkldnn._linear_pointwise(
                         v,
-                        mod.linear.weight.transpose(1, 0),
+                        mod.linear.weight,
                         mod.linear.bias,
                         attr,
                         scalars,
@@ -116,7 +116,7 @@ class TestoneDNNFusion(TestCase):
                 fused = torch.ops.mkldnn._linear_pointwise(
                     input,
                     other,
-                    model.linear.weight.transpose(1, 0),
+                    model.linear.weight,
                     model.linear.bias,
                     attr,
                 )
