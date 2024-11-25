@@ -261,20 +261,17 @@ def repro_get_args(options, exported_program, config_patches):
 
 def repro_run(options, exported_program, config_patches):
     from torch._inductor import _aoti_compile_and_package_inner, aoti_load_package
-    from torch._inductor.compile_fx import _flatten_inputs
 
     gm, args, kwargs = repro_common(options, exported_program)
 
-    flat_example_inputs, local_config_patches = _flatten_inputs(
-        gm, args, kwargs, options=config_patches
-    )
     from torch.cuda import synchronize
 
     package_path = _aoti_compile_and_package_inner(
         gm,
-        flat_example_inputs,
+        args,
+        kwargs,
         load_and_run=False,
-        inductor_configs=local_config_patches,
+        inductor_configs=config_patches,
     )
     compiled = aoti_load_package(package_path)
     assert not isinstance(compiled, str)
@@ -286,7 +283,7 @@ def repro_run(options, exported_program, config_patches):
             need_sync = True
             break
 
-    compiled(*args)
+    compiled(*args, **kwargs)
 
     if need_sync:
         synchronize()  # ensure segfaults are surfaced
@@ -334,6 +331,8 @@ def repro_minify(options, exported_program, config_patches):
     from torch._inductor.compile_fx import _flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
+
+    # update serialized_in_spec and serialized_out_spec
     flat_example_inputs, inductor_configs = _flatten_inputs(
         mod, args, kwargs, options=config_patches
     )
@@ -364,17 +363,13 @@ def repro_minify(options, exported_program, config_patches):
             return False
 
         assert isinstance(gm, torch.fx.GraphModule)
-        # update serialized_in_spec and serialized_out_spec
-        flat_example_inputs, local_config_patches = _flatten_inputs(
-            gm, tuple_inputs, options=config_patches
-        )
 
         try:
             _aoti_compile_and_package_inner(
                 gm,
-                flat_example_inputs,
+                tuple_inputs,
                 load_and_run=True,
-                inductor_configs=local_config_patches,
+                inductor_configs=inductor_configs,
             )
             if need_sync:
                 synchronize()  # ensure segfaults are surfaced
