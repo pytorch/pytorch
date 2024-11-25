@@ -2629,6 +2629,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
             var = -1 * torch.ones(3, 5)
             torch.nn.functional.gaussian_nll_loss(input, target, var)
+        with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
+            var = -1.0
+            torch.nn.functional.gaussian_nll_loss(input, target, var)
+
+    def test_gaussian_nll_loss_scalar_var(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
+        var = 0.5
+        var_tensor = var * torch.ones_like(input)
+        component_wise_loss = 0.5 * (torch.log(var_tensor) + (input - target)**2 / var_tensor)
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
+        self.assertEqual(F.gaussian_nll_loss(input, target, var_tensor, reduction='none'),
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
 
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
@@ -12234,22 +12248,22 @@ if __name__ == '__main__':
                            0.254, -0.24, -0.225, 0.104, 0.002, -0.001, 0.0574, 1.2344,
                            0.1748, -0.1797, -0.8125, 0.2051, -1.1328, 1.2344, -0.1562, 2.3554,
                            -0.1953, 0.0304, -0.3613, -1.3047, 1.0312, 0.1436, -0.6953, 0.5664,
-                           -0.5820, -0.3301, 0.8203, 0.6133, 0.5938],
+                           -0.5820, -0.3301, 0.8203, 0.6133, 0.5938, float('nan')],
                           [-0.8203, -1.2344, -0.5234, 2.5312, -0.4551, -0.6875, -1.5547, -0.2217,
                            -0.3027, 2.6406, 1.3047, 0.2344, -1.6719, 0.2773, -1.3516, 3.4575,
                            0.4414, 0.2656, 2.1094, -1.5156, 1.2344, -0.4336, 0.6797, -3.5486,
                            0.9766, -0.4062, 1.4844, 0.7500, -1.7578, 0.7461, 1.6094, 8.5458,
-                           0.3730, -0.3477, -1.0625, 0.3848, 0.0557]], device=device)
+                           0.3730, -0.3477, -1.0625, 0.3848, 0.0557, float('nan')]], device=device)
         expected = torch.tensor([[0.71, 0.06, 0.0001, 0., 0.7357, 0., -0.0001, -0.654,
                                   0., 0., 0., 0., 0., 0., 0., 0.7344,
                                   0., 0., -0.3125, 0., -0.6328, 0.7344, 0., 1.8554,
                                   0., 0., 0., -0.8047, 0.5312, 0., -0.1953, 0.0664,
-                                  -0.0820, 0.0, 0.3203, 0.1133, 0.0938],
+                                  -0.0820, 0.0, 0.3203, 0.1133, 0.0938, float('nan')],
                                  [-0.3203, -0.7344, -0.0234, 2.0312, 0.0, -0.1875, -1.0547, 0.,
                                   0.0, 2.1406, 0.8047, 0., -1.1719, 0., -0.8516, 2.9575,
                                   0., 0., 1.6094, -1.0156, 0.7344, 0., 0.1797, -3.0486,
                                   0.4766, 0., 0.9844, 0.2500, -1.2578, 0.2461, 1.1094, 8.0458,
-                                  0., 0., -0.5625, 0., 0.]])
+                                  0., 0., -0.5625, 0., 0., float('nan')]])
         softshrink = torch.nn.Softshrink()
         out = softshrink(x)
         self.assertEqual(out, expected, atol=1e-2, rtol=0)
