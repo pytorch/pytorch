@@ -879,13 +879,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     self.g.out.precomputed.add,
                 ]
                 for precomputed_elems in precomputed_values:
-                    for arg in precomputed_elems:
-                        context.append(
-                            Expr(
-                                expr=f"precompute.{arg.name}",
-                                type=structured.argument_type(arg, binds=arg.name),
-                            )
+                    context.extend(
+                        Expr(
+                            expr=f"precompute.{arg.name}",
+                            type=structured.argument_type(arg, binds=arg.name),
                         )
+                        for arg in precomputed_elems
+                    )
 
                 # Add a use of the precompute struct so FB internal compilers don't
                 # complain that there is an unused variable.

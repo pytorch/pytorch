@@ -54,8 +54,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
@@ -299,8 +298,8 @@ Tensor mkldnn_linear_pointwise_binary(
   }
 
   TORCH_CHECK(
-      output.sizes() == other_reshaped.sizes(),
-      "linear_binary_run expects the size of output and other tensor to be the same");
+      output.dim() == other_reshaped.dim(),
+      "linear_binary_run expects the dimension of output and other tensor to be the same");
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
@@ -445,7 +444,6 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
