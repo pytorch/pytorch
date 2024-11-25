@@ -8734,6 +8734,7 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # TODO: Will remove this after oneDNN v3.6
+    # now oneDNN v3.5.3 only supports mat1 * mat2 with the same data types.
     if device != 'cpu':
         # mat1 e4m3 mat2 e5m2
         mat1 = make_mat_e4m3((M, K))
@@ -24506,6 +24507,14 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_meta',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
         ),
     ),
     PythonRefInfo(

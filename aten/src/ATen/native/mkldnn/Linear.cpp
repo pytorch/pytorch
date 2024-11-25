@@ -67,8 +67,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
@@ -571,7 +570,6 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
   return out;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
