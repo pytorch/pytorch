@@ -1164,22 +1164,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @inference_dtypes
-    def test_cslt_sparse_mm_alg_id(self, device, dtype):
-        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        A_compressed = torch._cslt_compress(A)
-        B = torch.ones((128, 128), device=device).to(dtype)
-
-        A_compressed = torch._cslt_compress(A)
-        alg_id, split_k, split_k_one_kernel, _ = torch._C._cusparselt.mm_search(A_compressed, B.t(), None, None, None, False)
-        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(),
-                                              alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
-
-        dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
-        dense_result = dense_result.to(dtype)
-
-        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
-
-    @inference_dtypes
     def test_cslt_sparse_mm_search(self, device, dtype):
         A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
         A_compressed = torch._cslt_compress(A)
@@ -1187,7 +1171,10 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         A_compressed = torch._cslt_compress(A)
         alg_id = torch._cslt_sparse_mm_search(A_compressed, B.t())
-        assert alg_id in range(torch.backends.cusparselt.get_max_alg_id())
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id)
+        dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
+        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     @inference_dtypes
     def test_csrc_cslt_sparse_mm_search(self, device, dtype):
@@ -1196,8 +1183,11 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         B = torch.ones((128, 128), device=device).to(dtype)
 
         A_compressed = torch._cslt_compress(A)
-        alg_id, _, _, _ = torch._C._cusparselt.mm_search(A_compressed, B.t(), None, None, None, False)
-        assert alg_id in range(torch.backends.cusparselt.get_max_alg_id())
+        alg_id, split_k, split_k_one_kernel, _ = torch._C._cusparselt.mm_search(A_compressed, B.t(), None, None, None, False)
+        sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), alg_id=alg_id, split_k=split_k, split_k_one_kernel=split_k_one_kernel)
+        dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
+        dense_result = dense_result.to(dtype)
+        torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
     def test_cusparselt_backend(self):
         version = _get_torch_cuda_version()
