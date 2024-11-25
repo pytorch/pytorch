@@ -8763,10 +8763,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
     gqa_options = [True, False]
-    if TEST_WITH_ROCM and dtype == torch.float32:
-        causal_options = [False]  # FIXME: Large errors with causal+fp32
-    else:
-        causal_options = [True, False]
+    causal_options = [True, False]
     for qkv_shape, is_causal, dropout_p, _enable_gqa in product(
             qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
