@@ -29,9 +29,11 @@ class TritonSplitScanKernel(TritonKernel):
         self,
         *groups,
         pid_cache=None,
+        fixed_config=None,
         **kwargs,
     ) -> None:
         assert pid_cache is None, "not supported"
+        assert fixed_config is None, "not supported"
         super().__init__(
             *groups,
             **kwargs,
