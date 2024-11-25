@@ -1147,7 +1147,9 @@ def expand_as_default(func, *args, **kwargs):
     return NestedTensor(func(inp, other._values), **extract_kwargs(other))
 
 
-@register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
+@register_jagged_func(
+    torch.ops.aten.where.self, "condition: jt_all, self: any, other: any"
+)
 def where_self(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1157,10 +1159,26 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert condition._size == other._size == inp._size
+    # inp / other must each be either an NJT with the same shape OR a scalar tensor
+    # TODO: Support broadcasting beyond scalar tensors
+    def _is_supported(t, condition=condition):
+        return (t.is_nested and t._size == condition._size) or (
+            not t.is_nested and t.shape == ()
+        )
+
+    if not _is_supported(inp) or not _is_supported(other):
+        raise ValueError(
+            "where(): with a nested tensor condition, all inputs must be either nested tensors "
+            "with compatible shapes or scalar tensors"
+        )
 
     return NestedTensor(
-        func(condition._values, inp._values, other._values, **new_kwargs),
+        func(
+            condition._values,
+            inp if inp.shape == () else inp._values,
+            other if other.shape == () else other._values,
+            **new_kwargs,
+        ),
         **extract_kwargs(condition),
     )
 

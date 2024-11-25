@@ -1370,6 +1370,30 @@ def sample_inputs_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
         yield last_dim_sample
 
 
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        # NJTs for input, condition, and other
+        condition = njt > 0.0
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs={
+                "condition": condition,
+                "other": torch.randn_like(njt),
+            },
+        )
+
+        # NJT for input + condition and scalar for other
+        yield SampleInput(
+            njt.clone().detach(),
+            kwargs={
+                "condition": condition,
+                "other": 42,
+            },
+        )
+
+        # TODO: Cover broadcasting beyond scalar tensors
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
 
@@ -1405,6 +1429,7 @@ njt_sample_inputs = {
     "squeeze": sample_inputs_squeeze,
     "unflatten": sample_inputs_unflatten,
     "unsqueeze": sample_inputs_unsqueeze,
+    "where": sample_inputs_where,
 }
 
 njt_references = {
