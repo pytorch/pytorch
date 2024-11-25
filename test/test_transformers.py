@@ -3189,9 +3189,6 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_ROCM and dtype == torch.float32:
-            unittest.skip("Skip fp32 attn_mask gradients on ROCM, for now.")
-            return
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
         seed = 42
