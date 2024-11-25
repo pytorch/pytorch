@@ -598,10 +598,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
-  bool supportsCoalescing() const override {
-    return true;
-  }
-
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
@@ -760,6 +756,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
+
+  // Performs NCCL user buffer registration for all buffers in
+  // the given MemPool
+  void registerMemPool(c10::cuda::MemPool* pool);
+
+  // Performs NCCL user buffer de-registration for all buffers in
+  // the given MemPool
+  void deregisterMemPool(c10::cuda::MemPool* pool);
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and

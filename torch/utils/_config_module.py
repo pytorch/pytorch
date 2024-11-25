@@ -71,6 +71,10 @@ class Config:
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
         self.value_type = value_type
+        if self.justknob is not None:
+            assert isinstance(
+                self.default, bool
+            ), f"justknobs only support booleans, {self.default} is not a boolean"
 
 
 # Types saved/loaded in configs
@@ -213,6 +217,18 @@ class _ConfigEntry:
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
+    # Used to work arounds bad assumptions in unittest.mock.patch
+    # The code to blame is
+    # https://github.com/python/cpython/blob/94a7a4e22fb8f567090514785c69e65298acca42/Lib/unittest/mock.py#L1637
+    # Essentially, mock.patch requires, that if __dict__ isn't accessible
+    # (which it isn't), that after delattr is called on the object, the
+    # object must throw when hasattr is called. Otherwise, it doesn't call
+    # setattr again.
+    # Technically we'll have an intermediate state of hiding the config while
+    # mock.patch is unpatching itself, but it calls setattr after the delete
+    # call so the final state is correct. It's just very unintuitive.
+    # upstream bug - python/cpython#126886
+    hide: bool = False
 
     def __init__(self, config: Config):
         self.default = config.default
@@ -253,10 +269,14 @@ class ConfigModule(ModuleType):
         else:
             self._config[name].user_override = value
             self._is_dirty = True
+            self._config[name].hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.hide:
+                raise AttributeError(f"{self.__name__}.{name} does not exist")
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
@@ -288,6 +308,7 @@ class ConfigModule(ModuleType):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
+        self._config[name].hide = True
 
     def _is_default(self, name: str) -> bool:
         return self._config[name].user_override is _UNSET_SENTINEL
@@ -565,10 +586,10 @@ def patch_object(obj: object, name: str, value: object) -> object:
     return mock.patch.object(obj, name, value)
 
 
-def get_tristate_env(name: str) -> Optional[bool]:
+def get_tristate_env(name: str, default: Any = None) -> Optional[bool]:
     value = os.environ.get(name)
     if value == "1":
         return True
     if value == "0":
         return False
-    return None
+    return default

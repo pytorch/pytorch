@@ -2,36 +2,22 @@
 set -eux -o pipefail
 
 # This script is used to prepare the Docker container for aarch64_ci_wheel_build.py python script
-# as we need to install conda and setup the python version for the build.
+# By creating symlinks from desired /opt/python to /usr/local/bin/
 
-CONDA_PYTHON_EXE=/opt/conda/bin/python
-CONDA_EXE=/opt/conda/bin/conda
-CONDA_ENV_NAME=aarch64_env
-PATH=/opt/conda/bin:$PATH
-LD_LIBRARY_PATH=/opt/conda/envs/${CONDA_ENV_NAME}/lib/:/opt/conda/lib:$LD_LIBRARY_PATH
-
-###############################################################################
-# Install conda
-# disable SSL_verify due to getting "Could not find a suitable TLS CA certificate bundle, invalid path"
-# when using Python version, less than the conda latest
-###############################################################################
-echo 'Installing conda-forge'
-curl -L -o /mambaforge.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh
-chmod +x /mambaforge.sh
-/mambaforge.sh -b -p /opt/conda
-rm /mambaforge.sh
-source /opt/conda/etc/profile.d/conda.sh
-conda config --set ssl_verify False
-conda create -y -c conda-forge -n "${CONDA_ENV_NAME}" python=${DESIRED_PYTHON}
-conda activate "${CONDA_ENV_NAME}"
-
+NUMPY_VERSION=2.0.2
+PYGIT2_VERSION=1.15.1
 if [[ "$DESIRED_PYTHON"  == "3.13" ]]; then
-    pip install -q --pre numpy==2.1.2
-    conda install -y -c conda-forge pyyaml==6.0.2 patchelf==0.17.2 pygit2==1.15.1 ninja==1.11.1 scons==4.7.0
-else
-    pip install -q --pre numpy==2.0.2
-    conda install -y -c conda-forge pyyaml==6.0.1 patchelf==0.17.2 pygit2==1.13.2 ninja==1.11.1 scons==4.5.2
+    NUMPY_VERSION=2.1.2
+    PYGIT2_VERSION=1.16.0
 fi
 
+SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
+source $SCRIPTPATH/../manywheel/set_desired_python.sh
+
+pip install -q numpy==${NUMPY_VERSION} pyyaml==6.0.2 scons==4.7.0 ninja==1.11.1 patchelf==0.17.2 pygit2==${PYGIT2_VERSION}
+
+for tool in python python3 pip pip3 ninja scons patchelf; do
+    ln -sf ${DESIRED_PYTHON_BIN_DIR}/${tool} /usr/local/bin;
+done
+
 python --version
-conda --version
