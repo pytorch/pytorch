@@ -392,6 +392,11 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+  // Wait for the communicator to be ready. This is a blocking function.
+  // Useful in nonblocking mode: NCCL requires the communicator to be ready
+  // before issuing a second command.
+  void waitReady();
+
   std::optional<std::string> getNcclCommFailureReason() const {
     LockType lock(mutex_);
     return commFailureReason_;
@@ -445,6 +450,14 @@ class NCCLComm {
     return;
 #endif
   }
+
+  // Finalize a communicator -- asking it to flush its operations. When the
+  // communicator is marked as nonblocking, this is a nonblocking function;
+  // otherwise, it will block till all operations complete.
+  void finalize();
+
+  // Destroy a communicator. This is a blocking function.
+  void destroy();
 
   bool isInitialized() const {
     LockType lock(mutex_);

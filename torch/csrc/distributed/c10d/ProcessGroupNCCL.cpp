@@ -1400,13 +1400,40 @@ void ProcessGroupNCCL::abort() {
   monitorWakeUpCV_.notify_one();
 }
 
+// Difference between `abort()` and `shutdown()`:
+// 1. `abort()` will signal communicators to terminate all NCCL kernels
+// immediately.
+// 2. `shutdown()` will wait for all NCCL kernels to finish before destroying
+// communicators.
+
 // Destroy (shutdown) this backend -- normal exit.
 void ProcessGroupNCCL::shutdown() {
-  // kwen2501 (Aug 2024): moved code of `shutdown()` to `abort()` because it
-  // actually implemented an abort behavior.
-  // TODO: implementation of `shutdown` should use ncclCommDestroy() instead
-  // of ncclCommAbort(). Ideally non-blocking API mode should be used.
-  this->abort();
+  // Flush all collectives
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& it : devNCCLCommMap_) {
+      auto& ncclComm = it.second;
+      ncclComm->finalize();
+    }
+  }
+  // Wait for all operations to complete.  If NCCL comm is non-blocking and
+  // timeout is reach, this will throw an exception.
+  for (auto& it : devNCCLCommMap_) {
+    auto& ncclComm = it.second;
+    ncclComm->waitReady();
+  }
+  // Tell watchdog to (1) flush its queue and (2) do not use comm objects
+  // anymore because I am going to destroy them now
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  // Destroy the communicator, reclaim resources
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& it : devNCCLCommMap_) {
+      auto& ncclComm = it.second;
+      ncclComm->destroy();
+    }
+  }
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -1425,7 +1452,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
-    shutdown();
+    // Note: we have rewritten `shutdown` to represent the destroy behavior.
+    // Here we route to `abort()` explicitly to maintain the old behavior, until
+    // we fix everything.
+    abort();
   }
 
   // Wait for all threads to finish before returning
@@ -2140,6 +2170,10 @@ void ProcessGroupNCCL::watchdogHandler() {
     }
     done = workMetaList_.empty();
   }
+  // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
+  // false alarm
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 }
 
 void ProcessGroupNCCL::runHookLoop() {
