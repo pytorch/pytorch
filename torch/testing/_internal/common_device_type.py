@@ -25,7 +25,6 @@ from typing import (
 )
 
 import torch
-from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -59,6 +58,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    GPU_TYPES,
 )
 
 
