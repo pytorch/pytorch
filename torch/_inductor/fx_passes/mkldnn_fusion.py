@@ -260,23 +260,20 @@ if torch._C._has_mkldnn:
             )
             if len(computation_nodes) != 2:
                 return False
-            # Check for same Activation
             act = computation_nodes[0].args[0]
-            if computation_nodes[1].args[0] != act:
-                return False
-            # Check for different wgt
             wgt = computation_nodes[0].args[1]
-            if computation_nodes[1].args[1] == wgt:
-                return False
             if (
-                wgt.meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+                computation_nodes[1].args[0] != act
+                or computation_nodes[1].args[1] == wgt
+                or wgt.meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
                 or computation_nodes[0].args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
             ):
-                # TODO: Extending to support dtype other than bfloat16
+                # check for same activations and different wgt
+                # <TODO> Extend to support dtype other than bfloat16
                 return False
             wgt_size = computation_nodes[0].args[1].meta.get("val").size()  # type: ignore[union-attr]
-            # Check for same weight size
             if computation_nodes[1].args[1].meta.get("val").size() != wgt_size:  # type: ignore[union-attr]
+                # check for same weight size
                 return False
             # Ensure max autotune used with CPP backend
             if not (
