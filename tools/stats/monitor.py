@@ -146,22 +146,24 @@ class UsageLog:
         Returns:
             dict: A dictionary containing the collected GPU utilization data.
         """
-        record = {}
+        info = {}
         if self._has_pynvml:
             # Iterate over the available GPUs
             for idx, gpu_handle in enumerate(self._gpu_handles):
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
                     gpu_handle
                 )
-                record.update(
+                gpu_processes = self._get_per_process_gpu_info(gpu_handle)
+                info.update(
                     {
                         f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
                         f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
+                        f"gpu_processes_{idx}": gpu_processes,
                     }
                 )
-        elif self._has_amdsmi:
+        if self._has_amdsmi:
             for idx, handle in enumerate(self._gpu_handles):
-                record.update(
+                info.update(
                     {
                         f"total_gpu_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
                             handle
@@ -217,7 +219,9 @@ class UsageLog:
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         per_process_info = []
         for p in processes:
-            info = {"pid": p.pid, "gpu_memory": p.usedGpuMemory}
+            mem = p.usedGpuMemory / (1024 * 1024)
+            pid = p.pid
+            info = {"pid": pid, "gpu_memory": mem}
             per_process_info.append(info)
         return per_process_info
 
