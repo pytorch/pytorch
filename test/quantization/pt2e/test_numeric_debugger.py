@@ -14,6 +14,7 @@ from torch.ao.quantization import (
     NUMERIC_DEBUG_HANDLE_KEY,
     prepare_for_propagation_comparison,
 )
+from torch.ao.quantization.pt2e.graph_utils import get_control_flow_submodules
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -27,14 +28,18 @@ from torch.testing._internal.common_utils import IS_WINDOWS, skipIfCrossRef, Tes
 def _extract_debug_handles(model) -> Dict[str, int]:
     debug_handle_map: Dict[str, int] = {}
 
-    for node in model.graph.nodes:
-        if (
-            CUSTOM_KEY in node.meta
-            and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
-        ):
-            debug_handle_map[str(node)] = node.meta[CUSTOM_KEY][
-                NUMERIC_DEBUG_HANDLE_KEY
-            ]
+    m_queue = [model]
+
+    while m_queue:
+        cur_m = m_queue.pop(0)
+        for n in cur_m.graph.nodes:
+            if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
+                debug_handle_map[str(n)] = n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
+
+        control_flow_submodules = [
+            submodule for _, submodule, _ in get_control_flow_submodules(cur_m)
+        ]
+        m_queue.extend(control_flow_submodules)
 
     return debug_handle_map
 
@@ -44,15 +49,21 @@ class TestNumericDebugger(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = torch.export.export(m, example_inputs)
+        ep = export_for_training(m, example_inputs)
         generate_numeric_debug_handle(ep)
-        unique_ids = set()
-        count = 0
-        for n in ep.graph.nodes:
-            if CUSTOM_KEY in n.meta and NUMERIC_DEBUG_HANDLE_KEY in n.meta[CUSTOM_KEY]:
-                unique_ids.add(n.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY])
-                count += 1
-        self.assertEqual(len(unique_ids), count)
+        debug_handle_map = _extract_debug_handles(ep.module())
+
+        self.assertEqual(len(set(debug_handle_map.values())), len(debug_handle_map))
+
+    def test_control_flow(self):
+        m = TestHelperModules.ControlFlow()
+        example_inputs = m.example_inputs()
+        ep = export_for_training(m, example_inputs)
+        generate_numeric_debug_handle(ep)
+
+        debug_handle_map = _extract_debug_handles(ep.module())
+
+        self.assertEqual(len(set(debug_handle_map.values())), len(debug_handle_map))
 
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
