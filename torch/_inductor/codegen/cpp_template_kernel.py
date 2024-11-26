@@ -288,7 +288,7 @@ class CppTemplateKernel(CppKernel):
               in `epilogue_nodes` with `src`.
         """
         if isinstance(src, Iterable):
-            # For mlp silu-mul fusion
+            # Group GEMM may have multi outputs to be localized
             assert all(dst.get_size() == _src.get_size() for _src in src)
             assert epilogue_nodes
         else:
@@ -303,6 +303,7 @@ class CppTemplateKernel(CppKernel):
                     and isinstance(orig_src, Iterable)
                     and orig_src[0].get_name() != src[0].get_name()
                 ):
+                    # For Group GEMM
                     assert all(
                         _orig_src.get_name() != _src.get_name()
                         for _orig_src, _src in zip(orig_src, src)
