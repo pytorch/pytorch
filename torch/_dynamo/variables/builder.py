@@ -997,11 +997,24 @@ class VariableBuilder:
                 new_symint == 1,
             )
         elif isinstance(value, torch.SymInt):
-            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                value.node.hint,
-                self.source,
-                dynamic_dim=DimDynamic.DYNAMIC,
-            )
+            if value.node.has_hint():
+                new_symint = (
+                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                        value.node.hint,
+                        self.source,
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                    )
+                )
+            else:
+                # TODO (yidi): we need to figure out a way to propagate the guards
+                # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
+                # this is automatically done by evaluating the guards once but this
+                # will cause data-dependent error when we evaluate the outer unbacked symints.
+                # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                unimplemented(
+                    "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
+                )
+
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
