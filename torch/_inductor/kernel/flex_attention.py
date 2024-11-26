@@ -1509,7 +1509,7 @@ def bwd_dq_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1541,7 +1541,7 @@ def bwd_dq_block_mn(
 
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1691,7 +1691,7 @@ def bwd_dkdv_block_mn(
             n="n",
         ) | indent_except_first(2) }}
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1749,7 +1749,7 @@ def bwd_dkdv_block_mn(
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

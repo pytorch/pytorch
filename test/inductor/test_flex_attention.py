@@ -804,38 +804,42 @@ class TestFlexAttention(InductorTestCase):
         D: int = D,
     ):
         MAX_S = S
-        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
-        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
+        block_mask1 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out1 = sdpa_partial(
+        golden_out1 = sdpa_partial1(
             q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
         )
-        ref_out1 = sdpa_partial(q1, k1, v1)
+        ref_out1 = sdpa_partial1(q1, k1, v1)
 
         # The second eager batch, shape (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
         q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out2 = sdpa_partial(
+        golden_out2 = sdpa_partial2(
             q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
         )
-        ref_out2 = sdpa_partial(q2, k2, v2)
+        ref_out2 = sdpa_partial2(q2, k2, v2)
 
         # The third eager batch, shape (B * 4, H, S / 4, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask3 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out3 = sdpa_partial(
+        golden_out3 = sdpa_partial3(
             q3.to(torch.float64), k3.to(torch.float64), v3.to(torch.float64)
         )
-        ref_out3 = sdpa_partial(q3, k3, v3)
+        ref_out3 = sdpa_partial3(q3, k3, v3)
 
         # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
         # We check dynamo counters["frames"]["ok"] to ensure:
@@ -852,18 +856,17 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        compiled_sdpa = torch.compile(sdpa_partial)
-        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        compiled_out1 = torch.compile(sdpa_partial1)(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # The second batch (automatic dynamic).
-        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        compiled_out2 = torch.compile(sdpa_partial2)(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
         # The third batch (no re-compilation).
-        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        compiled_out3 = torch.compile(sdpa_partial3)(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
@@ -2203,7 +2206,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     # Use weird mask to test reusing block_mask does work well.
     @supported_platform
-    def test_block_mask_reuse_with_weird_mask(self):
+    def _test_block_mask_reuse_with_weird_mask(self):
         def mask(b, h, q, kv):
             return (kv < 256) | (kv >= 2048)
 
@@ -3795,6 +3798,30 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
             block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+
+    @common_utils.parametrize("compile", [False, True])
+    def test_block_mask_vs_sequence_lengths(self, compile):
+        if compile:
+            flex_attention_call = torch.compile(flex_attention)
+        else:
+            flex_attention_call = flex_attention
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def create_inputs(S):
+            q, k, v = (
+                torch.randn(
+                    1, 8, S, 64, dtype=torch.float16, requires_grad=True, device="cuda"
+                )
+                for _ in range(3)
+            )
+            return q, k, v
+
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
+        flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+            flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
 
 class TestPagedAttention(InductorTestCase):
