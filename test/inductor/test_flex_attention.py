@@ -3823,6 +3823,10 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         with self.assertRaisesRegex(ValueError, "block_mask was created for"):
             flex_attention_call(*create_inputs(2048), block_mask=block_mask)
 
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
+        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+            flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+
 
 class TestPagedAttention(InductorTestCase):
     def _check_equal(
