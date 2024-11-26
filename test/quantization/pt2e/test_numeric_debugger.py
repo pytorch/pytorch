@@ -70,7 +70,7 @@ class TestNumericDebugger(TestCase):
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
             ):
                 debug_handle_to_prev_decomp_op_map[
-                    node.meta.get("nn_module_stack")
+                    str(node.meta.get("nn_module_stack"))
                 ] = node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
 
         bfs_trace_executorch_program_with_node_process(
