@@ -2398,6 +2398,7 @@ def _generate_qlinear_weight_prepack_patterns(
 def _generate_linear_dynamic_fp16_pattern(
     _dequant_weight_pattern,
     input_dim_exceeds_two=False,
+    relu_fused=False,
 ):
     dtype = torch.float32
     t_pattern = _generate_linear_t_pattern(_dequant_weight_pattern, dtype)
@@ -2423,24 +2424,30 @@ def _generate_linear_dynamic_fp16_pattern(
         KeywordArg("act_reshape_size"),
         input_dim_exceeds_two,
     )
-    dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
-        CallFunction(
-            aten.addmm.default,
-            KeywordArg("b"),
-            x_pattern_with_reshape,
-            t_pattern,
+    dequant_linear_bias_pattern = generate_pattern_with_unary(
+        _may_generate_pattern_with_reshape(
+            CallFunction(
+                aten.addmm.default,
+                KeywordArg("b"),
+                x_pattern_with_reshape,
+                t_pattern,
+            ),
+            KeywordArg("output_reshape_size"),
+            input_dim_exceeds_two,
         ),
-        KeywordArg("output_reshape_size"),
-        input_dim_exceeds_two,
+        aten.relu.default if relu_fused else None,
     )
-    dequant_linear_no_bias_pattern = _may_generate_pattern_with_reshape(
-        CallFunction(
-            aten.mm.default,
-            x_pattern_with_reshape,
-            t_pattern,
+    dequant_linear_no_bias_pattern = generate_pattern_with_unary(
+        _may_generate_pattern_with_reshape(
+            CallFunction(
+                aten.mm.default,
+                x_pattern_with_reshape,
+                t_pattern,
+            ),
+            KeywordArg("output_reshape_size"),
+            input_dim_exceeds_two,
         ),
-        KeywordArg("output_reshape_size"),
-        input_dim_exceeds_two,
+        aten.relu.default if relu_fused else None,
     )
     return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
 
@@ -2583,6 +2590,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
     pattern,
     pass_number,
     input_dim_exceeds_two=False,
+    relu_fused=False,
 ):
     def _extra_check_fn(match: Match):
         return (
@@ -2605,19 +2613,33 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         dequant_per_tensor (fp32)
           |
         mm/addmm <- t <- dequant_per_tensor (fp32) <- fp16_weight
+          |
+        (relu)
 
         Insert weight prepack node and change the pattern to:
         fp32 activation
           |
         onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- fp16_weight
+        (or onednn.linear_relu_dynamic_fp16)
         """
         dtype = torch.float
         # pattern is the same for contiguous or non-contiguous input
         input_contiguous = True
-        (
-            linear_node,
-            output_reshape_node,
-        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        linear_nodes = filter_nodes(match.nodes, aten.addmm.default)
+        assert len(linear_nodes) <= 1
+        if len(linear_nodes) == 0:
+            linear_nodes = filter_nodes(match.nodes, aten.mm.default)
+        assert len(linear_nodes) == 1
+        linear_node = linear_nodes[0]
+        assert isinstance(linear_node, torch.fx.node.Node)
+        output_reshape_node = (
+            next(iter(linear_node.users)) if input_dim_exceeds_two else None
+        )
+        out_node = output_reshape_node if input_dim_exceeds_two else linear_node
+        if relu_fused:
+            out_node = match.output_node()
+        assert out_node is not None
+
         input_index = 1 if linear_node.target is aten.addmm.default else 0
         weight_index = input_index + 1
 
@@ -2629,10 +2651,14 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         ) = _get_linear_dq_node(
             linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
         )
+        quant_x_node = dequant_x_node.args[0]
+        assert quant_x_node.target is quantized_decomposed.quantize_per_tensor.default
 
         t_node = linear_node.args[weight_index]
+        assert isinstance(t_node, torch.fx.node.Node)
 
         dequant_w_node = t_node.args[0]
+        assert isinstance(dequant_w_node, torch.fx.node.Node)
         assert (
             dequant_w_node.target is quantized_decomposed.dequantize_per_tensor.default
         )
@@ -2662,23 +2688,24 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
                 prepack_weight_node,
                 bias,
             )
-            new_linear_node = graph.call_function(
-                torch.ops.onednn.linear_dynamic_fp16.default, args=new_args
+            linear_op = (
+                torch.ops.onednn.linear_relu_dynamic_fp16.default
+                if relu_fused
+                else torch.ops.onednn.linear_dynamic_fp16.default
             )
-            if input_dim_exceeds_two:
-                output_reshape_node.replace_all_uses_with(new_linear_node)
-                new_linear_node.meta.update(output_reshape_node.meta)
-            else:
-                linear_node.replace_all_uses_with(new_linear_node)
-                new_linear_node.meta.update(linear_node.meta)
-
+            new_linear_node = graph.call_function(linear_op, args=new_args)
+            out_node.replace_all_uses_with(new_linear_node)
+            new_linear_node.meta.update(out_node.meta)
             # Erase the original linear node
-            if input_dim_exceeds_two:
+            if relu_fused:
+                graph.erase_node(out_node)
+            if output_reshape_node is not None:
                 graph.erase_node(output_reshape_node)
             graph.erase_node(linear_node)
             if input_dim_exceeds_two:
                 graph.erase_node(act_reshape_node)
             graph.erase_node(dequant_x_node)
+            graph.erase_node(quant_x_node)
             graph.erase_node(t_node)
             graph.erase_node(dequant_w_node)
 
@@ -2698,17 +2725,20 @@ def _register_linear_dynamic_fp16_weight_prepack():
         KeywordArg("w_quant_max"),
         KeywordArg("w_dtype"),
     )
-    for input_dim_exceeds_two in [False, True]:
-        patterns = _generate_linear_dynamic_fp16_pattern(
-            dequantize_per_tensor_weight_pattern,
-            input_dim_exceeds_two,
-        )
-        for pattern in patterns:
-            _register_linear_dynamic_fp16_weight_prepack_pass(
-                pattern,
-                pass_number=1,
-                input_dim_exceeds_two=input_dim_exceeds_two,
+    for relu_fused in [False, True]:
+        for input_dim_exceeds_two in [False, True]:
+            patterns = _generate_linear_dynamic_fp16_pattern(
+                dequantize_per_tensor_weight_pattern,
+                input_dim_exceeds_two,
+                relu_fused=relu_fused,
             )
+            for pattern in patterns:
+                _register_linear_dynamic_fp16_weight_prepack_pass(
+                    pattern,
+                    pass_number=0 if relu_fused else 1,
+                    input_dim_exceeds_two=input_dim_exceeds_two,
+                    relu_fused=relu_fused,
+                )
 
 
 @functools.lru_cache(None)

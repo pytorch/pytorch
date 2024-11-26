@@ -2963,15 +2963,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 rtol=0.07,
             )
 
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    def test_linear_dynamic_fp16(self):
+    def _test_linear_dynamic_fp16_helper(self, use_relu: bool):
         class M(torch.nn.Module):
-            def __init__(self, bias: bool):
+            def __init__(self, bias: bool, use_relu: bool):
                 super().__init__()
                 self.linear = torch.nn.Linear(256, 256, bias=bias)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
 
             def forward(self, x):
+                if self.use_relu:
+                    return self.relu(self.linear(x))
                 return self.linear(x)
 
         quantizer = X86InductorQuantizer().set_global(
@@ -2989,7 +2991,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             x = torch.randn(x_shape)
             if not x_contig:
                 x = x[0::2, ...]
-            mod = M(bias).eval()
+            mod = M(bias, use_relu).eval()
 
             def matcher_check_fn():
                 self.assertEqual(
@@ -3001,6 +3003,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 nodes_count = 5
                 if input_ndim > 2:
                     nodes_count += 2
+                if use_relu:
+                    nodes_count += 1
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
                     nodes_count,
@@ -3015,14 +3019,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=True,
                 quantizer=quantizer,
             )
+            linear_op_str = (
+                "torch.ops.onednn.linear_relu_dynamic_fp16.default"
+                if use_relu
+                else "torch.ops.onednn.linear_dynamic_fp16.default"
+            )
             self._test_code_common(
                 mod,
                 (x,),
-                ["torch.ops.onednn.linear_dynamic_fp16.default"],
+                [linear_op_str],
                 ["torch.ops.aten.addmm.default", "torch.ops.aten.mm.default"],
                 check_quantization=True,
                 quantizer=quantizer,
             )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16(self):
+        self._test_linear_dynamic_fp16_helper(use_relu=False)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_relu_dynamic_fp16(self):
+        self._test_linear_dynamic_fp16_helper(use_relu=True)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
