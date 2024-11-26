@@ -9,7 +9,7 @@ class TestMetricsContext(TestCase):
         super().setUp()
         self.metrics = {}
 
-    def _on_exit(self, metrics):
+    def _on_exit(self, start_ns, end_ns, metrics, exc_type, exc_value):
         # Save away the metrics to be validated in the test.
         self.metrics = metrics.copy()
 
@@ -86,6 +86,15 @@ class TestMetricsContext(TestCase):
         self.assertEqual(self.metrics, {"m1": {1, 2}, "m2": {3, 4}})
         self.assertTrue(isinstance(self.metrics["m1"], set))
         self.assertTrue(isinstance(self.metrics["m2"], set))
+
+    def test_set_key_value(self):
+        with MetricsContext(self._on_exit) as context:
+            context.set_key_value("feature_usage", "k", True)
+            # Overrides allowed
+            context.set_key_value("feature_usage", "k2", True)
+            context.set_key_value("feature_usage", "k2", False)
+
+        self.assertEqual(self.metrics, {"feature_usage": {"k": True, "k2": False}})
 
 
 if __name__ == "__main__":

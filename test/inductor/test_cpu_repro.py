@@ -558,15 +558,15 @@ class CPUReproTests(TestCase):
         itertools.product(
             *[
                 [True, False],
-                [1, 2],
-                [2],
-                [1, 2],
+                [1, 7],
+                [7],
+                [1, 7],
                 [False, True],
                 [False, True],
                 [False, True],
                 [True, False],
-                [1, 2],
-                [1, 2],
+                [1, 7],
+                [1, 7],
             ]
         ),
     )
@@ -4713,6 +4713,21 @@ class CPUReproTests(TestCase):
             return torch.prod(arg, 1, dtype=torch.bool)
 
         self.common(fn, (result,))
+
+    @requires_vectorization
+    @config.patch("cpp.min_chunk_size", 1)
+    def test_for_loop_collapsed(self):
+        # https://github.com/pytorch/pytorch/issues/122281
+        def fn(x):
+            return x.transpose(1, 0).contiguous()
+
+        x = torch.randn(199, 2)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
+            code
+        )
 
 
 if __name__ == "__main__":
