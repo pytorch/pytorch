@@ -181,6 +181,7 @@ manual_torch_name_rule_map = {
     "torch.nested._internal.nested_tensor.nested_from_padded": TorchInGraphFunctionVariable,
     "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     "torch.nested.nested_tensor_from_padded": UserFunctionVariable,
+    "torch.nested._internal.offload_tensor.request_offload_all": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,

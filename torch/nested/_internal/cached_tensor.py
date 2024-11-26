@@ -1,0 +1,98 @@
+import torch
+from torch.nested._internal.offload_tensor import register_tensor, try_get_int
+from torch.utils import _pytree as pytree
+
+
+def _get_source_field(metadata, source_fields):
+    return next(k for k in source_fields if metadata[k] is not None)
+
+
+def _get_source(metadata, source_fields):
+    source_field = _get_source_field(metadata, source_fields)
+    return metadata[source_field]
+
+
+class CachedTensor(torch.Tensor):
+    @staticmethod
+    def __new__(
+        cls,
+        metadata: dict,
+        source_fields=None,
+        extra_fields=(),
+    ):
+        assert source_fields is not None
+        assert any(
+            metadata[k] is not None for k in source_fields
+        ), f"CachedTensor: At least one of {source_fields} must be passed"
+
+        # Tensor's metadata is the first non-None source field
+        source = _get_source(metadata, source_fields)
+        shape = source.shape
+        kwargs = {}
+        kwargs["strides"] = source.stride()
+        kwargs["storage_offset"] = source.storage_offset()
+        kwargs["device"] = source.device
+        kwargs["layout"] = source.layout
+        kwargs["requires_grad"] = source.requires_grad
+        kwargs["dtype"] = source.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, metadata: dict, source_fields=None, extra_fields=()):
+        # All source fields are registered, last non-None source field is the inner_id
+        self.inner_id = None
+        for k, v in metadata.items():
+            if k in source_fields:
+                if not try_get_int(v):
+                    self.inner_id = register_tensor(v)
+        assert self.inner_id is not None
+        self.source_fields = source_fields
+        self.extra_fields = extra_fields
+        self.all_fields = source_fields + extra_fields
+        self.metadata = metadata
+
+    def __repr__(self):
+        source_repr = repr(_get_source(self.metadata, self.source_fields))
+        return f"CachedTensor({source_repr})"
+
+    def __getattr__(self, name):
+        if name in self.metadata:
+            return self.metadata[name]
+        else:
+            raise AttributeError(
+                f"{type(self).__name__} object has no attribute '{name}'"
+            )
+
+    def __tensor_flatten__(self):
+        ctx = {
+            "source_fields": self.source_fields,
+            "extra_fields": self.extra_fields,
+        }
+        return [x for x in self.all_fields if self.metadata.get(x) is not None], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return CachedTensor(inner_tensors, **meta)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        # Doing any operation on a CachedTensor automatically unwraps and returns a non-CachedTensor
+        # We can improve this to do smarter things, like automatically cache .diff(), .cumsum(), etc.
+        if kwargs is None:
+            kwargs = {}
+        unwrapped_args = pytree.tree_map_only(
+            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), args
+        )
+        unwrapped_kwargs = pytree.tree_map_only(
+            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), kwargs
+        )
+        return func(*unwrapped_args, **unwrapped_kwargs)
+
+
+@torch._dynamo.allow_in_graph
+def make_cached_tensor(metadata):
+    return CachedTensor(
+        metadata,
+        source_fields=source_fields,
+        extra_fields=extra_fields,
+    )

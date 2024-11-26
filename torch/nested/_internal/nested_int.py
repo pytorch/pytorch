@@ -35,12 +35,15 @@ def _ge(lhs: Any, rhs: Any) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, t_id: int, coeff: int):
-        self.t_id = t_id
+    def __init__(self, cache: int, coeff: int):
+        self.cache = cache
         self.coeff = coeff
 
     def nested_int_coeff(self) -> int:
         return self.coeff
+
+    def nested_int_cache(self) -> Any:
+        return self.cache
 
     def maybe_as_int(self) -> Optional[int]:
         return None
@@ -62,7 +65,7 @@ class NestedIntNode:
 
     def _str(self) -> str:
         if self.coeff == 1:
-            return f"j{self.t_id}"
+            return f"j{self.cache.id}"
         return f"{self.coeff}*j{self.t_id}"
 
     def __str__(self) -> str:

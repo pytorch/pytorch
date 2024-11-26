@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import TypeAlias, TypeGuard
 
 import torch
 from torch._C._autograd import CreationMeta
@@ -40,6 +40,7 @@ from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
+from typing_extensions import TypeAlias, TypeGuard
 
 
 if TYPE_CHECKING:
@@ -192,6 +193,26 @@ class MetaTensorDescriber:
             self.next_storage_id += 1
         return self.lookup_storage[s]
 
+    def describe_custom_size_strides(self, t: torch.Tensor):
+        def process(x):
+            from torch.nested._internal.nested_int import NestedIntNode
+
+            if isinstance(x, torch.SymInt) and isinstance(x.node, NestedIntNode):
+                # For tensors on symint, you need to explicitly pass the inner
+                # subclass attribute to indicate which inner tensor attribute
+                return MetaNestedIntDesc(
+                    cache=self.describe_tensor(
+                        x.node.nested_int_cache(),
+                        inner_tensor_attr="_metadata",
+                    ),
+                )
+            return None
+
+        return MetaCustomSizeStridesDesc(
+            size=tuple(process(x) for x in t.size()),
+            stride=tuple(process(x) for x in t.stride()),
+        )
+
     def describe_storage(self, s: torch.UntypedStorage, *, trace: bool = False):
         r = MetaStorageDesc(
             id=self.get_storage_id(s),
@@ -209,7 +230,11 @@ class MetaTensorDescriber:
         return r
 
     def describe_tensor(
-        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
+        self,
+        t: torch.Tensor,
+        *,
+        recurse: bool = True,
+        trace: bool = False,
     ):
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -305,7 +330,7 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        from torch.nested._internal.offload_tensor import _global_tensor_registry
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -335,11 +360,8 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=(
-                _tensor_symint_registry[t].node.nested_int()
-                if t in _tensor_symint_registry
-                else None
-            ),
+            nested_int=_global_tensor_registry.try_get_int(t),
+            custom_size_strides=self.describe_custom_size_strides(t),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -423,6 +445,18 @@ class MetaTensorDescriber:
 
 
 @dataclass(frozen=True)
+class MetaNestedIntDesc:
+    cache: MetaNestedCacheDesc
+
+
+@dataclass(frozen=True)
+class MetaCustomSizeStridesDesc:
+    size: Tuple[Optional[MetaNestedIntDesc], ...]
+    stride: Tuple[Optional[MetaNestedIntDesc], ...]
+    # storage_offset can never be NestedInt
+
+
+@dataclass(frozen=True)
 class MetaStorageDesc:
     id: MetaStorageId
     size: int
@@ -476,6 +510,7 @@ class MetaTensorDesc:
     # metadata if that offsets is already associated with a nested int.
     # See test_construct_from_jagged_with_input_offsets_mixed_case.
     nested_int: Optional[int] = None
+    custom_size_strides: MetaCustomSizeStridesDesc = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -710,6 +745,22 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
+        def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
+            # Assume we captured the symbolic_context of the outer-most subclass
+            curr_context = symbolic_context
+            for k in t.inner_subclass_path:
+                curr_context = curr_context.inner_context[k]
+
+            inner_callback = functools.partial(callback_, device=t.device)
+
+            return self.meta_tensor(
+                t,
+                shape_env,
+                inner_callback,
+                source=src,
+                symbolic_context=curr_context,
+            )
+
         # When we make as_strided calls, we end up generating a guard
         # that the new as_strided tensor is in bounds for the old storage
         # for the base (since as_strided calls can "bust" out of their
@@ -768,6 +819,8 @@ class MetaConverter:
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        metafy_fn=metafy_fn,
+                        custom_size_strides=t.custom_size_strides,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -830,7 +883,7 @@ class MetaConverter:
                     return self.meta_tensor(
                         t,
                         shape_env=shape_env,
-                        callback=callback,
+                        callback_=callback,
                         source=source,
                         symbolic_context=symbolic_context,
                     )
@@ -842,11 +895,13 @@ class MetaConverter:
                         current_context = symbolic_context.inner_contexts[attr]
 
                     current_source = AttrSource(source, attr)
+                    inner_callback = functools.partial(callback_, device=t.device)
                     new_empty_tensor = _empty_create_subclass(
                         meta_tensor_desc,
                         meta_tensor_desc.size,
                         meta_tensor_desc.stride,
                         current_context,
+                        inner_callback,
                         callback,
                         current_source,
                     )
@@ -1260,7 +1315,7 @@ class MetaConverter:
                             ft = self.meta_tensor(
                                 t.unwrapped,
                                 shape_env=shape_env,
-                                callback=callback,
+                                callback_=callback,
                                 # NB: reuse these exactly, we treat the
                                 # functional tensor as "invisible".
                                 # TODO: Actually this all probably doesn't
@@ -1303,7 +1358,7 @@ class MetaConverter:
                     unwrapped = self.meta_tensor(
                         t.unwrapped,
                         shape_env=shape_env,
-                        callback=callback,
+                        callback_=callback,
                         source=source,
                         symbolic_context=symbolic_context,
                     )
@@ -1575,11 +1630,11 @@ class MetaConverter:
             if t.is_parameter:
                 r._is_param = True
 
+            # TODO(soulitzer): update this note
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
-                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
-                    nt_tensor_id=t.nested_int
-                )
+                r.source = source
+                r.set_nested_id(t.nested_int)
 
             self.set_tensor_memo(t, r)
 
@@ -1590,7 +1645,7 @@ class MetaConverter:
         t,
         shape_env=None,
         *,
-        callback=lambda t: t(),
+        callback_=lambda t: t(),
         source=None,
         symbolic_context=None,
         # Controls whether or not we should dump the tensor metadata to structured logs
@@ -1598,6 +1653,7 @@ class MetaConverter:
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace=True,
     ):
+        callback = functools.partial(callback_, device=t.device)
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
 
@@ -1660,7 +1716,7 @@ class MetaConverter:
             r = self.meta_tensor(
                 t_desc,
                 shape_env=shape_env,
-                callback=callback,
+                callback_=callback,
                 source=source,
                 symbolic_context=symbolic_context,
             )
