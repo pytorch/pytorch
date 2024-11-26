@@ -1,4 +1,5 @@
 import torch
+from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.offload_tensor import register_tensor, try_get_int
 from torch.utils import _pytree as pytree
 
@@ -43,13 +44,19 @@ class CachedTensor(torch.Tensor):
         self.inner_id = None
         for k, v in metadata.items():
             if k in source_fields:
-                if not try_get_int(v):
+                if try_get_int(v) is None:
                     self.inner_id = register_tensor(v)
+                else:
+                    self.inner_id = try_get_int(v)
+        # Why is inner_id none?
         assert self.inner_id is not None
         self.source_fields = source_fields
         self.extra_fields = extra_fields
         self.all_fields = source_fields + extra_fields
         self.metadata = metadata
+
+        # Compile only
+        self.nested_int_ref = None
 
     def __repr__(self):
         source_repr = repr(_get_source(self.metadata, self.source_fields))
@@ -81,7 +88,7 @@ class CachedTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         if op in _func_registry:
-            return _func_registry[op](*args, **kwargs)
+            return _func_registry[op](op, *args, **kwargs)
 
         unwrapped_args = pytree.tree_map_only(
             CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), args
@@ -144,13 +151,13 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         values = values.squeeze(-1)
 
     return NestedTensor(
-        new_kwargs["values"],
+        values,
         new_kwargs["metadata"],
         _ragged_idx=new_kwargs["ragged_idx"],
     )
 
 
-@register_op(torch.ops.aten._nested_view_from_jagged.default)
+@register_func(torch.ops.aten._nested_view_from_jagged.default)
 def _nested_view_from_jagged_default(func, *args, **kwargs):
     # values: t, metadata: t, ragged_idx: any?
     from torch.nested._internal.nested_tensor import NestedTensor
@@ -158,8 +165,9 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+    print(new_kwargs)
     return NestedTensor(
-        new_kwargs["values"],
+        new_kwargs["input"],
         new_kwargs["metadata"],
         _ragged_idx=new_kwargs["ragged_idx"],
     )

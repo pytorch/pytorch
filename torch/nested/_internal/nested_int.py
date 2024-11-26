@@ -35,8 +35,18 @@ def _ge(lhs: Any, rhs: Any) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, cache: int, coeff: int):
+    def __init__(self, cache: torch.Tensor, coeff: int):
         self.cache = cache
+        from torch.nested._internal.nested_tensor import source_fields
+        from torch.nested._internal.offload_tensor import try_get_int
+
+        self.t_id = -1
+        for k in source_fields:
+            if (v := cache.metadata.get(k)) is not None:
+                if (t_id := try_get_int(v)) is not None:
+                    self.t_id = t_id
+                    break
+        assert self.t_id >= 0
         self.coeff = coeff
 
     def nested_int_coeff(self) -> int:
@@ -82,7 +92,7 @@ class NestedIntNode:
             other = other.constant_int()
         else:
             raise ValueError(f"unsupported: {type(other)}")
-        return NestedIntNode(self.t_id, self.coeff * other)
+        return NestedIntNode(self.cache, self.coeff * other)
 
     def eq(self, other: Any) -> Any:
         return torch._C._get_constant_bool_symnode(_eq(self, other))

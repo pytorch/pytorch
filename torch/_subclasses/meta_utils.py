@@ -747,14 +747,13 @@ class MetaConverter:
         self.arg_cnt += 1
 
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            inner_context = getattr(symbolic_context, "inner_context")
-            assert inner_context is not None
+            inner_contexts = getattr(symbolic_context, "inner_contexts")
             return self.meta_tensor(
                 t,
                 shape_env,
                 functools.partial(callback_, device=t.device),
                 source=src,
-                symbolic_context=inner_context[t.subclass_inner_attr],
+                symbolic_context=inner_contexts[t.subclass_inner_attr],
             )
 
         # When we make as_strided calls, we end up generating a guard
@@ -898,7 +897,6 @@ class MetaConverter:
                         meta_tensor_desc.stride,
                         current_context,
                         inner_callback,
-                        callback,
                         current_source,
                     )
                     inner_tensors[attr] = new_empty_tensor
@@ -1630,7 +1628,7 @@ class MetaConverter:
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 r.source = source
-                r.set_nested_id(t.nested_int)
+                r.register_nested_int_id(t.nested_int)
 
             self.set_tensor_memo(t, r)
 

@@ -2843,7 +2843,6 @@
 
 - name: _nested_from_padded_tensor(Tensor padded, Tensor metadata, int ragged_idx=1, SymInt? sum_S=None) -> Tensor
   padded: grad.to_padded_tensor_symint(0.0, at::OptionalArrayRef<c10::SymInt>(padded.sym_sizes()))
-  offsets: non_differentiable
   metadata: non_differentiable
 
 - name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
@@ -2853,9 +2852,7 @@
 
 - name: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, int ragged_idx=1) -> Tensor(a)
   self: grad.values()
-  offsets: non_differentiable
-  lengths: non_differentiable
-  metadata: non_differentiable
+  metadata: metadata
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
   self: "_nested_view_from_jagged(grad, at::_nested_get_jagged_metadata(self), at::_nested_get_ragged_idx(self))"

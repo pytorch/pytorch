@@ -380,7 +380,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback_=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -622,6 +622,7 @@ class FakeTensor(Tensor):
     unique_memo = SymNumberMemoDescriptor()
 
     nested_int_id: Optional[int] = None
+    source: Any = None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -895,7 +896,7 @@ class FakeTensor(Tensor):
         return self.nested_int_id
 
     def register_nested_int_id(self, nid: Optional[int] = None):
-        if self.nid is None:
+        if nid is None:
             self.nested_int_id = self.fake_mode.get_next_nested_int_id()
         else:
             self.nested_int_id = nid
@@ -911,7 +912,7 @@ class FakeTensor(Tensor):
 
     def detach(self) -> torch.Tensor:  # type: ignore[override]
         out = torch.ops.aten.detach.default(self)
-        if t_id := try_get_nested_int_id(self):
+        if (t_id := self.try_get_nested_int_id()) is not None:
             out.register_nested_int_id(t_id)
         return out
 
@@ -1206,10 +1207,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-        import torch.nested._internal.nested_tensor
+        import torch.nested._internal.offload_tensor
 
         self.nt_tensor_id_initial_count = (
-            torch.nested._internal.nested_tensor._tensor_id_counter
+            torch.nested._internal.offload_tensor._global_tensor_registry._next_id
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
@@ -2360,14 +2361,13 @@ class FakeTensorMode(TorchDispatchMode):
         # Returned nested int always has coeff=1; caller should multiply result by coeff if needed
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
+        from torch.nested._internal.utils import _try_get_source
 
-        src = (
-            cache.source
-            if cache.source
-            else torch._dynamo.source.EphemeralSource(
+        src = _try_get_source(cache)
+        if src is None:
+            src = torch._dynamo.source.EphemeralSource(
                 f"intermediate_offsets_or_lengths"
             )
-        )
         hint = torch.SymInt(NestedIntNode(cache, coeff=1))
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
@@ -2383,7 +2383,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def get_next_nested_int_id(self) -> int:
         ret = self.nt_tensor_id_counter
-        assert self.enter_stack, "should only called while FakeTensorMode is active"
+        # assert self.enter_stack, "should only called while FakeTensorMode is active"
         self.nt_tensor_id_counter += 1
         return ret
 

@@ -48,7 +48,7 @@ def register_tensor(t, t_id=None):
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 
     if isinstance((t := mb_unwrap_functional_tensor(t)), FakeTensor):
-        return t.register_nested_int_id(t, t_id=t_id)
+        return t.register_nested_int_id(t_id)
     else:
         return _global_tensor_registry.register(t, t_id=t_id)
 
@@ -58,7 +58,7 @@ def try_get_int(t):
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 
     if isinstance((t := mb_unwrap_functional_tensor(t)), FakeTensor):
-        return t.try_get_nested_int_id(t)
+        return t.try_get_nested_int_id()
     else:
         return _global_tensor_registry.try_get_int(t)
 

@@ -3864,12 +3864,12 @@ class ShapeEnv:
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
                 metafy_fn=metafy_fn,
-                mb_nested_int_desc=mb_nested_int,
+                nested_int_desc=opt_nested_int,
             )
-            for i, (sym, hint, mb_nested_int) in enumerate(zip(size, ex_size, custom_size_strides.size))
+            for i, (sym, hint, opt_nested_int) in enumerate(zip(size, ex_size, custom_size_strides.size))
         ]
         sym_stride = []
-        for i, (stride_expr, mb_nested_int) in enumerate(zip(stride, custom_size_strides.stride)):
+        for i, (stride_expr, opt_nested_int) in enumerate(zip(stride, custom_size_strides.stride)):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
@@ -3879,7 +3879,7 @@ class ShapeEnv:
                     hint=ex_stride[i],
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
                     metafy_fn=metafy_fn,
-                    mb_nested_int_desc=mb_nested_int,
+                    nested_int_desc=opt_nested_int,
                 )
             )
         sym_storage_offset = self.create_symintnode(
@@ -3947,8 +3947,7 @@ class ShapeEnv:
                 
             if coeff == 1:
                 fake_mode = _try_get_fake_mode(cache)
-                assert cache.source is not None
-                return fake_mode.get_nested_int(cache)
+                return fake_mode.get_nested_int(cache=cache)
             else:
                 # Don't participate in caching when coeff != 1
                 return SymInt(

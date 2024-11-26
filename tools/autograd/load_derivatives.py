@@ -113,9 +113,11 @@ def load_derivatives(
         # so we can generate derivatives for them separately.
         native_functions_with_view_groups = get_grouped_by_view_native_functions(funcs)
         native_functions = concatMap(
-            lambda g: [g]
-            if isinstance(g, NativeFunction)
-            else list(g.functions(include_copy=True)),
+            lambda g: (
+                [g]
+                if isinstance(g, NativeFunction)
+                else list(g.functions(include_copy=True))
+            ),
             native_functions_with_view_groups,
         )
         view_groups = [
