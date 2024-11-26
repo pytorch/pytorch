@@ -1843,10 +1843,11 @@ def fx_to_pattern(
         def call_function(
             self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> PatternExpr:
+            process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
             if target == operator.getitem:
 
-                def process_arg_fn(
+                def process_arg_fn_impl(
                     x: T,
                     ignore_types_override: Optional[Sequence[Type[Any]]] = tuple(
                         t for t in ignore_types if t is not int
@@ -1854,8 +1855,8 @@ def fx_to_pattern(
                 ) -> Union[T, KeywordArg, Ignored]:
                     return process_arg(x, ignore_types_override)
 
-            else:
-                process_arg_fn = process_arg
+                process_arg_fn = process_arg_fn_impl
+
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
