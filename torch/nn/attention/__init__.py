@@ -138,13 +138,13 @@ def sdpa_kernel(
     previous_backends = _cur_sdpa_kernel_backends()
     try:
         if set_priority:
-            torch._C._set_sdp_priority_order(user_priority)
+            torch._C._set_sdp_priority_order(user_priority) # type: ignore[arg-type]
         _sdpa_kernel(backends_set)
         yield {}
     finally:
         _sdpa_kernel(previous_backends)
         if set_priority:
-            torch._C._set_sdp_priority_order(previous_priority)
+            torch._C._set_sdp_priority_order(previous_priority) # type: ignore[arg-type]
 
 
 # variadic version of sdpa_kernel for dynamo to use while reconstructing

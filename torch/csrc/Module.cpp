@@ -704,7 +704,6 @@ static PyObject* THPModule_setSDPPriorityOrder(
 static PyObject* THPModule_sDPPriorityOrder(
     PyObject* _unused,
     PyObject* noargs) {
-
   auto ordervec = at::globalContext().sDPPriorityOrder();
   auto order =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(ordervec.size())));
@@ -715,7 +714,6 @@ static PyObject* THPModule_sDPPriorityOrder(
     PyList_SET_ITEM(order.get(), i, i64);
   }
   return order.release();
-
 }
 static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -1450,7 +1448,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
-    {"_get_sdp_priority_order", THPModule_sDPPriorityOrder, METH_NOARGS, nullptr},
+    {"_get_sdp_priority_order",
+     THPModule_sDPPriorityOrder,
+     METH_NOARGS,
+     nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
