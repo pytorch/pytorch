@@ -940,7 +940,7 @@
 - func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, MkldnnCPU: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA: as_strided_tensorimpl
     Meta: as_strided_tensorimpl_meta_symint
     MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
@@ -3334,9 +3334,6 @@
     CompositeImplicitAutograd: linear
     NestedTensorCPU, NestedTensorCUDA: nested_linear
     MPS: _mps_linear
-
-- func: pack_linear(Tensor weight) -> Tensor
-  python_module: nn
 
 - func: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -7031,7 +7028,6 @@
   structured_delegate: addmm.out
   variants: function, method
   dispatch:
-    MkldnnCPU: mkldnn_addmm_cpu
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: addmm_sparse_compressed_dense
@@ -7531,6 +7527,13 @@
   dispatch:
     CPU: dense_to_mkldnn
   autogen: to_mkldnn.out
+
+- func: mkldnn_reorder_linear_weight(Tensor self, SymInt? batch_size=None) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    CPU: mkldnn_reorder_linear_weight
+  autogen: mkldnn_reorder_linear_weight.out
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function

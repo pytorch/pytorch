@@ -1547,123 +1547,6 @@ static void addmm_impl_cpu_(
   }
 }
 
-// Addmm with prepacked weights
-static void mkldnn_addmm_impl_cpu_(
-    Tensor& result,
-    const Tensor& self,
-    Tensor m1,
-    Tensor m2,
-    const Scalar& beta,
-    const Scalar& alpha) {
-#if !defined(__aarch64__) || !AT_MKLDNN_ACL_ENABLED()
-  throw std::runtime_error(
-      "MKLDNN backend weight matmuls are only supported for aarch64\n");
-#endif
-  TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
-
-  TORCH_CHECK(
-      m1.dtype() == m2.dtype(),
-      "expected m1 and m2 to have the same dtype, but got: ",
-      m1.dtype(),
-      " != ",
-      m2.dtype())
-  // Array access is faster than .size(n) and .stride(n)
-  const auto self_sizes = self.sizes();
-  auto m1_strides = m1.strides();
-  auto m1_sizes = m1.sizes();
-  auto m2_strides = m2.strides();
-  auto m2_sizes = m2.sizes();
-
-  TORCH_CHECK(
-      self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
-      "input shape is incompatible with matrix multiplication (",
-      m1_sizes[0],
-      "x",
-      m1_sizes[1],
-      " @ ",
-      m2_sizes[0],
-      "x",
-      m2_sizes[1],
-      " != ",
-      self_sizes[0],
-      "x",
-      self_sizes[1],
-      ")");
-
-  at::native::resize_output(result, self_sizes);
-  const auto result_strides = result.strides();
-  const auto result_sizes = result.sizes();
-
-  if (result.numel() == 0) {
-    return;
-  }
-
-  // Some paths in the code below do not handle multiplications of the form [a,
-  // 0] x [0, b]
-  if (m1_sizes[1] == 0) {
-    if (beta.toComplexDouble() == 0.0) {
-      result.zero_();
-    } else {
-      if (!self.is_same(result)) {
-        result.copy_(self);
-      }
-      result.mul_(beta);
-    }
-    return;
-  }
-
-  if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
-    result.copy_(self);
-  }
-
-  bool transpose_c = false;
-  Tensor c;
-
-  // Cast result as matrix a
-  if (result_strides[0] == 1 &&
-      (result_sizes[1] == 1 ||
-       result_strides[1] >= std::max(int64_t{1}, result_sizes[0]))) {
-    transpose_c = false;
-    c = result.resolve_conj();
-  } else if (
-      result_strides[1] == 1 &&
-      (result_sizes[0] == 1 ||
-       result_strides[0] >= std::max(int64_t{1}, result_sizes[1]))) {
-    std::swap(m1, m2);
-    std::swap(m1_sizes, m2_sizes);
-    std::swap(m1_strides, m2_strides);
-    transpose_c = true;
-    c = result.resolve_conj();
-  } else {
-    transpose_c = false;
-    // make c FORTRAN contiguous
-    c = result.resolve_conj().transpose(0, 1).contiguous().transpose_(0, 1);
-  }
-
-  const int64_t m = result_sizes[transpose_c ? 1 : 0];
-
-  // Cast m1 as matrix a
-  Tensor a;
-  /* Need lda >= max(1, (transpose_a ? k : m)) */
-  if (m1_strides[transpose_c ? 1 : 0] == 1 &&
-      m1_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, m)) {
-    a = m1.resolve_conj();
-  } else {
-    a = m1;
-  }
-
-  auto b = m2;
-  // Always ensure the conjugation for c is resolved since there's no way to
-  // specify c's conjugation in the gemm call
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
-
-  mkldnn_matmul_prepacked(b, a, c, beta.to<float>(), alpha.to<float>());
-
-  if (!c.is_same(result)) {
-    result.copy_(c);
-  }
-}
-
 static void addbmm_impl_(
     Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -1731,14 +1614,6 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
     at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
   }
-}
-
-Tensor mkldnn_addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
-  Tensor result = at::empty({0}, self.options());
-  at::NoNamesGuard guard;
-  mkldnn_addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
-  return result;
 }
 
 TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {

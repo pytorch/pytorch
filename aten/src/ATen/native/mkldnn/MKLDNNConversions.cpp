@@ -17,6 +17,7 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
+#include <ATen/ops/mkldnn_reorder_linear_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -256,9 +257,44 @@ static Tensor mkldnn_reorder_conv_weight(
   }
 }
 
-static Tensor mkldnn_reorder_linear_weight(
+Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     std::optional<int64_t> batch_size_opt) {
+
+  ideep::tensor result;
+  // aarch64 weights need to be reordered to the format expected by 
+  // ComputeLibrary. Therefore we call prepare() to retrieve said format
+  // and call reorder_if_differ_in() to actually reorder the weights.
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  const auto self_dim = self.dim();
+  TORCH_CHECK(
+      self_dim != 0,
+      "selfs need to be at least 1D, but they are ",
+      self_dim,
+      "D");
+  ideep::matmul_forward_params params;
+  ideep::tensor input = itensor_view_from_dense(
+      at::zeros({self.size(-1), self.size(-1)}, self.options()));
+  ideep::tensor iself = itensor_view_from_dense(self.t());
+  result = itensor_view_from_dense(
+      at::zeros({self.size(-1), self.size(-2)}, self.options()));
+  ideep::matmul_forward::prepare(
+      params,
+      input,
+      iself,
+      result,
+      1.0f,
+      1.0f,
+      ideep::attr_t(),
+      ideep::data_type::undef);
+
+  auto new_weights = iself.reorder_if_differ_in(params.pd.weights_desc());
+  return new_with_itensor_mkldnn(
+      std::move(new_weights),
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().device_opt());
+#else
+
   mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_linear_weight");
   auto out_features = self.size(0);
   auto in_features = self.size(1);
@@ -274,43 +310,10 @@ static Tensor mkldnn_reorder_linear_weight(
       input_size,
       /* weight dtype */ dtype,
       /* src dtype */ dtype);
-  ideep::tensor result;
   result.init(packed_desc);
   result.feed_from(w);
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
-}
-
-Tensor pack_linear(const Tensor& weight) {
-#if !defined(__aarch64__) || !AT_MKLDNN_ACL_ENABLED()
-  return weight
 #endif
-  const auto weight_dim = weight.dim();
-  TORCH_CHECK(
-      weight_dim != 0,
-      "weights need to be at least 1D, but they are ",
-      weight_dim,
-      "D");
-  ideep::matmul_forward_params params;
-  ideep::tensor input = itensor_view_from_dense(
-      at::zeros({weight.size(-1), weight.size(-1)}, weight.options()));
-  ideep::tensor weight_ = itensor_view_from_dense(weight.t());
-  ideep::tensor result = itensor_view_from_dense(
-      at::zeros({weight.size(-1), weight.size(-2)}, weight.options()));
-  ideep::matmul_forward::prepare(
-      params,
-      input,
-      weight_,
-      result,
-      1.0f,
-      1.0f,
-      ideep::attr_t(),
-      ideep::data_type::undef);
-
-  auto new_weights = weight_.reorder_if_differ_in(params.pd.weights_desc());
-  return new_with_itensor_mkldnn(
-      std::move(new_weights),
-      optTypeMetaToScalarType(weight.options().dtype_opt()),
-      weight.options().device_opt());
 }
 
 static ideep::tensor::desc get_conv_transpose_expected_weights_desc(

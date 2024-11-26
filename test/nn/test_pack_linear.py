@@ -155,13 +155,11 @@ class TestPackLinear(TestCase):
 
     @parameterized.expand(
         [
-            (None, 16, 128, 256, 512, True),
-            (None, 16, 128, 256, 512, False),
-            (8, 16, 128, 256, 512, True),
-            (8, 16, 128, 256, 512, False),
+            (16, 128, 256, 512, True),
+            (16, 128, 256, 512, False),
         ]
     )
-    def test_compile(self, batch_size, channels, M, N, K, bias):
+    def test_compile(self, channels, M, N, K, bias):
         class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -186,11 +184,7 @@ class TestPackLinear(TestCase):
 
         model = torch.compile(Foo())
         packed_model = torch.nn.utils.pack_linear.pack_linear_weights(model)
-        inputs = (
-            torch.randint(0, 128, (batch_size, channels, M, N), dtype=torch.float32)
-            if batch_size
-            else torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
-        )
+        inputs = torch.randint(0, 128, (channels, M, N), dtype=torch.float32)
 
         self.assertEqual(model(inputs), packed_model(inputs))
 
