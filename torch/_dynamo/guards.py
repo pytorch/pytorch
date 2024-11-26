@@ -253,6 +253,16 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self):
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
+        # Ensure that that C++ side points to the updated diff guard manager.
+        # When a new GuardManagerWrapper is created, it does not have a
+        # cache_entry attribute, so it relies on the CacheEntry constructor to
+        # set the diff_guard_root in C++.  But once it is saved in the Dynamo
+        # cache, C++ side adds a cache_entry attribute. On recompiles, this
+        # cache_entry is visible, so we update the C++ side to point to the
+        # update guard manager.
+        if self.cache_entry:
+            self.cache_entry.update_diff_guard_root_manager()
+
     def clone_with_chosen_sources(self, chosen_sources):
         def filter_fn(node_mgr):
             return node_mgr.get_source() in chosen_sources
@@ -2204,6 +2214,9 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
     def __init__(self, reason):
         super().__init__()
         self.invalidation_reason = reason
+
+    def populate_diff_guard_manager(self):
+        self.diff_guard_root = None
 
 
 # NB: Naively, you'd expect this to only be a function that produces

@@ -25,7 +25,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
@@ -46,7 +46,7 @@ namespace at { namespace native {
         TORCH_CHECK(false, "miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
-}} //namespace at::native
+} //namespace at::native
 
 #else // AT_ROCM_ENABLED()
 
