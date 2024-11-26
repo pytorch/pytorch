@@ -2271,7 +2271,7 @@ class TestSDPACpuOnly(NNTestCase):
                 dropout_p=0.0,
                 is_causal=False
             )
-            print(out)
+
             # Check that output contains NaN
             self.assertTrue(torch.isnan(out).all())
 
