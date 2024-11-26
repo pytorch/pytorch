@@ -1163,7 +1163,7 @@ def _set_math_sdp_allow_fp16_bf16_reduction(arg: _bool) -> None: ...  # THPModul
 def _get_overrideable_sdp_enabled() -> _bool: ...  # THPModule_userEnabledOverrideableSDP
 def _set_sdp_use_overrideable(arg: _bool) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_sdp_priority_order() -> List[_int]: ... #THPModule_getSDPPriorityOrder
-def _set_sdp_priority_order(arg: List[_int]) -> None: #THPModule_setSDPPriorityOrder
+def _set_sdp_priority_order(arg: List[_int]) -> None: ... #THPModule_setSDPPriorityOrder
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn

@@ -12,4 +12,4 @@ enum class SDPBackend {
   overrideable = 4
 };
 
-}
+} // namespace at

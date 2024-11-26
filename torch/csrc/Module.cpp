@@ -692,14 +692,18 @@ static PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
-static PyObject* THPModule_setSDPPriorityOrder(PyObject* _unused, PyObject* arg) {
+static PyObject* THPModule_setSDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   auto priority_order = THPUtils_unpackLongs(arg);
   at::globalContext().setSDPPriorityOrder(priority_order);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-static PyObject* THPModule_sDPPriorityOrder(PyObject* _unused, PyObject* noargs) {
+static PyObject* THPModule_sDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
 
   auto ordervec = at::globalContext().sDPPriorityOrder();
   auto order =
