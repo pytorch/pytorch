@@ -1541,7 +1541,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
 GPU_TYPE = "xpu" if torch.xpu.is_available() else "cuda"
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 requires_gpu = unittest.skipUnless(torch.cuda.is_available()
-                or torch.xpu.is_available(), "Requires GPU")
+                                   or torch.xpu.is_available(), "Requires GPU")
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -2199,6 +2199,14 @@ def skip_if_pytest(fn):
 
     return wrapped
 
+def skipIfNoXPU(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_XPU:
+            raise unittest.SkipTest("test required PyTorched compiled with XPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def slowTest(fn):
     @wraps(fn)
