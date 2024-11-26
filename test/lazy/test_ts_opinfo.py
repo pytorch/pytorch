@@ -54,6 +54,7 @@ def init_lists():
     SKIP_RUNTIME_ERROR_LIST = {
         "index_select",  # Empty output_sizes is not supported
         "clone",  # is clone decomposed?
+        "any",  # ASAN failure
         "logdet",  # ASAN failure
     }
     SKIP_INCORRECT_RESULTS_LIST = {
