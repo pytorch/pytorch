@@ -65,9 +65,9 @@ class MetricsContext:
         """
         if self._level == 0:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
-        if metric in self._metrics:
+        if metric in self._metrics and self._metrics[metric] != value:
             raise RuntimeError(
-                f"Metric '{metric}' has already been set in the current context"
+                f"Metric '{metric}' has already been set to a different value ({self._metrics[metric]}) in the current context"
             )
         self._metrics[metric] = value
 
