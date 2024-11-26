@@ -216,11 +216,12 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
+        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = _generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -2960,6 +2961,67 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self, bias: bool):
+                super().__init__()
+                self.linear = torch.nn.Linear(256, 256, bias=bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        quantizer.set_module_type_qconfig(
+            torch.nn.Linear, xiq.get_x86_inductor_linear_dynamic_fp16_config()
+        )
+        bias_list = [True, False]
+        input_ndim_list = [2, 3]
+        x_contig_list = [True, False]
+        cases = itertools.product(bias_list, input_ndim_list, x_contig_list)
+        for bias, input_ndim, x_contig in cases:
+            x_shape = (4, 256) if input_ndim == 2 else (4, 1, 256)
+            x = torch.randn(x_shape)
+            if not x_contig:
+                x = x[0::2, ...]
+            mod = M(bias).eval()
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                # Matched nodes:
+                # (1) quantize x, (2) dequantize x, (3) dequantize w, (4) permute w, (5) mm/addmm
+                # If x.ndim == 3, two view nodes are added.
+                nodes_count = 5
+                if input_ndim > 2:
+                    nodes_count += 2
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
+
+            self._test_common(
+                mod,
+                (x,),
+                atol=1e-2,
+                rtol=1e-2,
+                matcher_check_fn=matcher_check_fn,
+                check_quantization=True,
+                quantizer=quantizer,
+            )
+            self._test_code_common(
+                mod,
+                (x,),
+                ["torch.ops.onednn.linear_dynamic_fp16.default"],
+                ["torch.ops.aten.addmm.default", "torch.ops.aten.mm.default"],
+                check_quantization=True,
+                quantizer=quantizer,
             )
 
 

@@ -2399,6 +2399,18 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
+    @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
+    def meta_linear_dynamic_fp16(
+        x,
+        w,
+        bias,
+    ):
+        output_shape = list(x.shape)
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
+        out = x.new_empty(output_shape)
+        return out
+
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )

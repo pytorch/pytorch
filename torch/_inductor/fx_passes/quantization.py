@@ -2395,6 +2395,56 @@ def _generate_qlinear_weight_prepack_patterns(
         )
 
 
+def _generate_linear_dynamic_fp16_pattern(
+    _dequant_weight_pattern,
+    input_dim_exceeds_two=False,
+):
+    dtype = torch.float32
+    t_pattern = _generate_linear_t_pattern(_dequant_weight_pattern, dtype)
+    x_q_dq_patten = CallFunction(
+        quantized_decomposed.dequantize_per_tensor.default,
+        CallFunction(
+            quantized_decomposed.quantize_per_tensor.default,
+            KeywordArg("x"),
+            KeywordArg("x_scale"),
+            KeywordArg("x_zp"),
+            KeywordArg("x_quant_min"),
+            KeywordArg("x_quant_max"),
+            KeywordArg("x_q_dtype"),
+        ),
+        Arg(),  # x_scale
+        Arg(),  # x_zp
+        Arg(),  # x_q_min
+        Arg(),  # x_q_max
+        Arg(),  # x_q_dtype
+    )
+    x_pattern_with_reshape = _may_generate_pattern_with_reshape(
+        x_q_dq_patten,
+        KeywordArg("act_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.addmm.default,
+            KeywordArg("b"),
+            x_pattern_with_reshape,
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_linear_no_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.mm.default,
+            x_pattern_with_reshape,
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
+
+
 def _register_dequant_promotion():
     dequant_pattern_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False], [True, False]
@@ -2529,6 +2579,138 @@ def _register_qlinear_weight_prepack():
         )
 
 
+def _register_linear_dynamic_fp16_weight_prepack_pass(
+    pattern,
+    pass_number,
+    input_dim_exceeds_two=False,
+):
+    def _extra_check_fn(match: Match):
+        return (
+            match.kwargs["x_q_dtype"] == torch.float16
+            and match.kwargs["w_dtype"] == torch.float16
+        )
+
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_extra_check_fn,
+        pass_number=pass_number,
+    )
+    def linear_dynamic_fp16_weight_prepack(match: Match, *args, **kwargs):
+        """
+        Match the pattern:
+        fp32 activation
+          |
+        quant_per_tensor (fp16)
+          |
+        dequant_per_tensor (fp32)
+          |
+        mm/addmm <- t <- dequant_per_tensor (fp32) <- fp16_weight
+
+        Insert weight prepack node and change the pattern to:
+        fp32 activation
+          |
+        onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- fp16_weight
+        """
+        dtype = torch.float
+        # pattern is the same for contiguous or non-contiguous input
+        input_contiguous = True
+        (
+            linear_node,
+            output_reshape_node,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        weight_index = input_index + 1
+
+        (
+            dequant_x_node,
+            act_reshape_node,
+            activation_to_bf16_node,
+            act_expand_node,
+        ) = _get_linear_dq_node(
+            linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
+        )
+
+        t_node = linear_node.args[weight_index]
+
+        dequant_w_node = t_node.args[0]
+        assert (
+            dequant_w_node.target is quantized_decomposed.dequantize_per_tensor.default
+        )
+
+        x = kwargs["x"]
+        w = kwargs["q_weight"]
+        bias = kwargs["b"] if "b" in kwargs else None
+
+        x_shape = x.meta.get("tensor_meta").shape
+        if has_free_symbols(x_shape):
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
+            x_shape = None
+        graph = match.graph
+        with graph.inserting_before(linear_node):
+            # Insert weight prepack node and the qlinear node
+            packed_weight_inputs = (
+                w,
+                x_shape,
+            )
+            packed_weight_op = torch.ops.onednn.linear_prepack_fp16
+            prepack_weight_node = graph.call_function(
+                packed_weight_op, args=packed_weight_inputs
+            )
+
+            new_args: Tuple[Any, ...] = (
+                x,
+                prepack_weight_node,
+                bias,
+            )
+            new_linear_node = graph.call_function(
+                torch.ops.onednn.linear_dynamic_fp16.default, args=new_args
+            )
+            if input_dim_exceeds_two:
+                output_reshape_node.replace_all_uses_with(new_linear_node)
+                new_linear_node.meta.update(output_reshape_node.meta)
+            else:
+                linear_node.replace_all_uses_with(new_linear_node)
+                new_linear_node.meta.update(linear_node.meta)
+
+            # Erase the original linear node
+            if input_dim_exceeds_two:
+                graph.erase_node(output_reshape_node)
+            graph.erase_node(linear_node)
+            if input_dim_exceeds_two:
+                graph.erase_node(act_reshape_node)
+            graph.erase_node(dequant_x_node)
+            graph.erase_node(t_node)
+            graph.erase_node(dequant_w_node)
+
+            counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
+
+
+def _register_linear_dynamic_fp16_weight_prepack():
+    dequantize_per_tensor_weight_pattern = CallFunction(
+        quantized_decomposed.dequantize_per_tensor.default,
+        KeywordArg("q_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("w_quant_min"),
+        KeywordArg("w_quant_max"),
+        KeywordArg("w_dtype"),
+    )
+    for input_dim_exceeds_two in [False, True]:
+        patterns = _generate_linear_dynamic_fp16_pattern(
+            dequantize_per_tensor_weight_pattern,
+            input_dim_exceeds_two,
+        )
+        for pattern in patterns:
+            _register_linear_dynamic_fp16_weight_prepack_pass(
+                pattern,
+                pass_number=1,
+                input_dim_exceeds_two=input_dim_exceeds_two,
+            )
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
@@ -2539,6 +2721,7 @@ def _register_quantization_weight_pack_pass():
 
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
+    _register_linear_dynamic_fp16_weight_prepack()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):

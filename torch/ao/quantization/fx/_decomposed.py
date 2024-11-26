@@ -71,6 +71,8 @@ def quantize_per_tensor(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
+    if dtype == torch.float16:
+        return input.to(dtype)
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert (
@@ -262,6 +264,8 @@ def dequantize_per_tensor(
     ), f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
     if out_dtype is None:
         out_dtype = torch.float32
+    if dtype == torch.float16:
+        return input.to(out_dtype)
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
