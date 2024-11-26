@@ -8,7 +8,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
-from torch._dynamo.exc import FailOnCacheLimitHit
+from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
@@ -214,7 +214,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 return b + 1
 
         func(torch.randn(5), True)
-        with self.assertRaises(FailOnCacheLimitHit):
+        with self.assertRaises(FailOnRecompileLimitHit):
             func(torch.randn(5), False)
 
     @torch._dynamo.config.patch("cache_size_limit", 32)
