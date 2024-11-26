@@ -102,12 +102,14 @@ TEST(XPUCachingAllocatorTest, DeviceCachingAllocateByExternalStream) {
   void* tmp = sycl::aligned_alloc_device(
       512, _10mb, c10::xpu::get_raw_device(0), c10::xpu::get_device_context());
   void* ptr1 = c10::xpu::XPUCachingAllocator::raw_alloc(_10mb);
-  // We have reserved 500M memory that can be reused. When we allocate ptr0
-  // and ptr1 via device caching allocator, they should be on the same block.
-  // And ptr1 is the next block of ptr0, like [ptr0, ptr1]. This is because tmp
-  // pointer is not allocated via device caching allocator so that it can NOT
-  // reuse our reserved memory. So the offset between ptr0 and ptr1 should equal
-  // to ptr0's size (10M).
+  // We have reserved 500M of memory for resue. When allocating `ptr0` and
+  // `ptr1` through the device caching allocator, they should be allocated from
+  // the same block. Specifically, `ptr1` should follow immediately after `ptr0`
+  // in the block, forming a sequence like [ptr0, ptr1]. This behavior occurs
+  // because the `tmp` pointer is not allocated through the device caching
+  // allocator, meaning it cannot reuse the reserved memory. As a result, the
+  // offset between `ptr0` and `ptr1` should match the size of `ptr0` (10M in
+  // this case).
   auto diff = static_cast<char*>(ptr1) - static_cast<char*>(ptr0);
   EXPECT_EQ(diff, _10mb);
   c10::xpu::XPUCachingAllocator::raw_delete(ptr1);
