@@ -6,11 +6,12 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
+from torch.distributed.tensor import placement_types
 from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
@@ -117,6 +118,47 @@ class DistTensorRandomOpTest(DTensorTestBase):
             self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
 
         self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_pipeline_parallel_manual_seed(self):
+        # This test is to verify the `manual_seed` API works as expected in the
+        # pipeline parallel setting.
+        world_mesh = init_device_mesh(
+            self.device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("pp", "spmd"),
+        )
+        pp_mesh = world_mesh["pp"]
+        pp_rank = pp_mesh.get_local_rank()  # rank 0,1 = 0; rank 2,3 = 1
+        spmd_mesh = world_mesh["spmd"]
+
+        # set the seed for each pipeline stage to 123 + pp_rank
+        manual_seed(123 + pp_rank, spmd_mesh)
+        self.assertEqual(123 + pp_rank, random._rng_tracker.get_seed("parallel-rng"))
+
+        # mimic initializing a model weight sharded on the SPMD mesh
+        spmd_dtensor = torch.distributed.tensor.ones(
+            2 * spmd_mesh.size(), 2, device_mesh=spmd_mesh, placements=[Shard(0)]
+        )
+        torch.nn.init.normal_(spmd_dtensor)
+
+        # gather all the shards to compare initialization results
+        WORLD = torch.distributed.group.WORLD
+        assert WORLD is not None
+        tensor_gather = funcol.all_gather_tensor(
+            spmd_dtensor.to_local(),
+            gather_dim=0,
+            group=WORLD,
+        )
+
+        # verify the weights are initialized differently on all ranks
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                self.assertNotEqual(
+                    spmd_dtensor.to_local(),
+                    tensor_gather[2 * other_rank : 2 * (other_rank + 1), :],
+                )
 
     @with_comms
     @skip_unless_torch_gpu
