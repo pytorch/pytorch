@@ -909,27 +909,82 @@ bool is_parameter(py::handle tensor) {
 }
 
 /**
+ * Dispatches metadata functions to the methods that return integer values,
+ * i.e. used whenever static shapes are being used.
+ *
+ * These are used by the tensor storage overlapping check. Even though their
+ * symbolic counterpart does work whenever static shapes are being used, the
+ * introduced overhead might significantly worsen the performance.
+ */
+struct StaticMeta {
+  static int64_t numel(const Tensor& t) {
+    return t.numel();
+  }
+
+  static int64_t storage_offset(const Tensor& t) {
+    return t.storage_offset();
+  }
+
+  static int64_t size(const Tensor& t, int64_t i) {
+    return t.size(i);
+  }
+
+  static int64_t stride(const Tensor& t, int64_t i) {
+    return t.stride(i);
+  }
+};
+
+/**
+ * Dispatches metadata functions to the methods that return c10::SymInt
+ * values, i.e. used whenever dynamic shapes are being used.
+ */
+struct DynamicMeta {
+  static SymInt numel(const Tensor& t) {
+    return t.sym_numel();
+  }
+
+  static SymInt storage_offset(const Tensor& t) {
+    return t.sym_storage_offset();
+  }
+
+  static SymInt size(const Tensor& t, int64_t i) {
+    return t.sym_size(i);
+  }
+
+  static SymInt stride(const Tensor& t, int64_t i) {
+    return t.sym_stride(i);
+  }
+};
+
+/**
  * Assumption: x and y are known to share a storage, and we are trying to
  * determine if their memory is actually completely disjoint, based on
  * sizes/strides/storage_offset
+ *
+ * "Meta" should be one of the "*Meta" classes above. They dictate which
+ * version of the metadata functions we should be using (symbolic vs.
+ * concrete). Even though they have the same apparent behavior, the symbolic
+ * version introduces a bit of overhead. Such an overhead might end up
+ * becoming relevant if it's run enough times.
  */
+template <class Meta>
 bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   if (x.is_same(y)) {
     return false;
   }
-  if (x.sym_numel() == 0 || y.sym_numel() == 0) {
+  if (Meta::numel(x) == 0 || Meta::numel(y) == 0) {
     return true;
   }
 
   // Make x always on the left
-  if (x.sym_storage_offset() > y.sym_storage_offset()) {
-    return tensors_definitely_do_not_overlap(y, x);
+  if (Meta::storage_offset(x) > Meta::storage_offset(y)) {
+    return tensors_definitely_do_not_overlap<Meta>(y, x);
   }
 
   // Short-circuit in the "obvious" overlapping case: both tensors are
   // contiguous
   if (x.is_contiguous() && y.is_contiguous()) {
-    if (x.sym_storage_offset() + x.sym_numel() > y.sym_storage_offset()) {
+    if (Meta::storage_offset(x) + Meta::numel(x) > Meta::storage_offset(y)) {
       // definitely overlap
       return false;
     } else {
@@ -940,22 +995,22 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
 
   // Short-circuit: if last memory address of x is < start of y, then not
   // overlapping.
-  auto x_last = x.sym_storage_offset();
+  auto x_last = Meta::storage_offset(x);
   for (int64_t i = 0; i < x.dim(); i++) {
-    x_last += (x.sym_size(i) - 1) * x.sym_stride(i);
+    x_last += (Meta::size(x, i) - 1) * Meta::stride(x, i);
   }
-  if (x_last < y.sym_storage_offset()) {
+  if (x_last < Meta::storage_offset(y)) {
     return true;
   }
 
-  if (x.dim() == 2 && y.dim() == 2 && x.sym_stride(1) == 1 &&
-      y.sym_stride(1) == 1) {
+  if (x.dim() == 2 && y.dim() == 2 && Meta::stride(x, 1) == 1 &&
+      Meta::stride(y, 1) == 1) {
     // This cases is needed for the shampoo optimizer.
     // All tensors are 2d (non-contiguous), have the same outer stride, and have
     // an inner stride of 1 (so rows are contiguous)
-    if (x.sym_stride(0) == y.sym_stride(0)) {
-      auto offset_delta = y.sym_storage_offset() - x.sym_storage_offset();
-      if (offset_delta < x.sym_size(1)) {
+    if (Meta::stride(x, 0) == Meta::stride(y, 0)) {
+      auto offset_delta = Meta::storage_offset(y) - Meta::storage_offset(x);
+      if (offset_delta < Meta::size(x, 1)) {
         // definitely overlaps (row 0 of y overlaps with row 0 of x)
         // Example:
         //   base = torch.arange(32).reshape(4, 8)
@@ -966,7 +1021,7 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
         return false;
       }
       auto x_total_elems_covered =
-          x.sym_stride(0) * (x.sym_size(0) - 1) + x.sym_size(1);
+          Meta::stride(x, 0) * (Meta::size(x, 0) - 1) + Meta::size(x, 1);
       if (x_total_elems_covered <= offset_delta) {
         // definitely does not overlap (last byte of x is before start of y)
         // Example:
@@ -980,7 +1035,7 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
       // repeatedly, until the first row of y is before the first row of x. Then
       // we can check if these rows overlap. We can accomplish this by modding
       // our offset by the stride.
-      auto offset_delta_mod = offset_delta % x.sym_stride(0);
+      auto offset_delta_mod = offset_delta % Meta::stride(x, 0);
       // Example:
       // 0 1 2 3
       // 9 10 11 12
@@ -993,7 +1048,7 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
       //   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
       // If the interval [modded_offset, modded_offset + x_size] falls entirely
       // without
-      if (offset_delta_mod + y.sym_size(1) <= x.sym_stride(0)) {
+      if (offset_delta_mod + Meta::size(y, 1) <= Meta::stride(x, 0)) {
         return true;
       }
     }
@@ -1011,13 +1066,14 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
  * tensor 4, all of them will be in the output of this function. Even if
  * tensor 1 and 4 don't overlap.
  */
+template <class Meta>
 std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
   std::unordered_set<int64_t> aliased_tensor_indices;
   for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
     auto tensor_i = tensors[i];
     for (int64_t j = 0; j < i; j++) {
-      if (!tensors_definitely_do_not_overlap(tensor_i, tensors[j])) {
+      if (!tensors_definitely_do_not_overlap<Meta>(tensor_i, tensors[j])) {
         aliased_tensor_indices.insert(i);
         aliased_tensor_indices.insert(j);
       }
@@ -1044,7 +1100,7 @@ bool check_overlapping(
   tensors.insert(tensors.end(), overlapping.begin(), overlapping.end());
   tensors.insert(tensors.end(), non_overlapping.begin(), non_overlapping.end());
   // Check what is the current storage overlapping relation.
-  auto indices = compute_overlapping_tensors(tensors);
+  auto indices = compute_overlapping_tensors<StaticMeta>(tensors);
   // Check that the set of indices of tensors that might overlap is equal to
   // the indices of the first `overlapping.size()` tensors. That's because
   // `overlapping` tensors were in the beginning of `tensors` list.
@@ -5420,7 +5476,19 @@ PyObject* torch_c_dynamo_guards_init() {
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
   py_m.def(
       "install_storage_overlapping_guard", install_storage_overlapping_guard);
-  py_m.def("compute_overlapping_tensors", compute_overlapping_tensors);
+  py_m.def(
+      "compute_overlapping_tensors",
+      [](const std::vector<Tensor> tensors, bool symbolic) {
+        // Pick the correct Meta class, depending on whether we are
+        // dealing with symbolic values or not.
+        if (symbolic) {
+          return compute_overlapping_tensors<DynamicMeta>(tensors);
+        } else {
+          return compute_overlapping_tensors<StaticMeta>(tensors);
+        }
+      },
+      py::arg("tensors"),
+      py::arg("symbolic") = true);
   py_m.def("profile_guard_manager", profile_guard_manager);
 
 // initialize dict_version_map watcher for 3.12
