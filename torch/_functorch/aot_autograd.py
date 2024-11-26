@@ -957,11 +957,6 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 def handle_dynamo_gm(
     mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor]
 ) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
-    aot_autograd_arg_pos_to_source = None
-    static_input_indices = []
-    if not isinstance(mod, torch.fx.GraphModule) or "dynamo_compile_id" not in mod.meta:
-        return aot_autograd_arg_pos_to_source, static_input_indices
-
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
@@ -969,8 +964,8 @@ def handle_dynamo_gm(
     assert "_param_name_to_source" in mod.meta
     param_name_to_source = mod.meta["_param_name_to_source"]
     aot_autograd_arg_pos_to_source = []
-
     seen_sources = set()
+
     # Collect the new inputs lifted by aotdispatch
     for name in params.keys():
         assert name in param_name_to_source, f"{name} not found."
@@ -980,6 +975,7 @@ def handle_dynamo_gm(
         aot_autograd_arg_pos_to_source.append(source)
 
     # Collect the dynamo graph inputs
+    static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert "grapharg" in node.meta and node.meta["grapharg"] is not None
         source = node.meta["grapharg"].source
@@ -1054,7 +1050,12 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(mod, params)
+    aot_autograd_arg_pos_to_source = None
+    static_input_indices = []
+    if isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta:
+        aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(
+            mod, params
+        )
 
     # Then, the params 1:1 mapped sources, if relevant.
     if aot_autograd_arg_pos_to_source is not None:
