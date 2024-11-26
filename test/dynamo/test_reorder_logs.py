@@ -32,35 +32,19 @@ def f_isEnabledFor(x):
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
-    @parametrize("ignore_method, fn",[
-        (None, f_info),
-        (logger_test.info, f_info),
-        (None, f_isEnabledFor),
-        (logger_test.isEnabledFor, f_isEnabledFor),
+    @parametrize("ignore_method, fn, should_ignore_logger",[
+        (None, f_info, False),
+        (logger_test.info, f_info, False),
+        (None, f_isEnabledFor, False),
+        (logger_test.isEnabledFor, f_isEnabledFor, False),
+        (logger.info, f_info, True),
+        (logging.Logger.info, f_info, True),
+        (logger.isEnabledFor, f_isEnabledFor, True),
+        (logging.Logger.isEnabledFor, f_isEnabledFor, True),
     ])
-    def test_dont_ignore_logger(self, ignore_method, fn):
+    def test_dont_ignore_logger(self, ignore_method, fn, should_ignore_logger):
         counters.clear()
         x = torch.randn(3, 3)
-        orig_out = fn(x)
-        with torch._dynamo.config.patch(ignore_logger_methods={ignore_method}):
-            opt_f = torch.compile(backend="eager")(fn)
-            with self.assertLogs(logger, level="INFO") as captured:
-                opt_out = opt_f(x)
-                printed_output = [entry.split(":", 2)[2] for entry in captured.output]
-
-        self.assertTrue(same(orig_out, opt_out))
-        self.assertIn("moo", printed_output)
-        self.assertEqual(len(counters["graph_break"]), 1)
-
-    @parametrize("ignore_method, fn",[
-        (logger.info, f_info),
-        (logging.Logger.info, f_info),
-        (logger.isEnabledFor, f_isEnabledFor),
-        (logging.Logger.isEnabledFor, f_isEnabledFor),
-    ])
-    def test_ignore_logger(self, ignore_method, fn):
-        counters.clear()
-        x = torch.ones(3, 3)
         orig_out = fn(x)
         with torch._dynamo.config.patch(ignore_logger_methods={ignore_method}):
             opt_f = torch.compile(backend="eager")(fn)
@@ -70,8 +54,14 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
                 printed_output = [entry.split(":", 2)[2] for entry in captured.output]
 
         self.assertTrue(same(orig_out, opt_out))
-        self.assertNotIn("moo", printed_output)
-        self.assertEqual(len(counters["graph_break"]), 0)
+        if should_ignore_logger:
+            self.assertNotIn("moo", printed_output)
+            self.assertEqual(len(counters["graph_break"]), 0)
+        else:
+            self.assertIn("moo", printed_output)
+            self.assertEqual(len(counters["graph_break"]), 1)
+
+
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
     def test_dont_reorder_print(self):
         def f(x):
