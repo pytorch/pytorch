@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -28,13 +28,8 @@ __all__: list[str] = []
 if python_pytree._cxx_pytree_exists:
     import optree
     import optree._C
-    import optree.registry
-    import optree.utils
 
     import torch.utils._cxx_pytree as cxx_pytree
-
-    _KT = TypeVar("_KT")
-    _VT = TypeVar("_VT")
 
     @substitute_in_graph(
         optree._C.is_dict_insertion_ordered,
@@ -47,14 +42,6 @@ if python_pytree._cxx_pytree_exists:
             "Should not be called directly "
             "because the original function will be called in the constant fold path."
         )
-
-    @substitute_in_graph(optree.registry._dict_flatten, can_constant_fold_through=True)  # type: ignore[arg-type]
-    def _dict_flatten(
-        dct: dict[_KT, _VT], /
-    ) -> tuple[tuple[_VT, ...], list[_KT], tuple[_KT, ...]]:
-        sorted_keys = optree.utils.total_order_sorted(dct)
-        values = tuple(dct[k] for k in sorted_keys)
-        return values, sorted_keys, tuple(sorted_keys)
 
     __name = ""
     for __name in (
