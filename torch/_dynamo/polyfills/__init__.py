@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         builtins as builtins,
         functools as functools,
         itertools as itertools,
+        operator as operator,
         os as os,
         sys as sys,
     )
@@ -100,10 +101,15 @@ def set_intersection(set1, set2):
 
 def set_union(set1, set2):
     union_set = set1.copy()
-    for x in set2:
-        if x not in union_set:
-            union_set.add(x)
+    set_update(union_set, set2)
     return union_set
+
+
+def set_update(set1, set2):
+    for x in set2:
+        if x not in set1:
+            set1.add(x)
+    return set1
 
 
 def set_difference(set1, set2):
@@ -184,3 +190,11 @@ def foreach_pow_scalar(scalar, exps):
 
 def addcmul_inplace(self, tensor1, tensor2, value):
     return self.add_(tensor1 * tensor2 * value)
+
+
+def predicate(obj: Any) -> bool:
+    # This will cause the rest of dynamo to handle the if statement correctly, so we don't have to rewrite it here.
+    # We can't just use bool() here since we can't trace into that in general.
+    if obj:
+        return True
+    return False
