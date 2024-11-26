@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
 #include <c10/util/CallOnce.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
@@ -289,11 +291,40 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<
       DynamicMetalShaderLibrary,
-      std::shared_ptr<DynamicMetalShaderLibrary>>(m, "_mps_ShaderLibrary")
+      std::shared_ptr<DynamicMetalShaderLibrary>>(
+      m, "_mps_ShaderLibrary", py::dynamic_attr())
       .def_property_readonly(
           "function_names", &DynamicMetalShaderLibrary::getFunctionNames);
+  py::class_<MetalKernelFunction, std::shared_ptr<MetalKernelFunction>>(
+      m, "_mps_MetalKernel")
+      .def(
+          "__call__",
+          [](MetalKernelFunction& self,
+             const py::args& args,
+             const py::kwargs& kwargs) {
+            auto t = THPVariable_Unpack(args[0].ptr());
+            self.runCommandBlock([&] {
+              self.startEncoding();
+              self.setArg(0, t);
+              self.dispatch(10);
+            });
+          })
+      .def_property_readonly(
+          "max_threads_per_threadgroup",
+          &MetalKernelFunction::getMaxThreadsPerThreadgroup)
+      .def_property_readonly(
+          "thread_execution_width",
+          &MetalKernelFunction::getThreadExecutionWidth)
+      .def_property_readonly(
+          "static_thread_group_memory_length",
+          &MetalKernelFunction::getStaticThreadGroupMemoryLength);
   m.def("_mps_compileShader", [](const std::string& source) {
-    return std::make_shared<DynamicMetalShaderLibrary>(source);
+    auto lib = std::make_shared<DynamicMetalShaderLibrary>(source);
+    auto rc = py::cast(lib);
+    for (auto func : lib->getFunctionNames()) {
+      py::setattr(rc, func.c_str(), py::cast(lib->getFunction(func)));
+    }
+    return rc;
   });
 }
 #endif /* USE_MPS */

@@ -1,4 +1,7 @@
 //  Copyright © 2022 Apple Inc.
+#include <ATen/core/TensorBase.h>
+#include <ATen/native/mps/MetalShaderLibrary.h>
+#include <functional>
 #include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
@@ -867,6 +870,10 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   return rc;
 }
 
+std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
+  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+}
+
 class BundledShaderLibary : public MetalShaderLibrary {
  public:
   BundledShaderLibary() : MetalShaderLibrary("") {}
@@ -913,6 +920,43 @@ class BundledShaderLibary : public MetalShaderLibrary {
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   static BundledShaderLibary l;
   return l;
+}
+
+// MetalKernelFunction implementation
+MetalKernelFunction::~MetalKernelFunction() {}
+
+void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      run();
+    }
+  });
+}
+
+void MetalKernelFunction::startEncoding() {
+  encoder = getCurrentMPSStream()->commandEncoder();
+  [encoder setComputePipelineState:cps];
+}
+void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
+  auto group_size_val = group_size.value_or(std::min(length, getMaxThreadsPerThreadgroup()));
+  [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
+}
+
+void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
+  TORCH_CHECK(t.device().type() == kMPS, "Tensor must be on GPU");
+  mtl_setBuffer(encoder, t, idx);
+}
+
+uint64_t MetalKernelFunction::getMaxThreadsPerThreadgroup() const {
+  return [cps maxTotalThreadsPerThreadgroup];
+}
+
+uint64_t MetalKernelFunction::getThreadExecutionWidth() const {
+  return [cps threadExecutionWidth];
+}
+
+uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
+  return [cps staticThreadgroupMemoryLength];
 }
 
 } // namespace at::native::mps
