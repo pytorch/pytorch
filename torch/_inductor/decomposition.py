@@ -443,16 +443,6 @@ def lift(self: torch.Tensor) -> torch.Tensor:
     return self
 
 
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(
-    self: torch.Tensor,
-    *,
-    generator: Optional[torch.Generator] = None,
-) -> torch.Tensor:
-    assert generator is None
-    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
-
-
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other > self), self, other)
