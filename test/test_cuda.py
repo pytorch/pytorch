@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
 )
@@ -1050,6 +1051,12 @@ except RuntimeError as e:
         self.assertTrue(
             abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
         )
+
+    @largeTensorTest('20GB', 'cuda')
+    def test_randint_generation_for_large_numel(self) -> None:
+        numel = 2**31 + 1
+        s = torch.randint(2, (numel,), device='cuda', dtype=torch.int8).sum()
+        self.assertTrue(s > 0, "expected randint in [0, 1] to generate nonzero values")
 
     @parametrize("dtype", [torch.float32, torch.double])
     def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
