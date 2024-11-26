@@ -178,7 +178,7 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
-        # TODO - rationalize index_expr. the dtype is not always used and we inconsistent about int32 or int64
+        # TODO - TODO - rationalize index_expr. The dtype is not always used and we are inconsistent about int32 or int64
         # in lowerings. cpp just uses the dtype
         if hasattr(V.kernel, "index_dtype"):
             dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
