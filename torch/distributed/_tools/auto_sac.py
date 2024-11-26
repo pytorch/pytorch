@@ -1,6 +1,7 @@
 import logging
+import weakref
 from copy import deepcopy
-from enum import StrEnum
+from enum import auto, Enum
 from typing import (
     Any,
     Callable,
@@ -15,10 +16,9 @@ from typing import (
 )
 
 import torch
-from torch.distributed._tools import MemTracker, RuntimeEstimator, SACEstimator
 from torch.distributed._tools.ilp_utils import (
     aggregate_stats,
-    get_module_name_dict,
+    collect_stats,
     parse_module_info,
 )
 from torch.distributed._tools.sac_estimator import (
@@ -62,10 +62,10 @@ class AutoSACResult(NamedTuple):
             memory to discard in the optimal SAC solution.
 
         recomputation_time (float):
-            The total recomputation time for the optimal SAC solution.
+            The total recomputation time (in ms) for the optimal SAC solution.
 
         peak_mem (int):
-            The upper bound on the peak memory of the optimal SAC solution. A value of -1
+            The upper bound on the peak memory (in Bytes) of the optimal SAC solution. A value of -1
             indicates that the ILP solver failed to find a solution.
     """
 
@@ -75,17 +75,17 @@ class AutoSACResult(NamedTuple):
     peak_mem: int
 
 
-class SACAlgorithm(StrEnum):
+class SACAlgorithm(Enum):
     """
-    Enum for SAC algorithms.
+    Enum representing the Selective Activation Checkpointing (SAC) algorithms.
 
     Attributes:
-        GREEDY (str): Greedy algorithm.
-        OPTIMAL (str): Optimal algorithm.
+        GREEDY: Represents the greedy algorithm for SAC.
+        OPTIMAL: Represents the optimal algorithm for SAC.
     """
 
-    GREEDY = "greedy"
-    OPTIMAL = "optimal"
+    GREEDY = auto()
+    OPTIMAL = auto()
 
 
 class _SACPolicy:
@@ -229,63 +229,102 @@ def get_greedy_checkpointing_policy_per_module(
 
 
 def get_auto_sac_policies(
-    model: torch.nn.Module,
-    sac_estimator: SACEstimator,
-    mem_tracker: MemTracker,
-    runtime_estimator: RuntimeEstimator,
+    train_step: Callable,
+    models: List[torch.nn.Module],
+    optimizers: List[torch.optim.Optimizer],
+    inputs: Any,
     dev: torch.device,
     memory_budget: float,
     sac_algo: SACAlgorithm = SACAlgorithm.GREEDY,
     shard_degree: int = 1,
     ac_units: Optional[Set[str]] = None,
     fsdp_units: Optional[Set[str]] = None,
+    runtime_kwargs: Optional[Dict[str, Any]] = None,
 ) -> AutoSACResult:
     """
     Computes auto-SAC (Selective Activation Checkpointing) policies for the given model.
 
     Args:
-        model (torch.nn.Module):
-            The input model for which SAC policies are to be computed.
-
-        sac_estimator (SACEstimator):
-            Instance of `SACEstimator` containing SAC statistics.
-
-        mem_tracker (MemTracker):
-            Instance of `MemTracker` with tracked memory usage.
-
-        runtime_estimator (RuntimeEstimator):
-            Instance of `RuntimeEstimator` populated with runtime performance.
-
+        train_step (Callable):
+            A function that executes a single training step for the given models, optimizers, and inputs.
+            It should have the signature `train_step(models, optimizers, inputs)`.
+        models (List[torch.nn.Module]):
+            A list of PyTorch root modules whose statistics are to be collected, initialized under `FakeTensorMode`.
+        optimizers (List[torch.optim.Optimizer]):
+            A list of optimizers corresponding to the root modules, initialized under `FakeTensorMode`.
+            For root modules that don't require an optimizer, `None` should be passed.
+        inputs (Any):
+            The inputs required for the training step, initialized under `FakeTensorMode`.
         dev (torch.device):
-            The device on which the statistics were collected.
-
+            The device on which the model, inputs, and optimizer are initialized.
         memory_budget (float):
             The memory budget in GiB for which SAC policies are optimized.
-
+            Recommended max budget is 80% of the device memory.
         sac_algo (SACAlgorithm, optional):
             The SAC algorithm to use for policy computation. Defaults to `SACAlgorithm.GREEDY`.
-
         shard_degree (int, optional):
-            Number of GPUs across which the model is sharded. Used to calculate
+            The number of GPUs across which the model is sharded. Used to calculate
             parameter, gradient, and optimizer memory for FSDP. Defaults to 1.
-
         ac_units (Optional[Set[str]], optional):
             A set of user-specified Activation Checkpointing (AC) unit Fully Qualified Names (FQNs).
             Defaults to `None`.
-
         fsdp_units (Optional[Set[str]], optional):
             A set of Fully Sharded Data Parallel (FSDP) units. AC units cannot be supermodules
             of FSDP unit FQNs. Defaults to `None`.
+        runtime_kwargs (Optional[Dict[str, Any]], optional):
+            A dictionary of runtime-related configuration parameters. Supported keys:
+                - `"estimate_mode"` (str): The runtime estimation mode to use. Supported modes:
+                    - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
+                    - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
+                      Defaults to `"operator-level-cost-model"`.
+                - `"gpu_type"` (str): The GPU type to configure specific settings (e.g., `"H100_SXM_80GB"`).
+                - `"custom_config"` (Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]):
+                  A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
 
     Returns:
         AutoSACResult:
             The computed SAC policies, activation memory decisions, recomputation time,
             and peak memory estimates.
-    """
 
+    Example usage:
+
+        .. code-block:: python
+
+            dev = torch.device('cuda:0')
+            torch.set_default_device(dev)
+
+            def train_step(models, optimizers, inputs):
+                # Abstract training step implementation
+                ...
+
+            with FakeTensorMode():
+                models = [...]  # List of PyTorch models
+                optimizers = [...]  # List of optimizers
+                inputs = [...]  # Inputs for the training step
+
+                auto_sac_result = get_auto_sac_policies(
+                    train_step=train_step,
+                    models=models,
+                    optimizers=optimizers,
+                    inputs=inputs,
+                    dev=dev,
+                    memory_budget=60.0,
+                    sac_algo=SACAlgorithm.OPTIMAL,
+                )
+    """
+    assert len(models) == len(
+        optimizers
+    ), "Expect the number of root modules and optimizers to be same"
+    # Collect model statistics
+    mem_tracker, runtime_estimator, sac_estimator = collect_stats(
+        train_step, models, optimizers, inputs, runtime_kwargs
+    )
     # Aggregate model statistics
     mod_info = aggregate_stats(
-        model, mem_tracker, runtime_estimator, sac_estimator, dev
+        models, optimizers, mem_tracker, runtime_estimator, sac_estimator, dev
     )
     # Parse module information into a graph
     graph = parse_module_info(mod_info)
@@ -397,3 +436,28 @@ def apply_auto_sac(
     from torch.distributed.fsdp._wrap_utils import _post_order_apply
 
     _post_order_apply(model, fn=_sac_wrapper)
+
+
+def get_module_name_dict(root_module: torch.nn.Module) -> weakref.WeakKeyDictionary:
+    """
+    Create a weak key dictionary of modules and their fully qualified names.
+
+    Args:
+        root_module (torch.nn.Module): Root module to start traversal.
+
+    Returns:
+        weakref.WeakKeyDictionary: Dictionary of modules and their names.
+    """
+    module_dict: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+    def _get_mod_name(mod: torch.nn.Module, fqn: str = "") -> str:
+        if mod in module_dict:
+            return module_dict[mod]
+        mod_name = fqn or type(mod).__name__
+        module_dict[mod] = mod_name
+        for name, submod in mod.named_children():
+            _get_mod_name(submod, f"{mod_name}.{name}")
+        return mod_name
+
+    _get_mod_name(root_module)
+    return module_dict

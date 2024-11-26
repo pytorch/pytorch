@@ -1,10 +1,10 @@
 # Owner(s): ["module: unknown"]
-import copy
 import unittest
 from functools import partial
-from typing import Optional, Set, Tuple
+from typing import Callable, List, Optional, Set, Tuple
 
 import torch
+from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DeviceMesh
@@ -15,9 +15,12 @@ from torch.distributed._tools.auto_sac import (
     SACAlgorithm,
 )
 from torch.distributed._tools.fsdp2_mem_tracker import FSDPMemTracker
-from torch.distributed._tools.ilp_utils import aggregate_stats, parse_module_info
-from torch.distributed._tools.mem_tracker import _ModState, MemTracker
-from torch.distributed._tools.runtime_estimator import RuntimeEstimator
+from torch.distributed._tools.ilp_utils import (
+    aggregate_stats,
+    collect_stats,
+    parse_module_info,
+)
+from torch.distributed._tools.mem_tracker import MemTracker
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.distributed._tools.sac_ilp import (
     get_optimal_checkpointing_policy_per_module,
@@ -34,7 +37,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 def _init_model_input_optimizer(
     dev: torch.device,
-) -> Tuple[torch.nn.Module, torch.optim.Optimizer, torch.Tensor]:
+) -> Tuple[Callable, List[nn.Module], List[optim.Optimizer], torch.Tensor]:
     bsz = 8
     model_args = ModelArgs(
         n_layers=4,
@@ -50,51 +53,45 @@ def _init_model_input_optimizer(
     inp = torch.randint(
         0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=dev
     )
-    return (model, optimizer, inp)
+
+    def train_step(
+        models: List[nn.Module], optimizers: List[optim.Optimizer], inputs: torch.Tensor
+    ) -> None:
+        model = models[0]
+        optimizer = optimizers[0]
+        loss = model(inputs).sum()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    return (train_step, [model], [optimizer], inp)
 
 
 def _run_and_get_memtracker(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
+    train_step: Callable,
+    models: List[torch.nn.Module],
+    optimizers: List[torch.optim.Optimizer],
     inp: torch.Tensor,
 ) -> MemTracker:
+    train_step(models, optimizers, inp)
     mem_tracker = MemTracker()
-    mem_tracker.track_external(model, optimizer)
-    with mem_tracker as mt:
-        for iter_idx in range(2):  # running twice to initialize optimizer
-            output = model(inp)
-            output.sum().backward()
-            if iter_idx == 1:
-                last_snapshot = mt.get_tracker_snapshot("current")
-            optimizer.step()
-            optimizer.zero_grad()
-            if iter_idx == 0:
-                mt.reset_mod_stats()
-    assert last_snapshot is not None
-    for mod_stats in mem_tracker.memory_tracking.values():
-        # postprocessing due to the fact that for ModTracker, the post backward hook
-        # is not being called for modules whose inputs don't require gradients
-        # TODO(@sanketpurandare): fix this in ModTracker and ensure it does not lead to any perf regression
-        if _ModState.POST_BW not in mod_stats.snapshots.keys():
-            mod_stats.snapshots.setdefault(_ModState.POST_BW, []).append(
-                copy.deepcopy(last_snapshot)
-            )
+    mem_tracker.track_external(*models, *optimizers, inp)
+    with mem_tracker:
+        train_step(models, optimizers, inp)
     return mem_tracker
 
 
 def _run_and_get_fsdp_memtracker(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
+    train_step: Callable,
+    models: List[nn.Module],
+    optimizers: List[optim.Optimizer],
     inp: torch.Tensor,
 ) -> FSDPMemTracker:
-    fsdp_memtracker = FSDPMemTracker(model, optimizer)
+    fsdp_memtracker = FSDPMemTracker(models[0], optimizers[0])
     fsdp_memtracker.track_inputs((inp,))
     with fsdp_memtracker as fmt:
-        for iter_idx in range(2):  # running twice to initialize optimizer
-            output = model(inp)
-            output.sum().backward()
-            optimizer.step()
-            optimizer.zero_grad()
+        for iter_idx in range(2):
+            train_step(models, optimizers, inp)
             if iter_idx == 0:
                 fmt.reset_mod_stats()
     if torch.distributed.group.WORLD:
@@ -111,62 +108,12 @@ def _init_distributed(world_size: int) -> DeviceMesh:
     return mesh
 
 
-def _apply_fsdp(model: torch.nn.Module, fsdp_units: Set[str], mesh: DeviceMesh):
+def _apply_fsdp(model: torch.nn.Module, mesh: DeviceMesh):
     fully_shard_fn = partial(fully_shard, mesh=mesh)
-    for name, module in model.named_modules():
-        if name in fsdp_units:
-            fully_shard_fn(module)
+    for layer_id, transformer_block in enumerate(model.layers):
+        reshard_after_forward = int(layer_id) < len(model.layers) - 1
+        fully_shard_fn(transformer_block, reshard_after_forward=reshard_after_forward)
     fully_shard_fn(model)
-
-
-def _run_and_get_runtime_estimator(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    inp: torch.Tensor,
-    estimate_mode: str,
-    gpu_type: str,
-) -> RuntimeEstimator:
-    def _run_one_step() -> None:
-        output = model(inp)
-        output.sum().backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-    # Initializing optimizer states and warm-up
-    _run_one_step()
-
-    runtime_estimator = RuntimeEstimator()
-    with runtime_estimator(estimate_mode_type=estimate_mode, gpu_type=gpu_type):
-        _run_one_step()  # We use only one iteration for estimation
-    return runtime_estimator
-
-
-def _run_and_get_sac_estimator(
-    model: torch.nn.Module,
-    inp: torch.Tensor,
-    estimate_mode: str,
-    gpu_type: str,
-) -> SACEstimator:
-    sac_estimator = SACEstimator()
-    with sac_estimator(estimate_mode_type=estimate_mode, gpu_type=gpu_type):
-        loss = model(inp).sum()
-    loss.backward()
-    return sac_estimator
-
-
-def _collect_statistics(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    inp: torch.Tensor,
-    estimate_mode: str,
-    gpu_type: str,
-) -> Tuple[MemTracker, RuntimeEstimator, SACEstimator]:
-    mem_tracker = _run_and_get_memtracker(model, optimizer, inp)
-    runtime_estimator = _run_and_get_runtime_estimator(
-        model, optimizer, inp, estimate_mode, gpu_type
-    )
-    sac_estimator = _run_and_get_sac_estimator(model, inp, estimate_mode, gpu_type)
-    return mem_tracker, runtime_estimator, sac_estimator
 
 
 class TestSACILP(TestCase):
@@ -211,20 +158,29 @@ class TestSACILP(TestCase):
                 - recomputation_time (float): Total recomputation time with SAC.
         """
         with FakeTensorMode():
-            model, optimizer, inp = _init_model_input_optimizer(self.device)
-            mem_tracker, runtime_estimator, sac_estimator = _collect_statistics(
-                model, optimizer, inp, self.estimate_mode, self.gpu_type
+            train_step, models, optimizers, inp = _init_model_input_optimizer(
+                self.device
+            )
+            mem_tracker, runtime_estimator, sac_estimator = collect_stats(
+                train_step,
+                models,
+                optimizers,
+                inp,
+                runtime_kwargs={
+                    "estimate_mode": self.estimate_mode,
+                    "gpu_type": self.gpu_type,
+                },
             )
 
         mod_info = aggregate_stats(
-            model,
+            models,
+            optimizers,
             mem_tracker,
             runtime_estimator,
             sac_estimator,
             self.device,
         )
         g = parse_module_info(mod_info)
-
         peak_mem = mem_tracker.get_tracker_snapshot("peak")[self.device]["Total"]
         compute_time = runtime_estimator.total_compute_time
         ac_decisions, recomputation_time, expected_peak_mem = sac_milp(
@@ -265,13 +221,13 @@ class TestSACILP(TestCase):
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.6138, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[0], 0.2445, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[1], 0.5546, delta=0.05)
         self.assertAlmostEqual(sorted_discard_ratio[2], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.5731, delta=0.05)
+        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.0267, delta=0.05)
 
         self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (3.8 / 42.016), 1, delta=0.1
+            (recomputation_time / compute_time) / (2.4 / 42.016), 1, delta=0.1
         )
         GiB = 2**30
         self.assertLessEqual(expected_peak_mem / GiB, 2.01)
@@ -296,7 +252,8 @@ class TestSACILP(TestCase):
             recomputation_time,
         ) = self._test_sac_ilp(
             memory_budget=1.6,
-            fsdp_units={"Transformer.layers." + str(i) for i in range(4)},
+            fsdp_units={"Transformer.layers." + str(i) for i in range(4)}
+            | {"Transformer"},
             shard_degree=4,
         )
         modules_to_ac = set(ac_decisions.keys())
@@ -305,13 +262,13 @@ class TestSACILP(TestCase):
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.6138, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[0], 0.5838, delta=0.05)
         self.assertAlmostEqual(sorted_discard_ratio[1], 0.6138, delta=0.05)
         self.assertAlmostEqual(sorted_discard_ratio[2], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.7553, delta=0.05)
+        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.4252, delta=0.05)
 
         self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (4.27 / 42.016), 1, delta=0.1
+            (recomputation_time / compute_time) / (3.23 / 42.016), 1, delta=0.1
         )
         GiB = 2**30
         self.assertLessEqual(expected_peak_mem / GiB, 1.61)
@@ -330,7 +287,8 @@ class TestSACILP(TestCase):
         """
         ac_decisions, _, expected_peak_mem, _, recomputation_time = self._test_sac_ilp(
             memory_budget=2.7,
-            fsdp_units={"Transformer.layers." + str(i) for i in range(4)},
+            fsdp_units={"Transformer.layers." + str(i) for i in range(4)}
+            | {"Transformer"},
             shard_degree=4,
         )
         self.assertDictEqual(ac_decisions, {})
@@ -352,7 +310,8 @@ class TestSACILP(TestCase):
         """
         ac_decisions, _, expected_peak_mem, _, recomputation_time = self._test_sac_ilp(
             memory_budget=0.8,
-            fsdp_units={"Transformer.layers." + str(i) for i in range(4)},
+            fsdp_units={"Transformer.layers." + str(i) for i in range(4)}
+            | {"Transformer"},
             shard_degree=4,
         )
         self.assertEqual(ac_decisions, {})
@@ -480,42 +439,53 @@ class TestAutoSAC(TestCase):
                   and actual peak memory after applying Auto-SAC.
         """
         with self.fake_mode:
-            model, optimizer, inp = _init_model_input_optimizer(self.device)
-            mem_tracker, runtime_estimator, sac_estimator = _collect_statistics(
-                model, optimizer, inp, self.estimate_mode, self.gpu_type
+            train_step, models, optimizers, inp = _init_model_input_optimizer(
+                self.device
             )
 
-        auto_sac_result = get_auto_sac_policies(
-            model,
-            sac_estimator,
-            mem_tracker,
-            runtime_estimator,
-            self.device,
-            memory_budget=memory_budget,
-            sac_algo=sac_algo,
-            shard_degree=shard_degree,
-            fsdp_units=fsdp_units,
-        )
-        apply_auto_sac(model, auto_sac_result.sac_policies, preserve_rng_state=False)
+            auto_sac_result = get_auto_sac_policies(
+                train_step,
+                models,
+                optimizers,
+                inp,
+                self.device,
+                memory_budget=memory_budget,
+                sac_algo=sac_algo,
+                shard_degree=shard_degree,
+                fsdp_units=fsdp_units,
+                runtime_kwargs={
+                    "estimate_mode": self.estimate_mode,
+                    "gpu_type": self.gpu_type,
+                },
+            )
+            for model in models:
+                apply_auto_sac(
+                    model, auto_sac_result.sac_policies, preserve_rng_state=False
+                )
 
         if shard_degree > 1:
             mesh = _init_distributed(shard_degree)
             with self.fake_mode:
-                del optimizer
-                _apply_fsdp(model, fsdp_units, mesh)
-                optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
-                fsdp_mem_tracker = _run_and_get_fsdp_memtracker(model, optimizer, inp)
+                del optimizers[0]
+                _apply_fsdp(model, mesh)
+                optimizers.append(
+                    torch.optim.Adam(models[0].parameters(), lr=1e-2, foreach=True)
+                )
+                fsdp_mem_tracker = _run_and_get_fsdp_memtracker(
+                    train_step, models, optimizers, inp
+                )
                 peak_mem_after = fsdp_mem_tracker.get_tracker_snapshot("peak")[
                     self.device
                 ]["Total"]
-                return (auto_sac_result.peak_mem, peak_mem_after)
         else:
             with self.fake_mode:
-                mem_tracker_sac = _run_and_get_memtracker(model, optimizer, inp)
+                mem_tracker_sac = _run_and_get_memtracker(
+                    train_step, models, optimizers, inp
+                )
                 peak_mem_after = mem_tracker_sac.get_tracker_snapshot("peak")[
                     self.device
                 ]["Total"]
-                return (auto_sac_result.peak_mem, peak_mem_after)
+        return (auto_sac_result.peak_mem, peak_mem_after)
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
@@ -560,7 +530,9 @@ class TestAutoSAC(TestCase):
         memory_budget = 1.6
         sac_algo = SACAlgorithm.OPTIMAL
         GiB = 2**30
-        fsdp_units = {"Transformer.layers." + str(i) for i in range(4)}
+        fsdp_units = {"Transformer.layers." + str(i) for i in range(4)} | {
+            "Transformer"
+        }
         shard_degree = 4
         delta = 0.01
 
@@ -614,7 +586,9 @@ class TestAutoSAC(TestCase):
         memory_budget = 1.6
         sac_algo = SACAlgorithm.GREEDY
         GiB = 2**30
-        fsdp_units = {"Transformer.layers." + str(i) for i in range(4)}
+        fsdp_units = {"Transformer.layers." + str(i) for i in range(4)} | {
+            "Transformer"
+        }
         shard_degree = 4
         delta = 0.01
 

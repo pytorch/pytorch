@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from typing_extensions import Self
 
 import torch
@@ -108,13 +108,53 @@ class RuntimeEstimator(TorchDispatchMode):
         self.total_compute_time: float = 0.0
 
     @classmethod
-    def init_configs(cls, gpu_type: str = "") -> None:
+    def init_configs(
+        cls,
+        gpu_type: str = "",
+        custom_config: Optional[
+            Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]
+        ] = None,
+    ) -> None:
+        """
+        Initialize the configuration for the GPU type, including peak FLOPS, FLOPS factors, and bandwidth.
+
+        Args:
+            gpu_type (str, optional):
+                The type of GPU to configure specific settings (e.g., "H100_SXM_80GB").
+                Defaults to an empty string, which triggers automatic configuration based on the available GPU.
+            custom_config (Optional[Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]], optional):
+                A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
+                If provided, this overrides the default estimation based on the GPU type.
+
+        Returns:
+            None
+        Raises:
+            TypeError: If `runtime_kwargs` contains invalid types for any of the supported keys.
+        """
+        if gpu_type and not isinstance(gpu_type, str):
+            raise TypeError(f"`gpu_type` must be a str, got {type(gpu_type).__name__}")
+        if custom_config:
+            if not (isinstance(custom_config, tuple) and len(custom_config) == 3):
+                raise TypeError("`custom_config` must be a tuple of length 3")
+            if not all(isinstance(custom_config[i], dict) for i in range(2)):
+                raise TypeError(
+                    "The first two elements of `custom_config` must be dictionaries"
+                )
+            if not isinstance(custom_config[2], float):
+                raise TypeError("The third element of `custom_config` must be a float")
         cls._gpu_type = resolve_gpu_type(gpu_type)
         (
             cls._peak_flops_reg,
             cls._peak_flops_factors,
             cls._peak_bandwidth,
-        ) = get_estimation_configs(cls._gpu_type)
+        ) = (
+            get_estimation_configs(cls._gpu_type)
+            if not custom_config
+            else custom_config
+        )
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
     # NB: returns fake tensors
@@ -298,7 +338,7 @@ class RuntimeEstimator(TorchDispatchMode):
             if func_packet in flop_registry:
                 float_dtypes = out_dtypes & cls._float_types
                 dtype = min(float_dtypes, key=lambda x: x.itemsize)
-                # This gives FLOPS/sec for the given dtype
+                # This gives GFLOPS/sec for the given dtype
                 peak_gpu_flops = cls._peak_flops_reg[dtype]
                 # factor determines the peak flops that are empirically attained by compute ops
                 factor = cls._peak_flops_factors[dtype]
@@ -306,8 +346,8 @@ class RuntimeEstimator(TorchDispatchMode):
                 flop_count_func = flop_registry[func_packet]
                 # We divide by a factor of 2 to get the MACs (multiply and accumulate)
                 flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
-                # We multiply by 1e9 to get the time in nano seconds
-                compute_time = (flop_count / peak_empirical_flops) * 1e9
+                # FLOPS/(GFLOPS/sec) gives us time in nanoseconds
+                compute_time = flop_count / peak_empirical_flops
                 return compute_time
             return 0.0
 
@@ -438,24 +478,37 @@ class RuntimeEstimator(TorchDispatchMode):
         self.total_compute_time += op_time
         return res
 
-    def __call__(self, estimate_mode_type: str, gpu_type: str = "") -> Self:
+    def __call__(
+        self,
+        estimate_mode_type: str,
+        gpu_type: str = "",
+        custom_config: Optional[
+            Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]
+        ] = None,
+    ) -> Self:
         """
         Configures the runtime estimation mode and initializes GPU-specific configurations.
 
-        Supported modes:
-            - "operator-level-benchmark": Estimates runtime using operator benchmarking.
-            - "operator-level-cost-model": Estimates runtime using a roofline cost model.
+        Supported Modes:
+            - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
+            - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
 
         Args:
             estimate_mode_type (str):
-                The type of runtime estimation mode to use. Must be one of the supported modes.
+                The runtime estimation mode to use. Must be one of the supported modes.
             gpu_type (str, optional):
-                The GPU type to configure specific settings (e.g., "H100_SXM_80GB").
-                Defaults to an empty string for automatic configurations.
+                The GPU type to configure specific settings (e.g., `"H100_SXM_80GB"`).
+                Defaults to an empty string, which triggers automatic configuration based on the available GPU.
+            custom_config (Optional[Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]], optional):
+                A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
+                If provided, this overrides the default estimation based on the GPU type.
 
         Returns:
             Self:
-                The current instance of `RuntimeEstimator` with the configured estimate mode.
+                The current instance of `RuntimeEstimator` with the configured estimation mode.
 
         Raises:
             NotImplementedError:
@@ -470,7 +523,7 @@ class RuntimeEstimator(TorchDispatchMode):
                 f"estimate_mode_type {estimate_mode_type} not supported"
             )
         self._estimate_mode_type = estimate_mode_type
-        RuntimeEstimator.init_configs(gpu_type)
+        RuntimeEstimator.init_configs(gpu_type, custom_config)
         return self
 
     def __enter__(self) -> Self:

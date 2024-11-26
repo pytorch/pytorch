@@ -141,7 +141,7 @@ class TestRuntimeEstimator(TestCase):
     ):
         """Runs a basic GPT-2 model"""
         vocab_size = 8192
-        bsz, seq_len = 64, 1024
+        bsz, seq_len = 8, 1024
         model_args = ModelArgs(
             n_layers=4,
             n_heads=12,

@@ -90,11 +90,11 @@ _PRESET_GPU_TYPES = {
 }
 
 _A100_peak_flops: Dict[torch.dtype, float] = {
-    torch.float64: 9.7e12,
-    torch.float32: 19.5e12,
-    torch.bfloat16: 312e12,
-    torch.float16: 312e12,
-    torch.int8: 624e12,
+    torch.float64: 9.7e3,
+    torch.float32: 19.5e3,
+    torch.bfloat16: 312e3,
+    torch.float16: 312e3,
+    torch.int8: 624e3,
 }
 
 _A100_peak_factors: Dict[torch.dtype, float] = {
@@ -142,18 +142,18 @@ _peak_flops_registry: Dict[str, Dict[torch.dtype, float]] = {
     "A100_SXM_40GB": _A100_peak_flops,
     "A100_SXM_80GB": _A100_peak_flops,
     "H100_SXM_80GB": {
-        torch.float64: 34e12,
-        torch.float32: 67e12,
-        torch.bfloat16: 1979e12,
-        torch.float16: 1979e12,
-        torch.int8: 3958e12,
+        torch.float64: 34e3,
+        torch.float32: 67e3,
+        torch.bfloat16: 1979e3,
+        torch.float16: 1979e3,
+        torch.int8: 3958e3,
     },
     "H100_NVL_94GB": {
-        torch.float64: 30e12,
-        torch.float32: 60e12,
-        torch.bfloat16: 1671e12,
-        torch.float16: 1671e12,
-        torch.int8: 3341e12,
+        torch.float64: 30e3,
+        torch.float32: 60e3,
+        torch.bfloat16: 1671e3,
+        torch.float16: 1671e3,
+        torch.int8: 3341e3,
     },
 }
 
@@ -170,14 +170,18 @@ def _get_device_lines() -> List[str]:
         result = subprocess.run(
             ["lspci"], stdout=subprocess.PIPE, text=True, check=True
         )
+        return [
+            line
+            for line in result.stdout.splitlines()
+            if any(family in line for family in _PRESET_GPU_FAMILY)
+        ]
+    except FileNotFoundError:
+        logger.warning("`lspci` command not found. Returning empty device lines.")
+        return []
     except subprocess.CalledProcessError as e:
-        logger.error("Error running lspci: %s", e)
-        raise
-    return [
-        line
-        for line in result.stdout.splitlines()
-        if any(family in line for family in _PRESET_GPU_FAMILY)
-    ]
+        logger.error("Error running lspci: %s. Returning empty device lines.", e)
+        return []
+
 
 
 def _parse_device_line(line: str) -> Tuple[str, str, str]:
@@ -224,16 +228,16 @@ def get_estimation_configs(
 
     Returns:
         Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]:
-            Peak FLOPS (in FLOPS/s), peak FLOPS factors, and peak bandwidth (in GB/s) for the GPU type.
+            Peak FLOPS (in GFLOPS/s), peak FLOPS factors, and peak bandwidth (in GB/s) for the GPU type.
     """
     if gpu_type in _PRESET_GPU_TYPES:
         peak_flops = _peak_flops_registry[gpu_type]
         peak_flops_fac = _peak_flops_factors[gpu_type]
         peak_bw = _peak_bandwidth_registry[gpu_type]
         logger.debug(
-            "Automatically derived configs for GPU\n"
-            "With peak flops (TF/s): %s\n"
-            "And peak bandwidth (TiB/s): %.2g",
+            "Found pre-existing configs for GPU\n"
+            "With peak flops (GF/s): %s\n"
+            "And peak bandwidth (GiB/s): %.2g",
             _display_float_dict(peak_flops),
             peak_bw,
         )
@@ -241,13 +245,14 @@ def get_estimation_configs(
 
     peak_flops = {}
     for dtype in [torch.float16, torch.bfloat16, torch.float32]:
-        peak_flops[dtype] = get_device_tflops(dtype)
+        # This actually gives Peta-FLOPS/sec, multiply by 1e6 to get GFLOPS/sec
+        peak_flops[dtype] = get_device_tflops(dtype) * 1e6
     peak_flops_fac = _A100_peak_factors
     peak_bw = get_gpu_dram_gbps()
     logger.debug(
         "Automatically derived configs for GPU\n"
-        "With peak flops (TF/s): %s\n"
-        "And peak bandwidth (TiB/s): %.2g",
+        "With peak flops (GF/s): %s\n"
+        "And peak bandwidth (GiB/s): %.2g",
         _display_float_dict(peak_flops),
         peak_bw,
     )

@@ -1,9 +1,10 @@
 import logging
 import math
+from collections import defaultdict
 from enum import IntEnum
 from typing import Dict, List, Optional, Set, Tuple
 
-from torch.distributed._tools.ilp_utils import Graph, is_submodule
+from torch.distributed._tools.ilp_utils import Graph, is_self_or_submodule, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats
 
 
@@ -63,12 +64,34 @@ def sac_milp(
 
     """
     num_nodes = len(graph.nodes)
-    M = graph.nodes[0][
-        "fw_runtime_per_module"
-    ]  # note: numerical issue may occur if M is too big
     MEM_MULTIPLIER = 2**30
-    max_fsdp_unit_memory = 0.0
-    opt_memory = graph.opt_memory / MEM_MULTIPLIER
+    # total_param_memory/total_opt_memory/total_grad_memory represents the total sharded + non-sharded param/opt/grad
+    # memory for the root modules
+    total_fwd_runtime = 0.0
+    total_param_memory = 0.0
+    total_opt_memory = 0.0
+    root_grad_mem: Dict[str, float] = defaultdict(float)
+    for root_fqn, opt_mem in graph.root_opt_mem.items():
+        if fsdp_units and root_fqn in fsdp_units:
+            total_opt_memory += opt_mem / (MEM_MULTIPLIER * shard_degree)
+            root_grad_mem[root_fqn] = graph.name2node[root_fqn]["grad_per_module"] / (
+                MEM_MULTIPLIER * shard_degree
+            )
+            total_param_memory += graph.name2node[root_fqn]["param_per_module"] / (
+                MEM_MULTIPLIER * shard_degree
+            )
+        else:
+            total_opt_memory += opt_mem / MEM_MULTIPLIER
+            root_grad_mem[root_fqn] = (
+                graph.name2node[root_fqn]["grad_per_module"] / MEM_MULTIPLIER
+            )
+            total_param_memory += (
+                graph.name2node[root_fqn]["param_per_module"] / MEM_MULTIPLIER
+            )
+        total_fwd_runtime += graph.name2node[root_fqn]["fw_runtime_per_module"]
+    M = total_fwd_runtime  # note: numerical issue may occur if M is too big
+
+    max_fsdp_unit_memory: Dict[str, float] = defaultdict(float)
 
     # Create a MILP problem
     prob = LpProblem("SAC", LpMinimize)
@@ -124,11 +147,15 @@ def sac_milp(
                             fqn
                         ]
 
-        # Find maximum parameter count among FSDP units
-        max_fsdp_unit_memory = (
-            max(node_to_param_size[fsdp_unit] for fsdp_unit in fsdp_units)
-            / MEM_MULTIPLIER
-        )
+        # Find maximum parameter count among FSDP units for each root module
+        for root_fqn in graph.root_opt_mem:
+            if root_fqn in fsdp_units:
+                max_unit_memory = max(
+                    node_to_param_size[fsdp_unit]
+                    for fsdp_unit in fsdp_units
+                    if is_self_or_submodule(fsdp_unit, root_fqn)
+                )
+                max_fsdp_unit_memory[root_fqn] = max_unit_memory / MEM_MULTIPLIER
 
     # [Constraint] No nested AC units
     for i in range(num_nodes):
@@ -139,6 +166,11 @@ def sac_milp(
     # [Constraint] Do not AC leaf modules
     for i in range(num_nodes):
         if graph.nodes[i]["is_leaf"]:
+            prob += y[i] == 0
+
+    # [Constraint] Do not AC modules that don't call backward
+    for i in range(num_nodes):
+        if not graph.nodes[i]["requires_grad"]:
             prob += y[i] == 0
 
     # [Constraint] Express amount of discarded activation memory
@@ -176,7 +208,7 @@ def sac_milp(
     #   for discarding. Hence, we subtract the mandatorily saved memory (SAV).
     for i in range(num_nodes):
         prob += y[i] >= r[i]
-        if graph.nodes[i]["is_leaf"]:
+        if graph.nodes[i]["is_leaf"] or not graph.nodes[i]["requires_grad"]:
             continue
         SAV_i = graph.nodes[i]["saved_memory"] / MEM_MULTIPLIER
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
@@ -197,16 +229,23 @@ def sac_milp(
         prob += a[i] == TA_i + AG_i - lpDot(coeff, d)
 
     # [Constraint] Express the total amount of memory at each module
-    # The total is given by activation memory + 3 * max FSDP unit size
-    #   + sharded param, grad and opt memory
-    P_1 = graph.nodes[0]["param_per_module"] / MEM_MULTIPLIER
+    # G_i represents the grad memory of module i
+    # TG_i represents the grad memory accumulated so far for the root module of i
+    # ACC_i represents the accumulated grad memory of other root modules the have completed their backward
+    # total_param_memory/total_opt_memory represents the total sharded + non-sharded param/opt memory for
+    #  all modules that stays static throughtout the training
     for i in range(num_nodes):
-        TG_i = graph.nodes[i]["grad_total"] / MEM_MULTIPLIER
-        prob += (
-            m[i]
-            == a[i]
-            + 3 * max_fsdp_unit_memory
-            + (P_1 + TG_i + opt_memory) / shard_degree
+        root_node = graph.nodes[graph.get_root_idx(i)]
+        TG_i = (graph.nodes[i]["grad_total"] - root_node["grad_total"]) / MEM_MULTIPLIER
+        G_i = graph.nodes[i]["grad_per_module"] / MEM_MULTIPLIER
+        ACC_i = 0.0
+        for other_root_fqn in root_grad_mem:
+            if graph.name2node[other_root_fqn]["index"] > root_node["index"]:
+                ACC_i += root_grad_mem[other_root_fqn]
+        prob += m[i] == a[i] + 3 * max_fsdp_unit_memory[
+            root_node["fqn"]
+        ] + G_i + total_opt_memory + total_param_memory + ACC_i + (TG_i) / (
+            shard_degree if fsdp_units and root_node["fqn"] in fsdp_units else 1
         )
 
     # [Constraint] Express peak memory

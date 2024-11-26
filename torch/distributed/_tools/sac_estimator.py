@@ -959,24 +959,37 @@ class SACEstimator(TorchDispatchMode):
                 self.sac_mod_greedy_order_meta[mod_fqn], sac_stats, print_tabular
             )
 
-    def __call__(self, estimate_mode_type: str, gpu_type: str = "") -> Self:
+    def __call__(
+        self,
+        estimate_mode_type: str,
+        gpu_type: str = "",
+        custom_config: Optional[
+            Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]
+        ] = None,
+    ) -> Self:
         """
         Configures the runtime estimation mode and initializes GPU-specific settings.
 
         Supported Modes:
-            - "operator-level-benchmark": Uses operator benchmarking to estimate runtime.
-            - "operator-level-cost-model": Uses a roofline cost model to estimate runtime.
+            - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
+            - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
 
         Args:
             estimate_mode_type (str):
-                The type of runtime estimation mode to configure. Must be one of the supported modes.
+                The runtime estimation mode to use. Must be one of the supported modes.
             gpu_type (str, optional):
-                The GPU type to configure specific settings (e.g., "H100_SXM_80GB").
-                Defaults to an empty string for automatic configurations.
+                The GPU type to configure specific settings (e.g., `"H100_SXM_80GB"`).
+                Defaults to an empty string, which triggers automatic configuration based on the available GPU.
+            custom_config (Optional[Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]], optional):
+                A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
+                If provided, this overrides the default estimation based on the GPU type.
 
         Returns:
             Self:
-                The instance of the `SACEstimator` class with the configured runtime estimation mode.
+                The current instance of `RuntimeEstimator` with the configured estimation mode.
 
         Raises:
             NotImplementedError:
@@ -990,7 +1003,7 @@ class SACEstimator(TorchDispatchMode):
             raise NotImplementedError(
                 f"estimate_mode_type {estimate_mode_type} not supported"
             )
-        RuntimeEstimator.init_configs(gpu_type)
+        RuntimeEstimator.init_configs(gpu_type, custom_config)
         return self
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
