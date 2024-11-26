@@ -4,7 +4,7 @@ from collections import namedtuple
 from typing import Tuple
 
 import torch
-from torch._C import DispatchKey, DispatchKeySet
+from torch._C import DispatchKey, DispatchKeySet, SymIntType
 from torch._prims_common import is_expandable_to
 from torch.nested._internal.cached_tensor import make_cached_tensor
 from torch.nested._internal.nested_int import NestedIntNode
@@ -150,23 +150,25 @@ class NestedTensor(torch.Tensor):
         return self._host_lengths if self.is_cpu else self._device_lengths
 
     def __getattr__(self, name):
-
         from torch.nested._internal.nested_int import NestedIntNode
 
+        # Put this logic somewhere else
         node = self.shape[self._ragged_idx].node
         if isinstance(node, NestedIntNode):
             metadata = node.nested_int_cache()
         else:
             metadata = node.hint.node.nested_int_cache()
+
+        if name == "_lengths":
+            return self.lengths()
+        if name == "_offsets":
+            return self.offsets()
+
         if name not in source_fields + extra_fields:
             raise AttributeError(
                 f"{type(self).__name__} object has no attribute '{name}'"
             )
-        if name in metadata.metadata:
-            # Do I need to unpack here? What if dynamo sees this?
-            return metadata.metadata[name]
-        else:
-            return None
+        return metadata.metadata.get(name)
 
     @property
     def _metadata(self):
@@ -191,7 +193,7 @@ class NestedTensor(torch.Tensor):
             # compute & cache
             max_val = _get_sdpa_extreme_seqlen(
                 torch.max,
-                self.offsets().diff() if self.lengths() is None else self.lengths(),
+                self._offsets.diff() if self._lengths is None else self._lengths,
             )
             max_seqlen_tensor = _store_val_in_tensor(max_val)
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
@@ -203,7 +205,7 @@ class NestedTensor(torch.Tensor):
             # compute & cache
             min_val = _get_sdpa_extreme_seqlen(
                 torch.min,
-                self.offsets().diff() if self.lengths() is None else self.lengths(),
+                self._offsets.diff() if self._lengths is None else self._lengths,
             )
             min_seqlen_tensor = _store_val_in_tensor(min_val)
             self._metadata_cache["min_seqlen"] = min_seqlen_tensor
@@ -238,7 +240,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self.offsets()}{grad_fn_str}, contiguous={self.lengths() is None})"
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
 
     # TODO: Remove this in favor of the default tensor subclass serialization logic.
     # We don't do this today because of https://github.com/pytorch/pytorch/issues/125622.

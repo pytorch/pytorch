@@ -499,7 +499,7 @@ def clone_default(func, *args, **kwargs):
 
     new_meta = extract_kwargs(inp)
 
-    if inp.lengths() is not None:
+    if inp._lengths is not None:
         if new_kwargs["memory_format"] == torch.contiguous_format:
             # need to copy to remove "holes" non-contiguity / lengths metadata
             # TODO: write a kernel for this

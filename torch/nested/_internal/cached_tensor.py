@@ -83,12 +83,16 @@ class CachedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, op, types, args, kwargs):
+        from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
+
         # Doing any operation on a CachedTensor automatically unwraps and returns a non-CachedTensor
         # We can improve this to do smarter things, like automatically cache .diff(), .cumsum(), etc.
         if kwargs is None:
             kwargs = {}
+
         if op in _func_registry:
-            return _func_registry[op](op, *args, **kwargs)
+            with maybe_enable_thunkify():
+                return _func_registry[op](op, *args, **kwargs)
 
         unwrapped_args = pytree.tree_map_only(
             CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), args
@@ -165,7 +169,6 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    print(new_kwargs)
     return NestedTensor(
         new_kwargs["input"],
         new_kwargs["metadata"],

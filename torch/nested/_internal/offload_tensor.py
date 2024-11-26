@@ -41,6 +41,12 @@ class TensorRegistry:
             return self.register(tensor)
         return ret
 
+    def copy(self):
+        ret = TensorRegistry()
+        ret._id_to_tensor = self._tensor_to_id.copy()
+        ret._tensor_to_id = self._tensor_to_id.copy()
+        ret._next_id = self._next_id
+
 
 # Make sure dynamo doesn't try to trace through this
 def register_tensor(t, t_id=None):
@@ -233,6 +239,11 @@ class OffloadTensorRegistry:
             self.wrapper_refs = still_alive
             _global_is_pending_offload = False
         return
+
+    def copy(self):
+        # Is this what we want to do?
+        ret = OffloadTensorRegistry()
+        ret.wrapper_refs = self.wrapper_refs.copy()
 
 
 _global_offload_tensor_registry = OffloadTensorRegistry()

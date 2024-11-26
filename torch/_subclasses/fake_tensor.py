@@ -900,6 +900,7 @@ class FakeTensor(Tensor):
             self.nested_int_id = self.fake_mode.get_next_nested_int_id()
         else:
             self.nested_int_id = nid
+        return self.nested_int_id
 
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:

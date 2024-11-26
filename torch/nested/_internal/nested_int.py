@@ -75,7 +75,7 @@ class NestedIntNode:
 
     def _str(self) -> str:
         if self.coeff == 1:
-            return f"j{self.cache.id}"
+            return f"j{self.t_id}"
         return f"{self.coeff}*j{self.t_id}"
 
     def __str__(self) -> str:
