@@ -247,8 +247,8 @@ def register_onednn_fusion_ops():
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
             x: TensorBox,
-            w: Union[TensorBox, List[TensorBox]],
-            b: Union[TensorBox, List[TensorBox]],
+            w: TensorBox,
+            b: TensorBox,
             attr,
             scalars,
             algorithm,
@@ -258,7 +258,6 @@ def register_onednn_fusion_ops():
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
-
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
             choices: List[ChoiceCaller] = []
@@ -296,7 +295,6 @@ def register_onednn_fusion_ops():
                         **kwargs,
                     )
                 )
-            assert isinstance(w, TensorBox)
             assert w.get_name() in V.graph.constants
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
