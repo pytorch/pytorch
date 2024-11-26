@@ -85,21 +85,38 @@ class CollectTracepointsPass(PassBase):
                 if node.op != "call_function":
                     continue
                 if node.target == torch.ops.higher_order._export_tracepoint:
+                    # There's some subtlety worth noting. Here fqn corresponds to
+                    # the call name, whereas path corresponds to the module name.
+                    # They are not necessarily the same! When a submodule is shared
+                    # through different aliases, there are as many _export_tracepoint
+                    # markers as there are aliases, since the shared submodule is
+                    # wrapped once for each alias.
                     path = node.kwargs["path"]
+                    fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
+
                     module_key = next(reversed(node.meta["nn_module_stack"]))
                     if "@" in module_key:
-                        call_path = f"{path}@{module_key.split('@')[-1]}"
-                        if call_path not in self.specs:
-                            self.specs[call_path] = copy_sig(self.specs[path])
-                        path = call_path
+                        suffix = module_key.split("@")[-1]
+                        path = f"{path}@{suffix}"
+
+                        call_fqn = f"{fqn}@{suffix}"
+                        if call_fqn not in self.specs:
+                            self.specs[call_fqn] = copy_sig(self.specs[fqn])
+                        fqn = call_fqn
+
                     kind = node.kwargs["kind"]
                     for i, arg in enumerate(node.args):
-                        if kind == "module_call_inputs":
-                            self.specs[path].inputs.append(get_arg_spec(arg))
-                        elif kind == "module_call_outputs":
-                            self.specs[path].outputs.append(get_arg_spec(arg))
-                        else:
-                            raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                        # We only update the signature of the alias used to call
+                        # the submodule. Otherwise the signatures of all aliases
+                        # would get conflated; the inputs/outputs of every call
+                        # would be recorded in every other call as well.
+                        if fqn == path:
+                            if kind == "module_call_inputs":
+                                self.specs[path].inputs.append(get_arg_spec(arg))
+                            elif kind == "module_call_outputs":
+                                self.specs[path].outputs.append(get_arg_spec(arg))
+                            else:
+                                raise AssertionError(f"Unknown tracepoint kind: {kind}")
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
                                 assert user.op == "call_function"

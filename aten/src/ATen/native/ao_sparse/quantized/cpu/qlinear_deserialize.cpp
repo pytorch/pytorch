@@ -7,8 +7,7 @@
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 #endif
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 
 namespace {
 constexpr int64_t serialization_version_index [[maybe_unused]] = 0;
@@ -317,5 +316,4 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 }
 #endif // USE_PYTORCH_QNNPACK
 
-} // namespace sparse
 } // namespace ao

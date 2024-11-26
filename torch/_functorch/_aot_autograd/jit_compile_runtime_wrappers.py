@@ -64,7 +64,13 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+from .utils import (
+    _get_symint_hints,
+    contain_metadata_mutation_ops,
+    make_boxed_func,
+    strict_zip,
+    unlift_tokens,
+)
 
 
 zip = strict_zip
@@ -191,7 +197,7 @@ def aot_dispatch_base(
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
@@ -318,6 +324,23 @@ def collect_bw_donated_buffer_idxs(
     Collects backward donated buffer indexes from fw_module and bw_module.
     """
 
+    # [Note: Metadata mutation in proxy tracing]
+    # node.meta["val"] is a snapshot of the tensor value when tracing a graph,
+    # instead of the final state after the graph has run. node.meta["val"] is
+    # not updated even if later there is a metadata mutation op.
+    # See: https://github.com/pytorch/pytorch/pull/141308#issuecomment-2495798947
+    #
+    # Currently, metadata mutation op happens only for sacrificial parameter
+    # specifically the `set_` op. This motivates banning metadata mutation from
+    # proxy tracing.
+    #
+    # Since node.meta["val"] is used to detect donated buffer, we return an empty
+    # list if there exists metadata mutation op.
+    if contain_metadata_mutation_ops(fw_module) or contain_metadata_mutation_ops(
+        bw_module
+    ):
+        return []
+
     fw_ins = fw_module.graph.find_nodes(op="placeholder")
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
@@ -421,7 +444,7 @@ def aot_dispatch_autograd(
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             with dynamo_timed("jit_compile_runtime_wrappers.partition_fn"):
                 fw_module, bw_module = aot_config.partition_fn(

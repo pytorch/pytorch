@@ -1075,7 +1075,7 @@ def aot_module_simplified(
 
     def dispatch_and_compile():
         functional_call = create_functional_call(mod, params_spec, params_len)
-        with compiled_autograd.disable():
+        with compiled_autograd._disable():
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,
                 fake_flat_args,

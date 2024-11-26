@@ -12,11 +12,27 @@ using HandleType = CUmemGenericAllocationHandle;
 using HandleType = void*;
 #endif
 
+// Resource wrapper that owns a (vaddr, allocation handle) pair. Upon
+// destruction, it unmaps the vaddr and releases the allocation handle.
+struct AllocationRef : public c10::intrusive_ptr_target {
+  void* ptr;
+  HandleType handle;
+  size_t block_size;
+  int device_idx;
+
+  AllocationRef(
+      void* ptr,
+      HandleType handle,
+      size_t block_size,
+      int device_idx);
+
+  ~AllocationRef();
+};
+
 class CUDASymmetricMemory : public SymmetricMemory {
  public:
   CUDASymmetricMemory(
-      std::vector<HandleType> handles,
-      size_t block_size,
+      std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
       std::vector<void*> buffers,
       std::vector<void*> signal_pads,
       HandleType mc_handle,
@@ -26,7 +42,7 @@ class CUDASymmetricMemory : public SymmetricMemory {
       int rank,
       int world_size);
 
-  ~CUDASymmetricMemory() override;
+  ~CUDASymmetricMemory() override{};
 
   std::vector<void*> get_buffer_ptrs() override;
   std::vector<void*> get_signal_pad_ptrs() override;
@@ -57,11 +73,8 @@ class CUDASymmetricMemory : public SymmetricMemory {
   int get_rank() override;
   int get_world_size() override;
 
-  void stream_write_value32(uintptr_t addr, uint32_t val) override;
-
  private:
-  std::vector<HandleType> handles_;
-  size_t block_size_;
+  std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
   HandleType mc_handle_;
@@ -72,43 +85,40 @@ class CUDASymmetricMemory : public SymmetricMemory {
   int world_size_;
   void** buffers_dev_;
   void** signal_pads_dev_;
-  std::optional<std::function<void(void)>> finalizer_;
 };
 
+// Metadata associated with each allocation performed by
+// `CUDASymmetricMemoryAllocator`.
 struct Block : public c10::intrusive_ptr_target {
-  HandleType handle;
+  c10::intrusive_ptr<AllocationRef> alloc_ref;
   int device_idx;
   size_t block_size;
   size_t buffer_size;
   size_t signal_pad_offset;
-  std::string group_name;
-  c10::intrusive_ptr<CUDASymmetricMemory> symm_mem = nullptr;
+  std::optional<std::string> default_group_name;
+  std::map<std::string, c10::intrusive_ptr<CUDASymmetricMemory>> symm_mems;
 
   Block(
-      HandleType handle,
+      c10::intrusive_ptr<AllocationRef> alloc_ref,
       int device_idx,
       size_t block_size,
       size_t buffer_size,
       size_t signal_pad_offset,
-      std::string group_name)
-      : handle(handle),
-        device_idx(device_idx),
-        block_size(block_size),
-        buffer_size(buffer_size),
-        signal_pad_offset(signal_pad_offset),
-        group_name(std::move(group_name)),
-        symm_mem(nullptr) {}
+      const std::optional<std::string>& group_name);
 };
 
 class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
-  void* alloc(size_t size, int device_idx, const std::string& group_name)
-      override;
+  void* alloc(
+      size_t size,
+      int device_idx,
+      const std::optional<std::string>& group_name) override;
 
   void free(void* ptr) override;
   size_t get_alloc_size(void* ptr) override;
-  c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) override;
-  bool is_rendezvous_completed(void* ptr) override;
+  c10::intrusive_ptr<SymmetricMemory> rendezvous(
+      void* ptr,
+      const std::optional<std::string>& group_name) override;
   bool has_multicast_support(int device_idx) override;
 
  private:

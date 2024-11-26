@@ -692,6 +692,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemory.cu",
     "torch/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu",
+    "torch/csrc/distributed/c10d/cuda/AsyncMM.cu",
     "torch/csrc/distributed/c10d/NanCheck.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
@@ -791,6 +792,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -843,6 +845,7 @@ libtorch_python_core_sources = [
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
+    "torch/csrc/export/pybind.cpp",
     "torch/csrc/inductor/aoti_package/pybind.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
