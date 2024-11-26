@@ -717,7 +717,7 @@ def _templated_ring_attention_backward(
                 grad_value.shape
             )
 
-            if i <= rank and _cp_options.enable_load_balance:
+            if i <= rank and _cp_options.enable_load_balance and is_causal:
                 grad_key = _partial_update(
                     grad_key,
                     grad_key_,
@@ -742,7 +742,7 @@ def _templated_ring_attention_backward(
         # Send the grad key, and grad value to the next rank.
         dkv_rotater.exchange_buffers(next_grad_kv)
 
-        if i <= rank or not _cp_options.enable_load_balance:
+        if i <= rank or not _cp_options.enable_load_balance or not is_causal:
             grad_query += grad_query_
         else:
             grad_query = _partial_update(
