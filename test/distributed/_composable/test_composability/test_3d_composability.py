@@ -31,7 +31,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import with_comms
 
 
@@ -39,9 +39,8 @@ class Test3DTraining(FSDPTest):
     global num_layers
     num_layers = 8
 
-    @with_comms
-    @requires_nccl()
     @skip_if_lt_x_gpu(8)
+    @skipIfRocm
     def test_3d(self):
         self.run_subtests(
             {
