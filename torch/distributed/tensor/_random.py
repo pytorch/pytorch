@@ -135,7 +135,7 @@ class _RNGStateTracker:
         return int(seed_tensor.item())
 
     def set_seed(self, name: str, seed: int) -> None:
-        seed_tensor = torch.tensor([seed]).view(torch.uint8)
+        seed_tensor = torch.tensor([seed], dtype=torch.uint64).view(torch.uint8)
         offset_tensor = torch.tensor([0]).view(torch.uint8)
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
@@ -200,7 +200,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             )
 
         seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset]).view(torch.uint8)
+        offset_tensor = torch.tensor([offset], dtype=torch.uint64).view(torch.uint8)
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
