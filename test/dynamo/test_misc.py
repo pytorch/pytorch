@@ -12014,6 +12014,22 @@ fn
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
 
+    def test_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Foo:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, foo0):
+            if dataclasses.is_dataclass(foo0):
+                foo1 = dataclasses.replace(foo0, **{"x": 1})
+                return x + 1, foo1
+            return x + 2, foo0
+
+        res, foo = run(torch.zeros(1), Foo(0))
+        self.assertTrue(res, torch.ones(1))
+        self.assertEqual(foo.x, 1)
+
     def test_frozenset_of_non_literals(self):
         class Foo:
             pass
@@ -12034,7 +12050,6 @@ fn
         res = run(torch.ones(1), s, foo)
         self.assertTrue(same(res[0], torch.ones(1) + 1))
         self.assertEqual(res[1], 1)
-        self.assertEqual(foo.x, 1)
 
 
 class TestTracer(JitTestCase):
