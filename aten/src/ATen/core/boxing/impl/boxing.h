@@ -12,8 +12,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <type_traits>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 //
 // utils
@@ -417,5 +416,4 @@ struct BoxedKernelWrapper<
   }
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

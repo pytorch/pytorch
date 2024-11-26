@@ -1403,7 +1403,7 @@ void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
-      "compiled_autograd.enable() requires no threads in backwards()");
+      "compiled_autograd._enable() requires no threads in backwards()");
   the_compiled_autograd.store(fn);
 }
 
