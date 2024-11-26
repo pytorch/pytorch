@@ -923,9 +923,11 @@ def chunk_default(func, *args, **kwargs):
         split_sizes = [x.sum().item() for x in chunked_lengths]
         chunk_values = inp._values.split(split_sizes)
 
+        # Note that the actual number of chunks returned is not necessarily the same as
+        # the input number; it can be counter-intuitive, but it matches dense behavior.
         return [
             NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
-            for i in range(0, chunk_size)
+            for i in range(0, len(chunk_values))
         ]
     else:
         return [
