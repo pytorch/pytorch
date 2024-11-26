@@ -52,7 +52,7 @@ __all__ = ["trace_wrapped"]
 if not torch._running_with_deploy():
     # torch.library.custom_op does not work with torch.deploy/multipy
 
-    @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
     def zeros_and_scatter(
         shape: List[int],
         indices: List[Tensor],
@@ -84,7 +84,7 @@ if not torch._running_with_deploy():
                 assert idx.shape == value.shape
                 expanded_indices.append(idx)
 
-        out = torch.ops.FlexAttentionLib.zeros_and_scatter(
+        out = torch.ops.flex_lib.zeros_and_scatter(
             shape,
             expanded_indices,
             value,
@@ -109,7 +109,7 @@ class ModIndex(torch.autograd.Function):
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
-            torch.ops.FlexAttentionLib.zeros_and_scatter(
+            torch.ops.flex_lib.zeros_and_scatter(
                 ctx.input_shape,
                 indices,
                 gradOut,

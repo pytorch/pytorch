@@ -586,7 +586,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         )
         assert (
             not any_buffer_requires_grad
-        ), "Captured buffers from mask mod that require grad are not yet supported."
+        ), "Captured buffers from mask mod that require grad are not supported."
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
@@ -707,7 +707,9 @@ def flex_attention_autograd(
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     with TransformGetItemToIndex():
-        input_requires_grad = any(t.requires_grad for t in (query, key, value))
+        input_requires_grad = any(
+            t.requires_grad for t in (query, key, value, *score_mod_other_buffers)
+        )
         if torch.is_grad_enabled() and input_requires_grad:
             example_vals = (
                 query.new_zeros((), requires_grad=input_requires_grad),
@@ -930,7 +932,8 @@ def trace_flex_attention_backward(
         mask_mod_other_buffers,
     )
 
-    fw_example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+    requires_grad = any(pytree.tree_map(lambda x: x.requires_grad, (query, key)))
+    fw_example_vals = [query.new_zeros((), requires_grad=requires_grad)] + [
         query.new_zeros((), dtype=torch.int) for _ in range(4)
     ]
     bw_example_vals = fw_example_vals + [query.new_zeros(())]
@@ -946,9 +949,14 @@ def trace_flex_attention_backward(
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
     block_mask = block_mask[:-1] + (mask_graph,)
-    proxy_mode.tracer.root.register_module("fw_graph", fw_graph)  # type: ignore[arg-type]
-    proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
-    proxy_mode.tracer.root.register_module("mask_graph", mask_graph)
+
+    qualname = proxy_mode.tracer.get_fresh_qualname("fw_graph")
+    proxy_mode.tracer.root.register_module(qualname, fw_graph)  # type: ignore[arg-type]
+    qualname = proxy_mode.tracer.get_fresh_qualname("joint_graph")
+    proxy_mode.tracer.root.register_module(qualname, joint_graph)
+    qualname = proxy_mode.tracer.get_fresh_qualname("mask_graph")
+    proxy_mode.tracer.root.register_module(qualname, mask_graph)
+
     node_args = (
         query,
         key,

@@ -33,6 +33,22 @@ class SampleModelForDynamicShapes(torch.nn.Module):
         return x.relu(), b.sigmoid()
 
 
+class NestedModelForDynamicShapes(torch.nn.Module):
+    def forward(
+        self,
+        x: torch.Tensor,
+        ys: list[torch.Tensor],
+        zs: dict[str, torch.Tensor],
+        c: torch.Tensor,
+    ):
+        y = ys[0] + ys[1] + zs["a"] + zs["b"]
+        w = 5
+        if x.shape[0] < 3 and c.shape[0] != 4:
+            return x + w, x + y, c
+        else:
+            return x - w, x - y, c
+
+
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
 
@@ -71,6 +87,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assert_export(
             SampleModelForDynamicShapes(),
             (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+            input_names=["x", "b"],
             dynamic_axes={
                 "b": [0, 1, 2],
             },
@@ -80,6 +97,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assert_export(
             SampleModelForDynamicShapes(),
             (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}),
+            input_names=["x", "b"],
             dynamic_axes={
                 "b": [0, 1, 2],
             },
@@ -135,6 +153,29 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
         self.assert_export(exported_program)
 
+    def test_dynamic_shapes_supports_input_names(self):
+        self.assert_export(
+            SampleModelForDynamicShapes(),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            dynamic_shapes={
+                "custom_x": {
+                    0: torch.export.Dim("customx_dim_0"),
+                    1: torch.export.Dim("customx_dim_1"),
+                    2: torch.export.Dim("customx_dim_2"),
+                },
+                "custom_b": {
+                    0: torch.export.Dim("customb_dim_0"),
+                    1: torch.export.Dim("customb_dim_1"),
+                    2: torch.export.Dim("customb_dim_2"),
+                },
+            },
+            input_names=["custom_x", "custom_b"],
+            fallback=False,
+        )
+
     def test_partial_dynamic_shapes(self):
         self.assert_export(
             SampleModelForDynamicShapes(),
@@ -180,6 +221,47 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
         assert onnx_program is not None
         onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
+        # kwargs can still be renamed as long as it's in order
+        input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
+
+        dynamic_axes = {
+            "input_x": {0: "dim"},
+            "input_y": {0: "dim"},
+            "input_z": {0: "dim"},
+            "d": {0: "dim"},
+            "e": {0: "dim"},
+        }
+
+        model = NestedModelForDynamicShapes()
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(4),
+        )
+
+        self.assert_export(
+            model, input, dynamic_axes=dynamic_axes, input_names=input_names
+        )
+
+        # Check whether inputs are dynamically shaped
+        onnx_program = torch.onnx.export(
+            model,
+            input,
+            dynamic_axes=dynamic_axes,
+            input_names=input_names,
+            dynamo=True,
+        )
+        self.assertTrue(
+            all(
+                [
+                    input.type.tensor_type.shape.dim[0].dim_param
+                    for input in onnx_program.model_proto.graph.input
+                ][:-1]
+            )
+        )
 
     def test_refine_dynamic_shapes_with_onnx_export(self):
         # NOTE: From test/export/test_export.py
