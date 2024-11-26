@@ -73,7 +73,10 @@ def pack_module(
     ), f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
     device = next(iter(devices)) if len(devices) > 0 else None
 
-    packed_weight = torch._C._nn.pack_linear(torch.Tensor(mod.weight))
+    if torch._C._has_mkldnn:
+        packed_weight = torch._C._nn.mkldnn_reorder_linear_weight(torch.Tensor(mod.weight))
+    else:
+        raise Exception()
 
     if packed_weight is not None:
         mod.weight = torch.nn.Parameter(packed_weight)

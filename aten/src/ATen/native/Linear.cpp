@@ -64,12 +64,7 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
       flattened_dim = flattened_dim * input_sizes[i];
     }
     auto inp_reshape = input.reshape_symint({flattened_dim, input_sizes.at(input_sizes.size() -1)});
-    Tensor result;
-    if (weight.is_mkldnn()) {
-      result = at::addmm(bias, inp_reshape, weight);
-    } else {
-      result = at::addmm(bias, inp_reshape, weight.t());
-    }
+    const auto result = at::addmm(bias, inp_reshape, weight.t());
     auto new_size = input_sizes.slice(0, input_sizes.size() - 1);
     c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
     sizes_vec.push_back(result.sym_size(1));
@@ -102,28 +97,36 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
   // Weight has been prepacked
   if (weight.is_mkldnn()) {
     Tensor bias_ = *bias;
+    Tensor input_ = input;
 
     if (input_dim == 2) {
       if (!(bias->defined())) {
         bias_ =
             at::zeros({input.sizes()[0], weight.sizes()[1]}, input.options());
       }
-      return at::addmm(bias_, input, weight);
+      return mkldnn_linear(input_, weight, bias_);
+    } else {
+      int64_t flattened_dim = 1;
+      for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
+        flattened_dim = flattened_dim * input.sizes()[i];
+      }
+      input_ = input.reshape_symint({flattened_dim, input.sizes().at(input.sizes().size() - 1)});
+      if (!input_.is_contiguous()) {
+        // If user forces flattening via env var
+        input_ = input_.contiguous();
+      }
+      
+      if (!(bias->defined())) {
+        bias_ = at::zeros({flattened_dim, weight.sizes()[1]}, input.options());
+      }
     }
 
-    uint64_t flattened_dim = 1;
-    for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
-      flattened_dim = flattened_dim * input.sizes()[i];
-    }
-    if (!(bias->defined())) {
-      bias_ = at::zeros({flattened_dim, weight.sizes()[1]}, input.options());
-    }
-    if (!input.is_contiguous()) {
-      // If user forces flattening via env var
-      const Tensor input_cont = input.contiguous();
-      return _flatten_nd_linear(input_cont, weight, bias_);
-    }
-    return _flatten_nd_linear(input, weight, bias_);
+    auto result = mkldnn_linear(input_, weight, bias_);
+
+    auto new_size = input.sizes().slice(0, input.sizes().size() - 1);
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
   }
 
   if ((input_dim == 2 && bias->defined())) {

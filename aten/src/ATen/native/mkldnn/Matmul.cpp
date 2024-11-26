@@ -322,6 +322,9 @@ void mkldnn_matmul(
 
 }
 
+// Call ideep::matmul_forward with prepacked weights,
+// avoiding any unecessary reorders before calling
+// ideep::matmul_forward::compute().
 void mkldnn_matmul_prepacked(
     const Tensor &mat1,
     const Tensor &mat2,
