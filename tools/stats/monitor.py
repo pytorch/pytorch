@@ -113,6 +113,7 @@ class UsageLogger:
         ).isoformat()
         self.log_json(self._summary_info)
 
+        counter = 0
         # start data collection
         while not self._kill_now:
             collecting_start_time = time.time()
@@ -127,11 +128,18 @@ class UsageLogger:
                 # collect cpu and memory metrics
                 memory = psutil.virtual_memory()
                 used_cpu_percent = psutil.cpu_percent()
+
+                counter += 1
+                if counter == 12:
+                    disk_usage = psutil.disk_usage('/')
+                    counter = 0
+                    stats["disk_usage"]= disk_usage.percent
+
                 stats.update(
                     {
                         "total_cpu_percent": used_cpu_percent,
                         "total_memory_percent": memory.percent,
-                        "processes": self._get_process_info()
+                        "processes": self._get_process_info(),
                     }
                 )
                 stats.update(self._collect_gpu_data())
