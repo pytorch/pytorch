@@ -72,6 +72,11 @@ jobs:
           repository:  "ozanMSFT/builder"
           ref: "users/ozanMSFT/win-arm64"
           path: "builder"
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Bootstrap Git
         shell: cmd
         run: |
