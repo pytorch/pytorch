@@ -138,7 +138,7 @@ class UsageLog:
             finally:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
-                stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
+                stats["log_duration"] = f"{time_diff*1000:.2f}ms"
                 # log
                 self.log_json(stats)
                 # sleep for the remaining time to meet the log interval.
@@ -272,14 +272,15 @@ class UsageLog:
                 }
             except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
+
             # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
             # requires higher user privileges and could throw AccessDenied error, i.e. mac
             try:
                 memory_full_info = p.memory_full_info()
-                info["uss_memory"] = memory_full_info.uss
+                info["uss_memory"] = f"{memory_full_info.uss/ (1024 * 1024):.2f}"
                 if "pss" in memory_full_info:
                     # only availiable in linux
-                    info["pss_memory"] = memory_full_info.pss
+                    info["pss_memory"] = f"{memory_full_info.pss/ (1024 * 1024):.2f}"
             except psutil.AccessDenied as e:
                 # It's ok to skip this
                 pass
