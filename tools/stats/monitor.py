@@ -9,6 +9,7 @@ import argparse
 import datetime
 import json
 import signal
+import threading
 import time
 from datetime import timezone
 from typing import Any
@@ -23,7 +24,6 @@ try:
     _HAS_PYNVML = True
 except ModuleNotFoundError:
     pass
-
 try:
     import amdsmi # type: ignore[import]
     _HAS_AMDSMI = True
@@ -51,39 +51,13 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
-class LogRecord:
-    """
-    A class to manage log data as record.
-    """
-    def __init__(self) -> None:
-        self._summary_info = {}
-
-    def upsert(self, key, value) -> None:
-        self._summary_info[key] = value
-
-    def upsert_pairs(self, pairs) -> None:
-        for key, value in pairs.items():
-            self._summary_info[key] = value
-
-    def get(self) -> dict[str, Any]:
-        return self._summary_info
-
 class UsageLog:
     def __init__(self, log_interval, is_debug_mode=False, pynvmlExist = False, amdsmiExist = False) -> None:
-        """
-        Initializes a new instance of the UsageLog class.
-
-        Args:
-            log_interval (int): The time interval for logging utilization data in seconds.
-        """
         self._log_interval = log_interval
-        self._summary_info = LogRecord()
-        self._summary_info.upsert_pairs(
-            {
-                "level": "metadata",
-                "interval": self._log_interval,
-            }
-        )
+        self._summary_info ={
+            "level": "metadata",
+            "interval": self._log_interval,
+        }
         self._has_pynvml = False
         self._has_amdsmi = False
         self._kill_now = False
@@ -125,56 +99,43 @@ class UsageLog:
             Executes the main loop of the program.
             """
             # logs start_time for execution
-            self._summary_info.upsert(
-                "start_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
-            )
-
+            self._summary_info["start_time"] = datetime.datetime.now(timezone.utc)
             # prints log summary info before execution
-            self.log_json(self._summary_info.get())
+            self.log_json(self._summary_info)
 
             # execute the main loop
             while not self._kill_now:
                 collecting_start_time = time.time()
                 stats = {}
                 try:
-                    valid_record = LogRecord()
+                    mem = psutil.virtual_memory()
                     # collect cpu and memory utilization
-                    valid_record.upsert_pairs(
+                    stats.update(
                         {
                             "level": "record",
-                            "time": datetime.datetime.now(timezone.utc).isoformat("T")
-                            + "Z",
+                            "time": datetime.datetime.now(timezone.utc),
                             "total_cpu_percent": psutil.cpu_percent(),
-                            "total_memory_percent": psutil.virtual_memory(),
+                            "total_memory_percent": mem.percent,
                             "processes": self._get_process_info(),
                         }
                     )
-                    valid_record.upsert_pairs(self._collect_gpu_data())
-                    stats = valid_record.get()
+                    stats.update(self._collect_gpu_data())
                 except Exception as e:
-                    error_record = {
+                    # only log error
+                    stats = {
                         "level": "record",
-                        "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
+                        "time": datetime.datetime.now(timezone.utc),
                         "error": str(e),
                     }
-                    stats = error_record
                 finally:
                     collecting_end_time = time.time()
                     time_diff = collecting_end_time - collecting_start_time
                     stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
-
                     # log
                     self.log_json(stats)
-
                     # sleep for the remaining time to meet the log interval.
                     if time_diff < self._log_interval:
                         time.sleep(self._log_interval - time_diff)
-
-            # prints complete log summary info to terminal
-            self._summary_info.upsert(
-                "end_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
-            )
-            self.log_json(self._summary_info.get())
             # shut down gpu connections
             self._shutdown_gpu_connections()
 
@@ -185,14 +146,14 @@ class UsageLog:
         Returns:
             dict: A dictionary containing the collected GPU utilization data.
         """
-        record = LogRecord()
+        record = {}
         if self._has_pynvml:
             # Iterate over the available GPUs
             for idx, gpu_handle in enumerate(self._gpu_handles):
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
                     gpu_handle
                 )
-                record.upsert_pairs(
+                record.update(
                     {
                         f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
                         f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
@@ -200,7 +161,7 @@ class UsageLog:
                 )
         elif self._has_amdsmi:
             for idx, handle in enumerate(self._gpu_handles):
-                record.upsert_pairs(
+                record.update(
                     {
                         f"total_gpu_utilization_{idx}": amdsmi.amdsmi_get_gpu_activity(
                             handle
@@ -214,7 +175,7 @@ class UsageLog:
                         ],
                     }
                 )
-        return record.get()
+        return record
 
     def _initialGpuHanlders(self) -> None:
         """
@@ -231,14 +192,15 @@ class UsageLog:
                 self._gpu_libs_detected.append("amdsmi")
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
             self._num_of_cpus = psutil.cpu_count(logical=False)
-
-            # log summary info for handlers
-            self._summary_info.upsert("gpu_libs_detected", self._gpu_libs_detected)
-            self._summary_info.upsert("num_of_gpus", len(self._gpu_handles))
-            self._summary_info.upsert("num_of_cpus", self._num_of_cpus)
+            self._summary_info.update(
+                {
+                    "gpu_libs_detected": self._gpu_libs_detected,
+                    "num_of_gpus": len(self._gpu_handles),
+                    "num_of_cpus": self._num_of_cpus,
+                }
+            )
         except Exception as e:
-            self._summary_info.upsert("error", str(e))
-
+            self._summary_info["error"] = str(e)
     def _shutdown_gpu_connections(self) -> None:
         if self._has_amdsmi:
             try:
