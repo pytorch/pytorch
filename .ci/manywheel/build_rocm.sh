@@ -186,9 +186,13 @@ do
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
 
-# PyTorch-version specific
-# AOTriton dependency only for PyTorch >= 2.4
-if (( $(echo "${PYTORCH_VERSION} 2.4" | awk '{print ($1 >= $2)}') )); then
+# FIXME: Temporary until https://github.com/pytorch/pytorch/pull/137443 lands
+# Install AOTriton
+if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
+    cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
+    SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
+    bash ${SOURCE_DIR}/../common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
+    export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
     ROCM_SO_FILES+=("libaotriton_v2.so")
 fi
 
