@@ -185,7 +185,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: wheel-py3_12-cpu-build
+    needs: wheel-py3_12-cpu-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder

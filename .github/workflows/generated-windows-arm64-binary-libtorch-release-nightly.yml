@@ -192,7 +192,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    needs: libtorch-cpu-shared-with-deps-release-build
+    needs: libtorch-cpu-shared-with-deps-release-test
     with:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder

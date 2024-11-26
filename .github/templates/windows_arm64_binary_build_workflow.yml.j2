@@ -174,6 +174,6 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
   {%- if branches == "nightly" %}
-  !{{ upload.upload_binaries(config, True, False) }}
+  !{{ upload.upload_binaries(config, True) }}
   {%- endif %}
 {%- endfor %}
