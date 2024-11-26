@@ -1412,9 +1412,9 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     else:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
-    children_specs = []
-    for child_string in json_schema["children_spec"]:
-        children_specs.append(_json_to_treespec(child_string))
+    children_specs = [
+        _json_to_treespec(child_string) for child_string in json_schema["children_spec"]
+    ]
 
     return TreeSpec(typ, context, children_specs)
 
