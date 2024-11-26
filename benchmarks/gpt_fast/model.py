@@ -18,10 +18,7 @@ def find_multiple(n: int, k: int) -> int:
 class ModelArgs:
     block_size: int = 2048
     vocab_size: int = 32000
-    # origianl n_layer is 32
-    # waiting for A100-80G machine to be available in CI
-    # https://github.com/pytorch/pytorch/actions/runs/12018005803/job/33503683582?pr=140627
-    n_layer: int = 16
+    n_layer: int = 32
     n_head: int = 32
     dim: int = 4096
     intermediate_size: int = None
