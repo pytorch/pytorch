@@ -504,9 +504,7 @@ Vectorized<double> inline Vectorized<double>::le(const Vectorized<double>& other
 template <>
 inline void convert(const double* src, double* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<double>::size();
-#ifndef __msvc_cl__
 #pragma unroll
-#endif
   for (int64_t i = 0; i < n - fraction; i += Vectorized<double>::size()) {
     svst1_f64(ptrue, dst + i, svldnt1_f64(ptrue, src + i));
   }

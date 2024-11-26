@@ -482,8 +482,8 @@ struct RegisterPRIVATEUSE1Dispatch {
   REGISTER_AVX2_DISPATCH(name, fn)                                             \
   REGISTER_VSX_DISPATCH(name, fn)                                              \
   REGISTER_ZVECTOR_DISPATCH(name, fn)                                          \
-  REGISTER_SVE512_DISPATCH(name, fn)                                          \
-  REGISTER_SVE256_DISPATCH(name, fn)                                          \
+  REGISTER_SVE512_DISPATCH(name, fn)                                           \
+  REGISTER_SVE256_DISPATCH(name, fn)                                           \
   REGISTER_SVE128_DISPATCH(name, fn)
 
 #define REGISTER_SVE_DISPATCH(name, fn)                                        \
