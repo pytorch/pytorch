@@ -1193,7 +1193,6 @@ class TritonKernelOverrides(TritonOverrides):
                 cls.to_dtype(var, dtype),
                 dtype=dtype,
             )
-
         var.mask_vars = indexing.mask_vars
         return var
 
