@@ -62,7 +62,7 @@ void mkl_gemm_f16f16f32(
 #include <mkl.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static CBLAS_TRANSPOSE to_cblas(TransposeType x) {
   switch (x) {
@@ -151,7 +151,7 @@ void mkl_gemm_f16f16f32(
 #endif
 }
 
-}} // namespace at::native
+} // namespace at::native
 
 #endif
 C10_DIAGNOSTIC_POP()

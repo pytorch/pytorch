@@ -11,6 +11,7 @@ from .ir import (
     ExternKernelAlloc,
     FixedLayout,
     FlexibleLayout,
+    get_device_type,
     ir_node_to_tensor,
     IRNode,
     is_contiguous_storage_and_layout,
@@ -44,8 +45,8 @@ def _prepare_convolution_fusion_create(
     This function is a helper function to prepare inputs, layout and constant args
     for convolution post-op fusion's create function, including deciding the output
     layout (channels first or channels last), realizing inputs and make them etc. The
-    function only supports the CPU device since conv post-op fusion kernel is only
-    supported on CPU right now.
+    function only supports the CPU/XPU device since conv post-op fusion kernel is only
+    supported on CPU/XPU right now.
     """
 
     # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
@@ -163,7 +164,8 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert get_device_type(x) == get_device_type(weight)
+    assert get_device_type(x) in ["cpu", "xpu"]
     inputs = [x]
 
     if quantize_args is not None:
@@ -182,7 +184,7 @@ def _prepare_convolution_fusion_create(
         inputs += [other]
 
     kernel_layout = FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         convert_shape_to_inductor(output_size),
         convert_shape_to_inductor(output_stride),
@@ -226,7 +228,7 @@ def _prepare_linear_fusion_create(
     req_stride_order = list(reversed(range(len(x.get_size()))))
 
     x = cls.require_stride_order(x, req_stride_order)
-    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    assert get_device_type(x) == "cpu" and get_device_type(weight) == "cpu"
     inputs = [x]
 
     if quantize_args is not None:

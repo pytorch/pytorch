@@ -81,6 +81,7 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+    "xpu": "at::kXPU",
 }
 
 LAYOUT_TO_ATEN = {
@@ -498,7 +499,7 @@ def rewrite_index_for_nodes(
     for i in range(len(local_buf.get_size())):
         var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
         index_vars.append(var if var in used_vars else 0)
-    index = local_buf.layout.make_indexer()(index_vars)
+    index = local_buf.get_layout().make_indexer()(index_vars)
     return index
 
 
