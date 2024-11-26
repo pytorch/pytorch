@@ -2257,6 +2257,24 @@ class TestSDPACpuOnly(NNTestCase):
         out.sum().backward()
         self.assertTrue(torch.isnan(query.grad).any())
 
+    @parametrize("dtype", [torch.float32, torch.float16])
+    def test_cpu_flash_attn_nan_propagation(self, dtype):
+        # Setup tensors
+        query = torch.full((1, 1, 16, 16), torch.nan, dtype=dtype)
+        key = torch.randn(1, 1, 16, 16, dtype=dtype)
+        value = torch.randn(1, 1, 16, 16, dtype=dtype)
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            out = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value,
+                attn_mask=None,
+                dropout_p=0.0,
+                is_causal=False
+            )
+
+            # Check that output contains NaN
+            self.assertTrue(torch.isnan(out).all())
+
     @parametrize("kernel", [SDPBackend.MATH])
     def test_scaled_dot_product_attention_math_with_negative_scale(self, device, kernel: SDPBackend):
         # https://github.com/pytorch/pytorch/issues/105190.
