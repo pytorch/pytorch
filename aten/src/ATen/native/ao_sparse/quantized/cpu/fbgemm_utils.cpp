@@ -8,8 +8,7 @@
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 int register_linear_params() {
   static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
@@ -42,4 +41,4 @@ int register_linear_params() {
 namespace {
 [[maybe_unused]] static auto linear_params = register_linear_params();
 } // namespace
-}}  // namespace ao::sparse
+}  // namespace ao::sparse
