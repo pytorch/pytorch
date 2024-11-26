@@ -683,13 +683,7 @@ class StructuredTraceTest(TestCase):
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_storage": {"id": 1, "describer_id": "ID", "size": 8}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_tensor": {"id": 1, "ndim": 0, "dtype": "torch.float64", "device": "device(type='cpu')", "size": [], "is_leaf": true, "stride": [], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 1, "source": "___as_tensor(L['ys'][0])"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_storage": {"id": 2, "describer_id": "ID", "size": 8}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_tensor": {"id": 2, "ndim": 0, "dtype": "torch.float64", "device": "device(type='cpu')", "size": [], "is_leaf": true, "stride": [], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 2, "source": "___as_tensor(L['zs'][0])"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-{"dynamo_output_graph": {"sizes": {"l_x_": [1], "l_ys_0_": [], "l_zs_0_": [], "x": [1]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"dynamo_output_graph": {"sizes": {"l_x_": [1], "x": [1]}}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "recompile_reasons", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
@@ -697,13 +691,7 @@ class StructuredTraceTest(TestCase):
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_storage": {"id": 1, "describer_id": "ID", "size": 8}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_tensor": {"id": 1, "ndim": 0, "dtype": "torch.float64", "device": "device(type='cpu')", "size": [], "is_leaf": true, "stride": [], "storage": 1, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 1, "source": "___as_tensor(L['ys'][0])"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_storage": {"id": 2, "describer_id": "ID", "size": 8}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_tensor": {"id": 2, "ndim": 0, "dtype": "torch.float64", "device": "device(type='cpu')", "size": [], "is_leaf": true, "stride": [], "storage": 2, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"describe_source": {"describer_id": "ID", "id": 2, "source": "___as_tensor(L['zs'][0])"}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-{"dynamo_output_graph": {"sizes": {"l_x_": [1], "l_ys_0_": [], "l_zs_0_": [], "x": [1]}}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
+{"dynamo_output_graph": {"sizes": {"l_x_": [1], "x": [1]}}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 """,  # noqa: B950
