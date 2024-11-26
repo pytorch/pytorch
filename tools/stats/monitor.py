@@ -9,7 +9,6 @@ import argparse
 import datetime
 import json
 import signal
-import threading
 import time
 from datetime import timezone
 from typing import Any
@@ -79,7 +78,7 @@ class UsageLog:
                 self._has_amdsmi = True
             except amdsmi.AmdSmiException:
                 pass
-        self._initialGpuHanlders()
+        self._initial_gpu_handler()
 
     def log_json(self, stats) -> None:
         if self._debug_mode:
@@ -99,7 +98,7 @@ class UsageLog:
             Executes the main loop of the program.
             """
             # logs start_time for execution
-            self._summary_info["start_time"] = datetime.datetime.now(timezone.utc)
+            self._summary_info["start_time"] = datetime.datetime.now(timezone.utc).isoformat()
             # prints log summary info before execution
             self.log_json(self._summary_info)
 
@@ -113,7 +112,7 @@ class UsageLog:
                     stats.update(
                         {
                             "level": "record",
-                            "time": datetime.datetime.now(timezone.utc),
+                            "time": datetime.datetime.now(timezone.utc).isoformat(),
                             "total_cpu_percent": psutil.cpu_percent(),
                             "total_memory_percent": mem.percent,
                             "processes": self._get_process_info(),
@@ -124,7 +123,7 @@ class UsageLog:
                     # only log error
                     stats = {
                         "level": "record",
-                        "time": datetime.datetime.now(timezone.utc),
+                        "time": datetime.datetime.now(timezone.utc).isoformat(),
                         "error": str(e),
                     }
                 finally:
@@ -179,7 +178,7 @@ class UsageLog:
                 )
         return info
 
-    def _initialGpuHanlders(self) -> None:
+    def _initial_gpu_handler(self) -> None:
         """
         Initializes the GPU handlers if available.
         """
@@ -193,7 +192,9 @@ class UsageLog:
             if self._has_amdsmi:
                 self._gpu_libs_detected.append("amdsmi")
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
+
             self._num_of_cpus = psutil.cpu_count(logical=False)
+            # update summary info
             self._summary_info.update(
                 {
                     "gpu_libs_detected": self._gpu_libs_detected,
@@ -203,6 +204,7 @@ class UsageLog:
             )
         except Exception as e:
             self._summary_info["error"] = str(e)
+
     def _shutdown_gpu_connections(self) -> None:
         if self._has_amdsmi:
             try:
@@ -237,7 +239,7 @@ class UsageLog:
                 proc_info = p
             info = {
                 "pid": proc_info["pid"],
-                "gpu_memory": proc_info["memory_usage"]["vram_mem"],
+                "gpu_memory": proc_info["memory_usage"]["vram_mem"]/ (1024 * 1024),
             }
             per_process_info.append(info)
         return per_process_info
@@ -284,18 +286,13 @@ def main():
     """
     Main function of the program.
     """
-    try:
-        args = parse_args()
-        usagelog = UsageLog(args.log_interval, args.debug,_HAS_PYNVML,_HAS_AMDSMI)
-        # gracefully exit the script when pid is killed
-        signal.signal(signal.SIGTERM, usagelog.exit_gracefully)
-        # gracefully exit the script when keyboard ctrl+c is pressed.
-        signal.signal(signal.SIGINT, usagelog.exit_gracefully)
-        usagelog.execute()
-    except Exception as e:
-        json.dumps(
-            {"level": "main", "error": f"Failed to execute the usage log: {str(e)}"}
-        )
+    args = parse_args()
+    usagelog = UsageLog(args.log_interval, args.debug,_HAS_PYNVML,_HAS_AMDSMI)
+    # gracefully exit the script when pid is killed
+    signal.signal(signal.SIGTERM, usagelog.exit_gracefully)
+    # gracefully exit the script when keyboard ctrl+c is pressed.
+    signal.signal(signal.SIGINT, usagelog.exit_gracefully)
+    usagelog.execute()
 
 
 if __name__ == "__main__":
