@@ -148,13 +148,16 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
             """\
-{'GraphLowering.compile_to_module': [0.0, 0.0],
+{'GraphLowering.codegen': [0.0, 0.0],
+ 'GraphLowering.compile_to_fn': [0.0, 0.0],
+ 'GraphLowering.compile_to_module': [0.0, 0.0],
  'GraphLowering.run': [0.0, 0.0],
  'OutputGraph.call_user_compiler': [0.0],
  'PyCodeCache.load_by_key_path': [0.0, 0.0],
  'PythonWrapperCodegen.generate': [0.0, 0.0],
  'Scheduler.__init__': [0.0, 0.0],
  'Scheduler.codegen': [0.0, 0.0],
+ 'Scheduler.fused_nodes': [0.0, 0.0],
  '_compile.compile_inner': [0.0],
  '_recursive_joint_graph_passes': [0.0],
  '_recursive_post_grad_passes': [0.0, 0.0],
@@ -198,11 +201,15 @@ class TestDynamoTimed(TestCase):
             e.co_filename = None
             e.co_firstlineno = None
             e.inductor_config = None
+            e.cuda_version = None
+            e.triton_version = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
+        raw = dataclasses.asdict(compilation_events[0])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[0])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
@@ -218,6 +225,7 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
+ 'cuda_version': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': 0,
@@ -240,6 +248,11 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': True,
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
@@ -248,6 +261,7 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
  'remote_fx_graph_cache_put_time_ms': None,
@@ -261,12 +275,15 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None}""",  # noqa: B950
+ 'triton_compile_time_us': None,
+ 'triton_version': None}""",  # noqa: B950
         )
 
         # Second event is for the backward
+        raw = dataclasses.asdict(compilation_events[1])
+        del raw["feature_usage"]
         self.assertExpectedInline(
-            pprint.pformat(dataclasses.asdict(compilation_events[1])),
+            pprint.pformat(raw),
             """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
@@ -282,6 +299,7 @@ class TestDynamoTimed(TestCase):
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
  'cuda_synchronize_time_us': None,
+ 'cuda_version': None,
  'distributed_ephemeral_timeout_us': None,
  'duration_us': 0,
  'dynamo_compile_time_before_restart_us': None,
@@ -304,6 +322,11 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_remote_cache_backend_type': None,
+ 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_keys': None,
+ 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': False,
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
@@ -312,6 +335,7 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'remote_cache_time_saved_s': None,
+ 'remote_cache_version': None,
  'remote_fx_graph_cache_get_time_ms': None,
  'remote_fx_graph_cache_get_time_us': None,
  'remote_fx_graph_cache_put_time_ms': None,
@@ -321,11 +345,12 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
- 'start_time': None,
+ 'start_time': 0.0001,
  'start_time_us': 100,
- 'structured_logging_overhead_s': None,
+ 'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None}""",  # noqa: B950
+ 'triton_compile_time_us': None,
+ 'triton_version': None}""",  # noqa: B950
         )
 
 

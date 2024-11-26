@@ -135,6 +135,8 @@ class WorkspaceArg:
     def get_device(self):
         return self.device
 
+    get_device_or_error = get_device
+
     def get_dtype(self):
         return self.dtype
 
@@ -151,6 +153,10 @@ class WorkspaceArg:
     @property
     def layout(self):
         return self.get_layout()
+
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
 
     def get_size(self):
         return [self.count]
@@ -302,7 +308,9 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(device: Union[torch.device, str, None]):
+    if device is None:
+        return {}
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -374,6 +382,7 @@ def init_backend_registration():
             "xpu",
             TritonScheduling,
             PythonWrapperCodegen,
+            CppWrapperGpu,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -1693,7 +1702,7 @@ class CSE:
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self.cache = {}
+        self._cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
@@ -1706,11 +1715,11 @@ class CSE:
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self):
         # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
-        return CSE(
+        return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
             name_prefix=self.name_prefix,
@@ -1718,6 +1727,22 @@ class CSE:
             store_cache=self.store_cache,
             varname_map=self.varname_map,
         )
+
+    def augment_key(self, cache_key: object) -> object:
+        "Override this method to augment cache key with backend specifics"
+        return cache_key
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[self.augment_key(cache_key)] = val
+
+    def contains(self, cache_key) -> bool:
+        return self.augment_key(cache_key) in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(self.augment_key(cache_key), None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[self.augment_key(cache_key)]
 
     def generate(
         self,
@@ -1747,10 +1772,10 @@ class CSE:
         else:
             assert isinstance(expr, str)
             cache_key = expr
-        var = self.cache.get(cache_key, None)
+        var = self.try_get(cache_key)
         if not var:
             var = self.newvar(bounds, dtype)
-            self.cache[cache_key] = var
+            self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -1795,8 +1820,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, torch._prims_common.Number):
             return inp
         else:
-            assert hasattr(inp, "dtype")
-
             # construct a tmp tensor to use dtype promotion util function
             return torch.empty([1], dtype=inp.dtype)
 
@@ -2078,7 +2101,7 @@ class Kernel(CodeGen):
     def swap_buffers(self, lb, cb=None, sb=None):
         def scope_cse(cse):
             new_cse = cse.clone()
-            new_cse.cache = ScopedDict(cse.cache)
+            new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
             new_cse.store_cache = ScopedDict(cse.store_cache)
             return new_cse
