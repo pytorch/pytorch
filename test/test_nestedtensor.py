@@ -8081,27 +8081,10 @@ FORWARD_SKIPS_AND_XFAILS = [
                 "narrow",
                 "select",
                 "split",
-                "unsqueeze",
             }
         ),
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
         name="ragged_dim_unsupported",
-    ),
-    # Bug: unsqueeze at the end is wrong
-    XFailRule(
-        error_type=AssertionError,
-        error_msg="The values for attribute 'shape' do not match",
-        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
-        sample_match_fn=lambda device, sample: "add dim to the end" in sample.name,
-        name="unsqueeze_end_dim_unsupported",
-    ),
-    # Bug: inserting a dim before the ragged dim should update ragged_idx!
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
-        sample_match_fn=lambda device, sample: (
-            sample.kwargs["dim"] <= sample.input._ragged_idx
-        ),
-        name="unsqueeze_dim_before_ragged_bug",
     ),
     XFailRule(
         error_type=RuntimeError,
@@ -8280,8 +8263,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
 ]
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
-    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
-    *(x for x in FORWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
+    *FORWARD_SKIPS_AND_XFAILS,
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8403,8 +8385,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         name="clone_unbind_data_dependency_backward",
     ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
-    # The unsqueeze bugs don't affect eager vs. compile consistency so they don't fail here
-    *(x for x in BACKWARD_SKIPS_AND_XFAILS if not x.name.startswith("unsqueeze")),
+    *BACKWARD_SKIPS_AND_XFAILS,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
