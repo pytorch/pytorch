@@ -21,7 +21,7 @@ extra_fields = (
     "_min_seqlen_tensor",
     "_inverse_indices",
 )
-UnpackResult = namedtuple("UnpackResult", source_fields + extra_fields)
+# UnpackResult = namedtuple("UnpackResult", source_fields + extra_fields)
 
 
 @torch._dynamo.allow_in_graph
@@ -493,23 +493,6 @@ def jagged_from_tensor_and_lengths(
     return (ret_nt, offsets, None if is_contiguous else length_list)
 
 
-# NB: A dummy arg is required so that NestedTensor.__torch_dispatch__() is invoked
-# for _nested_view_from_values_offsets(). Sizes don't matter much, but they shouldn't be
-# 0/1 because the dummy can be fake-ified and we want to avoid specializing.
-# This arg is otherwise unused.
-_dummy_instance: Optional[torch.Tensor] = None
-
-
-def _nt_view_dummy() -> torch.Tensor:
-    global _dummy_instance
-    if _dummy_instance is None:
-        _dummy_instance = NestedTensor(
-            values=torch.zeros(3, 3, device="meta"),
-            offsets=torch.zeros(3, device="meta", dtype=torch.int64),
-        ).detach()
-    return _dummy_instance
-
-
 def normalize_lengths_offsets(metadata):
     # Does the follow conversion:
     # {
@@ -595,9 +578,6 @@ def nested_view_from_values_offsets(
     metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
-        # We could potentially get rid of the dummy arg if we make the CacheTensor
-        # NestedTensor specific.
-        _nt_view_dummy(),
         # Putting metadata_tensor AFTER so multiple dispatch hits nested tensor first
         metadata_tensor,
         ragged_idx,
@@ -610,7 +590,6 @@ def nested_view_from_values_offsets_lengths(
     metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
-        _nt_view_dummy(),
         metadata_tensor,
         ragged_idx,
     )  # type: ignore[return-value]
@@ -624,7 +603,6 @@ def nested_from_padded(
     metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
     return torch._nested_from_padded_tensor(
         padded,
-        _nt_view_dummy(),
         metadata_tensor,
         ragged_idx,
         sum_S,

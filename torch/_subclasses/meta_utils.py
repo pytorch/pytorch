@@ -203,7 +203,7 @@ class MetaTensorDescriber:
                 return MetaNestedIntDesc(
                     cache=self.describe_tensor(
                         x.node.nested_int_cache(),
-                        inner_tensor_attr="_metadata",
+                        subclass_inner_attr="_metadata",
                     ),
                 )
             return None
@@ -235,6 +235,7 @@ class MetaTensorDescriber:
         *,
         recurse: bool = True,
         trace: bool = False,
+        subclass_inner_attr: Optional[str] = None,
     ):
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
@@ -362,6 +363,7 @@ class MetaTensorDescriber:
             is_nested=is_nested,
             nested_int=_global_tensor_registry.try_get_int(t),
             custom_size_strides=self.describe_custom_size_strides(t),
+            subclass_inner_attr=subclass_inner_attr,
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -506,11 +508,9 @@ class MetaTensorDesc:
     is_gradtrackingtensor: bool = False
     is_view: bool = False
     is_nested: bool = False
-    # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
-    # metadata if that offsets is already associated with a nested int.
-    # See test_construct_from_jagged_with_input_offsets_mixed_case.
     nested_int: Optional[int] = None
     custom_size_strides: MetaCustomSizeStridesDesc = None
+    subclass_inner_attr: Optional[str] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -723,10 +723,11 @@ class MetaConverter:
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv] = None,
-        callback=lambda t: t(),
+        callback_=lambda t: t(),
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ):
+        callback = functools.partial(callback_, device=t.device)
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -746,19 +747,14 @@ class MetaConverter:
         self.arg_cnt += 1
 
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            # Assume we captured the symbolic_context of the outer-most subclass
-            curr_context = symbolic_context
-            for k in t.inner_subclass_path:
-                curr_context = curr_context.inner_context[k]
-
-            inner_callback = functools.partial(callback_, device=t.device)
-
+            inner_context = getattr(symbolic_context, "inner_context")
+            assert inner_context is not None
             return self.meta_tensor(
                 t,
                 shape_env,
-                inner_callback,
+                functools.partial(callback_, device=t.device),
                 source=src,
-                symbolic_context=curr_context,
+                symbolic_context=inner_context[t.subclass_inner_attr],
             )
 
         # When we make as_strided calls, we end up generating a guard

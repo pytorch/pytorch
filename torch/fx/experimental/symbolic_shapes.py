@@ -3900,7 +3900,7 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[Union[int, torch.SymInt]],
         source: Optional[Source] = None,
         metafy_fn: Optional[Callable] = None,
         nested_int_desc: Optional[MetaNestedIntDesc] = None,
@@ -3935,7 +3935,7 @@ class ShapeEnv:
             #     the branch below. This branch handles (1) recursive
             #     fakification (See Note [Recursive fakification]) and
             #     (2) special strides logic.
-            from torch._dynamo.source import SymNodePropertySource,
+            from torch._dynamo.source import SymNodePropertySource
             from torch.nested._internal.nested_int import NestedIntNode
             from torch.nested._internal.utils import _try_get_fake_mode
 
@@ -4148,7 +4148,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_symbol(
         self,
-        val: int,
+        val: Union[int, torch.SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None

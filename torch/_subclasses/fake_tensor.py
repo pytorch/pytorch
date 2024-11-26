@@ -356,8 +356,8 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
-        # This callback is used by both subclass and inner tensors, allow the 
-        # to parameterize on the device in case the subclass and inner tensors
+        # This callback is used by both subclass and inner tensors. Require the
+        # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
         def mk_fake_tensor(make_meta_t: Callable[[], object], device) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
@@ -620,6 +620,8 @@ class FakeTensor(Tensor):
     nonzero_memo = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
+
+    nested_int_id: Optional[int] = None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -889,13 +891,14 @@ class FakeTensor(Tensor):
         return common_device, has_scalar_only_inputs
 
     # For the purpose of equality comparison
-    def get_nested_id(self) -> int:
-        if self.nested_id is None:
-            self.nested_id = self.fake_mode.get_next_nested_id()
-        return self.nested_id
+    def try_get_nested_int_id(self) -> Optional[int]:
+        return self.nested_int_id
 
-    def set_nested_id(self, nid: int):
-        self.nested_id = nid
+    def register_nested_int_id(self, nid: Optional[int] = None):
+        if self.nid is None:
+            self.nested_int_id = self.fake_mode.get_next_nested_int_id()
+        else:
+            self.nested_int_id = nid
 
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:
@@ -905,6 +908,12 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+    def detach(self) -> torch.Tensor:  # type: ignore[override]
+        out = torch.ops.aten.detach.default(self)
+        if t_id := try_get_nested_int_id(self):
+            out.register_nested_int_id(t_id)
+        return out
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -2333,7 +2342,7 @@ class FakeTensorMode(TorchDispatchMode):
         # The cache holds a weakref to the nested int
         # cache is 1:1 with symbolic nested int
         # a single offsets can be part of multiple cache and thus have
-        # multiple nested int. 
+        # multiple nested int.
         # comparing two of those nested ints can generate a guard
         # so we make sure that they have proper source.
         # during hint comparison, we check the nested_int which is the same.
@@ -2352,10 +2361,15 @@ class FakeTensorMode(TorchDispatchMode):
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
 
-        src = cache.source if cache.source else torch._dynamo.source.EphemeralSource(
-            f"intermediate_offsets_or_lengths"
+        src = (
+            cache.source
+            if cache.source
+            else torch._dynamo.source.EphemeralSource(
+                f"intermediate_offsets_or_lengths"
+            )
         )
-        hint = torch.SymInt(NestedIntNode(cache, coeff=coeff))
+        hint = torch.SymInt(NestedIntNode(cache, coeff=1))
+        assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
                 val=hint,
@@ -2364,6 +2378,7 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
+        assert isinstance(ret, torch.SymInt)
         return ret
 
     def get_next_nested_int_id(self) -> int:
