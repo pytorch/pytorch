@@ -954,7 +954,9 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def handle_dynamo_gm(mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor]):
+def handle_dynamo_gm(
+    mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor]
+) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
     aot_autograd_arg_pos_to_source = None
     static_input_indices = []
     if not isinstance(mod, torch.fx.GraphModule) or "dynamo_compile_id" not in mod.meta:
