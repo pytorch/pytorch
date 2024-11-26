@@ -1706,11 +1706,17 @@ common_constant_types: Set[type] = {
     bytes,
     type(None),
     Ellipsis.__class__,
+    NotImplemented.__class__,
     types.CodeType,
+    # Commonly used immutable types from torch.
     torch.device,
     torch.dtype,
     torch.memory_format,
     torch.layout,
+    torch.finfo,
+    torch.iinfo,
+    torch.nn.attention.SDPBackend,
+    torch.cuda._CudaDeviceProperties,
 }
 
 if has_triton_package():
