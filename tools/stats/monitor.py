@@ -161,7 +161,7 @@ class UsageLog:
                         f"gpu_processes_{idx}": gpu_processes,
                     }
                 )
-        if self._has_amdsmi:
+        elif self._has_amdsmi:
             for idx, handle in enumerate(self._gpu_handles):
                 info.update(
                     {
@@ -177,7 +177,7 @@ class UsageLog:
                         ],
                     }
                 )
-        return record
+        return info
 
     def _initialGpuHanlders(self) -> None:
         """
