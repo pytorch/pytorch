@@ -58,7 +58,6 @@ _lowp_fp_dtypes = (
     torch.float16,
 )
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
-run_and_get_code = test_torchinductor.run_and_get_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
