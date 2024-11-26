@@ -503,3 +503,11 @@ function(target_compile_options_if_supported target flag)
     target_compile_options(${target} PRIVATE ${flag})
   endif()
 endfunction()
+
+##############################################################################
+# Macro to append items to a input list if a condition is met.
+macro(append_list_if condition input_list)
+  if(${condition})
+    list(APPEND ${input_list} ${ARGN})
+  endif()
+endmacro()
