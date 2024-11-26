@@ -421,7 +421,6 @@ make html
 make serve
 ```
 
-
 Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
