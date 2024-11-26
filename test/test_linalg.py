@@ -7382,11 +7382,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             # Then  F^H = | -j * pi        2  |
             #             | 2          j * pi |
             (
-                torch.diag(torch.tensor([2., 1.], device=device, dtype=torch.complex64 if dtype == torch.float32 else torch.complex128)),
+                torch.diag(torch.tensor([2., 1.], device=device,
+                                        dtype=torch.complex64 if dtype == torch.float32 else torch.complex128)),
                 lambda m: torch.linalg.matrix_exp(torch.pi * 1j * m),
-
                 torch.tensor([[-1j * torch.pi, 2], [2, 1j * torch.pi]],
-                             device=device, dtype=torch.complex64 if dtype == torch.float32 else torch.complex128)),
+                             device=device, dtype=torch.complex64 \
+                             if dtype == torch.float32 else torch.complex128)),
         ]
 
         for A, f, F_H in testcases:
