@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import asyncio
 import contextlib
 import copy
 import dataclasses
@@ -863,6 +864,21 @@ class CommonTemplate:
                 torch.tensor([False, False, True, True]),
             ),
         )
+
+    @patch("torch._inductor.compile_fx._debug_force_async", True)
+    def test_async_in_async_context(self):
+        # Make sure that compiling works when we do and when we don't have an
+        # existing event loop.
+
+        def fn(a, b):
+            return a + b
+
+        self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
+
+        async def async_sub():
+            self.common(fn, (torch.tensor([True]), torch.tensor([False])))
+
+        asyncio.run(async_sub())
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti

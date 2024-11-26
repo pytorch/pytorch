@@ -831,19 +831,18 @@ class _InProcessFxCompile(_FxCompileSync):
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
-        *,
-        cudagraphs: Optional[BoxedBool] = None,
-        static_input_idxs: Sequence[int] = (),
-        is_backward: bool = False,
-        graph_id: Optional[int] = None,
-        cpp_wrapper: bool = False,
-        aot_mode: bool = False,
-        is_inference: bool = False,
-        layout_opt: Optional[bool] = None,
-        extern_node_serializer: Optional[
-            Callable[[List[ExternKernelNode]], Any]
-        ] = None,
+        **kwargs: Unpack[_CompileFxKwargs],
     ) -> Union[CompiledFxGraph, str]:
+        cudagraphs = kwargs["cudagraphs"]
+        static_input_idxs = kwargs["static_input_idxs"]
+        is_backward = kwargs["is_backward"]
+        graph_id = kwargs["graph_id"]
+        cpp_wrapper = kwargs["cpp_wrapper"]
+        aot_mode = kwargs["aot_mode"]
+        is_inference = kwargs["is_inference"]
+        layout_opt = kwargs["layout_opt"]
+        extern_node_serializer = kwargs["extern_node_serializer"]
+
         if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
             import time
 
@@ -851,8 +850,6 @@ class _InProcessFxCompile(_FxCompileSync):
                 "Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec
             )
             time.sleep(sleep_sec)
-
-        record_original_output_strides(gm)
 
         with dynamo_utils.preserve_rng_state():
             if is_tf32_warning_applicable(gm):
@@ -918,6 +915,8 @@ class _InProcessFxCompile(_FxCompileSync):
             # graph.
             with torch.no_grad():
                 fake_mode = fake_tensor_prop(gm, example_inputs)
+
+            record_original_output_strides(gm)
 
             # pattern matcher passes might not preserve striding information
             # on node.meta["val"]. if in the future we rely on these being
@@ -1085,6 +1084,9 @@ class _InProcessFxCompile(_FxCompileSync):
             return compiled_graph
 
 
+_debug_force_async = False
+
+
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -1102,7 +1104,9 @@ def fx_codegen_and_compile(
 
     scheme: FxCompile = _InProcessFxCompile()
 
-    if isinstance(scheme, _FxCompileSync):
+    if not _debug_force_async and isinstance(scheme, _FxCompileSync):
+        # As a debugging optimization if the scheme supports sync then run it
+        # sync.
         return scheme.codegen_and_compile_sync(
             gm,
             example_inputs,
@@ -1116,22 +1120,31 @@ def fx_codegen_and_compile(
             layout_opt=layout_opt,
             extern_node_serializer=extern_node_serializer,
         )
-    else:
-        future = scheme.codegen_and_compile(
-            gm,
-            example_inputs,
-            cudagraphs=cudagraphs,
-            static_input_idxs=static_input_idxs,
-            is_backward=is_backward,
-            graph_id=graph_id,
-            cpp_wrapper=cpp_wrapper,
-            aot_mode=aot_mode,
-            is_inference=is_inference,
-            layout_opt=layout_opt,
-            extern_node_serializer=extern_node_serializer,
-        )
-        # TODO: do we need to worry about them already having an event loop? Add
-        # a test for calling this from within an async function?
+
+    future = scheme.codegen_and_compile(
+        gm,
+        example_inputs,
+        cudagraphs=cudagraphs,
+        static_input_idxs=static_input_idxs,
+        is_backward=is_backward,
+        graph_id=graph_id,
+        cpp_wrapper=cpp_wrapper,
+        aot_mode=aot_mode,
+        is_inference=is_inference,
+        layout_opt=layout_opt,
+        extern_node_serializer=extern_node_serializer,
+    )
+
+    try:
+        # We're already buried under an event loop - python won't let us nest
+        # event loops so trick it out.
+        try:
+            while True:
+                future.send(None)
+        except StopIteration as result:
+            return result.value
+    except RuntimeError:
+        # No existing loop - create one and run our future
         return asyncio.run(future)
 
 

@@ -1196,13 +1196,6 @@ class FxGraphCache:
         if graph is None:
             return None, cache_info
 
-        try:
-            artifact_path = graph.after_deserialization(gm)
-        except OSError:
-            # Not expected, but in case the PyCodeCache entry is removed from
-            # underneath us, treat it as a cache miss and recompile.
-            return None, cache_info
-
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
@@ -1215,6 +1208,13 @@ class FxGraphCache:
                     )
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
+
+        try:
+            artifact_path = graph.after_deserialization(gm)
+        except OSError:
+            # Not expected, but in case the PyCodeCache entry is removed from
+            # underneath us, treat it as a cache miss and recompile.
+            return None, cache_info
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         code = graph.source_code
@@ -1788,9 +1788,9 @@ class CompiledFxGraph:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
-        # This is used by tests to check the output for specific details.
         from .graph import GraphLowering
 
+        # This is used by tests to check the output for specific details.
         GraphLowering.save_output_code(code)
 
         try:
