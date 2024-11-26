@@ -52,13 +52,6 @@ def linear_silu_linear_mul(
     *_, layout, x, transposed_w0 = mm_args(x, transposed_w0, layout=layout)
 
     assert use_cpp_packed_gemm_template(layout, x, transposed_w0)
-    kwargs = dict(
-        has_bias=[bias is not None for bias in b],
-        trans_w=True,
-    )
-
-    input_nodes = [x, w[0], w[1]]
-    input_nodes.extend([bias for bias in b if bias is not None])
 
     def epilogue_creator(buf, buf1, inp, inp1):
         input_loader = buf.make_loader()
@@ -86,17 +79,26 @@ def linear_silu_linear_mul(
             ranges=buf.get_size(),
         )
 
+    kwargs = dict(
+        has_bias=[bias is not None for bias in b],
+        trans_w=True,
+        epilogue_creator=epilogue_creator,
+        act_mapping={0: x, 1: x},
+    )
+
+    input_nodes = [x, w[0], w[1]]
+    input_nodes.extend([bias for bias in b if bias is not None])
+
     CppGroupGEMMTemplate.add_choices(
         choices,
         layout,
         input_nodes,
-        epilogue_creator=epilogue_creator,
         **kwargs,  # type: ignore[arg-type]
     )
 
     assert len(choices) != 0
     result = autotune_select_algorithm(
-        "mlp_silu_mul",
+        "linear_silu_linear_mul",
         choices,
         input_nodes,
         layout,
