@@ -288,6 +288,210 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
+def transpose_w(W, trans_w):
+    if isinstance(W, ir.IRNode):
+        if trans_w:
+            if not isinstance(W, ir.TensorBox):
+                W = ir.TensorBox(W)
+            W = L.permute(W, [1, 0])
+    else:
+        if trans_w:
+            assert isinstance(W, torch.Tensor)
+            W = W.transpose(0, 1)
+    return W
+
+
+def expand_bias(B, X):
+    if B is not None:
+        if isinstance(B, ir.IRNode):
+            if not isinstance(B, ir.TensorBox):
+                B = ir.TensorBox(B)
+            B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
+        else:
+            assert isinstance(B, torch.Tensor)
+            B = B.expand(X.shape[0], B.shape[-1])
+    return B
+
+
+def get_block_w(W, padded_n, block_n, k, n, micro_gemm):
+    blocked_w: Union[ir.IRNode, torch.Tensor] = W
+    if isinstance(W, ir.IRNode):
+        new_size = [padded_n // block_n, k, block_n]
+        blocked_w = ir.Buffer(
+            name=W.get_name(),  # Borrow the registered buffer name
+            layout=ir.FixedLayout(
+                W.get_device_or_error(),
+                W.get_dtype(),
+                new_size,
+                ir.FlexibleLayout.contiguous_strides(new_size),
+                0,
+            ),
+        )
+    else:
+        blocked_w = (
+            torch.nn.functional.pad(W, (0, padded_n - n))
+            .reshape(k, padded_n // block_n, block_n)
+            .transpose(0, 1)
+            .contiguous()
+        )
+        if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            layout_str = (
+                "VNNI4" if micro_gemm.get_b_layout() == LayoutType.VNNI4 else "VNNI2"
+            )
+            assert micro_gemm.get_b_layout() in [
+                LayoutType.VNNI2,
+                LayoutType.VNNI4,
+            ], f"We only support {layout_str} for now"
+            vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
+            assert (
+                k % vnni_size == 0
+            ), f"k should be divisible by vnni_size for {layout_str} layout"
+            blocked_w = (
+                blocked_w.view(padded_n // block_n, k // vnni_size, vnni_size, block_n)
+                .transpose(-1, -2)
+                .contiguous()
+                .view(padded_n // block_n, k, block_n)
+            )
+        # normalize stride to be "contiguous_strides" per size
+        # this avoids the problems in L.view during template codegen
+        new_stride = [1]
+        for sz in reversed(blocked_w.shape[1:]):
+            new_stride.insert(0, new_stride[0] * sz)
+        blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
+    return blocked_w
+
+
+def prune_tensors(input_nodes, new_input_nodes):
+    def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
+        return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
+            is_same_tensor(base_tensor, comp_tensor)
+            or is_same_mkldnn_tensor(base_tensor, comp_tensor)
+        )
+
+    def get_candidates(input_nodes, new_input_nodes):
+        # Only Constant Buffer like weight and bias might be changed in GEMM Template.
+        # The Inductor IR Node may changed, but still share the storage. For example:
+        # bias in bfloat16 case which only do the expand
+        return [
+            node
+            for node in input_nodes
+            if (
+                node not in new_input_nodes
+                and isinstance(node, (ir.TensorBox, ir.StorageBox))
+                and node.get_name() in V.graph.constants
+                and not any(
+                    (
+                        isinstance(new_node, (ir.TensorBox, ir.StorageBox))
+                        and new_node.get_name() in V.graph.constants
+                        and share_storage(
+                            V.graph.constants[node.get_name()],
+                            V.graph.constants[new_node.get_name()],
+                        )
+                    )
+                    for new_node in new_input_nodes
+                )
+            )
+        ]
+
+    for candidate_node in get_candidates(input_nodes, new_input_nodes):
+        # By using the new packed weight for the GEMM template, we can prune the
+        # old weight if it has no other users. This saves memory but makes the FX graph
+        # non-retraceable. To support retracing, we can add a repack node to the
+        # FX graph. For example:
+        # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+        candidate_tensor_users = 0
+        candidate_tensor = V.graph.constants[candidate_node.get_name()]
+        for node in reversed(V.graph.graph.nodes):
+            # Case may happen when the candidate tensor is used by more than 1 get_attr node
+            # https://github.com/pytorch/pytorch/issues/134998
+            if node.op == "get_attr" and hasattr(
+                V.graph.module, node.name
+            ):  # candidate tensor might already be deleted
+                comp_tensor = getattr(V.graph.module, node.name)
+                if share_storage(candidate_tensor, comp_tensor):
+                    candidate_tensor_users += 1
+
+        for node in reversed(V.graph.graph.nodes):
+            # The get_attr node has only 1 user fx node
+            # The candidate tensor has been used by only 1 get_attr node
+            if (
+                node.name == candidate_node.get_name()
+                and len(node.users) == 1
+                and candidate_tensor_users == 1
+            ):
+                del V.graph.constants[node.name]
+                delattr(V.graph.module, node.name)
+                delattr(V.graph.graph.owning_module, node.name)
+
+
+def process_out_template_epilogues(
+    epilogues: List[ir.IRNode],
+    epilogue_nodes: List[ir.IRNode],
+    Y: ir.Buffer,
+    template_buffer: ir.Buffer,
+    reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+):
+    epilogues.extend(epilogue_nodes)
+    assert Y.get_numel() == epilogues[-1].get_numel()
+    Y = cast(ir.Buffer, epilogues[-1])
+
+    Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+
+    if (
+        Y.get_size() == template_buffer.get_size()
+        and Y.get_stride() == template_buffer.get_stride()
+    ):
+        reindexers.extend([None] * len(epilogue_nodes))
+        Y_2d = Y
+    else:
+
+        def get_reindexer(epilogue_node):
+            # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
+            #   template_buffer:
+            #       size (324, 512), stride (512, 1)
+            #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+            #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+            stride_order = list(
+                ir.get_stride_order(
+                    V.graph.sizevars.size_hints(epilogue_node.get_stride())
+                )
+            )
+            fill_order = ir.stride_order2fill_order(stride_order)
+            reversed_fill_order = list(reversed(fill_order))
+            size_with_stride_ordered_decreasingly = [
+                epilogue_node.get_size()[i] for i in reversed_fill_order
+            ]
+            reshape_reindex = ir.View.dynamic_reshape_indexer(
+                size_with_stride_ordered_decreasingly,
+                template_buffer.get_size(),
+            )
+
+            # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
+            #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+            #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+            #   epilogue_node:
+            #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
+            from_stride_ordered_decreasingly_to_epilogue_node_order = [
+                (len(stride_order) - 1) - stride_order[i]
+                for i in range(len(stride_order))
+            ]
+            stride_reindex = ir.same_reorder(
+                from_stride_ordered_decreasingly_to_epilogue_node_order
+            )
+
+            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+            return reindexer
+
+        reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
+        if isinstance(Y, ir.BaseView):
+            storage = ir.StorageBox(Y.unwrap_view())
+        else:
+            assert isinstance(Y, ir.Buffer)
+            storage = ir.StorageBox(Y)
+        Y_2d = ir.ReinterpretView(data=storage, layout=template_buffer.get_layout())
+    return epilogues, Y, reindexers, Y_2d
+
+
 class CppPackedGemmTemplate(CppTemplate):
     def __init__(
         self,
@@ -631,23 +835,8 @@ class CppPackedGemmTemplate(CppTemplate):
             X = new_inputs[0]
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
-            if isinstance(W, ir.IRNode):
-                if trans_w:
-                    if not isinstance(W, ir.TensorBox):
-                        W = ir.TensorBox(W)
-                    W = L.permute(W, [1, 0])
-            else:
-                if trans_w:
-                    assert isinstance(W, torch.Tensor)
-                    W = W.transpose(0, 1)
-            if B is not None:
-                if isinstance(B, ir.IRNode):
-                    if not isinstance(B, ir.TensorBox):
-                        B = ir.TensorBox(B)
-                    B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
-                else:
-                    assert isinstance(B, torch.Tensor)
-                    B = B.expand(X.shape[0], B.shape[-1])
+            W = transpose_w(W, trans_w)
+            B = expand_bias(B, X)
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B
@@ -679,57 +868,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def pack_weight(inputs, layout_or_out):
             W = inputs[1]
             new_inputs = list(inputs)
-            blocked_w: Union[ir.IRNode, torch.Tensor] = W
-            if isinstance(W, ir.IRNode):
-                new_size = [padded_n // block_n, k, block_n]
-                blocked_w = ir.Buffer(
-                    name=W.get_name(),  # Borrow the registered buffer name
-                    layout=ir.FixedLayout(
-                        W.get_device_or_error(),
-                        W.get_dtype(),
-                        new_size,
-                        ir.FlexibleLayout.contiguous_strides(new_size),
-                        0,
-                    ),
-                )
-            else:
-                blocked_w = (
-                    torch.nn.functional.pad(W, (0, padded_n - n))
-                    .reshape(k, padded_n // block_n, block_n)
-                    .transpose(0, 1)
-                    .contiguous()
-                )
-                if micro_gemm.get_b_layout() != LayoutType.NORMAL:
-                    layout_str = (
-                        "VNNI4"
-                        if micro_gemm.get_b_layout() == LayoutType.VNNI4
-                        else "VNNI2"
-                    )
-                    assert micro_gemm.get_b_layout() in [
-                        LayoutType.VNNI2,
-                        LayoutType.VNNI4,
-                    ], f"We only support {layout_str} for now"
-                    vnni_size = (
-                        4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                    )
-                    assert (
-                        k % vnni_size == 0
-                    ), f"k should be divisible by vnni_size for {layout_str} layout"
-                    blocked_w = (
-                        blocked_w.view(
-                            padded_n // block_n, k // vnni_size, vnni_size, block_n
-                        )
-                        .transpose(-1, -2)
-                        .contiguous()
-                        .view(padded_n // block_n, k, block_n)
-                    )
-                # normalize stride to be "contiguous_strides" per size
-                # this avoids the problems in L.view during template codegen
-                new_stride = [1]
-                for sz in reversed(blocked_w.shape[1:]):
-                    new_stride.insert(0, new_stride[0] * sz)
-                blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-            new_inputs[1] = blocked_w
+            new_inputs[1] = get_block_w(W, padded_n, block_n, k, n, micro_gemm)
 
             def _is_int8_gemm(inputs):
                 return (
@@ -756,68 +895,6 @@ class CppPackedGemmTemplate(CppTemplate):
             return pack_weight(
                 *normalize_shapes(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
             )
-
-        def prune_tensors(input_nodes, new_input_nodes):
-            def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
-                return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
-                    is_same_tensor(base_tensor, comp_tensor)
-                    or is_same_mkldnn_tensor(base_tensor, comp_tensor)
-                )
-
-            def get_candidates(input_nodes, new_input_nodes):
-                # Only Constant Buffer like weight and bias might be changed in GEMM Template.
-                # The Inductor IR Node may changed, but still share the storage. For example:
-                # bias in bfloat16 case which only do the expand
-                return [
-                    node
-                    for node in input_nodes
-                    if (
-                        node not in new_input_nodes
-                        and isinstance(node, (ir.TensorBox, ir.StorageBox))
-                        and node.get_name() in V.graph.constants
-                        and not any(
-                            (
-                                isinstance(new_node, (ir.TensorBox, ir.StorageBox))
-                                and new_node.get_name() in V.graph.constants
-                                and share_storage(
-                                    V.graph.constants[node.get_name()],
-                                    V.graph.constants[new_node.get_name()],
-                                )
-                            )
-                            for new_node in new_input_nodes
-                        )
-                    )
-                ]
-
-            for candidate_node in get_candidates(input_nodes, new_input_nodes):
-                # By using the new packed weight for the GEMM template, we can prune the
-                # old weight if it has no other users. This saves memory but makes the FX graph
-                # non-retraceable. To support retracing, we can add a repack node to the
-                # FX graph. For example:
-                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
-                candidate_tensor_users = 0
-                candidate_tensor = V.graph.constants[candidate_node.get_name()]
-                for node in reversed(V.graph.graph.nodes):
-                    # Case may happen when the candidate tensor is used by more than 1 get_attr node
-                    # https://github.com/pytorch/pytorch/issues/134998
-                    if node.op == "get_attr" and hasattr(
-                        V.graph.module, node.name
-                    ):  # candidate tensor might already be deleted
-                        comp_tensor = getattr(V.graph.module, node.name)
-                        if share_storage(candidate_tensor, comp_tensor):
-                            candidate_tensor_users += 1
-
-                for node in reversed(V.graph.graph.nodes):
-                    # The get_attr node has only 1 user fx node
-                    # The candidate tensor has been used by only 1 get_attr node
-                    if (
-                        node.name == candidate_node.get_name()
-                        and len(node.users) == 1
-                        and candidate_tensor_users == 1
-                    ):
-                        del V.graph.constants[node.name]
-                        delattr(V.graph.module, node.name)
-                        delattr(V.graph.graph.owning_module, node.name)
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -1015,67 +1092,15 @@ class CppPackedGemmTemplate(CppTemplate):
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
 
         if epilogue_nodes:
-            epilogues.extend(epilogue_nodes)
-            assert Y.get_numel() == epilogues[-1].get_numel()
-            Y = cast(ir.Buffer, epilogues[-1])
-
             if not template_buffer_has_other_users:
                 Y_aliases.add(template_buffer.get_name())
-
-            if (
-                Y.get_size() == template_buffer.get_size()
-                and Y.get_stride() == template_buffer.get_stride()
-            ):
-                reindexers.extend([None] * len(epilogue_nodes))
-                Y_2d = Y
-            else:
-
-                def get_reindexer(epilogue_node):
-                    # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
-                    #   template_buffer:
-                    #       size (324, 512), stride (512, 1)
-                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
-                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                    stride_order = list(
-                        ir.get_stride_order(
-                            V.graph.sizevars.size_hints(epilogue_node.get_stride())
-                        )
-                    )
-                    fill_order = ir.stride_order2fill_order(stride_order)
-                    reversed_fill_order = list(reversed(fill_order))
-                    size_with_stride_ordered_decreasingly = [
-                        epilogue_node.get_size()[i] for i in reversed_fill_order
-                    ]
-                    reshape_reindex = ir.View.dynamic_reshape_indexer(
-                        size_with_stride_ordered_decreasingly,
-                        template_buffer.get_size(),
-                    )
-
-                    # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
-                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
-                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                    #   epilogue_node:
-                    #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
-                    from_stride_ordered_decreasingly_to_epilogue_node_order = [
-                        (len(stride_order) - 1) - stride_order[i]
-                        for i in range(len(stride_order))
-                    ]
-                    stride_reindex = ir.same_reorder(
-                        from_stride_ordered_decreasingly_to_epilogue_node_order
-                    )
-
-                    reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                    return reindexer
-
-                reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
-                if isinstance(Y, ir.BaseView):
-                    storage = ir.StorageBox(Y.unwrap_view())
-                else:
-                    assert isinstance(Y, ir.Buffer)
-                    storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(
-                    data=storage, layout=template_buffer.get_layout()
-                )
+            epilogues, Y, reindexers, Y_2d = process_out_template_epilogues(
+                epilogues,
+                epilogue_nodes,
+                Y,
+                template_buffer,
+                reindexers,
+            )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
