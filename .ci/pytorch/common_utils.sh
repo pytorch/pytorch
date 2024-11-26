@@ -228,6 +228,9 @@ function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout "$commit"
+  rm -rf torchbenchmark/models/*
+  git checkout -- torchbenchmark/models/__init__.py
+  git checkout -- torchbenchmark/models/hf_T5
 
   if [ "$1" ]; then
     python install.py --continue_on_fail models "$@"
