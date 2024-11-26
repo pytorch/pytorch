@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
+    "get_x86_inductor_linear_dynamic_fp16_config",
 ]
 
 
@@ -341,6 +342,37 @@ def get_default_x86_inductor_quantization_config(
     return quantization_config
 
 
+@functools.lru_cache
+def get_x86_inductor_linear_dynamic_fp16_config():
+    """
+    For linear_dynamic_fp16
+    Although it is called dynamic, it is actually static in the sense that input and weight are converted to fp16 directly.
+    So, `is_dynamic` is set to False below.
+    """
+    act_quantization_spec = QuantizationSpec(
+        dtype=torch.float16,
+        qscheme=torch.per_tensor_affine,
+        is_dynamic=False,
+        observer_or_fake_quant_ctr=PlaceholderObserver,
+    )
+
+    weight_quantization_spec = QuantizationSpec(
+        dtype=torch.half,
+        qscheme=torch.per_tensor_symmetric,
+        is_dynamic=False,
+        observer_or_fake_quant_ctr=PlaceholderObserver,
+    )
+    bias_quantization_spec = None  # will use placeholder observer by default
+    quantization_config = QuantizationConfig(
+        act_quantization_spec,
+        act_quantization_spec,
+        weight_quantization_spec,
+        bias_quantization_spec,
+        is_qat=False,
+    )
+    return quantization_config
+
+
 def _annotate_nodes_not_quantize(nodes: Union[Node, List[Node]]) -> None:
     """Annotate nodes to exclude them from quantization (their `quantization_config` is `None`)."""
     if not isinstance(nodes, list):
@@ -454,16 +486,7 @@ class X86InductorQuantizer(Quantizer):
         ):
             warnings.warn("Mixed QAT and Non-QAT quantization config is not supported.")
             need_skip = True
-        if current_mode.dynamic_state is not None:
-            input_activation_spec = quantization_config.input_activation
-            if (
-                input_activation_spec is not None
-                and current_mode.dynamic_state != input_activation_spec.is_dynamic
-            ):
-                warnings.warn(
-                    "Mixed dynamic and static quantization config is not supported."
-                )
-                need_skip = True
+
         return need_skip
 
     def set_global(self, quantization_config: QuantizationConfig):

@@ -342,7 +342,20 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 ]
             graph.erase_node(node)
     elif dtype == torch.float16:
-        raise NotImplementedError("decomposed to float16 op not implemented yet")
+        quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.default
+        dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.default
+        with graph.inserting_before(node):
+            input_node = node.args[0]
+            quant_args = (input_node, 1.0, 0, 0, 0, torch.float16)
+            convert_fp16_node = graph.create_node(
+                "call_function", quantize_op, quant_args, {}
+            )
+            dequant_args = (convert_fp16_node, 1.0, 0, 0, 0, torch.float16)
+            convert_fp32_node = graph.create_node(
+                "call_function", dequantize_op, dequant_args, {}
+            )
+            node.replace_all_uses_with(convert_fp32_node)
+            graph.erase_node(node)
 
     # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
