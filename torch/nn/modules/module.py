@@ -30,6 +30,7 @@ from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
 
+
 __all__ = [
     "register_module_forward_pre_hook",
     "register_module_forward_hook",
@@ -68,6 +69,7 @@ class _IncompatibleKeys(
         return super().__repr__()
 
     __str__ = __repr__
+
 
 
 def _addindent(s_, numSpaces):
@@ -336,6 +338,7 @@ def register_module_full_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
+
     Hooks registered using this function behave in the same way as those
     registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
     Refer to its documentation for more details.
@@ -361,6 +364,7 @@ def register_module_full_backward_hook(
     .. warning ::
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
+
 
     Hooks registered using this function behave in the same way as those
     registered by :meth:`torch.nn.Module.register_full_backward_hook`.
@@ -1628,8 +1632,9 @@ class Module:
                 ``hook`` will be fired after all existing ``forward_pre`` hooks
                 on this :class:`torch.nn.modules.Module`. Note that global
                 ``forward_pre`` hooks registered with
-                :func:`register_module_forward_pre_hook` will fire before
-                all hooks registered by this method.
+                :func:`register_module_forward_pre_hook` will fire before all
+                hooks registered by this method.
+                Default: ``False``
 
             with_kwargs (bool): If true, the ``hook`` will be passed the kwargs
                 given to the forward function.
@@ -1843,7 +1848,7 @@ class Module:
 
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
-        # module, and then catching it, and then reraising it, and then
+        # module, and then catching it here, and then reraising it, and then
         # catching it again, and expecting the resulting frame to be compiled.
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
@@ -2057,7 +2062,7 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace or return a new one.
         If a new ``state_dict`` is returned, it will only be respected if it is the root
-        module that :meth:`state_dict` is called from.
+        module that :meth:`~nn.Module.state_dict` is called from.
         """
         if getattr(hook, "_from_public_api", False):
             raise RuntimeError(
@@ -2093,7 +2098,7 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook to be run before module's :meth:`~nn.Module.state_dict` is called.
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
         It should have the following signature::
             hook(module, prefix, keep_vars) -> None
@@ -2497,8 +2502,8 @@ class Module:
         Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
-            strict (bool, optional): whether to strictly enforce that the keys in
-                :attr:`state_dict` match the keys returned by this module's
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
             assign (bool, optional): When set to ``False``, the properties of the tensors
                 in the current module are preserved whereas setting it to ``True`` preserves
