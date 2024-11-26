@@ -76,7 +76,7 @@ std::deque<
  *
  * To prevent performance degradation, excessive memory usage, and increased
  * system complexity, the number of external streams at compile-time is limited
- * to twice the number of native streams. We assume that the users will
+ * to twice the number of native streams. We assume that other libraries will
  * carefully manage the number of external streams to ensure efficient and
  * consistent behavior.
  */
