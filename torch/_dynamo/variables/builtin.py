@@ -1896,29 +1896,12 @@ class BuiltinVariable(VariableTracker):
         if obj.has_force_unpack_var_sequence(tx) and not isinstance(
             obj, variables.TensorVariable
         ):
-            unpacked = obj.force_unpack_var_sequence(tx)
-            if not all(x.is_python_constant() for x in unpacked):
-                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
-                #       be a pure function and should not have any side effects.
-                return  # try next handler
-            key_fn = kwargs.pop("key", ConstantVariable.create(None))
-            reverse = kwargs.pop(
-                "reverse", ConstantVariable.create(False)
-            ).as_python_constant()
-            assert len(kwargs) == 0
-
-            if key_fn.is_python_constant() and key_fn.as_python_constant() is None:
-
-                def key(x):
-                    return x.as_python_constant()
-
-            else:
-
-                def key(x):
-                    return key_fn.call_function(tx, [x], {}).as_python_constant()
-
-            items = sorted(unpacked, key=key, reverse=reverse)
-            return variables.ListVariable(items)
+            list_var = variables.ListVariable(
+                obj.force_unpack_var_sequence(tx),
+                mutation_type=ValueMutationNew(),
+            )
+            list_var.call_method(tx, "sort", [], kwargs)
+            return list_var
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
@@ -2031,6 +2014,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items & b.set_items))
         # None no-ops this handler and lets the driving function proceed
 
+    call_iand = call_and_
+
     def call_or_(self, tx: "InstructionTranslator", a, b):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
@@ -2049,6 +2034,8 @@ class BuiltinVariable(VariableTracker):
             return SetVariable(list(a.set_items | b.set_items))
         # None no-ops this handler and lets the driving function proceed
         return None
+
+    call_ior = call_or_
 
     def call_not_(self, tx: "InstructionTranslator", a):
         if isinstance(a, SymNodeVariable):

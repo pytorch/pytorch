@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch._C
 import torch.fx
 import torch.nn
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.builtin import BuiltinVariable
@@ -2413,6 +2414,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
+            enable_grad=False,
             set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
@@ -2602,14 +2604,31 @@ class AutogradFunctionApplyVariable(VariableTracker):
             bwd_node,
             *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
         )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            fwd_out.as_proxy(),
-        )
+        kwargs = {
+            "args_tensor_mask": args_tensor_mask,
+            "non_differentiable_idx": non_differentiable_idx,
+        }
 
         # Store the invocation as a call
         from torch._functorch.autograd_function import autograd_function_apply
+
+        # We use speculate_subgraph to get the fwd graph, but it's alway under no grad mode like what eager mode does.
+        # The fwd outputs (tensor's example_value) need to be inferred from fake tensor prop to get the correct attributes
+        # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
+        # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
+        with enable_python_dispatcher():
+            with tx.output.fake_mode:
+                fake_args = (
+                    tx.output.nn_modules[fwd_node.node.name],
+                    tx.output.nn_modules[bwd_node.node.name],
+                    *(
+                        [
+                            _get_fake_value(arg)
+                            for arg in filtered_args + list(fwd_freevars.keys())
+                        ]
+                    ),
+                )
+                example_value = autograd_function_apply(*fake_args, **kwargs)
 
         return wrap_fx_proxy(
             tx=tx,
@@ -2617,13 +2636,19 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={
-                    "args_tensor_mask": args_tensor_mask,
-                    "non_differentiable_idx": non_differentiable_idx,
-                },
+                kwargs=kwargs,
             ),
             example_value=example_value,
         )
+
+
+def _get_fake_value(x):
+    if isinstance(x, variables.VariableTracker):
+        return x.as_proxy().node.meta["example_value"]
+    elif isinstance(x, torch.fx.Proxy):
+        return x.node.meta["example_value"]
+    else:
+        return x
 
 
 def maybe_positional_arg_names(func):
