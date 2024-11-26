@@ -545,7 +545,6 @@ def sanitize_gm_for_cache(gm: torch.fx.GraphModule):
     IGNORED_FIELDS = (
         "meta",  # metadata used by export
         "compile_subgraph_reason",  # Used by dynamo only for logging, no change in inductor/autograd behavior
-        "_param_name_to_source",  # Encapsulated by aot_config.aot_autograd_arg_pos_to_source
     )
     saved_fields = {}
     for field in IGNORED_FIELDS:

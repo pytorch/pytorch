@@ -612,9 +612,11 @@ def _create_aot_dispatcher_function(
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-                if isinstance(arg, FakeScriptObject)
-                else arg
+                (
+                    maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                    if isinstance(arg, FakeScriptObject)
+                    else arg
+                )
                 for arg in fake_flat_args
             ]
 
@@ -952,6 +954,54 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
+def handle_dynamo_gm(mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor]):
+    aot_autograd_arg_pos_to_source = None
+    static_input_indices = []
+    if not isinstance(mod, torch.fx.GraphModule) or "dynamo_compile_id" not in mod.meta:
+        return aot_autograd_arg_pos_to_source, static_input_indices
+
+    # We now know this came from dynamo, and (1) we care about guards,
+    # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
+    # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+
+    assert "_param_name_to_source" in mod.meta
+    param_name_to_source = mod.meta["_param_name_to_source"]
+    aot_autograd_arg_pos_to_source = []
+
+    seen_sources = set()
+    # Collect the new inputs lifted by aotdispatch
+    for name in params.keys():
+        assert name in param_name_to_source, f"{name} not found."
+        source = param_name_to_source[name]
+        assert source not in seen_sources, source
+        seen_sources.add(source)
+        aot_autograd_arg_pos_to_source.append(source)
+
+    static_input_indices = []
+    # Collect the dynamo graph inputs
+    for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
+        assert "grapharg" in node.meta and node.meta["grapharg"] is not None
+        source = node.meta["grapharg"].source
+        assert source not in seen_sources, source
+        seen_sources.add(source)
+        aot_autograd_arg_pos_to_source.append(source)
+        source_name = source.name() if source else str(source)
+
+        if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
+            "_dynamo_static_input_type", None
+        ):
+            static_inputs_log.debug(
+                "Adding static input pos %s for source %s", pos, source_name
+            )
+            static_input_indices.append(pos)
+        else:
+            static_inputs_log.debug(
+                "Non-static input pos %s for source %s", pos, source_name
+            )
+
+    return aot_autograd_arg_pos_to_source, static_input_indices
+
+
 def aot_module_simplified(
     mod: nn.Module,
     args,
@@ -989,8 +1039,6 @@ def aot_module_simplified(
     if inference_compiler is None:
         inference_compiler = fw_compiler
 
-    seen_sources = set()
-
     full_args = []
     # First, the params
     full_args.extend(params_flat)
@@ -1002,49 +1050,12 @@ def aot_module_simplified(
             tracing_context.params_unwrapped_to_flat_index,
         ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
 
-    aot_autograd_arg_pos_to_source = None
-    # Then, the params 1:1 mapped sources, if relevant.
-    if hasattr(mod, "_param_name_to_source"):
-        aot_autograd_arg_pos_to_source = []
-        # We now know this came from dynamo, and (1) we care about guards,
-        # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
-        # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params.keys():
-            assert name in mod._param_name_to_source, f"{name} not found."
-            source = mod._param_name_to_source[name]
-            assert source not in seen_sources, source
-            seen_sources.add(source)
-            aot_autograd_arg_pos_to_source.append(source)
-
     # Next, the input args
     full_args.extend(args)
 
-    static_input_indices = []
-    if hasattr(mod, "graph"):
-        # Non dynamo entrypoints can get to here...
-        for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-            if hasattr(node, "_dynamo_source"):
-                # ... but not here!
-                if aot_autograd_arg_pos_to_source is None:
-                    aot_autograd_arg_pos_to_source = []
-                source = node._dynamo_source
-                assert source not in seen_sources, source
-                seen_sources.add(source)
-                aot_autograd_arg_pos_to_source.append(source)
-                source_name = source.name() if source else str(source)
+    aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(mod, params)
 
-                if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-                    "_dynamo_static_input_type", None
-                ):
-                    static_inputs_log.debug(
-                        "Adding static input pos %s for source %s", pos, source_name
-                    )
-                    static_input_indices.append(pos)
-                else:
-                    static_inputs_log.debug(
-                        "Non-static input pos %s for source %s", pos, source_name
-                    )
-
+    # Then, the params 1:1 mapped sources, if relevant.
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
