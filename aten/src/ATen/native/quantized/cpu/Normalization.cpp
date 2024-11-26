@@ -385,7 +385,15 @@ Tensor quantized_batch_norm(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-  return q_batch_norm_impl<false>(qx, weight_opt,bias_opt, mean, var, eps, output_scale, output_zero_point);
+  return q_batch_norm_impl<false>(
+      qx,
+      weight_opt,
+      bias_opt,
+      mean,
+      var,
+      eps,
+      output_scale,
+      output_zero_point);
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
