@@ -50,17 +50,18 @@ fi
 
 DEPS_LIST=(
     "$LIBGOMP_PATH"
+    "/opt/intel/oneapi/compiler/latest/lib/libOpenCL.so.1"
 )
 
 DEPS_SONAME=(
     "libgomp.so.1"
+    "libOpenCL.so.1"
 )
 
 if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
     echo "Bundling with xpu support package libs."
     DEPS_LIST+=(
         "/opt/intel/oneapi/compiler/latest/lib/libsycl.so.8"
-        "/opt/intel/oneapi/compiler/latest/lib/libOpenCL.so.1"
         "/opt/intel/oneapi/compiler/latest/lib/libur_loader.so.0"
         "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_level_zero.so.0"
         "/opt/intel/oneapi/compiler/latest/lib/libur_adapter_opencl.so.0"
@@ -74,7 +75,6 @@ if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
     )
     DEPS_SONAME+=(
         "libsycl.so.8"
-        "libOpenCL.so.1"
         "libur_loader.so.0"
         "libur_adapter_level_zero.so.0"
         "libur_adapter_opencl.so.0"
