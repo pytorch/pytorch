@@ -89,6 +89,8 @@ from ..source import (
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
+    UnspecializedBuiltinNNModuleSource,
+    UnspecializedNNModuleSource,
 )
 from ..trace_rules import (
     is_callable_allowed,
@@ -1910,6 +1912,12 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            # Without this we regress benchmarks too much so for now don't unspecialize
+            # module float sources.
+            or isinstance(
+                self.get_source(),
+                (UnspecializedBuiltinNNModuleSource, UnspecializedNNModuleSource),
+            )
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
