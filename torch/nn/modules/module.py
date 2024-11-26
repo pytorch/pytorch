@@ -71,7 +71,6 @@ class _IncompatibleKeys(
     __str__ = __repr__
 
 
-
 def _addindent(s_, numSpaces):
     s = s_.split("\n")
     # don't do anything for single-line stuff
@@ -337,7 +336,6 @@ def register_module_full_backward_pre_hook(
     .. warning ::
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
-
 
     Hooks registered using this function behave in the same way as those
     registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
@@ -1635,7 +1633,6 @@ class Module:
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
                 Default: ``False``
-
             with_kwargs (bool): If true, the ``hook`` will be passed the kwargs
                 given to the forward function.
                 Default: ``False``
