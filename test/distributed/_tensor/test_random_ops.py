@@ -11,7 +11,6 @@ from torch.distributed._tensor._utils import compute_local_shape_and_global_offs
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
-from torch.distributed.tensor import placement_types
 from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
