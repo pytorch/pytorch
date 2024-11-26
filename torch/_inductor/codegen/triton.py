@@ -1187,12 +1187,13 @@ class TritonKernelOverrides(TritonOverrides):
             dtype=dtype,
         )
 
-        # TODO: can check if the cast is needed by checking dtype of contained index vars
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            cls.to_dtype(var, dtype),
-            dtype=dtype,
-        )
+        if dtype not in (torch.int32, torch.int64):
+            var = V.kernel.cse.generate(
+                V.kernel.compute,
+                cls.to_dtype(var, dtype),
+                dtype=dtype,
+            )
+
         var.mask_vars = indexing.mask_vars
         return var
 

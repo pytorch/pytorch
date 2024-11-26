@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 import torch
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .utils import upcast_compute_type
 from .virtualized import OpsValue
@@ -177,11 +178,24 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
+        # TODO - rationalize index_expr. the dtype is not always used and we inconsistent about int32 or int64
+        # in lowerings. cpp just uses the dtype
+        if hasattr(V.kernel, "index_dtype"):
+            dtype = torch.int32 if V.kernel.index_dtype == "tl.int32" else torch.int64
+
+        for index_var in expr.free_symbols:
+            if symbol_is_type(index_var, SymT.TMP):
+                cse_var = V.kernel.cse.varname_map[index_var.name]
+                dtype = torch.promote_types(dtype, cse_var.dtype)
+
         return upcast_compute_type(dtype)
 
     @staticmethod
     def to_dtype(
-        x: DTypeArg, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        x: DTypeArg,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
     ) -> torch.dtype:
         return upcast_compute_type(dtype)
 
