@@ -30,16 +30,13 @@ GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
 {{micro_gemm.codegen_define(kernel)}}
 
-{%- set kernel_args = {"X": X, "W": W, "W1": W1, "inp": inp, "inp1": inp1} %}
-
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     {{ template.codegen_blocks(
-        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
-
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
@@ -49,71 +46,91 @@ extern "C" {{export_declaration}}
         {{ template.codegen_single_thread_param(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
-{%- if use_local_acc %}
-    {%- set acc_buf_name = "local_acc_buf" %}
-        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
-    {%- set acc_buf2_name = "local_acc_buf2" %}
-        {{ kernel.define_buffer(acc_buf2_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
-{%- endif %}
+
+{%- set acc_buf_name_list=[] %}
+{%- set acc_buf_name_prefix = "local_acc_buf_" %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_buf_name = "local_acc_buf" + gemm_idx|string %}
+    {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+    {%- set acc_buf_name_list=acc_buf_name_list.append(acc_buf_name) %}
+{%- endfor %}
+
     if (horizontal_transverse) {
         for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
             {{ template.codegen_n_loop_param()|indent(12, false) }}
             for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
                 {{ template.codegen_m_loop_param()|indent(16, false) }}
-{%- if use_local_acc %}
-    {%- set acc = kernel.local_buffers[acc_buf_name] %}
-                {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
-    {%- set acc2 = kernel.local_buffers[acc_buf2_name] %}
-                {{ kernel.reinit_buffer_if_null(acc_buf2_name) }}
-{%- else %}
-    {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- endif %}
+{%- set acc_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_list = acc_list.append( kernel.local_buffers[acc_buf_name_list[gemm_idx]] ) %}
+    {{ kernel.reinit_buffer_if_null(acc_buf_name_list[gemm_idx]) }}
+{%- endfor %}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * Kr;
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
                     for (int64_t mci = m_start; mci < m_end; mci+=Mr) {
                         const int64_t m_start_i = mci;
                         const int64_t m_end_i = m_start_i + Mr;
-{%- set tile_X = kernel.slice_nd(X, [("m_start_i", "m_end_i"), ("k_start", "k_end")]) %}
+{%- set tile_X_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_X_list = tile_X_list.append( kernel.slice_nd(X_list[gemm_idx], [("m_start", "m_end"), ("k_start", "k_end")]) ) %}
+{%- endfor %}
                         for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-{%- set acc2_slice = kernel.slice_nd(
-    acc2, [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]
-) %}
-{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-{%- set tile_W1_3d = kernel.slice_nd(W1, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-{%- set tile_W1 = kernel.view(tile_W1_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-                            if (kc == k_block_start) {
+
+{%- set tile_W_3d_list=[] %}
+{%- set tile_W_list=[] %}
+{%- set acc_slice_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_slice_list = acc_slice_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")])
+    ) %}
+    {%- set tile_W_3d_list = tile_W_3d_list.append(
+        kernel.slice_nd(W_list[gemm_idx], [("nci", "nci + 1"), ("k_start", "k_end"), ()])
+    ) %}
+{%- endfor %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_W_list = tile_W_list.append(
+        kernel.view(tile_W_3d_list[gemm_idx], ["k_end - k_start", micro_gemm.register_blocking.block_n])
+    ) %}
+{%- endfor %}
+                        if (kc == k_block_start) {
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W, acc_slice, accum=False, horizontal_transverse=True
-                                )|indent(28, false)
-                                }}
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=False,
+                                    horizontal_transverse=True
+                                )|indent(28, false) }}
+                            {%- endfor %}
+                        } else {
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W1, acc2_slice, accum=False, horizontal_transverse=True
-                                )|indent(28, false)
-                                }}
-                            } else {
-                                {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W, acc_slice, accum=True, horizontal_transverse=True
-                                )|indent(28, false)
-                                }}
-                                {{ micro_gemm.codegen_call(
-                                    kernel, tile_X, tile_W1, acc2_slice, accum=True, horizontal_transverse=True
-                                )|indent(28, false)
-                                }}
-                            }
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=True,
+                                    horizontal_transverse=True
+                                )|indent(28, false) }}
+                            {%- endfor %}
+                        }
                         }
                     }
                 }
 
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
-{%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- set tile_acc_list = [] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_acc_list = tile_acc_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("0", "m_end - m_start"), ("0", "n_end - n_start")])
+    ) %}
+{%- endfor %}
                     {{ kernel.store_output(
                         tile_Y,
-                        (tile_acc, tile_acc1),
+                        tile_acc_list,
                         (GemmOut, GemmOut1),
                         epilogue_nodes,
                         offsets=("m_start", "n_start"),
@@ -128,54 +145,71 @@ extern "C" {{export_declaration}}
             {{ template.codegen_m_loop_param()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
                 {{ template.codegen_n_loop_param()|indent(16, false) }}
-{%- if use_local_acc %}
-    {%- set acc = kernel.local_buffers[acc_buf_name] %}
-                {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
-    {%- set acc2 = kernel.local_buffers[acc_buf2_name] %}
-                {{ kernel.reinit_buffer_if_null(acc_buf2_name) }}
-{%- else %}
-    {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- endif %}
+{%- set acc_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_list = acc_list.append( kernel.local_buffers[acc_buf_name_list[gemm_idx]] ) %}
+    {{ kernel.reinit_buffer_if_null(acc_buf_name_list[gemm_idx]) }}
+{%- endfor %}
                 for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
                     int64_t k_start = kc * Kr;
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
-{%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
+{%- set tile_X_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_X_list = tile_X_list.append( kernel.slice_nd(X_list[gemm_idx], [("m_start", "m_end"), ("k_start", "k_end")]) ) %}
+{%- endfor %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-{%- set acc2_slice = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
-{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
-{%- set tile_W1_3d = kernel.slice_nd(W1, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-{%- set tile_W1 = kernel.view(tile_W1_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+{%- set tile_W_3d_list=[] %}
+{%- set tile_W_list=[] %}
+{%- set acc_slice_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_slice_list = acc_slice_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")])
+    ) %}
+    {%- set tile_W_3d_list = tile_W_3d_list.append(
+        kernel.slice_nd(W_list[gemm_idx], [("nci", "nci + 1"), ("k_start", "k_end"), ()])
+    ) %}
+{%- endfor %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_W_list = tile_W_list.append(
+        kernel.view(tile_W_3d_list[gemm_idx], ["k_end - k_start", micro_gemm.register_blocking.block_n])
+    ) %}
+{%- endfor %}
                         if (kc == k_block_start) {
-                            {{ micro_gemm.codegen_call(
-                                kernel, tile_X, tile_W, acc_slice, accum=False, horizontal_transverse=False
-                            )|indent(28, false)
-                            }}
-                            {{ micro_gemm.codegen_call(
-                                kernel, tile_X, tile_W1, acc2_slice, accum=False, horizontal_transverse=False
-                            )|indent(28, false)
-                            }}
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
+                                {{ micro_gemm.codegen_call(
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=False,
+                                    horizontal_transverse=False
+                                )|indent(28, false) }}
+                            {%- endfor %}
                         } else {
-                            {{ micro_gemm.codegen_call(
-                                kernel, tile_X, tile_W, acc_slice, accum=True, horizontal_transverse=False
-                            )|indent(28, false)
-                            }}
-                            {{ micro_gemm.codegen_call(
-                                kernel, tile_X, tile_W1, acc2_slice, accum=True, horizontal_transverse=False
-                            )|indent(28, false)
-                            }}
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
+                                {{ micro_gemm.codegen_call(
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=True,
+                                    horizontal_transverse=False
+                                )|indent(28, false) }}
+                            {%- endfor %}
                         }
                     }
                 }
-
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
-{%- set tile_acc1 = kernel.slice_nd(acc2, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
+{%- set tile_acc_list = [] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_acc_list = tile_acc_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("0", "m_end - m_start"), ("0", "n_end - n_start")])
+    ) %}
+{%- endfor %}
                     {{ kernel.store_output(
                         tile_Y,
-                        (tile_acc, tile_acc1),
+                        tile_acc_list,
                         (GemmOut, GemmOut1),
                         epilogue_nodes,
                         offsets=("m_start", "n_start"),
@@ -192,6 +226,17 @@ extern "C" {{export_declaration}}
 """
 
 
+def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
+    act_deduplicated = []
+    act_deduplicated_name = set()
+    for act_idx in range(len(act_mapping.values())):
+        act = act_mapping[act_idx]
+        if act.get_name() not in act_deduplicated_name:
+            act_deduplicated.append(act)
+            act_deduplicated_name.add(act.get_name())
+    return act_deduplicated
+
+
 class CppGroupGEMMTemplate(CppPackedGemmTemplate):
     def __init__(
         self,
@@ -203,6 +248,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         alpha=1,
         has_bias=False,
         epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
+        act_mapping: Optional[dict[int, ir.TensorBox]] = None,
+        gemm_group_num: int = 1,
     ) -> None:
         super().__init__(
             input_nodes,
@@ -214,6 +261,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             has_bias,
             epilogue_creator,
         )
+        self.act_mapping = act_mapping
+        self.gemm_group_num = gemm_group_num
         self.silu_mul_fusion = True
 
     @staticmethod
@@ -227,8 +276,17 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
+        act_mapping: Optional[
+            dict[int, ir.TensorBox]
+        ] = None,  # map gemm idx to its activation
     ):
-        assert len(input_nodes) >= 3  # x, w0, w1, optional[b0], optional[b1]
+        # Assume input nodes order as:
+        # x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
+        gemm_group_num = len(has_bias)
+        assert act_mapping
+        act_deduplicated = get_deduplicated_act(act_mapping)
+        wgt_start_idx = len(act_deduplicated)
+        bias_start_idx = wgt_start_idx + gemm_group_num
 
         input_indices = list(range(len(input_nodes)))
 
@@ -239,7 +297,7 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
 
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
-            for idx in [1, 2]:
+            for idx in range(wgt_start_idx, wgt_start_idx + gemm_group_num):
                 if isinstance(inputs[idx], torch.Tensor):
                     W = inputs[idx]
                     new_inputs[idx] = W.to_dense() if W.is_mkldnn else W
@@ -251,13 +309,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             if not trans_w:
                 return new_inputs, layout_or_out
             X = new_inputs[0]
-            W0 = new_inputs[1]
-            W1 = new_inputs[2]
-
-            B0 = new_inputs[3] if has_bias[0] else None
-            B1 = None
-            if has_bias[1]:
-                B1 = new_inputs[4] if has_bias[0] else new_inputs[3]
+            W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
+            new_W_list = []
 
             def _transpose_w(W):
                 if isinstance(W, ir.IRNode):
@@ -271,10 +324,9 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                         W = W.transpose(0, 1)
                 return W
 
-            W0 = _transpose_w(W0)
-            W1 = _transpose_w(W1)
-            new_inputs[1] = W0
-            new_inputs[2] = W1
+            for W in W_list:
+                new_W_list.append(_transpose_w(W))
+            new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
 
             def _expand_bias(B):
                 if B is not None:
@@ -287,19 +339,17 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                         B = B.expand(X.shape[0], B.shape[-1])
                 return B
 
-            B0 = _expand_bias(B0)
-            B1 = _expand_bias(B1)
-            if B0 is not None:
-                new_inputs[3] = B0
-            if B1 is not None:
-                idx = 4 if B0 is not None else 3
-                new_inputs[idx] = B1
+            B_list = new_inputs[bias_start_idx:]
+            new_B_list = []
+            for B in B_list:
+                new_B_list.append(_expand_bias(B))
+            new_inputs[bias_start_idx:] = new_B_list
+
             return new_inputs, layout_or_out
 
-        # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
         new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
+        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[wgt_start_idx])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
         )
@@ -309,7 +359,7 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             n,
             k,
             input_dtype=new_inputs[0].get_dtype(),
-            input2_dtype=new_inputs[1].get_dtype(),
+            input2_dtype=new_inputs[wgt_start_idx].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=alpha,
@@ -320,9 +370,9 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         padded_n = get_padded_n(n, block_n)
 
         def pack_weight(inputs, layout_or_out):
-            W = inputs[1]
-            W1 = inputs[2]
+            new_W_list = []
             new_inputs = list(inputs)
+            W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
 
             def _get_block_w(W):
                 blocked_w: Union[ir.IRNode, torch.Tensor] = W
@@ -377,8 +427,9 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                     blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
                 return blocked_w
 
-            new_inputs[1] = _get_block_w(W)
-            new_inputs[2] = _get_block_w(W1)
+            for W in W_list:
+                new_W_list.append(_get_block_w(W))
+            new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
             return new_inputs, layout_or_out
 
         def preprocessor(inputs, layout):
@@ -393,32 +444,28 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
 
-                W_node = new_input_nodes[1]
-                W_node2 = new_input_nodes[2]
-                assert W_node.get_name() in V.graph.constants
-                W = V.graph.constants[W_node.get_name()]
-                W2 = V.graph.constants[W_node2.get_name()]
+                W_nodes = new_input_nodes[
+                    wgt_start_idx : wgt_start_idx + gemm_group_num
+                ]
+                W_tensor = []
+                for W_node in W_nodes:
+                    assert W_node.get_name() in V.graph.constants
+                    W_tensor.append(V.graph.constants[W_node.get_name()])
+                new_input_nodes[
+                    wgt_start_idx : wgt_start_idx + gemm_group_num
+                ] = W_tensor
 
-                new_input_nodes[1] = W
-                new_input_nodes[2] = W2
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-                W_packed = new_input_nodes[1]
-                W_packed_constant = V.graph.add_tensor_constant(W_packed)
-                new_input_nodes[1] = W_packed_constant
 
-                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
-                    W_packed_constant
-                )
+                for idx in range(wgt_start_idx, wgt_start_idx + gemm_group_num):
+                    W_packed = new_input_nodes[idx]
+                    W_packed_constant = V.graph.add_tensor_constant(W_packed)
 
-                W_packed2 = new_input_nodes[2]
-                W_packed_constant2 = V.graph.add_tensor_constant(W_packed2)
-                new_input_nodes[2] = W_packed_constant2
-
-                template_buffer.inputs[2] = ir.InputsKernel.unwrap_storage_for_input(
-                    W_packed_constant2
-                )
+                    template_buffer.inputs[
+                        idx
+                    ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
 
             return output
 
@@ -434,6 +481,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             alpha=alpha,
             has_bias=has_bias,
             epilogue_creator=epilogue_creator,
+            act_mapping=act_mapping,
+            gemm_group_num=gemm_group_num,
         )
         template.maybe_append_choice(choices)
         return template
@@ -446,22 +495,28 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
-        assert len(self.input_nodes) >= 3
+        assert self.act_mapping
+        act_deduplicated = get_deduplicated_act(self.act_mapping)
+        wgt_start_idx = len(act_deduplicated)
+        bias_start_idx = wgt_start_idx + self.gemm_group_num
 
-        X, W = self.input_nodes[0], self.input_nodes[1]
-        W1 = self.input_nodes[2]
+        X_list = list(self.act_mapping.values())
+        W_list = self.input_nodes[wgt_start_idx : wgt_start_idx + self.gemm_group_num]
+        inp_list = []
+        cur_idx = bias_start_idx
+        for inp_idx in range(self.gemm_group_num):
+            inp = None
+            if self.has_bias[inp_idx]:
+                inp = self.input_nodes[cur_idx]
+                cur_idx += 1
+            inp_list.append(inp)
         Y = self.output_node
-        has_gate_bias = self.has_bias[0]
-        has_up_bias = self.has_bias[1]
-        inp = self.input_nodes[3] if has_gate_bias else None
-        inp1 = None
-        if has_up_bias:
-            inp1 = self.input_nodes[4] if has_gate_bias else self.input_nodes[3]
 
         if template_buffer_node is not None:
             # Use the updated prepacked weight buffer
-            W = template_buffer_node.inputs[1]
-            W1 = template_buffer_node.inputs[2]
+            W_list = template_buffer_node.inputs[
+                wgt_start_idx : wgt_start_idx + self.gemm_group_num
+            ]
             Y = template_buffer_node
             counters["inductor"]["cpp_group_gemm_template"] += 1
 
@@ -471,21 +526,18 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         fake_buffers: List[ir.Buffer] = []
         Y_aliases: Set[str] = set()
 
-        # Force to use local acc
-        use_local_acc = True
-
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
-            X.get_dtype()
+            X_list[0].get_dtype()
         )
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
             self.m,
             self.n,
             self.k,
-            input_dtype=X.get_dtype(),
-            input2_dtype=W.get_dtype(),
+            input_dtype=X_list[0].get_dtype(),
+            input2_dtype=W_list[0].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=self.alpha,
@@ -503,9 +555,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
-        # Hardcode the in-template epilogue
-        # Bias-add for each linear if applicable
-        # Silu and Mul post op
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
 
@@ -528,8 +577,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                     data=self.epilogue_creator(
                         gemm_output_buffer,
                         gemm_output_buffer1,
-                        inp,
-                        inp1,
+                        inp_list[0],
+                        inp_list[1],
                     ),
                 )
             )
@@ -594,10 +643,15 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                     data=storage, layout=template_buffer.get_layout()
                 )
 
+        kernel_args = {}
+        for x_idx in range(wgt_start_idx):
+            kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
+        for w_idx in range(self.gemm_group_num):
+            kernel_args["W" + str(w_idx)] = W_list[w_idx]
+        for inp_idx in range(self.gemm_group_num):
+            kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
+
         options = dict(
-            X=X,
-            W=W,
-            inp=inp,
             Y=Y,
             N=self.n,
             K=self.k,
@@ -613,19 +667,18 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             Y_2d=Y_2d,
-            use_local_acc=use_local_acc,
             acc_buf_dtype=torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,
             config=config,
-            W1=W1,
-            inp1=inp1,
-            has_gate_bias=has_gate_bias,
-            has_up_bias=has_up_bias,
             epilogue_nodes=epilogues,
             GemmOut1=gemm_output_buffer1,
             reindexers=reindexers,
+            kernel_args=kernel_args,
+            X_list=X_list,
+            W_list=W_list,
+            gemm_group_num=self.gemm_group_num,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:

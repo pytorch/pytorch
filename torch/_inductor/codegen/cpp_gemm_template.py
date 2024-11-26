@@ -764,6 +764,7 @@ class CppPackedGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        act_mapping: Optional[dict[int, ir.TensorBox]] = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
