@@ -382,9 +382,17 @@ inline std::string format_list(
     bool truncate,
     bool with_escaped_quotes = true) {
   if (truncate && list.size() > kTruncatLength) {
-    return fmt::format(
-        "\"[{}, ...]\"",
-        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+    if (with_escaped_quotes == true) {
+      auto x = fmt::format(
+          "\"[{}, ...]\"",
+          fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+      return x;
+    } else {
+      auto x = fmt::format(
+          "[{}, ...]",
+          fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+      return x;
+    }
   }
   if (with_escaped_quotes == true) {
     auto x = fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
