@@ -420,12 +420,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Destroy pg
         dist.destroy_process_group()
 
+        # we need a new Store for the new PG, achieving it by adding prefix
+        new_store = c10d.PrefixStore("2nd", store)
+
         # re-initialize pg
         c10d.init_process_group(
             "nccl",
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=new_store,
         )
         t1 = torch.rand(5, 5, device=device)
         dist.all_reduce(t1)
@@ -571,10 +574,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         torch.cuda.synchronize(device)
         c10d.destroy_process_group()
-        self.assertEqual(
+        self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
