@@ -2120,11 +2120,7 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
-        if (
-            name in V.graph.removed_buffers
-            or name in self.allocated
-            or isinstance(buffer, ir.DonatedBuffer)
-        ):
+        if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
         if isinstance(
@@ -2178,12 +2174,7 @@ class PythonWrapperCodegen(CodeGen):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
-            or (
-                name in V.graph.graph_inputs
-                and not isinstance(
-                    V.graph.graph_inputs_original[name], ir.DonatedBuffer
-                )
-            )
+            or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
