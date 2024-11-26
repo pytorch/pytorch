@@ -53,7 +53,10 @@ def linear_silu_linear_mul(
 
     assert use_cpp_packed_gemm_template(layout, x, transposed_w0)
 
-    def epilogue_creator(buf, buf1, inp, inp1):
+    def epilogue_creator(output_bufs, inps):
+        assert len(output_bufs) == 2
+        buf, buf1 = output_bufs
+        inp, inp1 = inps
         input_loader = buf.make_loader()
         input_loader1 = buf1.make_loader()
         if inp:
