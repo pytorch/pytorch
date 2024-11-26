@@ -441,6 +441,7 @@ class TestCKBackend(TestCase):
                 "rocm.ck_dir": self.ck_dir,
             }
         ):
+
             @torch.compile(dynamic=False)
             def compiled_bmm(x, w):
                 return bmm(x, w)
