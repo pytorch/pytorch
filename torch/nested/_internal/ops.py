@@ -1111,9 +1111,7 @@ def expand_default(func, *args, **kwargs):
     if not raggedness_matches(inp, size):
         raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
-    expand_arg = [
-        -1 if d == inp._ragged_idx else inp.size(d) for d in range(1, inp.dim())
-    ]
+    expand_arg = [-1 if d == inp._ragged_idx else size[d] for d in range(1, inp.dim())]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
 
