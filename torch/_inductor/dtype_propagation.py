@@ -16,7 +16,8 @@ T = TypeVar("T")
 
 class DTypeVar(Protocol):
     @property
-    def dtype(self) -> torch.dtype: ...
+    def dtype(self) -> torch.dtype:
+        ...
 
 
 DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
@@ -328,6 +329,17 @@ class DtypePropagationOpsHandler:
     def round_decimal(x: DTypeArg, y: DTypeArg) -> torch.dtype:
         # TODO - dont see it anywhere..
         return promote_types([x])
+
+    @staticmethod
+    def halide_clamp(value, size, check):
+        # TODO - way of registering dtype for op in backend
+        return torch.int32
+
+    @staticmethod
+    def inline_asm_elementwise(
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+    ):
+        return dtype
 
     @staticmethod
     def lshift(x: DTypeArg, y: DTypeArg) -> torch.dtype:

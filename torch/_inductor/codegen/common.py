@@ -23,10 +23,10 @@ from typing import (
 )
 
 import sympy
+from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from sympy.printing.printer import Printer
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
@@ -2013,11 +2013,10 @@ class Kernel(CodeGen):
                     output_idx = 0
 
                     def do_cse(v):
-                        # TODO - throw on default
                         output_dtype = getattr(
                             dtype_handler,
                             name,
-                        )(*args)
+                        )(*args, **kwargs)
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
