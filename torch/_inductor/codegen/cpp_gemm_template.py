@@ -42,7 +42,7 @@ from .cpp_utils import (
 
 log = logging.getLogger(__name__)
 
-GEMM_TEMPLATE_BLOCKS = r"""
+GEMM_TEMPLATE_INIT_BLOCKING = r"""
     constexpr int64_t num_threads = {{num_threads}};
     constexpr int64_t N = {{N}};
     constexpr int64_t K = {{K}};
@@ -120,7 +120,7 @@ GEMM_TEMPLATE_BLOCKS = r"""
     );
 """
 
-GEMM_TEMPLATE_MULTI_THREADS_PARAM = r"""
+GEMM_TEMPLATE_MULTI_THREADS_PARAMS = r"""
 const int tid = omp_get_thread_num();
 const int64_t k_group_id = tid / num_Kt_blocks;
 const int64_t k_slice_id = tid % num_Kt_blocks;
@@ -135,7 +135,7 @@ const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
 const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
 """
 
-GEMM_TEMPLATE_SINGLE_THREAD_PARAM = r"""
+GEMM_TEMPLATE_SINGLE_THREAD_PARAMS = r"""
 constexpr int tid = 0;
 constexpr int64_t k_group_id = 0;
 constexpr int64_t k_slice_id = 0;
@@ -155,7 +155,7 @@ constexpr int64_t m_block_end = Mr_blocks;
 {%- endif %}
 """
 
-GEMM_TEMPLATE_M_LOOP_PARAM = r"""
+GEMM_TEMPLATE_M_LOOP_PARAMS = r"""
 const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
 const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
 const int64_t m_start = mc * Mr;
@@ -163,7 +163,7 @@ const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
 const int64_t m_size = m_end - m_start;
 """
 
-GEMM_TEMPLATE_N_LOOP_PARAM = r"""
+GEMM_TEMPLATE_N_LOOP_PARAMS = r"""
 const int64_t n_start = nc * Nr;
 const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
 const int64_t n_size = n_end - n_start;
@@ -200,22 +200,21 @@ extern "C" {{export_declaration}}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        {{ template.codegen_multi_threads_param()|indent(8, false) }}
+        {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
     {
-        {{ template.codegen_single_thread_param(is_dynamic_M)|indent(8, false) }}
+        {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
-
     if (horizontal_transverse) {
         for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-            {{ template.codegen_n_loop_param()|indent(12, false) }}
+            {{ template.codegen_n_loop_params()|indent(12, false) }}
             for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-                {{ template.codegen_m_loop_param()|indent(16, false) }}
+                {{ template.codegen_m_loop_params()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
@@ -266,9 +265,9 @@ extern "C" {{export_declaration}}
         }
     } else {
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-            {{ template.codegen_m_loop_param()|indent(12, false) }}
+            {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                {{ template.codegen_n_loop_param()|indent(16, false) }}
+                {{ template.codegen_n_loop_params()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
@@ -1365,21 +1364,21 @@ class CppPackedGemmTemplate(CppTemplate):
             X=X,
             W=W,
         )
-        return self._template_from_string(GEMM_TEMPLATE_BLOCKS).render(options)
+        return self._template_from_string(GEMM_TEMPLATE_INIT_BLOCKING).render(options)
 
-    def codegen_multi_threads_param(self):
-        return self._template_from_string(GEMM_TEMPLATE_MULTI_THREADS_PARAM).render()
+    def codegen_multi_threads_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_MULTI_THREADS_PARAMS).render()
 
-    def codegen_single_thread_param(self, is_dynamic_M):
+    def codegen_single_thread_params(self, is_dynamic_M):
         options = dict(
             is_dynamic_M=is_dynamic_M,
         )
-        return self._template_from_string(GEMM_TEMPLATE_SINGLE_THREAD_PARAM).render(
+        return self._template_from_string(GEMM_TEMPLATE_SINGLE_THREAD_PARAMS).render(
             options
         )
 
-    def codegen_m_loop_param(self):
-        return self._template_from_string(GEMM_TEMPLATE_M_LOOP_PARAM).render()
+    def codegen_m_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_M_LOOP_PARAMS).render()
 
-    def codegen_n_loop_param(self):
-        return self._template_from_string(GEMM_TEMPLATE_N_LOOP_PARAM).render()
+    def codegen_n_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_N_LOOP_PARAMS).render()

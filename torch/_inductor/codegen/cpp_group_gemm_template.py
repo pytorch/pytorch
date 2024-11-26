@@ -40,10 +40,10 @@ extern "C" {{export_declaration}}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        {{ template.codegen_multi_threads_param()|indent(8, false) }}
+        {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
     {
-        {{ template.codegen_single_thread_param(is_dynamic_M)|indent(8, false) }}
+        {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
 
@@ -57,9 +57,9 @@ extern "C" {{export_declaration}}
 
     if (horizontal_transverse) {
         for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-            {{ template.codegen_n_loop_param()|indent(12, false) }}
+            {{ template.codegen_n_loop_params()|indent(12, false) }}
             for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-                {{ template.codegen_m_loop_param()|indent(16, false) }}
+                {{ template.codegen_m_loop_params()|indent(16, false) }}
 {%- set acc_list=[] %}
 {%- for gemm_idx in range(0, gemm_group_num, 1) %}
     {%- set acc_list = acc_list.append( kernel.local_buffers[acc_buf_name_list[gemm_idx]] ) %}
@@ -142,9 +142,9 @@ extern "C" {{export_declaration}}
         }
     } else {
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-            {{ template.codegen_m_loop_param()|indent(12, false) }}
+            {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                {{ template.codegen_n_loop_param()|indent(16, false) }}
+                {{ template.codegen_n_loop_params()|indent(16, false) }}
 {%- set acc_list=[] %}
 {%- for gemm_idx in range(0, gemm_group_num, 1) %}
     {%- set acc_list = acc_list.append( kernel.local_buffers[acc_buf_name_list[gemm_idx]] ) %}
