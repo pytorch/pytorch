@@ -301,6 +301,7 @@ cc_library(
             "aten/src/**/*.hpp",
             "aten/src/ATen/cuda/**/*.cuh",
             "aten/src/ATen/native/**/*.cuh",
+            "aten/src/THC/*.cuh",
         ],
     ) + [
         ":aten_src_ATen_config",
