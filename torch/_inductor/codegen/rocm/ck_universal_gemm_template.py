@@ -769,7 +769,6 @@ class CKGemmTemplate(CKTemplate):
         Such instances will be assigned +inf runtime by the autotune process.
         """
         try:
-            import ck4inductor  # type: ignore[import]
             from ck4inductor.batched_universal_gemm.gen_instances import (  # type: ignore[import]
                 gen_ops_library as gen_batched_gemm_ops_library,
             )
