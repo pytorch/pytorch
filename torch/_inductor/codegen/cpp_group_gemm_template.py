@@ -1,21 +1,29 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, List, Optional, Set, Union
+from typing import Any, Callable, List, Optional, Set, Union
 from unittest.mock import patch
 
 import torch
 import torch.utils
 
 from ..._dynamo.utils import counters
-from .. import config, ir, lowering as L
+from .. import config, ir
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
-from .cpp_gemm_template import CppPackedGemmTemplate, get_padded_n
-from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
+from .cpp_gemm_template import (
+    CppPackedGemmTemplate,
+    expand_bias,
+    get_block_w,
+    get_padded_n,
+    process_out_template_epilogues,
+    prune_tensors,
+    transpose_w,
+)
+from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
     DTYPE_TO_CPP,
@@ -35,7 +43,7 @@ extern "C" {{export_declaration}}
 {
     {{kernel.maybe_codegen_profile()}}
     {{ template.codegen_blocks(
-        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
@@ -131,7 +139,7 @@ extern "C" {{export_declaration}}
                     {{ kernel.store_output(
                         tile_Y,
                         tile_acc_list,
-                        (GemmOut, GemmOut1),
+                        GemmOuts,
                         epilogue_nodes,
                         offsets=("m_start", "n_start"),
                         reindexers=reindexers
@@ -210,7 +218,7 @@ extern "C" {{export_declaration}}
                     {{ kernel.store_output(
                         tile_Y,
                         tile_acc_list,
-                        (GemmOut, GemmOut1),
+                        GemmOuts,
                         epilogue_nodes,
                         offsets=("m_start", "n_start"),
                         reindexers=reindexers
@@ -311,38 +319,13 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             X = new_inputs[0]
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
             new_W_list = []
-
-            def _transpose_w(W):
-                if isinstance(W, ir.IRNode):
-                    if trans_w:
-                        if not isinstance(W, ir.TensorBox):
-                            W = ir.TensorBox(W)
-                        W = L.permute(W, [1, 0])
-                else:
-                    if trans_w:
-                        assert isinstance(W, torch.Tensor)
-                        W = W.transpose(0, 1)
-                return W
-
             for W in W_list:
-                new_W_list.append(_transpose_w(W))
+                new_W_list.append(transpose_w(W, trans_w))
             new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
-
-            def _expand_bias(B):
-                if B is not None:
-                    if isinstance(B, ir.IRNode):
-                        if not isinstance(B, ir.TensorBox):
-                            B = ir.TensorBox(B)
-                        B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
-                    else:
-                        assert isinstance(B, torch.Tensor)
-                        B = B.expand(X.shape[0], B.shape[-1])
-                return B
-
             B_list = new_inputs[bias_start_idx:]
             new_B_list = []
             for B in B_list:
-                new_B_list.append(_expand_bias(B))
+                new_B_list.append(expand_bias(B, X))
             new_inputs[bias_start_idx:] = new_B_list
 
             return new_inputs, layout_or_out
@@ -373,62 +356,8 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             new_W_list = []
             new_inputs = list(inputs)
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
-
-            def _get_block_w(W):
-                blocked_w: Union[ir.IRNode, torch.Tensor] = W
-                if isinstance(W, ir.IRNode):
-                    new_size = [padded_n // block_n, k, block_n]
-                    blocked_w = ir.Buffer(
-                        name=W.get_name(),  # Borrow the registered buffer name
-                        layout=ir.FixedLayout(
-                            W.get_device_or_error(),
-                            W.get_dtype(),
-                            new_size,
-                            ir.FlexibleLayout.contiguous_strides(new_size),
-                            0,
-                        ),
-                    )
-                else:
-                    blocked_w = (
-                        torch.nn.functional.pad(W, (0, padded_n - n))
-                        .reshape(k, padded_n // block_n, block_n)
-                        .transpose(0, 1)
-                        .contiguous()
-                    )
-                    if micro_gemm.get_b_layout() != LayoutType.NORMAL:
-                        layout_str = (
-                            "VNNI4"
-                            if micro_gemm.get_b_layout() == LayoutType.VNNI4
-                            else "VNNI2"
-                        )
-                        assert micro_gemm.get_b_layout() in [
-                            LayoutType.VNNI2,
-                            LayoutType.VNNI4,
-                        ], f"We only support {layout_str} for now"
-                        vnni_size = (
-                            4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                        )
-                        assert (
-                            k % vnni_size == 0
-                        ), f"k should be divisible by vnni_size for {layout_str} layout"
-                        blocked_w = (
-                            blocked_w.view(
-                                padded_n // block_n, k // vnni_size, vnni_size, block_n
-                            )
-                            .transpose(-1, -2)
-                            .contiguous()
-                            .view(padded_n // block_n, k, block_n)
-                        )
-                    # normalize stride to be "contiguous_strides" per size
-                    # this avoids the problems in L.view during template codegen
-                    new_stride = [1]
-                    for sz in reversed(blocked_w.shape[1:]):
-                        new_stride.insert(0, new_stride[0] * sz)
-                    blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-                return blocked_w
-
             for W in W_list:
-                new_W_list.append(_get_block_w(W))
+                new_W_list.append(get_block_w(W, padded_n, block_n, k, n, micro_gemm))
             new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
             return new_inputs, layout_or_out
 
@@ -443,7 +372,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
-
                 W_nodes = new_input_nodes[
                     wgt_start_idx : wgt_start_idx + gemm_group_num
                 ]
@@ -459,10 +387,12 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
 
+                # Prune unused tensors
+                prune_tensors(input_nodes, new_input_nodes)
+
                 for idx in range(wgt_start_idx, wgt_start_idx + gemm_group_num):
                     W_packed = new_input_nodes[idx]
                     W_packed_constant = V.graph.add_tensor_constant(W_packed)
-
                     template_buffer.inputs[
                         idx
                     ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
@@ -513,7 +443,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         Y = self.output_node
 
         if template_buffer_node is not None:
-            # Use the updated prepacked weight buffer
             W_list = template_buffer_node.inputs[
                 wgt_start_idx : wgt_start_idx + self.gemm_group_num
             ]
@@ -521,13 +450,9 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             counters["inductor"]["cpp_group_gemm_template"] += 1
 
         template_buffer = Y
-        gemm_output_buffer = template_buffer
-
         fake_buffers: List[ir.Buffer] = []
         Y_aliases: Set[str] = set()
-
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X_list[0].get_dtype()
         )
@@ -557,16 +482,14 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
 
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-
-        gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
-        gemm_output_buffer = ir.Buffer(
-            name=gemm_output_name, layout=template_buffer.layout
-        )
-
-        gemm_output_name1 = f"{template_buffer.get_name()}_GemmOut1"
-        gemm_output_buffer1 = ir.Buffer(
-            name=gemm_output_name1, layout=template_buffer.layout
-        )
+        gemm_output_buffers: list[ir.Buffer] = []
+        for out_buf_idx in range(self.gemm_group_num):
+            gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
+                out_buf_idx
+            )
+            gemm_output_buffers.append(
+                ir.Buffer(name=gemm_output_name, layout=template_buffer.layout)
+            )
 
         buffer_name = template_buffer.get_name()
         if self.epilogue_creator:
@@ -574,74 +497,19 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                 ir.ComputedBuffer(
                     name=buffer_name,
                     layout=template_buffer.layout,
-                    data=self.epilogue_creator(
-                        gemm_output_buffer,
-                        gemm_output_buffer1,
-                        inp_list[0],
-                        inp_list[1],
-                    ),
+                    data=self.epilogue_creator(gemm_output_buffers, inp_list),
                 )
             )
             reindexers.append(None)
 
         if epilogue_nodes:
-            epilogues.extend(epilogue_nodes)
-            assert Y.get_numel() == epilogues[-1].get_numel()
-            Y = cast(ir.Buffer, epilogues[-1])
-            if (
-                Y.get_size() == template_buffer.get_size()
-                and Y.get_stride() == template_buffer.get_stride()
-            ):
-                reindexers.extend([None] * len(epilogue_nodes))
-                Y_2d = Y
-            else:
-
-                def get_reindexer(epilogue_node):
-                    # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
-                    #   template_buffer:
-                    #       size (324, 512), stride (512, 1)
-                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
-                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                    stride_order = list(
-                        ir.get_stride_order(
-                            V.graph.sizevars.size_hints(epilogue_node.get_stride())
-                        )
-                    )
-                    fill_order = ir.stride_order2fill_order(stride_order)
-                    reversed_fill_order = list(reversed(fill_order))
-                    size_with_stride_ordered_decreasingly = [
-                        epilogue_node.get_size()[i] for i in reversed_fill_order
-                    ]
-                    reshape_reindex = ir.View.dynamic_reshape_indexer(
-                        size_with_stride_ordered_decreasingly,
-                        template_buffer.get_size(),
-                    )
-
-                    # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
-                    #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
-                    #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                    #   epilogue_node:
-                    #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
-                    from_stride_ordered_decreasingly_to_epilogue_node_order = [
-                        (len(stride_order) - 1) - stride_order[i]
-                        for i in range(len(stride_order))
-                    ]
-                    stride_reindex = ir.same_reorder(
-                        from_stride_ordered_decreasingly_to_epilogue_node_order
-                    )
-
-                    reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                    return reindexer
-
-                reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
-                if isinstance(Y, ir.BaseView):
-                    storage = ir.StorageBox(Y.unwrap_view())
-                else:
-                    assert isinstance(Y, ir.Buffer)
-                    storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(
-                    data=storage, layout=template_buffer.get_layout()
-                )
+            epilogues, Y, reindexers, Y_2d = process_out_template_epilogues(
+                epilogues,
+                epilogue_nodes,
+                Y,
+                template_buffer,
+                reindexers,
+            )
 
         kernel_args = {}
         for x_idx in range(wgt_start_idx):
@@ -656,7 +524,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             N=self.n,
             K=self.k,
             PADDED_N=self.padded_n,
-            GemmOut=gemm_output_buffer,
             aliases={alias: Y.get_name() for alias in Y_aliases},
             beta=self.beta,
             alpha=self.alpha,
@@ -673,7 +540,7 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             L2_cache_size=L2_cache_size,
             config=config,
             epilogue_nodes=epilogues,
-            GemmOut1=gemm_output_buffer1,
+            GemmOuts=gemm_output_buffers,
             reindexers=reindexers,
             kernel_args=kernel_args,
             X_list=X_list,
