@@ -467,7 +467,7 @@ class GraphLowering(torch.fx.Interpreter):
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
-        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(  # type: ignore[operator, union-attr]
             "dynamo_flat_name_to_original_fqn", {}
         )
         self.allocated_constant_name: Dict[str, str] = (
@@ -487,7 +487,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.workspace_id = itertools.count()
 
     def has_feature(
-        self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
+        self,
+        device: Union[torch._inductor.ir.IRNode, device, None],
+        feature: BackendFeature,
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
@@ -724,7 +726,7 @@ class GraphLowering(torch.fx.Interpreter):
         can be saved.
         """
         output_set: OrderedSet[Node] = OrderedSet()
-        for n in reversed(self.module.graph.nodes):
+        for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
                 continue
@@ -748,7 +750,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - res2net101_26w_4s
         # - res2net50_14w_8s
         # - sebotnet33ts_256
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if n in output_set:
                 output_set.update(n.users)
 
@@ -810,13 +812,11 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def get_numel(self, buffer_name: str) -> Union[int, Expr]:
-        from .ir import MultiOutputLayout
-
         if buffer_name in self.constants:
             return self.constants[buffer_name].numel()
         if buffer_name in self.name_to_buffer:
             buf = self.name_to_buffer[buffer_name]
-            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+            if not buf.has_tensor_output():
                 return 1
             return buf.get_numel()
         if buffer_name in self.graph_inputs:
@@ -840,12 +840,13 @@ class GraphLowering(torch.fx.Interpreter):
         name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
             not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and buffer.get_device() is not None
+            and device is not None
         ):
-            self.add_device_info(buffer.get_device())
+            self.add_device_info(device)
 
         if set_name:
             buffer.name = name
@@ -894,8 +895,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
         return (
-            self.module.meta[orig_name]
-            if orig_name in self.module.meta
+            self.module.meta[orig_name]  # type: ignore[index]
+            if orig_name in self.module.meta  # type: ignore[operator]
             else self.constants[name]
         )
 
@@ -1188,7 +1189,7 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
-            elif isinstance(r.get_layout(), ir.CommBufferLayout):
+            elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
                 # Active references to persistent comm buffers are not allowed
                 # outside of graphs
                 result_correct_strides.append(ir.ExternKernel.copy_input(r))
@@ -1292,7 +1293,7 @@ class GraphLowering(torch.fx.Interpreter):
             return tensor
 
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
-        new_stride = list(old_layout.stride)
+        new_stride = [*old_layout.stride]
         for i, s in enumerate(tensor.get_size()):
             if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
                 new_stride[i] = meta_strides[i]
@@ -1474,11 +1475,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
                 strides = n.meta["val"].stride()
                 sym_strides = torch._inductor.utils.any_is_symbolic(*strides)
-                if (
-                    not hasattr(result, "get_stride")
-                    or result.get_stride() != strides
-                    and not sym_strides
-                ):
+                if result.maybe_get_stride() != strides and not sym_strides:
                     stride_order = ir.get_stride_order(strides)
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
             if (
@@ -1657,15 +1654,14 @@ class GraphLowering(torch.fx.Interpreter):
             new_unbacked_defs |= op.get_unbacked_symbol_defs()
 
         def format_new_defs() -> str:
-            r = []
-            for buf in self.buffers[buffer_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
-                )
-            for op in self.operations[operation_watermark:]:
-                r.append(
-                    f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
-                )
+            r = [
+                f"unbacked_symbol_defs={buf.get_unbacked_symbol_defs()} in:\n{buf}\n"
+                for buf in self.buffers[buffer_watermark:]
+            ]
+            r.extend(
+                f"unbacked_symbol_defs={op.get_unbacked_symbol_defs()} in:\n{op}\n"
+                for op in self.operations[operation_watermark:]
+            )
             return "***\n".join(r)
 
         if n.op != "placeholder":
@@ -2091,7 +2087,7 @@ class GraphLowering(torch.fx.Interpreter):
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
             and len(self.graph_inputs[name].get_size()) == 0
-            and self.graph_inputs[name].get_device().type == "cpu"
+            and get_device_type(self.graph_inputs[name]) == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
 

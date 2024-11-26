@@ -403,13 +403,12 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             # ensure we get the same number of returns for each invocation
             assert all(len(o) == num_returns for o in out_ref_components)
             # construct NJTs from same index returns from each invocation
-            njt_returns = []
-            for r in range(num_returns):
-                njt_returns.append(
-                    torch.nested.as_nested_tensor(
-                        [o[r] for o in out_ref_components], layout=torch.jagged
-                    )
+            njt_returns = [
+                torch.nested.as_nested_tensor(
+                    [o[r] for o in out_ref_components], layout=torch.jagged
                 )
+                for r in range(num_returns)
+            ]
             return type(out_ref_components[0])(njt_returns)
         return torch.nested.as_nested_tensor(out_ref_components, layout=torch.jagged)
 
@@ -486,11 +485,10 @@ def reduction_reference(op, sample):
             # ensure we get the same number of returns for each invocation
             assert all(len(o) == num_returns for o in out_ref_components)
             # stack same index returns from each invocation
-            stacked_returns = []
-            for r in range(num_returns):
-                stacked_returns.append(
-                    torch.stack([o[r] for o in out_ref_components], dim=0)
-                )
+            stacked_returns = [
+                torch.stack([o[r] for o in out_ref_components], dim=0)
+                for r in range(num_returns)
+            ]
             return type(out_ref_components[0])(stacked_returns)
         return torch.stack(out_ref_components, dim=0)
 
@@ -1378,31 +1376,15 @@ def sample_inputs_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
-    for njt in _sample_njts(
-        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    for sample in sample_inputs_elementwise_njt_binary(
+        op_info, device, dtype, requires_grad, **kwargs
     ):
-        # NJTs for input, condition, and other
-        condition = njt > 0.0
-        yield SampleInput(
-            njt.clone().detach(),
-            kwargs={
-                "condition": condition,
-                "other": torch.randn_like(njt),
-            },
-        )
-
-        # NJT for input + condition and scalar for other
-        yield SampleInput(
-            njt.clone().detach(),
-            kwargs={
-                "condition": condition,
-                "other": 42,
-            },
-        )
-
-        # TODO: Cover broadcasting beyond scalar tensors
-
-
+        other = sample.args[0]
+        sample.args = ()
+        sample.kwargs["other"] = other
+        sample.kwargs["condition"] = sample.input > 0.0
+        sample.name = sample.name.replace("(", "(NT, ")
+        yield sample
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
 
