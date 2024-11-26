@@ -2726,6 +2726,7 @@ coverage_ignore_classes = [
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "SymDispatchMode",
     "SymbolicContext",
     # torch.fx.experimental.unification.match
