@@ -1378,7 +1378,6 @@ def main():
             subpath = os.path.relpath(root, start=aotriton_image_path)
             for fn in files:
                 aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
-        print(f'{aks2_files=}')
         torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
