@@ -8,6 +8,10 @@ on:
       - reopened
     branches-ignore:
       - nightly
+  push:
+    tags:
+      # TODO: Remove me later
+      -  ciflow/inductor-cu126/*
   workflow_dispatch:
 
 jobs:

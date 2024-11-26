@@ -32,7 +32,7 @@ from torch._inductor.codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, xfailIfS390X
 
 
 try:
@@ -50,6 +50,7 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
+@xfailIfS390X
 class BaseExtensionBackendTests(TestCase):
     module = None
 
