@@ -43,15 +43,14 @@ def dump_file(filename: str) -> None:
 
 
 def from_traceback(tb: Sequence[traceback.FrameSummary]) -> List[Dict[str, Any]]:
-    r = []
-    for frame in tb:
-        # dict naming convention here coincides with
-        # python/combined_traceback.cpp
-        r.append(
-            {
-                "line": frame.lineno,
-                "name": frame.name,
-                "filename": intern_string(frame.filename),
-            }
-        )
+    # dict naming convention here coincides with
+    # python/combined_traceback.cpp
+    r = [
+        {
+            "line": frame.lineno,
+            "name": frame.name,
+            "filename": intern_string(frame.filename),
+        }
+        for frame in tb
+    ]
     return r

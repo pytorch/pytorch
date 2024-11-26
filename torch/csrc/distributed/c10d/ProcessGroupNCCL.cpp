@@ -789,7 +789,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
   // Abort all communicators of this work
-  ncclComm_->ncclCommAbort();
+  ncclComm_->abort();
 
   ncclCommDevIdxMapMutex.lock();
   ncclCommDevIdxMap.erase(ncclComm_);
@@ -1113,6 +1113,59 @@ bool ProcessGroupNCCL::isInitialized() {
   return initialized;
 }
 
+void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer registration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->registerSegment(
+        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+  }
+}
+
+void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
+  const auto key = std::to_string(pool->device());
+  auto device = at::Device(at::DeviceType::CUDA, pool->device());
+  LOG(INFO) << logPrefix()
+            << "Performing NCCL user buffer deregistration for all buffers in "
+            << "MemPool: " << pool->id() << ", device index: " << key
+            << ", i am " << this;
+  auto ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    // HACK: currently we are using this function for NVLS
+    // reductions, and that's why using OpType::ALLREDUCE.
+    // If we end up using this API for zero-copy P2P, we might
+    // need to refactor and account for different OpType.
+    ncclComm = initNCCLComm(key, device, OpType::ALLREDUCE);
+  }
+  TORCH_INTERNAL_ASSERT(ncclComm != nullptr);
+  auto ctx = c10::cuda::MemPoolContext(pool);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.device == pool->device(),
+        "Mismatch between CUDA memory segment device and pool's device");
+    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+  }
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
@@ -1277,19 +1330,10 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-    at::cuda::OptionalCUDAGuard gpuGuard;
-    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
-    if (deviceIndex >= 0) {
-      // For P2P comms, the deviceIndex could be -1 (invalid), as the keys in
-      // the map could be non deviceIndex, but rank to rank numbers. So we
-      // indeed need to check if deviceIndex >= 0
-      // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
-      gpuGuard.set_index(deviceIndex);
-    }
-
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
-    ncclComm->ncclCommAbort(abortReason);
+    // abort() call now has GPU guard inside
+    ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
     // from the cache, it is possible that a new collective operation
@@ -2287,7 +2331,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   std::shared_ptr<NCCLComm>& ncclComm = devNCCLCommMap_[devNCCLCommMapKey];
   // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
   // destroyed, so using ncclCommAbort here.
-  ncclComm->ncclCommAbort();
+  ncclComm->abort();
   // Remove communicators from the cache.
   devNCCLCommMap_.erase(devNCCLCommMapKey);
   // Clear used device indices.
@@ -2436,9 +2480,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     }
 
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+    ncclComm =
+        NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID);
+    ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
 #endif
   }
 

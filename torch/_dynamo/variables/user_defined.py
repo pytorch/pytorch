@@ -776,14 +776,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
-                items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.force_unpack_var_sequence(tx):
-                    items.append(
-                        TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
-                        )
+                items = [
+                    TupleVariable(
+                        [key, self.odict_getitem(tx, key)],
                     )
+                    for key in keys.force_unpack_var_sequence(tx)
+                ]
                 tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
@@ -1012,10 +1011,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
-    def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
+    def get_source_by_walking_mro(self, name):
+        assert self.cls_source is not None
+
+        for idx, klass in enumerate(type(self.value).__mro__):
+            if name in klass.__dict__:
+                mro_source = AttrSource(self.cls_source, "__mro__")
+                klass_source = GetItemSource(mro_source, idx)
+                dict_source = AttrSource(klass_source, "__dict__")
+                return GetItemSource(dict_source, name)
+
+        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1121,10 +1127,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_get_source = None
             if self.cls_source:
                 # To access the method descriptor from the udf object w/o using
-                # inspect.getattr_static, we can look into the class __dict__
-                descriptor_source = GetItemSource(
-                    AttrSource(self.cls_source, "__dict__"), name
-                )
+                # inspect.getattr_static, we can look into the class mro
+                descriptor_source = self.get_source_by_walking_mro(name)
                 descriptor_get_source = AttrSource(descriptor_source, "__get__")
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
@@ -1143,9 +1147,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
-            if self.is_supported_nn_module_method(subobj):
-                return variables.GetAttrVariable(self, name, source=source)
-
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
@@ -1423,7 +1424,10 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         # However, users can try to add a new attribute to the class using the
         # __dict__ attribute. To catch this, we save the ConstDictVariable for
         # the __dict__ and then lookup into this vt for each attr lookup.
-        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+        if name == "get" and type(self.value).get in (
+            collections.abc.Mapping.get,
+            dict.get,
+        ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         elif name == "__dict__" and self.source:
             self.generic_dict_vt = variables.LazyVariableTracker.create(

@@ -21,7 +21,7 @@ std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
     const {
   std::lock_guard<std::mutex> guard(lock_);
   return knownWorkerIds_;
-};
+}
 
 void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
   std::lock_guard<std::mutex> guard(lock_);
