@@ -195,8 +195,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor _mkldnn_pooling(
     const Tensor& input,
@@ -667,7 +666,6 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
       /*algo*/ ideep::algorithm::pooling_avg_exclude_padding);
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
