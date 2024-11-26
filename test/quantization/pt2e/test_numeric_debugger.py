@@ -49,7 +49,7 @@ class TestNumericDebugger(TestCase):
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = torch.export.export(m, example_inputs)
+        ep = export_for_training(m, example_inputs)
         generate_numeric_debug_handle(ep)
         debug_handle_map = _extract_debug_handles(ep.module())
 
