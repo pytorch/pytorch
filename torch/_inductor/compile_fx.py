@@ -1522,14 +1522,15 @@ def compile_fx(
                     recursive_compile_fx,
                 )
 
-            model_ = _recursive_pre_grad_passes(model_, example_inputs_)
-
         if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
             return flatten_graph_inputs(
                 model_,
                 example_inputs_,
                 recursive_compile_fx,
             )
+
+        if isinstance(model_, GraphModule):
+            model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
         assert not config._raise_error_for_testing
         num_example_inputs = len(example_inputs_)
