@@ -1397,8 +1397,6 @@ class GraphInfo:
         original_outputs = list(graph.outputs())
         original_inputs = list(graph.inputs())
 
-        new_outputs = []
-
         def _process_bridge_value_for_lower(
             graph: torch.Graph, bridge_value: torch.Value
         ) -> torch.Value:
@@ -1416,9 +1414,9 @@ class GraphInfo:
             graph, pivot, process_bridge_value_for_lower
         )
 
-        for output in original_outputs:
-            if _produced_by(output, lower_nodes):
-                new_outputs.append(output)
+        new_outputs = [
+            output for output in original_outputs if _produced_by(output, lower_nodes)
+        ]
         for _ in enumerate(original_outputs):
             graph.eraseOutput(0)
         for output in new_outputs:

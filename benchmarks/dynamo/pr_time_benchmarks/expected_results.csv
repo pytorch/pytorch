@@ -1,4 +1,8 @@
+<<<<<<< HEAD
+add_loop_eager,compile_time_instruction_count,3050000000,0.015
+=======
 add_loop_eager,compile_time_instruction_count,3045000000,0.015
+>>>>>>> 73738d9a773 (Refactor dtype propagation)
 
 
 
@@ -6,11 +10,19 @@ add_loop_eager_dynamic,compile_time_instruction_count,5674000000,0.025
 
 
 
+<<<<<<< HEAD
+add_loop_inductor,compile_time_instruction_count,24520000000,0.015
+
+
+
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,41330000000,0.025
+=======
 add_loop_inductor,compile_time_instruction_count,26690000000,0.015
 
 
 
 add_loop_inductor_dynamic_gpu,compile_time_instruction_count,42190000000,0.025
+>>>>>>> 73738d9a773 (Refactor dtype propagation)
 
 
 
@@ -18,7 +30,11 @@ add_loop_inductor_gpu,compile_time_instruction_count,24660000000,0.015
 
 
 
+<<<<<<< HEAD
+basic_modules_ListOfLinears_eager,compile_time_instruction_count,1033000000,0.015
+=======
 basic_modules_ListOfLinears_eager,compile_time_instruction_count,1034000000,0.015
+>>>>>>> 73738d9a773 (Refactor dtype propagation)
 
 
 
@@ -38,15 +54,15 @@ update_hint_regression,compile_time_instruction_count,1669000000,0.02
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,1160000000,0.015
+sum_floordiv_regression,compile_time_instruction_count,1105000000,0.015
 
 
 
-symint_sum,compile_time_instruction_count,3314000000,0.015
+symint_sum,compile_time_instruction_count,3258000000,0.015
 
 
 
-aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2011000000,0.015
+aotdispatcher_inference_nosubclass_cpu,compile_time_instruction_count,2005000000,0.015
 
 
 
@@ -58,7 +74,7 @@ aotdispatcher_partitioner_cpu,compile_time_instruction_count,9036000000,0.015
 
 
 
-aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3847000000,0.015
+aotdispatcher_training_nosubclass_cpu,compile_time_instruction_count,3834000000,0.015
 
 
 
