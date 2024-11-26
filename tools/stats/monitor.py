@@ -15,6 +15,20 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
+_HAS_PYNVML = False
+_HAS_AMDSMI = False
+
+try:
+    import pynvml # type: ignore[import]
+    _HAS_PYNVML = True
+except ModuleNotFoundError:
+    pass
+
+try:
+    import amdsmi # type: ignore[import]
+    _HAS_AMDSMI = True
+except ModuleNotFoundError:
+    pass
 
 def parse_args() -> argparse.Namespace:
     """
@@ -37,7 +51,6 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
-
 class LogRecord:
     """
     A class to manage log data as record.
@@ -55,9 +68,8 @@ class LogRecord:
     def get(self) -> dict[str, Any]:
         return self._summary_info
 
-
 class UsageLog:
-    def __init__(self, log_interval, is_debug_mode=False) -> None:
+    def __init__(self, log_interval, is_debug_mode=False, pynvmlExist = False, amdsmiExist = False) -> None:
         """
         Initializes a new instance of the UsageLog class.
 
@@ -81,36 +93,21 @@ class UsageLog:
         self._debug_mode = is_debug_mode
 
         # initialize gpu connections
-        try:
-            import pynvml  # type: ignore[import]
-
+        if pynvmlExist:
             try:
                 pynvml.nvmlInit()
                 self._has_pynvml = True
             except pynvml.NVMLError:
                 pass
-        except ModuleNotFoundError:
-            pass
-        try:
-            import amdsmi  # type: ignore[import]
-
+        if amdsmiExist:
             try:
                 amdsmi.amdsmi_init()
                 self._has_amdsmi = True
             except amdsmi.AmdSmiException:
                 pass
-        except ModuleNotFoundError:
-            # no amdsmi is available
-            pass
         self._initialGpuHanlders()
 
     def log_json(self, stats) -> None:
-        """
-        Logs the given statistics as JSON.
-
-        Args:
-            stats (dict): A dictionary containing the statistics to be logged.
-        """
         if self._debug_mode:
             # pretty print the json for debug mode
             print(json.dumps(stats, indent=4))
@@ -122,6 +119,64 @@ class UsageLog:
         Exits the program gracefully. this shuts down the logging loops in execute()
         """
         self._kill_now = True
+
+    def execute(self) -> None:
+            """
+            Executes the main loop of the program.
+            """
+            # logs start_time for execution
+            self._summary_info.upsert(
+                "start_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
+            )
+
+            # prints log summary info before execution
+            self.log_json(self._summary_info.get())
+
+            # execute the main loop
+            while not self._kill_now:
+                collecting_start_time = time.time()
+                stats = {}
+                try:
+                    valid_record = LogRecord()
+                    # collect cpu and memory utilization
+                    valid_record.upsert_pairs(
+                        {
+                            "level": "record",
+                            "time": datetime.datetime.now(timezone.utc).isoformat("T")
+                            + "Z",
+                            "total_cpu_percent": psutil.cpu_percent(),
+                            "total_memory_percent": psutil.virtual_memory(),
+                            "processes": self._get_process_info(),
+                        }
+                    )
+                    valid_record.upsert_pairs(self._collect_gpu_data())
+                    stats = valid_record.get()
+                except Exception as e:
+                    error_record = {
+                        "level": "record",
+                        "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
+                        "error": str(e),
+                    }
+                    stats = error_record
+                finally:
+                    collecting_end_time = time.time()
+                    time_diff = collecting_end_time - collecting_start_time
+                    stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
+
+                    # log
+                    self.log_json(stats)
+
+                    # sleep for the remaining time to meet the log interval.
+                    if time_diff < self._log_interval:
+                        time.sleep(self._log_interval - time_diff)
+
+            # prints complete log summary info to terminal
+            self._summary_info.upsert(
+                "end_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
+            )
+            self.log_json(self._summary_info.get())
+            # shut down gpu connections
+            self._shutdown_gpu_connections()
 
     def _collect_gpu_data(self)->dict[str, Any]:
         """
@@ -161,68 +216,10 @@ class UsageLog:
                 )
         return record.get()
 
-
-    def execute(self) -> None:
-        """
-        Executes the main loop of the program.
-        """
-        # logs start_time for execution
-        self._summary_info.upsert(
-            "start_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
-        )
-
-        # prints log summary info before execution
-        self.log_json(self._summary_info.get())
-
-        # execute the main loop
-        while not self._kill_now:
-            collecting_start_time = time.time()
-            stats = {}
-            try:
-                valid_record = LogRecord()
-                # collect cpu and memory utilization
-                valid_record.upsert_pairs(
-                    {
-                        "level": "record",
-                        "time": datetime.datetime.now(timezone.utc).isoformat("T")
-                        + "Z",
-                        "total_cpu_percent": psutil.cpu_percent(),
-                        "total_memory_percent": psutil.virtual_memory(),
-                        "processes": self._get_process_info(),
-                    }
-                )
-                valid_record.upsert_pairs(self._collect_gpu_data())
-                stats = valid_record.get()
-            except Exception as e:
-                error_record = {
-                    "level": "record",
-                    "time": datetime.datetime.now(timezone.utc).isoformat("T") + "Z",
-                    "error": str(e),
-                }
-                stats = error_record
-            finally:
-                collecting_end_time = time.time()
-                time_diff = collecting_end_time - collecting_start_time
-                stats["loop_time_interval"] = f"{time_diff*1000:.2f}ms"
-                self.log_json(stats)
-
-                # sleep for the remaining time to meet the log interval.
-                if time_diff < self._log_interval:
-                    time.sleep(self._log_interval - time_diff)
-
-        # prints complete log summary info to terminal
-        self._summary_info.upsert(
-            "end_time", datetime.datetime.now(timezone.utc).isoformat("T") + "Z"
-        )
-        self.log_json(self._summary_info.get())
-        # shut down gpu connections
-        self._shutdown_gpu_connections()
-
     def _initialGpuHanlders(self) -> None:
         """
         Initializes the GPU handlers if available.
         """
-
         try:
             if self._has_pynvml:
                 self._gpu_libs_detected.append("pynvml")
@@ -323,7 +320,7 @@ def main():
     """
     try:
         args = parse_args()
-        usagelog = UsageLog(args.log_interval, args.debug)
+        usagelog = UsageLog(args.log_interval, args.debug,_HAS_PYNVML,_HAS_AMDSMI)
         # gracefully exit the script when pid is killed
         signal.signal(signal.SIGTERM, usagelog.exit_gracefully)
         # gracefully exit the script when keyboard ctrl+c is pressed.
