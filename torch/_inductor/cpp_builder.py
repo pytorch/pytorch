@@ -288,8 +288,7 @@ def get_compiler_version_info(compiler: str) -> str:
 
 # =============================== cpp builder ===============================
 def _append_list(dest_list: List[str], src_list: List[str]) -> None:
-    for item in src_list:
-        dest_list.append(copy.deepcopy(item))
+    dest_list.extend(copy.deepcopy(item) for item in src_list)
 
 
 def _remove_duplication_in_list(orig_list: List[str]) -> List[str]:
@@ -742,12 +741,11 @@ def _setup_standard_sys_libs(
 
 
 def _get_build_args_of_chosen_isa(vec_isa: VecISA) -> Tuple[List[str], List[str]]:
-    macros = []
-    build_flags = []
+    macros: List[str] = []
+    build_flags: List[str] = []
     if vec_isa != invalid_vec_isa:
         # Add Windows support later.
-        for x in vec_isa.build_macro():
-            macros.append(copy.deepcopy(x))
+        macros.extend(copy.deepcopy(x) for x in vec_isa.build_macro())
 
         build_flags = [vec_isa.build_arch_flags()]
 
@@ -827,7 +825,7 @@ def is_conda_llvm_openmp_installed() -> bool:
         command = "conda list llvm-openmp --json"
         output = subprocess.check_output(command.split()).decode("utf8")
         return len(json.loads(output)) > 0
-    except subprocess.SubprocessError:
+    except (subprocess.SubprocessError, FileNotFoundError):
         return False
 
 
