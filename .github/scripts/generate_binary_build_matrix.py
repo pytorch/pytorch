@@ -15,14 +15,10 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 
+# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.4", "12.6"]
-
-
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
-
-
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
-
 
 ROCM_ARCHES = ["6.1", "6.2"]
 
@@ -30,12 +26,9 @@ XPU_ARCHES = ["xpu"]
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
-
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-
 CPU_S390X_ARCH = ["cpu-s390x"]
-
 
 CUDA_AARCH64_ARCH = ["cuda-aarch64"]
 

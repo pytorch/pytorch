@@ -467,7 +467,7 @@ class GraphLowering(torch.fx.Interpreter):
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
-        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(  # type: ignore[operator, union-attr]
             "dynamo_flat_name_to_original_fqn", {}
         )
         self.allocated_constant_name: Dict[str, str] = (
@@ -726,7 +726,7 @@ class GraphLowering(torch.fx.Interpreter):
         can be saved.
         """
         output_set: OrderedSet[Node] = OrderedSet()
-        for n in reversed(self.module.graph.nodes):
+        for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
                 continue
@@ -750,7 +750,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - res2net101_26w_4s
         # - res2net50_14w_8s
         # - sebotnet33ts_256
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if n in output_set:
                 output_set.update(n.users)
 
@@ -895,8 +895,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
         return (
-            self.module.meta[orig_name]
-            if orig_name in self.module.meta
+            self.module.meta[orig_name]  # type: ignore[index]
+            if orig_name in self.module.meta  # type: ignore[operator]
             else self.constants[name]
         )
 
