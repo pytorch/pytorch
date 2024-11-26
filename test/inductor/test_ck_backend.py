@@ -413,7 +413,8 @@ class TestCKBackend(TestCase):
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
     def test_max_autotune_precompile_bmm(
-        self, max_autotune_gemm_backends,
+        self,
+        max_autotune_gemm_backends,
     ):
         """
         Test gemm-max-autotune torch.bmm with CK backend
