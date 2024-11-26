@@ -573,22 +573,21 @@ class SideEffects:
                 #   + only if a key was removed from the input dict
                 # (4) update the original dictionary with the dict created in (2)
 
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("update")
-                cg(var, allow_cache=False)  # Don't codegen via source
+                if var.should_reconstruct():
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.load_method("update")
+                    cg(var, allow_cache=False)  # Don't codegen via source
 
-                if var.should_reconstruct_all:
                     cg(var.source)  # type: ignore[attr-defined]
                     cg.load_method("clear")
 
-                suffixes.append(
-                    [
-                        *create_call_method(1),  # update
-                        create_instruction("POP_TOP"),
-                    ]
-                )
+                    suffixes.append(
+                        [
+                            *create_call_method(1),  # update
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
 
-                if var.should_reconstruct_all:
                     suffixes.append(
                         [
                             *create_call_method(0),  # clear
