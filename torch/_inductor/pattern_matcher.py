@@ -1844,21 +1844,23 @@ def fx_to_pattern(
             self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> PatternExpr:
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
-            if target == operator.getitem and int in ignore_types:
-                temp_ignore_types = tuple(t for t in ignore_types if t is not int)
+            if target == operator.getitem:
 
-                def process_arg_fun(
-                    x: T, ignore_types_override: Optional[Sequence[Type[Any]]] = None
+                def process_arg_fn(
+                    x: T,
+                    ignore_types_override: Optional[Sequence[Type[Any]]] = tuple(
+                        t for t in ignore_types if t is not int
+                    ),
                 ) -> Union[T, KeywordArg, Ignored]:
-                    return process_arg(x, ignore_types_override=temp_ignore_types)
+                    return process_arg(x, ignore_types_override)
 
             else:
-                process_arg_fun = process_arg
-            args, kwargs = pytree.tree_map(process_arg_fun, (args, kwargs))
+                process_arg_fn = process_arg
+            args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
-                args = [process_arg_fun(a) for a in args]
-                kwargs = {k: process_arg_fun(a) for k, a in kwargs.items()}
+                args = [process_arg_fn(a) for a in args]
+                kwargs = {k: process_arg_fn(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n: torch.fx.Node) -> Any:
