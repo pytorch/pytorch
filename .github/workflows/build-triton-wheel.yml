@@ -45,7 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
-        device: ["cuda", "rocm", "xpu"]
+        device: ["cuda", "rocm"]
         include:
           - device: "rocm"
             rocm_version: "6.2"

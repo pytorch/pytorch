@@ -2085,7 +2085,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     def test_skip_first_wait(self):
         # Other tests test when skip_first_wait is false (default) so just test the true case
         test_schedule = torch.profiler.schedule(
-            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=True
+            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=1
         )
         test_schedule_expected_outputs = [
             # repeat No. 1 begin
