@@ -146,23 +146,23 @@ def arch_type(arch_version: str) -> str:
 
 
 # This can be updated to the release version when cutting release branch, i.e. 2.1
-DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
+DEFAULT_TAG = "bd600335dc532c0faf8704027946c2ab86fe271f"
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda{gpu_arch}:{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-rocm{gpu_arch}:{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
-    "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
-    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
-    "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
+    "xpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-xpu:{DEFAULT_TAG}",
+    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cpu:{DEFAULT_TAG}",
+    "cpu-cxx11-abi": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxcxx11-abi-builder-cpu-cxx11-abi:{DEFAULT_TAG}",
+    "cpu-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28_aarch64-builder-cpu-aarch64:{DEFAULT_TAG}",
+    "cpu-s390x": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxs390x-builder-cpu-s390x:{DEFAULT_TAG}",
+    "cuda-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:{DEFAULT_TAG}",
 }
 
 

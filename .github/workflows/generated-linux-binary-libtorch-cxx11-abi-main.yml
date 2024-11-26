@@ -53,7 +53,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-bd600335dc532c0faf8704027946c2ab86fe271f
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -75,7 +75,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-main
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-bd600335dc532c0faf8704027946c2ab86fe271f
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
