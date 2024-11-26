@@ -8,7 +8,6 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -24,6 +23,9 @@ class ConstantVariable(VariableTracker):
         Create a `ConstantVariable` based on the given value, and supports
         automatic routing for collection types like `tuple` (in which case we'd
         create `ConstantVariable` for the leaf items).
+
+        NOTE: the caller must install the proper guards if needed; most often
+        the guard will be `CONSTANT_MATCH`.
         """
         source = kwargs.get("source", None)
 
@@ -38,8 +40,6 @@ class ConstantVariable(VariableTracker):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                if item_source:
-                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
