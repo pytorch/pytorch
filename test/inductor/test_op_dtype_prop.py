@@ -7,6 +7,8 @@ import torch
 from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
 
@@ -78,7 +80,9 @@ class TestCase(InductorTestCase):
         def fn():
             return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
 
-        self.assertEqual(fn(), torch.compile(fn)())
+        out, code = run_and_get_code(torch.compile(fn))
+        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
+        self.assertEqual(fn(), out)
 
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))

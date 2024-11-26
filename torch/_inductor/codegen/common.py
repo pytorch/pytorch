@@ -2037,14 +2037,24 @@ class Kernel(CodeGen):
                     output_idx = 0
 
                     def do_cse(v):
-                        if name == "masked":
-                            nonlocal value
-                            output_dtype = value.dtype
+                        device_str = V.graph.get_current_device_or_throw().type
+                        triton_backend = (
+                            config.cpu_backend == "triton"
+                            if device_str == "cpu"
+                            else config.cuda_backend == "triton"
+                        )
+                        # only triton backend tracks dtype currently
+                        if triton_backend:
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
                         else:
-                            output_dtype = getattr(
-                                dtype_handler,
-                                name,
-                            )(*args, **kwargs)
+                            # cpp backend doesnt track dtype yet
+                            output_dtype = None
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
@@ -2054,9 +2064,9 @@ class Kernel(CodeGen):
                         )
 
                         nonlocal output_idx
-                        if config.test_configs.runtime_triton_dtype_assert and not (
-                            V.graph.get_current_device_or_throw().type == "cpu"
-                            and config.cpu_backend != "triton"
+                        if (
+                            config.test_configs.runtime_triton_dtype_assert
+                            and triton_backend
                         ):
                             from torch._inductor.codegen.triton import triton_type
 
