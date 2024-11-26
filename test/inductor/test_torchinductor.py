@@ -5198,6 +5198,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @torch._functorch.config.patch("donated_buffer", True)
     def test_matmul_layer_norm(self):
         batch_size = 32
         seq_length = 50
@@ -12880,6 +12881,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @torch._functorch.config.patch("donated_buffer", True)
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
