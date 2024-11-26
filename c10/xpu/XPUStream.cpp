@@ -19,6 +19,11 @@ constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 constexpr int kStreamTypeBits = 3;
 
+// The number of compile-time external streams is limited to twice the number of
+// native streams. For more details, see Note [External XPU Stream].
+constexpr int max_compile_time_external_streams =
+    2 * kStreamsPerPool * max_compile_time_stream_priorities;
+
 // The SYCL queue pools are lazily initialized when the first queue is requested
 // for a device. The device flags track the initialization of each device. When
 // a queue is requested, the next queue in the pool to be returned in a
@@ -68,6 +73,12 @@ std::deque<
  * `external_streams`. To address this, we keep the external queue persistently
  * alive in the pool, ensuring the SYCL queue pointer remains valid regardless
  * of whether the XPUStream is still being referenced.
+ *
+ * To prevent performance degradation, excessive memory usage, and increased
+ * system complexity, the number of external streams at compile-time is limited
+ * to twice the number of native streams. We assume that the users will
+ * carefully manage the number of external streams to ensure efficient and
+ * consistent behavior.
  */
 std::vector<ska::flat_hash_map<sycl::queue, std::unique_ptr<sycl::queue>>>
     external_streams;
@@ -260,6 +271,12 @@ StreamId getExternalXPUStreamId(
   if (it != device_external_stream.end()) {
     return reinterpret_cast<StreamId>(it->second.get());
   }
+
+  TORCH_CHECK(
+      device_external_stream.size() < max_compile_time_external_streams,
+      "The number of external SYCL queue on the machine exceeds the compile-time maximum limit (",
+      max_compile_time_external_streams,
+      "). Please increase the maximum number and recompile PyTorch.");
 
   // Add the external queue and its raw pointer to the map. For more details,
   // see Note [External XPU Stream].
