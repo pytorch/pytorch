@@ -2193,21 +2193,6 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
     )
 
 
-@dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls, frozen=frozen)
-
-    if cls is None:
-        return wrap
-    return wrap(cls)
-
-
 @functools.lru_cache(None)
 def boolean_ops():
     return (
@@ -2247,8 +2232,16 @@ def register_op_dtype_propagation_rules(
     )
 
 
-def get_donated_idxs() -> Optional[List[int]]:
-    tracing_context = torch._guards.TracingContext.try_get()
-    if tracing_context is not None and tracing_context.fw_metadata:
-        return tracing_context.fw_metadata.bw_donated_idxs
-    return None
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)

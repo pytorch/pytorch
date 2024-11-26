@@ -5198,31 +5198,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    def test_matmul_layer_norm(self):
-        batch_size = 32
-        seq_length = 50
-        hidden_size = 256
-
-        inp = torch.randn(
-            batch_size,
-            seq_length,
-            hidden_size,
-            requires_grad=True,
-            device=self.device,
-        )
-        weight = torch.randn(
-            hidden_size, hidden_size, requires_grad=True, device=self.device
-        )
-
-        layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
-
-        def foo(inp, weight):
-            matmul_output = inp @ weight
-            final_output = layer_norm(matmul_output)
-            return final_output
-
-        self.common(foo, (inp, weight), check_lowp=False)
-
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -12505,8 +12480,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
+        tmp0 = tl.load(in_ptr0 + (x1 + 512*x0 + 262144*r2), rmask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + 262144*r2), rmask, eviction_policy='evict_first', other=0.0)""",
                 )
 
         @config.patch("triton.use_block_ptr", True)
@@ -12538,7 +12513,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [((511 + XBLOCK) // 512), ((1) * ((1) <= (((511 + XBLOCK) // 512))) + (((511 + XBLOCK) // 512)) * ((((511 + XBLOCK) // 512)) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
+        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [(511 + XBLOCK) // 512, ((1) * ((1) <= ((511 + XBLOCK) // 512)) + ((511 + XBLOCK) // 512) * (((511 + XBLOCK) // 512) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
@@ -12879,43 +12854,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
-
-        def test_donated_buffer_inplace(self):
-            batch_size = 32
-            seq_length = 50
-            hidden_size = 256
-
-            inp = torch.randn(
-                batch_size,
-                seq_length,
-                hidden_size,
-                requires_grad=True,
-                device=self.device,
-            )
-            weight = torch.randn(
-                hidden_size, hidden_size, requires_grad=True, device=self.device
-            )
-
-            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
-
-            def fn(inp, weight):
-                matmul_output = inp @ weight
-                final_output = layer_norm(matmul_output)
-                return final_output
-
-            fn_opt = torch.compile(fn)
-
-            def wrapper(inp, weight):
-                return fn_opt(inp, weight).sum().backward()
-
-            _, code = run_and_get_code(wrapper, inp, weight)
-
-            if config.cpp_wrapper:
-                # when using cpp_wrapper, backward triton code is in code[2]
-                self.assertTrue("in_out_ptr" in code[2])
-            else:
-                # when not using cpp_wrapper, backward triton code is in code[1]
-                self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
