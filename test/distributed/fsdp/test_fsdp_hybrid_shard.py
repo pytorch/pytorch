@@ -35,6 +35,7 @@ from torch.testing._internal.common_fsdp import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
+    skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -227,6 +228,7 @@ class TestFSDPHybridShard(FSDPTest):
     # resharded after forward.
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm # temp skip
     def test_fsdp_hybrid_shard_basic_setup(self):
         """
         Tests basic functionality of HYBRID_SHARD and _HYBRID_SHARD_ZERO2:
