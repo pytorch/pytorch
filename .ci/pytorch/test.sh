@@ -500,6 +500,7 @@ test_perf_for_dashboard() {
       elif [[ "$target" == "accuracy" ]]; then
         target_flag+=( --no-translation-validation)
       fi
+      target_flag+=( --only hf_T5)
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
