@@ -847,7 +847,7 @@ Tensor scalar_tensor(const Scalar& s,
   // NB: It's always wrong to try to create a scalar tensor with the jagged layout.
   // Rather than fix this everywhere, just use the strided layout and let NJT handle
   // scalar tensor broadcasting.
-  if (layout.has_value() && layout == at::kJagged) {
+  if (layout == at::kJagged) {
     layout = at::kStrided;
   }
   // See [Note: hacky wrapper removal for TensorOptions]
