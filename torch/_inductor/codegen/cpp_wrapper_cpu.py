@@ -199,11 +199,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_path = (
+        extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
-        if os.path.exists(extend_aoti_path):
-            self.header.splice(f"#include <{extend_aoti_path}>")
+        extend_aoti_c_shim_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "include",
+            extend_aoti_c_shim_include,
+        )
+        if os.path.exists(extend_aoti_c_shim_path):
+            self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -1875,7 +1880,7 @@ if (custom_op_wrapper.get() == NULL) {
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
             elif isinstance(raw_arg, torch.layout):
-                # dtype
+                # memory layout
                 if sys.version_info < (3, 10):
                     # Py_NewRef is only available since Python 3.10
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
