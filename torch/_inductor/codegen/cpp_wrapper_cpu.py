@@ -198,11 +198,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_path = (
+        extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
-        if os.path.exists(extend_aoti_path):
-            self.header.splice(f"#include <{extend_aoti_path}>")
+        extend_aoti_c_shim_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "include",
+            extend_aoti_c_shim_include,
+        )
+        if os.path.exists(extend_aoti_c_shim_path):
+            self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",

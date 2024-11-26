@@ -792,6 +792,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
 libtorch_python_core_sources = [
