@@ -25,7 +25,6 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
-  NIGHTLIES_PYTORCH_ROOT: ./pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
