@@ -82,11 +82,6 @@ jobs:
           repository:  "ozanMSFT/builder"
           ref: "users/ozanMSFT/win-arm64"
           path: "builder"
-      - name: Bootstrap folders
-        shell: cmd
-        run: |
-          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
-          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
       - name: Bootstrap Git
         shell: cmd
         run: |
@@ -122,21 +117,10 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
-      {%- if config["package_type"] == 'libtorch' %}
-      - name: Build LibTorch
-        shell: cmd
-        env:
-          BUILD_TYPE: !{{ config["libtorch_config"] }}
+      - name: Build PyTorch binary
+        shell: bash
         run: |
-          "builder/windows/arm64/build_libtorch.bat"
-      {%- else %}
-      - name: Build PyTorch
-        shell: cmd
-        env:
-          BUILD_TYPE: Release
-        run: |
-          "builder/windows/arm64/build_pytorch.bat"   
-      {%- endif %}
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
       - uses: !{{ common.upload_artifact_action }}
         if: always()
         with:
