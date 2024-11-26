@@ -88,12 +88,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
-        if isinstance(_rng_tracker, OffsetBasedRNGTracker):
-            _rng_tracker._manual_seed(seed)
-        else:
-            raise RuntimeError(
-                f"Unknown type of cuda RNG state tracker: _rng_tracker = {_rng_tracker}"
-            )
+        _rng_tracker._manual_seed(seed)
 
 
 class _RNGStateTracker:
@@ -147,6 +142,9 @@ class _RNGStateTracker:
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _distribute_region(self, spec: DTensorSpec):
+        pass
+
+    def _manual_seed(self, parallel_seed: int) -> None:
         pass
 
 
