@@ -58,7 +58,7 @@ extern "C" {{export_declaration}}
 {%- set acc_buf_name_list=[] %}
 {%- set acc_buf_name_prefix = "local_acc_buf_" %}
 {%- for gemm_idx in range(0, gemm_group_num, 1) %}
-    {%- set acc_buf_name = "local_acc_buf" + gemm_idx|string %}
+    {%- set acc_buf_name = acc_buf_name_prefix + gemm_idx|string %}
     {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
     {%- set acc_buf_name_list=acc_buf_name_list.append(acc_buf_name) %}
 {%- endfor %}
@@ -216,12 +216,7 @@ extern "C" {{export_declaration}}
     ) %}
 {%- endfor %}
                     {{ kernel.store_output(
-                        tile_Y,
-                        tile_acc_list,
-                        GemmOuts,
-                        epilogue_nodes,
-                        offsets=("m_start", "n_start"),
-                        reindexers=reindexers
+                        tile_Y, tile_acc_list, GemmOuts, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
                     }}
                 }
@@ -245,7 +240,7 @@ def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
     return act_deduplicated
 
 
-class CppGroupGEMMTemplate(CppPackedGemmTemplate):
+class CppGroupGemmTemplate(CppPackedGemmTemplate):
     def __init__(
         self,
         input_nodes,
@@ -259,6 +254,14 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         act_mapping: Optional[dict[int, ir.TensorBox]] = None,
         gemm_group_num: int = 1,
     ) -> None:
+        """
+        Template for Group of GEMMs:
+        * Each GEMM has the same dimensions (m, n, k) and the same leading dimensions (lda, ldb, ldc)
+          for their A, B, and C matrices.
+        * Each GEMM has distinct or shared activations, has distinct weight, has unique bias or no bias, has distinct epilogues.
+        * In the current implementation, the outputs of all GEMMs are accumulated using pointwise epilogues.
+          This behavior can be extended in the future if needed.
+        """
         super().__init__(
             input_nodes,
             layout,
@@ -286,16 +289,14 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
         act_mapping: Optional[
             dict[int, ir.TensorBox]
-        ] = None,  # map gemm idx to its activation
+        ] = None,  # gemm idx to its act buf
     ):
-        # Assume input nodes order as:
-        # x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
+        # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_group_num = len(has_bias)
         assert act_mapping
         act_deduplicated = get_deduplicated_act(act_mapping)
         wgt_start_idx = len(act_deduplicated)
         bias_start_idx = wgt_start_idx + gemm_group_num
-
         input_indices = list(range(len(input_nodes)))
 
         def reorder_and_filter(inputs, layout_or_out):
@@ -313,7 +314,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
 
         def normalize_shapes(inputs, layout_or_out):
             new_inputs = list(inputs)
-
             if not trans_w:
                 return new_inputs, layout_or_out
             X = new_inputs[0]
@@ -327,7 +327,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
             for B in B_list:
                 new_B_list.append(expand_bias(B, X))
             new_inputs[bias_start_idx:] = new_B_list
-
             return new_inputs, layout_or_out
 
         num_threads = parallel_num_threads()
@@ -368,7 +367,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
-                # prepack the weight as input to the template buffer
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
                 new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
@@ -382,25 +380,21 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
                 new_input_nodes[
                     wgt_start_idx : wgt_start_idx + gemm_group_num
                 ] = W_tensor
-
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-
                 # Prune unused tensors
                 prune_tensors(input_nodes, new_input_nodes)
-
                 for idx in range(wgt_start_idx, wgt_start_idx + gemm_group_num):
                     W_packed = new_input_nodes[idx]
                     W_packed_constant = V.graph.add_tensor_constant(W_packed)
                     template_buffer.inputs[
                         idx
                     ] = ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
-
             return output
 
         template = DataProcessorTemplateWrapper(
-            CppGroupGEMMTemplate,
+            CppGroupGemmTemplate,
             preprocessor,
             postprocessor,
             input_nodes=input_nodes,
@@ -429,7 +423,6 @@ class CppGroupGEMMTemplate(CppPackedGemmTemplate):
         act_deduplicated = get_deduplicated_act(self.act_mapping)
         wgt_start_idx = len(act_deduplicated)
         bias_start_idx = wgt_start_idx + self.gemm_group_num
-
         X_list = list(self.act_mapping.values())
         W_list = self.input_nodes[wgt_start_idx : wgt_start_idx + self.gemm_group_num]
         inp_list = []

@@ -1731,7 +1731,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         if input_3d and bias_gate and bias_up:
             # Reduce the redundant test combination
             return
-
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         counters.clear()
