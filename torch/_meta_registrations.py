@@ -536,6 +536,12 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
     compression_factor = 10 if is_8bit_input_type else 9
+
+    if is_8bit_input_type:
+        assert (
+            not dense_B.is_contiguous()
+        ), "dense input must be transposed for 8bit dtypes"
+
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
@@ -554,8 +560,7 @@ def meta__cslt_sparse_mm(
             }
         ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype)
-    return result
+    return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
 @register_meta(aten.index_reduce.default)
