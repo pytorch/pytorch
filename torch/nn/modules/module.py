@@ -21,6 +21,7 @@ from typing import (
     Union,
 )
 from typing_extensions import Self
+from typing import TYPE_CHECKING, Generic, ParamSpec, TypeVar
 
 import torch
 from torch import device, dtype, Tensor
@@ -28,7 +29,6 @@ from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Buffer, Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.hooks import BackwardHook, RemovableHandle
-
 
 __all__ = [
     "register_module_forward_pre_hook",
@@ -48,6 +48,16 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
 
+P = ParamSpec('P')
+T_co = TypeVar('T_co', covariant=True)
+
+if TYPE_CHECKING:
+    class Module(Generic[P, T_co]):
+        def forward(self, *args: P.args, **kwargs: P.kwargs) -> T_co: ...
+else:
+    class Module:
+        @classmethod
+        def __class_getitem__(cls, item): return cls
 
 class _IncompatibleKeys(
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
@@ -337,7 +347,6 @@ def register_module_full_backward_pre_hook(
         :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
-
     """
     handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
@@ -364,7 +373,6 @@ def register_module_full_backward_hook(
         :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
-
     """
     global _global_is_full_backward_hook
     if _global_is_full_backward_hook is False:
@@ -1620,9 +1628,9 @@ class Module:
                 ``hook`` will be fired after all existing ``forward_pre`` hooks
                 on this :class:`torch.nn.modules.Module`. Note that global
                 ``forward_pre`` hooks registered with
-                :func:`register_module_forward_pre_hook` will fire before all
-                hooks registered by this method.
-                Default: ``False``
+                :func:`register_module_forward_pre_hook` will fire before
+                all hooks registered by this method.
+
             with_kwargs (bool): If true, the ``hook`` will be passed the kwargs
                 given to the forward function.
                 Default: ``False``
@@ -1835,7 +1843,7 @@ class Module:
 
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
-        # module, and then catching it here, and then reraising it, and then
+        # module, and then catching it, and then reraising it, and then
         # catching it again, and expecting the resulting frame to be compiled.
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
@@ -2049,7 +2057,7 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace or return a new one.
         If a new ``state_dict`` is returned, it will only be respected if it is the root
-        module that :meth:`~nn.Module.state_dict` is called from.
+        module that :meth:`state_dict` is called from.
         """
         if getattr(hook, "_from_public_api", False):
             raise RuntimeError(
@@ -2085,7 +2093,7 @@ class Module:
         return handle
 
     def register_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
+        r"""Register a pre-hook to be run before module's :meth:`~nn.Module.state_dict` is called.
 
         It should have the following signature::
             hook(module, prefix, keep_vars) -> None
@@ -2489,8 +2497,8 @@ class Module:
         Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
-            strict (bool, optional): whether to strictly enforce that the keys
-                in :attr:`state_dict` match the keys returned by this module's
+            strict (bool, optional): whether to strictly enforce that the keys in
+                :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
             assign (bool, optional): When set to ``False``, the properties of the tensors
                 in the current module are preserved whereas setting it to ``True`` preserves
