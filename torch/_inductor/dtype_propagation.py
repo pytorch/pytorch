@@ -163,7 +163,10 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def to_dtype(
-        x: DTypeArg, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        x: DTypeArg,
+        dtype: torch.dtype,
+        src_dtype: Optional[torch.dtype] = None,
+        use_compute_types=True,
     ) -> torch.dtype:
         return dtype
 
