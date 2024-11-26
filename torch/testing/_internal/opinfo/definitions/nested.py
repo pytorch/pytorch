@@ -883,6 +883,20 @@ sample_inputs_nn_functional_threshold = partial(
     sample_inputs_elementwise_njt_unary,
     op_kwargs={"threshold": float.fromhex("0x1.3ap-3"), "value": -9},
 )
+
+
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in sample_inputs_elementwise_njt_binary(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        other = sample.args[0]
+        sample.args = ()
+        sample.kwargs["other"] = other
+        sample.kwargs["condition"] = sample.input > 0.0
+        sample.name = sample.name.replace("(", "(NT, ")
+        yield sample
+
+
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS ===
 
 
@@ -916,6 +930,7 @@ njt_sample_inputs = {
         sample_inputs_njt_reduction, supports_dimlist=False
     ),
     "prod": partial(sample_inputs_njt_reduction, supports_dimlist=False),
+    "where": sample_inputs_where,
 }
 
 njt_references = {
