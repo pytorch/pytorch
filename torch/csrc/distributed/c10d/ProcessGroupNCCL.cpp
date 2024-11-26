@@ -1330,18 +1330,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-    at::cuda::OptionalCUDAGuard gpuGuard;
-    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
-    if (deviceIndex >= 0) {
-      // For P2P comms, the deviceIndex could be -1 (invalid), as the keys in
-      // the map could be non deviceIndex, but rank to rank numbers. So we
-      // indeed need to check if deviceIndex >= 0
-      // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
-      gpuGuard.set_index(deviceIndex);
-    }
-
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
+    // abort() call now has GPU guard inside
     ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -2489,9 +2480,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     }
 
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+    ncclComm =
+        NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID);
+    ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
 #endif
   }
 
