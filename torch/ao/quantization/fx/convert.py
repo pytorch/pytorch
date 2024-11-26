@@ -343,9 +343,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             graph.erase_node(node)
     elif dtype == torch.float16:
         quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.default
-        dequantize_op = (
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default
-        )
+        dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.default
         with graph.inserting_before(node):
             input_node = node.args[0]
             quant_args = (input_node, 1.0, 0, 0, 0, torch.float16)
