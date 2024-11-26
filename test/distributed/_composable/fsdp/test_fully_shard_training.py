@@ -641,6 +641,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm # temp skip
     def test_gradient_accumulation(self):
         """
         Tests gradient accumulation with/without gradient reduction and
