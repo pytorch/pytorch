@@ -347,6 +347,17 @@ class DtypePropagationOpsHandler:
         return promote_types([x])
 
     @staticmethod
+    def halide_clamp(value, size, check):
+        # TODO - way of registering dtype for op in backend
+        return torch.int32
+
+    @staticmethod
+    def inline_asm_elementwise(
+        *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
+    ):
+        return dtype
+
+    @staticmethod
     def lshift(x: DTypeArg, y: DTypeArg) -> torch.dtype:
         return promote_types([x])
 
