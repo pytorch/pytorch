@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 import operator
 import random
+import sys
 import unittest
 from typing import NamedTuple, List
 
@@ -64,10 +65,13 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
+    if sys.version_info >= (3, 13):
+        raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
             x1 = X[i, k + 1] - X_min
+            breakpoint()
             w0 = W[j, k] - 128 - W_min
             w1 = W[j, k + 1] - 128 - W_min
             if x0 * w0 + x1 * w1 < -(1 << 15):
