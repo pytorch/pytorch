@@ -247,6 +247,10 @@ def _annotate_linear_relu(
             continue
 
         linear_node = maybe_linear_node
+        if len(linear_node.users) > 1:
+            # if linear node has multiple users, then it can't be fused with relu
+            continue
+
         input_qspec_map = {}
         input_act = linear_node.args[0]
         assert isinstance(input_act, Node)
@@ -350,6 +354,11 @@ def _do_annotate_conv_relu(
         if not isinstance(maybe_conv_node, Node) or not is_conv_node(maybe_conv_node):
             continue
         conv_node = maybe_conv_node
+
+        if len(conv_node.users) > 1:
+            # relu shouldn't be fuseable to conv if there are other users
+            # of convolution
+            continue
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
@@ -738,6 +747,12 @@ def _annotate_add_relu(
             continue
 
         add_node = maybe_add
+
+        if len(add_node.users) > 1:
+            # add can't be fused with ReLU if the result of add is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, add_node]
 
         if _is_annotated(partition):
@@ -860,6 +875,11 @@ def _annotate_mul_relu(
             continue
 
         mul_node = maybe_mul
+        if len(mul_node.users) > 1:
+            # mul can't be fused with ReLU if the result of mul is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, mul_node]
 
         if _is_annotated(partition):
@@ -1003,6 +1023,7 @@ def _annotate_cat(
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     return op in [
+        torch.ops.aten.relu.default,
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.hardtanh_.default,
         torch.ops.aten.max_pool2d.default,
