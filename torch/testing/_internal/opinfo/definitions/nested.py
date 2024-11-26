@@ -385,8 +385,10 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
             )
             # for all dim-related args present, convert from outer -> inner dim space
             for argname in {a for a in argnames if a in kwargs}:
+                # allow the SampleInput to tell us how to canonicalize the dim kwargs
+                ndim = nt_inp._ndim if hasattr(nt_inp, "_ndim") else nt_inp.dim()
                 kwargs[argname] = _outer_to_inner_dim(
-                    nt_inp.dim(), kwargs[argname], canonicalize=True
+                    ndim, kwargs[argname], canonicalize=True
                 )
 
         out_ref_component = op.op(inp, *args, **kwargs)
@@ -1361,10 +1363,15 @@ def sample_inputs_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
         op_info, device, dtype, requires_grad, **kwargs
     ):
         yield sample_input
+
         last_dim_sample = _update_sample(sample_input, {"dim": -1})
         last_dim_sample.name = (
             f"{_describe_njt(last_dim_sample.input)}: add dim to the end"
         )
+        # Tell the unbind reference how to canonicalize the dim kwargs
+        # This is necessary because unsqueeze() allows for a dim after
+        # the last dim to indicate an unsqueeze at the end.
+        last_dim_sample.input._ndim = last_dim_sample.input.dim() + 1
         yield last_dim_sample
 
 
