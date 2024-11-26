@@ -1972,7 +1972,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
-            output_code_log.debug("Output code written to: \n%s", path)
+            output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
