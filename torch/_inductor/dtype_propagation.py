@@ -197,7 +197,7 @@ class DtypePropagationOpsHandler:
         src_dtype: Optional[torch.dtype] = None,
         use_compute_types=True,
     ) -> torch.dtype:
-        return upcast_compute_type(dtype)
+        return upcast_compute_type(dtype) if use_compute_types else dtype
 
     @staticmethod
     def to_dtype_bitcast(
