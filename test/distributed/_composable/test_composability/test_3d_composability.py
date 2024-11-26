@@ -29,10 +29,9 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
-from torch.testing._internal.distributed._tensor.common_dtensor import with_comms
 
 
 class Test3DTraining(FSDPTest):
