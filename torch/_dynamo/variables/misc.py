@@ -331,13 +331,13 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class NewCellVariable(VariableTracker):
+class CellVariable(VariableTracker):
     # If the cell existed before Dynamo tracing started, this will be the
     # VariableTracker that represents the cell content.
     #
     # Note that all mutation to the cell (i.e., its content) will be buffered in
     # SideEffects, rather than being reflected here. One can think of
-    # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
+    # `CellVariable` as a special case for `UserDefinedObjectVariable`.
     pre_existing_contents: Optional[VariableTracker]
 
     def __init__(
