@@ -960,6 +960,7 @@ def handle_dynamo_gm(
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+    # Additionally, we mark static indices for cudagraphs.
 
     assert "_param_name_to_source" in mod.meta
     param_name_to_source = mod.meta["_param_name_to_source"]
