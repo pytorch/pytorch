@@ -301,7 +301,8 @@ z3-solver==4.12.2.0
 #Pinned versions:
 #test that import:
 
-tensorboard==2.13.0
+tensorboard==2.13.0 ; python_version < "3.13"
+tensorboard==2.18.0 ; python_version >= "3.13"
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard

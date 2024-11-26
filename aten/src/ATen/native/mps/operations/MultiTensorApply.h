@@ -131,9 +131,9 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
 
   TORCH_CHECK(tensor_lists.size() == depth, "Number of tensor lists has to match the depth");
   for (const auto& d : c10::irange(depth)) {
-    TORCH_CHECK(tensor_lists[d][0].scalar_type() == at::ScalarType::Float ||
-                    tensor_lists[d][0].scalar_type() == at::ScalarType::Half,
-                "Only float and half are supported");
+    const auto scalar_type = tensor_lists[d][0].scalar_type();
+    TORCH_CHECK(scalar_type == kFloat || scalar_type == kHalf || scalar_type == kBFloat16,
+                "Only float, bfloat and half are supported");
   }
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
