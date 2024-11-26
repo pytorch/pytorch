@@ -1057,9 +1057,6 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(
             mod, params
         )
-
-    # Then, the params 1:1 mapped sources, if relevant.
-    if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False
