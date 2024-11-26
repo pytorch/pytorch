@@ -977,7 +977,6 @@ def handle_dynamo_gm(mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor])
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
-    static_input_indices = []
     # Collect the dynamo graph inputs
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
         assert "grapharg" in node.meta and node.meta["grapharg"] is not None
