@@ -1349,9 +1349,6 @@ def main():
         "utils/benchmark/utils/*.cpp",
         "utils/benchmark/utils/valgrind_wrapper/*.cpp",
         "utils/benchmark/utils/valgrind_wrapper/*.h",
-        "utils/model_dump/skeleton.html",
-        "utils/model_dump/code.js",
-        "utils/model_dump/*.mjs",
     ]
 
     if not BUILD_LIBTORCH_WHL:
