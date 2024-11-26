@@ -29,13 +29,9 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skip_but_pass_in_sandcastle_if,
-)
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import with_comms
 
 
