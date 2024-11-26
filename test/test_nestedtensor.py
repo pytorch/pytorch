@@ -8093,19 +8093,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
         name="unflatten_batch_dim_unsupported",
     ),
-    # Bug: chunk calculation on batch dim is completely wrong for NJT. It should
-    # match what is done for dense tensors wrt chunk size calculation, which can
-    # be unintuitive.
-    XFailRule(
-        op_match_fn=lambda device, op: op.full_name == "chunk",
-        sample_match_fn=lambda device, sample: (
-            "batch_dim" in sample.name
-            and
-            # this specific case works lol
-            not (sample.input.size(0) == 3 and sample.kwargs["chunks"] == 2)
-        ),
-        name="batch_dim_chunk_bug1",
-    ),
     # expected: bmm / matmul sometimes use a to_padded_tensor() fallback which isn't
     # supported for non-contig NJTs with holes
     XFailRule(
@@ -8258,6 +8245,15 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
             and sample.kwargs.get("memory_format", None) == torch.contiguous_format
         ),
         name="clone_unbind_data_dependency",
+    ),
+    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
+    # data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        op_match_fn=lambda device, op: (op.full_name == "chunk"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="chunk_batch_dim_data_dependency",
     ),
     # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
     XFailRule(
