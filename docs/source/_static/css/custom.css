@@ -44,3 +44,10 @@
 }
 
 /* End of classes needed for the survey banner*/
+
+/* Hide Edit on Github button */
+
+.pytorch-breadcrumbs-wrapper .pytorch-breadcrumbs-aside .fa.fa-github {
+    margin-top: 5px;
+    display: none;
+}
