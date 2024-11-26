@@ -269,7 +269,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f16, f32, f64, b8, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
