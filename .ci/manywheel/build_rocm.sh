@@ -190,8 +190,7 @@ done
 # Install AOTriton
 if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
     cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
-    SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
-    bash ${SOURCE_DIR}/../common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
+    bash ${PYTORCH_ROOT}/.ci/docker/common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
     export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
     ROCM_SO_FILES+=("libaotriton_v2.so")
 fi
