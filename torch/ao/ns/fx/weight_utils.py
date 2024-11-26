@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.utils._typing_utils import not_none as _not_none
 
 from .ns_types import NSSingleResultType, NSSingleResultValuesType
 from .utils import get_target_type_str, getattr_from_fqn, return_first_non_observer_node
@@ -36,7 +35,7 @@ def get_lstm_weight(mod: nn.Module) -> List[torch.Tensor]:
     res = []
     for idx, param_name in enumerate(mod._flat_weights_names):  # type: ignore[arg-type]
         if "weight_ih_l" in param_name or "weight_hh_l" in param_name:
-            param_value = _not_none(mod._flat_weights[idx]).detach()  # type: ignore[index,union-attr]
+            param_value = mod._flat_weights[idx].detach()  # type: ignore[index,union-attr]
             res.append(param_value)
     return res
 
@@ -73,7 +72,7 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
         res = []
         for idx, param_name in enumerate(mod._flat_weights_names):
             if "weight_ih_l" in param_name or "weight_hh_l" in param_name:
-                param_value = mod._flat_weights[idx].detach()
+                param_value = mod._flat_weights[idx].detach()  # type: ignore[index,union-attr]
                 res.append(param_value)
         return res
     else:
