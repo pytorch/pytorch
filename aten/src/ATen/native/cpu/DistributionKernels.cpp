@@ -24,8 +24,8 @@
 #include <cpuinfo.h>
 #endif
 
-#if AT_ARMPL_ENABLED()
-#include <armpl.h>
+#if AT_OPENRNG_ENABLED()
+#include <openrng.h>
 #endif
 
 namespace at::native {
@@ -42,7 +42,7 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::
 }
 
 // Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
-#if (!AT_MKL_ENABLED() || (AT_MKL_ENABLED() && !defined(FBCODE_CAFFE2))) && !AT_ARMPL_ENABLED()
+#if (!AT_MKL_ENABLED() || (AT_MKL_ENABLED() && !defined(FBCODE_CAFFE2))) && !AT_OPENRNG_ENABLED()
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
@@ -111,7 +111,7 @@ static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, 
 }
 
 // Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
-#if ((!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2) || 1)) && !AT_ARMPL_ENABLED()
+#if ((!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2) || 1)) && !AT_OPENRNG_ENABLED()
 void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
