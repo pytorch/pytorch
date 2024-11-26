@@ -149,19 +149,19 @@ def arch_type(arch_version: str) -> str:
 DEFAULT_TAG = "4aa0d704b33b8954a9e48a643c7105e570ab0e5f"
 
 WHEEL_CONTAINER_IMAGES = {
-    "11.8": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder:cuda11.8:{DEFAULT_TAG}",
-    "12.4": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder:cuda12.4:{DEFAULT_TAG}",
-    "12.6": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder:cuda12.6:{DEFAULT_TAG}",
+    "11.8": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:{DEFAULT_TAG}",
+    "12.4": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda12.4:{DEFAULT_TAG}",
+    "12.6": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-cuda12.6:{DEFAULT_TAG}",
     **{
-        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder:rocm{gpu_arch}:{DEFAULT_TAG}"
+        gpu_arch: f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-rocm{gpu_arch}:{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
-    "xpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder:xpu:{DEFAULT_TAG}",
-    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder:cpu:{DEFAULT_TAG}",
-    "cpu-cxx11-abi": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi:{DEFAULT_TAG}",
-    "cpu-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28_aarch64-builder:cpu-aarch64:{DEFAULT_TAG}",
-    "cpu-s390x": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxs390x-builder:cpu-s390x:{DEFAULT_TAG}",
-    "cuda-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder:cuda12.4:{DEFAULT_TAG}",
+    "xpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28-builder-xpu:{DEFAULT_TAG}",
+    "cpu": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:{DEFAULT_TAG}",
+    "cpu-cxx11-abi": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxcxx11-abi-builder-cpu-cxx11-abi:{DEFAULT_TAG}",
+    "cpu-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux2_28_aarch64-builder-cpu-aarch64:{DEFAULT_TAG}",
+    "cpu-s390x": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxs390x-builder-cpu-s390x:{DEFAULT_TAG}",
+    "cuda-aarch64": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinuxaarch64-builder-cuda12.4:{DEFAULT_TAG}",
 }
 
 
