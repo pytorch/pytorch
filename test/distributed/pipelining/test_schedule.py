@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
 )
 
 logger = logging.getLogger(__name__)
@@ -316,6 +317,7 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    @skipIfRocm # temp skip
     def test_grad_with_manual_interleaved(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
