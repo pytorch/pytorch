@@ -8,17 +8,9 @@
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 typedef id<MTLDevice> MTLDevice_t;
-typedef id<MTLLibrary> MTLLibrary_t;
-typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
-typedef id<MTLLibrary> MTLLibrary_t;
 #else
-typedef void* MTLDevice;
 typedef void* MTLDevice_t;
-typedef void* MTLLibrary_t;
-typedef void* MTLComputePipelineState_t;
-typedef void* MTLLibrary_t;
 #endif
 
 namespace at::mps {
