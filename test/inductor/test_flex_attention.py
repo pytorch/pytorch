@@ -4301,7 +4301,8 @@ class TestLearnableBiases(InductorTestCase):
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_relative_1d_bias(self, params):
+    @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
+    def test_relative_1d_bias(self, params, mode: str):
         query, key, value = self._init_tensors(params)
         bias = torch.randn(
             2 * params.seq_length,
@@ -4313,7 +4314,7 @@ class TestLearnableBiases(InductorTestCase):
         def bias_func(score, b, h, q_idx, kv_idx):
             return score + bias[torch.abs(q_idx - kv_idx)]
 
-        flex_compiled = torch.compile(flex_attention)
+        flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
         out_gold = flex_attention(
