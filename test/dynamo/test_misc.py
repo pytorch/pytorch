@@ -1778,6 +1778,17 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops=9,
         )
 
+    def test_range_iter(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, it):
+            n = next(it)
+            return x + n
+
+        it = iter(range(1, 3))
+        res = run(torch.zeros(1), it)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(next(it), 2)
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
@@ -2832,6 +2843,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_copy_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, d0):
+            d1 = d0.copy()
+            d1[0] = 1
+            return x + 1, d1
+
+        d0 = {}
+        res, d1 = run(torch.zeros(1), d0)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(d0, {})
+        self.assertEqual(d1, {0: 1})
 
     def test_dict_subclass_get_method(self):
         class dotdict(dict):
@@ -9340,11 +9364,8 @@ def ___make_guard_fn():
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
-        d1 = collections.deque([a, b])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([a, b])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", a, b])
+        d2 = d1.copy()
 
         def fn(q):
             a = q.pop()
@@ -9353,16 +9374,14 @@ def ___make_guard_fn():
 
         eager = fn(d1)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
     def test_deque_append_left(self):
-        d1 = collections.deque([10, 10])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([10, 10])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", 10, 10])
+        d2 = d1.copy()
 
         def fn(q, a, b):
             q.appendleft(a)
@@ -9373,7 +9392,8 @@ def ___make_guard_fn():
         b = torch.randn([3, 3])
         eager = fn(d1, a, b)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2, a, b)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2, a, b)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))

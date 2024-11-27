@@ -1318,10 +1318,8 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
-        )
-        if istype(value, list):
+        result = BaseListVariable.cls_for_instance(value)(output)
+        if istype(value, (list, collections.deque)):
             return self.set_source_and_track_mutable(value, result)
         return result
 
@@ -1343,7 +1341,8 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         # Get all the values from the range iterator
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
-        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+        result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
