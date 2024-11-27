@@ -1108,7 +1108,7 @@ def is_big_gpu(index) -> bool:
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
-    if torch.version.hip is not None:
+    if torch.version.hip:
         if prop.major < 9 or prop.major == 10:
             log.warning(
                 "GPU arch does not support max_autotune_gemm mode usage"
