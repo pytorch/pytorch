@@ -203,7 +203,7 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def should_reconstruct(self):
+    def has_new_items(self):
         if self.should_reconstruct_all:
             return True
         return any(

@@ -267,7 +267,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         class DummyModule(torch.nn.Module):
             def __init__(self):
-                super(DummyModule, self).__init__()
+                super().__init__()
                 self.a = torch.nn.ModuleDict(
                     {
                         "b": torch.nn.ModuleDict(
