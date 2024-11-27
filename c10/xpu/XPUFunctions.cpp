@@ -56,8 +56,9 @@ inline void initGlobalDevicePoolState() {
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
 
-#ifdef _WIN32
-  // default context feature is disabled by default on Windows.
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  // The default context feature is disabled by default on Windows for SYCL
+  // compiler versions earlier than 2025.0.0.
   std::vector<sycl::device> deviceList;
   for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
        ++it) {
