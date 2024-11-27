@@ -961,9 +961,10 @@ class PatternPrettyPrinter:
         assert hasattr(obj, "pretty_print")
         out_str = obj.pretty_print(pp=pp)
 
-        output = []
-        for key in pp.memoized_objs_names:
-            output.append(f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}")
+        output = [
+            f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
+            for key in pp.memoized_objs_names
+        ]
 
         output.append(f"{output_name} = {out_str}")
 
@@ -1409,9 +1410,7 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> List[Any]:
-        args = []
-        for name in argnames_static:
-            args.append(kwargs.pop(name))
+        args = [kwargs.pop(name) for name in argnames_static]
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
@@ -1740,12 +1739,12 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta  # type: ignore[arg-type]
 
 
 def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
-    for nd in graph.nodes:
+    for nd in graph.nodes:  # type: ignore[union-attr]
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id

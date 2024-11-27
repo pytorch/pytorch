@@ -32,7 +32,7 @@ class WhileLoopOp(HigherOrderOperator):
         cond_fn: Callable,
         body_fn: Callable,
         carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: Tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
         if not isinstance(carried_inputs, tuple):
@@ -44,15 +44,7 @@ class WhileLoopOp(HigherOrderOperator):
                 f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
 
-        if not all(
-            isinstance(t, (torch.Tensor, int, float, bool, torch.SymInt))
-            for t in carried_inputs
-        ):
-            raise RuntimeError(
-                "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
-                f"{carried_inputs}"
-            )
-
+        validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -121,8 +113,24 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
     additional_inputs: Tuple = ()
+
+    # The reason we flatten the output before calling into dynamo is that
+    # we want to create a consistent input ordering for cond_fn and body_fn.
+    # and we also want to the input ordering matches the output ordering.
+    # Also see NOTE: [why we cannot use "automatic" for while_loop]
+    # Construct flat cond_fn and flat_body_fn, which takes flattened inputs
+    flat_inputs, in_spec = pytree.tree_flatten((carried_inputs, additional_inputs))
+
+    def flat_cond_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return cond_fn(*carried, *additional)
+
+    def flat_body_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return body_fn(*carried, *additional)
+
     if torch.compiler.is_dynamo_compiling():
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
         from torch._higher_order_ops.utils import validate_subgraph_args_types
@@ -148,7 +156,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
                     backend = "eager"
                 return torch.compile(
                     _while_loop_op_wrapper, backend=backend, fullgraph=True
-                )(cond_fn, body_fn, carried_inputs, additional_inputs)
+                )(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -188,24 +196,18 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-def _unspecialize_int(fake_mode, t, compute_binding):
-    from torch.fx.experimental.symbolic_shapes import compute_unbacked_bindings
-
+def _unspecialize_int(fake_mode, t):
     assert isinstance(t, int), t
     unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
-    if compute_binding:
-        _ = compute_unbacked_bindings(fake_mode.shape_env, unbacked_idx)
-    if "u15" in str(unbacked_idx):
-        breakpoint()
     return unbacked_idx
 
 
 # We allocate unbacked symints for int inputs since their value
 # can be iteration dependent and we don't really know the value
 # of the integer thus unbacked.
-def unspecialize_ints_with_unbacked_symints(fake_mode, carried_inputs, bind=False):
+def unspecialize_ints_with_unbacked_symints(fake_mode, carried_inputs):
     return tuple(
-        _unspecialize_int(fake_mode, arg, bind) if isinstance(arg, int) else arg
+        _unspecialize_int(fake_mode, arg) if isinstance(arg, int) else arg
         for arg in carried_inputs
     )
 
@@ -227,9 +229,8 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         # We create temporary unbacked symints for int carries to trace subgraph.
         with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
             tracing_carry = unspecialize_ints_with_unbacked_symints(
-                fake_mode, carried_inputs, bind=True
+                fake_mode, carried_inputs
             )
-            print("ignoring fresh unbacked symbols", tracing_carry)
         cond_graph = reenter_make_fx(cond_fn)(*tracing_carry, *additional_inputs)
         body_graph = reenter_make_fx(body_fn)(*tracing_carry, *additional_inputs)
 
