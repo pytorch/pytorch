@@ -215,8 +215,7 @@ class TracerBase:
         kwargs: Dict[str, Any],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
-        # fix noqa after next bc update
-        proxy_factory_fn: Callable[[Node], "Proxy"] = None,  # noqa: RUF013
+        proxy_factory_fn: Optional[Callable[[Node], "Proxy"]] = None,
     ):
         """
         Create a Node from the given arguments, then return the Node
