@@ -576,6 +576,32 @@ class TestMaxAutotune(TestCase):
     def test_empty_conv_input_with_1x1_kernel(self):
         self.test_empty_conv_input(kernel_size=1)
 
+    @config.patch(max_autotune_gemm_backends="TRITON")
+    def test_baddmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(
+                    torch.randn(64, 64, 192, dtype=torch.float16)
+                )
+                self.bias = torch.nn.Parameter(
+                    torch.randn(64, 1, 192, dtype=torch.float16)
+                )
+
+            def forward(self, x):
+                return torch.ops.aten.baddbmm.default(self.bias, x, self.weight)
+
+        x = torch.randn(
+            64, 2048, 64, dtype=torch.float16, requires_grad=False, device="cuda"
+        )
+        mod = M().cuda()
+
+        m_c = torch.compile(mode="max-autotune")(mod)
+        out, code = run_and_get_code(m_c, x)
+        self.assertEqual(out, mod(x))
+
+        FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
+
     @config.patch(max_autotune=True)
     def test_conv1x1_with_free_symbols(self):
         """

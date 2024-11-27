@@ -47,6 +47,7 @@ from torch._dynamo.utils import (
     flatten_graph_inputs,
     get_chromium_event_logger,
     lazy_format_graph_code,
+    set_feature_use,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -93,6 +94,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import get_device_type, IRNode
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -746,6 +748,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -763,6 +766,7 @@ def _compile_fx_inner(
                 remote=fx_graph_remote_cache,
             )
         else:
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
@@ -960,12 +964,13 @@ def fx_codegen_and_compile(
                     p = SymExprPrinter()
                     for out in graph.graph_outputs:
                         if (
-                            hasattr(out, "layout")
-                            and len(free_unbacked_symbols(out.layout.stride)) == 0
+                            isinstance(out, IRNode)
+                            and out.has_tensor_output()
+                            and len(free_unbacked_symbols(out.get_stride())) == 0
                         ):
                             # Convert to string for eval on the load path
                             output_strides.append(
-                                tuple(p.doprint(s) for s in out.layout.stride)
+                                tuple(p.doprint(s) for s in out.get_layout().stride)
                             )
                         else:
                             output_strides.append(None)
@@ -1722,12 +1727,12 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
             tracing_context
-        ), compiled_autograd.disable(), functorch_config.patch(
+        ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
             return aot_autograd(
@@ -1800,7 +1805,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
@@ -1808,8 +1813,10 @@ def handle_dynamo_export_graph(
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
-    def warn_and_skip(device: torch.device) -> Never:
+    def warn_and_skip(device: Optional[torch.device]) -> Never:
         from torch._dynamo.exc import SkipFrame
+
+        assert device is not None
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
@@ -1818,24 +1825,19 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         )
         raise SkipFrame("BF16 is not supported")
 
-    for inp in graph.graph_inputs.values():
-        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
+    for node in itertools.chain(graph.graph_inputs.values(), graph.graph_outputs):
+        if not isinstance(node, IRNode):
+            continue
+        device_type = get_device_type(node)
+        if (
+            not device_type
+            or not is_gpu(device_type)
+            or node.get_dtype() != torch.bfloat16
+        ):
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
+        device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
-        warn_and_skip(device)
-
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
+        warn_and_skip(node.get_device())

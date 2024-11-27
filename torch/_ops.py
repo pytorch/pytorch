@@ -268,8 +268,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
 
-        self.dispatch_depth = 0
-
         # [NOTE] We have to register pre-dispatch key implementation
         # because sometimes HOP use aot-dispatch tracing to detect certaion
         # mutations. This is problematic when we are functionalizing HOP
@@ -338,12 +336,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                     with _pop_mode_temporarily() as mode:
                         # "natural" calling convention: (mode, *args, **kwargs)
                         # TODO(rzou): we should support torch_dispatch calling convention too.
-                        print(
-                            f"{self.dispatch_depth * ' '}{self._name}:",
-                            type(mode),
-                            args,
-                            kwargs,
-                        )
                         result = handler(mode, *args, **kwargs)
                 else:
                     raise NotImplementedError(
@@ -441,14 +433,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 )
 
             dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            dispatch_key = dispatch_key_set.highestPriorityTypeId()
-            print(f"{self.dispatch_depth * ' '}dispatching", self, "to ", dispatch_key)
-            self.dispatch_depth += 1
-            ret = self.dispatch(
+            return self.dispatch(
                 dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
-            self.dispatch_depth -= 1
-            return ret
 
         return wrapper()
 

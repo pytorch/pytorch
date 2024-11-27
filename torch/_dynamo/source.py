@@ -673,17 +673,6 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class HopUnspecializedIntSource(Source):
-    const_int: int
-
-    def name(self):
-        return str(self.const_int)
-
-    def guard_source(self):
-        pass
-
-
-@dataclasses.dataclass(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 
