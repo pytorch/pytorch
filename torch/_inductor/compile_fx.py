@@ -54,7 +54,11 @@ from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, FxGraphCache
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.output_code import CompiledFxGraph, get_expanded_dims, index_expanded_dims
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    get_expanded_dims,
+    index_expanded_dims,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
