@@ -580,8 +580,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 .check_regex(
                     "torch.ops._c10d_functional.all_to_all_single.default\\("
                     "arg\\d+_\\d+, "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\], "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\]"
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\], "
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\]"
                 )
                 .run(code)
             )

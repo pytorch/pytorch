@@ -386,8 +386,8 @@ test_inductor_cpp_wrapper() {
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
   # unit tests with cpp wrapper.
-  python test/run_test.py --include inductor/test_torchinductor.py --verbose
-
+  python test/run_test.py -i inductor/test_torchinductor.py --verbose
+  python test/run_test.py -i inductor/test_torchinductor_opinfo.py --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -951,6 +951,9 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/FileStoreTest
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
+
+    echo "Testing multi-GPU linalg tests"
+    python test/run_test.py -i test_linalg.py -k test_matmul_offline_mgpu_tunable --verbose
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       MPIEXEC=$(command -v mpiexec)
