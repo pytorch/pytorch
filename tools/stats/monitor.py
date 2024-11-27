@@ -20,7 +20,7 @@ import json
 import signal
 import time
 from datetime import timezone
-from typing import Any
+from typing import Any, Dict
 
 import psutil  # type: ignore[import]
 
@@ -166,34 +166,35 @@ class UsageLogger:
             return
         print(json.dumps(stats))
 
-    def _collect_gpu_data(self) -> dict[str, Any]:
-        info = {}
+    def _collect_gpu_data(self) -> list[Dict[str, Any]]:
+        gpu_data_list = []
         if self._has_pynvml:
             # Iterate over the available GPUs
             for idx, gpu_handle in enumerate(self._gpu_handles):
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_processes = self._get_per_process_gpu_info(gpu_handle)
-                info.update(
+                gpu_data_list.append(
                     {
-                        f"total_gpu_utilization_{idx}": gpu_utilization.gpu,
-                        f"total_gpu_mem_utilization_{idx}": gpu_utilization.memory,
-                        f"gpu_processes_{idx}": gpu_processes,
-                    }
-                )
+                        "idx": idx,
+                        "total_gpu_utilization": gpu_utilization.gpu,
+                        "total_gpu_mem_utilization": gpu_utilization.memory,
+                        "gpu_processes": gpu_processes,
+                    })
         elif self._has_amdsmi:
             # Iterate over the available GPUs
             for idx, handle in enumerate(self._gpu_handles):
                 gpu_utilization = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_processes = self._rocm_get_per_process_gpu_info(handle)
                 gpu_meme_utilization = gpu_utilization["umc_activity"]
-                info.update(
+                gpu_data_list.append(
                     {
-                        f"total_gpu_utilization_{idx}": gpu_utilization["gfx_activity"],
-                        f"total_gpu_mem_utilization_{idx}": gpu_meme_utilization,
-                        f"gpu_processes_{idx}": gpu_processes,
+                        "idx": idx,
+                        "total_gpu_utilization": gpu_utilization["gfx_activity"],
+                        "total_gpu_mem_utilization": gpu_meme_utilization,
+                        "gpu_processes": gpu_processes,
                     }
                 )
-        return info
+        return gpu_data_list
 
     def _initial_gpu_handler(self) -> None:
         """
