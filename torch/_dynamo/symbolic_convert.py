@@ -435,7 +435,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
             user_stack_trace,
-            exc_info=exc_info,
         )
     else:
         # This log line MUST not contain the string "Graph break in user code",
@@ -2782,7 +2781,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     dummy_cell = types.CellType(value)
                     cell_source = LocalCellSource(name)
                     contents_source = LocalSource(
-                        name, is_input=True, is_root_frame_cell=True
+                        name, is_input=True, is_derefed_cell_contents=True
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
@@ -2799,7 +2798,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # effectively implementing the `COPY_FREE_VARS` instruction.
             for name, cell in zip(self.freevars(), closure):
                 cell_source = LocalCellSource(name)
-                contents_source = LocalSource(name, is_root_frame_cell=True)
+                contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
                         cell.cell_contents, contents_source

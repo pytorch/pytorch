@@ -107,12 +107,13 @@ class LocalSource(Source):
     # Whether this local is an input to the root frame.
     is_input: bool = False
 
-    # Whether the item at this source is the _content_ of a cell that is native
-    # to the root frame, i.e., a part of its `co_cellvars` or `co_freevars`.
-    is_root_frame_cell: bool = False
+    # Whether the item at this source is the _content_ of a cell that is
+    # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
+    # or `co_freevars`.
+    is_derefed_cell_contents: bool = False
 
     def reconstruct(self, codegen):
-        if self.is_root_frame_cell:
+        if self.is_derefed_cell_contents:
             codegen.load_deref(self.local_name)
         else:
             codegen.append_output(codegen.create_load(self.local_name))
