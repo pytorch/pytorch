@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
-from torch.ao.quantization.pt2e.graph_utils import get_control_flow_submodules
+from torch.ao.quantization.pt2e.graph_utils import bfs_trace_with_node_process
 from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
@@ -44,23 +44,6 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
 
     unique_id = 0
 
-    def _bfs_trace_graph_with_node_process(node_op: Callable) -> None:
-        nonlocal ep
-        queue = [ep.graph_module]
-        while queue:
-            current_graph_module = queue.pop(0)
-            for node in current_graph_module.graph.nodes:
-                if node.op in ["output", "placeholder"]:
-                    continue
-
-                node_op(node)
-
-            control_flow_submodules = [
-                submodule
-                for _, submodule, _ in get_control_flow_submodules(current_graph_module)
-            ]
-            queue.extend(control_flow_submodules)
-
     def _find_max_id(node: torch.fx.Node) -> None:
         nonlocal unique_id
         unique_id = max(
@@ -79,13 +62,13 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     # Find the max ID that exists in the graph first, in case part of the graph
     # has already been annotated. This way we guarantee there are no duplicate
     # handle IDs.
-    _bfs_trace_graph_with_node_process(_find_max_id)
+    bfs_trace_with_node_process(ep, _find_max_id)
 
     unique_id += 1
 
     # Assign debug handles to all nodes in the graph that don't have one based on the
     # max ID found in the previous step.
-    _bfs_trace_graph_with_node_process(_assign_debug_handle)
+    bfs_trace_with_node_process(ep, _assign_debug_handle)
 
 
 class OutputLogger(torch.nn.Module):
