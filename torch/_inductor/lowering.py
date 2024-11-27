@@ -3373,6 +3373,39 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 
 
 def index_put_impl_(self, indices, values, accumulate, check):
+    def try_get_name(x):
+        if isinstance(x, ir.TensorBox):
+            x = x.data
+        if isinstance(x, ir.BaseView):
+            x = x.unwrap_view()
+        if isinstance(x, ir.StorageBox):
+            x = x.data
+        return x.get_name() if isinstance(x, ir.Buffer) else None
+
+    def indice_slice_from_randperm(indice):
+        # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
+        # For this specific pattern, indices is unique as coming from torch.randperm.
+        # However, as the content of the indices is unknown, we have to check this specific pattern.
+        if isinstance(indice, TensorBox) and isinstance(indice.data, ir.BaseView):
+            indice = indice.data.unwrap_view()
+            return (
+                isinstance(indice, ir.StorageBox)
+                and isinstance(indice.data, ir.ExternKernel)
+                and getattr(indice.data, "fx_node", None)
+                and indice.data.fx_node.target == torch.ops.aten.randperm.default
+            )
+        return False
+
+    if try_get_name(self) in values.get_read_names() and not all(
+        indice_slice_from_randperm(indice) for indice in indices
+    ):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/138908
+        # When self and values have memory overlapping, indices may
+        # contain duplicate values, potentially causing incorrect results since
+        # the load of `values` might contain modified value from the store of `self`.
+        # To address this, store values in a temporary buffer in such cases.
+        values.realize()
+
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1

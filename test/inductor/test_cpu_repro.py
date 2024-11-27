@@ -924,6 +924,72 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_index_put(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y):
+            x = x + 10
+            y[x] += y[x]
+
+        x = torch.randint(-10, -9, (1, 2), dtype=torch.int64)
+        y = torch.randn((2, 32), dtype=torch.float32)
+        x_clone = x.clone()
+        y_clone = y.clone()
+        with torch.no_grad():
+            fn(x, y)
+            torch.compile(fn)(x_clone, y_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_put2(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(y, index0, index1):
+            y[index1] += y[index0]
+
+        y = torch.randn((2, 32), dtype=torch.float32)
+        index0 = torch.tensor([[0, 1]])
+        index1 = torch.tensor([[1, 0]])
+        y_clone = y.clone()
+        index0_clone = index0.clone()
+        index1_clone = index1.clone()
+        with torch.no_grad():
+            fn(y, index0, index1)
+            torch.compile(fn)(y_clone, index0_clone, index1_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_add(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y, scale_y, index):
+            values = x[index] + y * scale_y
+            out = x.index_add_(dim=0, source=values, index=index)
+            return out
+
+        inp = (
+            torch.randn(10, 10),
+            torch.randn(5, 10),
+            torch.randn(10),
+            torch.randperm(10, device="cpu")[:5].to(torch.int32),
+        )
+        inp_clones = []
+        for i in range(3):
+            inp_clones.append(
+                [
+                    inp[0].clone(),
+                    inp[1].clone(),
+                    inp[2].clone(),
+                    inp[3].clone()
+                    if i == 0
+                    else torch.zeros(10, device="cpu")[:5].to(torch.int32),
+                ]
+            )
+        inp_clone, inp_clone2, inp_clone3 = inp_clones
+        with torch.no_grad():
+            cfn = torch.compile(fn)
+            ref = fn(*inp)
+            res = cfn(*inp_clone)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+            ref = fn(*inp_clone2)
+            res = cfn(*inp_clone3)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
