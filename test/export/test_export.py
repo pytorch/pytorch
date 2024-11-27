@@ -870,6 +870,17 @@ graph():
         ep_res = torch.export.export(M(), input).module()(*input)
         self.assertEqual(orig_res, ep_res)
 
+    def test_symfloat_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([3.14], dtype=torch.float),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -3259,9 +3270,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(20),),
             fixes=[
                 # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check(((i//2)) != 0)",
+                "torch._check((i // 2) != 0)",
                 # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check(((i//2)) != 1)",
+                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -6544,8 +6555,6 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
-    @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 
