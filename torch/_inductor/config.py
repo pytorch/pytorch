@@ -798,6 +798,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
+# When True, complex_memory_overlap always reports True
+always_complex_memory_overlap_TESTING_ONLY: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
