@@ -648,12 +648,6 @@ def _compile_fx_inner(
             ):
                 input._is_inductor_static = True  # type: ignore[attr-defined]
 
-        # TODO: Remove this short circuit once types are unified here
-        if aot_mode:
-            return codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
-            )  # type: ignore[assignment]
-
         mb_compiled_graph: Optional[OutputCode] = None
         key_info = None
         cache_info = None
@@ -1068,7 +1062,7 @@ def fx_codegen_and_compile(
                         V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
-                    assert isinstance(compiled_fn, str)
+                    assert isinstance(compiled_fn, (str, list))
                     return CompiledAOTI(compiled_fn)
 
                 # TODO: Hoist this above V.aot_compilation
