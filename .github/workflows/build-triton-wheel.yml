@@ -46,6 +46,10 @@ jobs:
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
         device: ["cuda", "rocm"]
+        docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
+        exclude:
+          - device: "rocm"
+            docker-image: "pytorch/manylinux2_28-builder"
         include:
           - device: "rocm"
             rocm_version: "6.2"
@@ -53,7 +57,7 @@ jobs:
             rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux2_28-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
@@ -118,6 +122,11 @@ jobs:
             RELEASE="--release"
           fi
 
+          PLATFORM="manylinux_2_28_x86_64"
+          if [[ "${{ matrix.device }}" == "pytorch/manylinux-builder:cpu" ]]; then
+            PLATFORM="manylinux2014_x86_64"
+          fi
+
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
           if [[ "${{ matrix.device }}" == "cuda" ]]; then
@@ -126,8 +135,7 @@ jobs:
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           if [[ "${{ matrix.device }}" == "cuda" ]]; then
-            docker exec -t "${container_name}"  bash -c "ls -las //artifacts/"
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat manylinux_2_28_x86_64 //artifacts/*.whl"
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
