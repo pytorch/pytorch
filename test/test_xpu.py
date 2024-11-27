@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
@@ -235,6 +236,20 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        if int(torch.version.xpu) >= 20250000:
+            start_event.elapsed_time(end_event)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
