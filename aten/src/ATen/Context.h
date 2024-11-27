@@ -44,47 +44,37 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
-    } else if (device_type == at::kMPS) {
-      return at::detail::getMPSHooks().getDefaultMPSGenerator();
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
-    } else if (device_type == at::kIPU) {
-      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
-    } else if (device_type == at::kHPU) {
-      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
-          device.index());
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type)
+          .getDefaultGenerator(device.index());
     }
   }
 
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
       std::optional<c10::DeviceType> opt_device_type = std::nullopt) {
-    c10::DeviceType device_type = opt_device_type.has_value()
-        ? opt_device_type.value()
-        : at::getAccelerator(true).value();
-    if (device_type == at::kCUDA) {
+    if (!opt_device_type.has_value()) {
+      opt_device_type = at::getAccelerator(true);
+    }
+    if (opt_device_type == at::kCUDA) {
       return at::detail::getCUDAHooks();
-    } else if (device_type == at::kXPU) {
+    } else if (opt_device_type == at::kXPU) {
       return at::detail::getXPUHooks();
-    } else if (device_type == at::kMPS) {
+    } else if (opt_device_type == at::kMPS) {
       return at::detail::getMPSHooks();
-    } else if (device_type == at::kPrivateUse1) {
+    } else if (opt_device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks();
-    } else if (device_type == at::kMTIA) {
+    } else if (opt_device_type == at::kMTIA) {
       return at::detail::getMTIAHooks();
-    } else if (device_type == at::kHIP) {
+    } else if (opt_device_type == at::kHIP) {
       return at::detail::getHIPHooks();
-    } else if (device_type == at::kHPU) {
+    } else if (opt_device_type == at::kHPU) {
       return at::detail::getHPUHooks();
     } else {
       TORCH_CHECK(
           false,
-          c10::DeviceTypeName(device_type),
+          opt_device_type.has_value()
+              ? c10::DeviceTypeName(opt_device_type.value())
+              : "None",
           " device type not an accelerator.");
     }
   }
