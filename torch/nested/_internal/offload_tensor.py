@@ -133,7 +133,7 @@ class OffloadTensorRegistry:
         # hook(host_tensor, device_tensor) -> None
         self.offload_hook = None
 
-    def create(self, device, device_tensor, host_tensor, offload_hook):
+    def create(self, device, device_tensor, host_tensor):
         ret = OffloadTensor(
             device=device,
             device_tensor=device_tensor,

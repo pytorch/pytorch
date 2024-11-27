@@ -1,5 +1,4 @@
 import torch
-from torch.nested._internal.tensor_registry import register_tensor, try_get_int
 from torch.utils import _pytree as pytree
 
 
@@ -39,16 +38,6 @@ class CachedTensor(torch.Tensor):
         return out
 
     def __init__(self, metadata: dict, source_fields=None, extra_fields=()):
-        # All source fields are registered, last non-None source field is the inner_id
-        self.inner_id = None
-        for k, v in metadata.items():
-            if k in source_fields:
-                if try_get_int(v) is None:
-                    self.inner_id = register_tensor(v)
-                else:
-                    self.inner_id = try_get_int(v)
-        # Why is inner_id none?
-        assert self.inner_id is not None
         self.source_fields = source_fields
         self.extra_fields = extra_fields
         self.all_fields = source_fields + extra_fields

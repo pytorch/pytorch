@@ -2,6 +2,8 @@ from typing import *  # noqa: F403
 
 import torch
 from torch.fx.experimental.constant_symnode import ConstantIntNode
+from torch.nested._internal.tensor_registry import register_tensor, try_get_int
+from torch.nested._internal.utils import apply_func
 
 
 __all__ = ["NestedIntNode"]
@@ -34,19 +36,26 @@ def _ge(lhs: Any, rhs: Any) -> bool:
         raise ValueError("inputs unsupported")
 
 
+def _get_tensor_id(t) -> int:
+    ret = None
+
+    def func(t):
+        nonlocal ret
+
+        if try_get_int(t) is None:
+            ret = register_tensor(t)
+        else:
+            ret = try_get_int(t)
+
+    apply_func(t, func, only_source_fields=True)
+    assert ret is not None
+    return ret
+
+
 class NestedIntNode:
     def __init__(self, cache: torch.Tensor, coeff: int):
         self.cache = cache
-        from torch.nested._internal.nested_tensor import source_fields
-        from torch.nested._internal.tensor_registry import try_get_int
-
-        self.t_id = -1
-        for k in source_fields:
-            if (v := cache.metadata.get(k)) is not None:
-                if (t_id := try_get_int(v)) is not None:
-                    self.t_id = t_id
-                    break
-        assert self.t_id >= 0
+        self.t_id = _get_tensor_id(cache)
         self.coeff = coeff
 
     def nested_int_coeff(self) -> int:

@@ -2973,6 +2973,18 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
+    def test_in_graph_construction_from_intermediate_4_2(self):
+        # Shared intermediate (should be same as case #1)
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64, device="cuda")
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5, device="cuda").requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
     # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
     @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
