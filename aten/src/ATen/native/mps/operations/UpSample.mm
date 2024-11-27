@@ -271,14 +271,15 @@ static void upsample_bicubic2d_out_template(const Tensor& input,
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-      mtl_setBytes(computeEncoder, input_strides, 2);
-      mtl_setBytes(computeEncoder, output_strides, 3);
-      mtl_setBytes(computeEncoder, input_sizes, 4);
-      mtl_setBytes(computeEncoder, output_sizes, 5);
-      mtl_setBytes(computeEncoder, scales, 6);
-      mtl_setBytes(computeEncoder, align_corners, 7);
+      mtl_setArgs(computeEncoder,
+                  input,
+                  output,
+                  input_strides,
+                  output_strides,
+                  input_sizes,
+                  output_sizes,
+                  scales,
+                  align_corners);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
     }
   });
@@ -313,14 +314,15 @@ static void upsample_bicubic2d_backward_out_template(const Tensor& grad_input,
           grad_input.stride(3), grad_input.stride(2), grad_input.stride(1), grad_input.stride(0)};
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setBuffer(computeEncoder, grad_input, 0);
-      mtl_setBuffer(computeEncoder, grad_output, 1);
-      mtl_setBytes(computeEncoder, input_strides, 2);
-      mtl_setBytes(computeEncoder, output_strides, 3);
-      mtl_setBytes(computeEncoder, input_sizes, 4);
-      mtl_setBytes(computeEncoder, output_sizes, 5);
-      mtl_setBytes(computeEncoder, scales, 6);
-      mtl_setBytes(computeEncoder, align_corners, 7);
+      mtl_setArgs(computeEncoder,
+                  grad_input,
+                  grad_output,
+                  input_strides,
+                  output_strides,
+                  input_sizes,
+                  output_sizes,
+                  scales,
+                  align_corners);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, output_size[0] * output_size[1]);
     }
   });
