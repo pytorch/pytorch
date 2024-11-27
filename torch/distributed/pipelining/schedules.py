@@ -1537,7 +1537,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx not in unsharded_stages
                             and stage_idx not in unshard_ops
                         ), f"Unsharding the same {stage_idx=} twice"
-                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)
+                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
                 elif comp_type == RESHARD:
                     if stage_uses_fsdp:
                         assert (
@@ -1546,7 +1546,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         assert (
                             stage_idx not in unshard_ops
                         ), f"Resharding {stage_idx=} before finishing unshard"
-                        stage.submod.reshard()
+                        stage.submod.reshard()  # type: ignore[operator]
                 elif comp_type == FORWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
@@ -1702,16 +1702,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         )
 
         # Store the list of operations used for that rank
-        rank_ops: List[Optional[_Action]] = []
         # Pre-padding, rank starts with no-ops based on the warmup.
-        for _ in range(rank):
-            rank_ops.append(None)
+        rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
 
         for stage_index in stage_indices:
-            for mb_index in range(self._n_microbatches):
-                rank_ops.append(
-                    _Action(stage_index, _ComputationType.FORWARD, mb_index)
-                )
+            rank_ops.extend(
+                _Action(stage_index, _ComputationType.FORWARD, mb_index)
+                for mb_index in range(self._n_microbatches)
+            )
 
         # wait for the first backward to trickle up
         # which is 2 for every hop away
@@ -1719,10 +1717,10 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         rank_ops.extend([None] * post_warmup_ops)
 
         for stage_index in reversed(stage_indices):
-            for mb_index in reversed(range(self._n_microbatches)):
-                rank_ops.append(
-                    _Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index)
-                )
+            rank_ops.extend(
+                _Action(stage_index, _ComputationType.FULL_BACKWARD, mb_index)
+                for mb_index in reversed(range(self._n_microbatches))
+            )
         return rank_ops
 
 
@@ -1744,10 +1742,8 @@ def _get_1f1b_rank_ops(
     weight_stage_mb_index: Dict[int, int] = defaultdict(int)
 
     # Store the list of operations used for that rank
-    rank_ops: List[Optional[_Action]] = []
     # Pre-padding, rank starts with no-ops based on the warmup.
-    for _ in range(rank):
-        rank_ops.append(None)
+    rank_ops: List[Optional[_Action]] = [None for _ in range(rank)]
     # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
     # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
     # Formula:

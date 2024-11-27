@@ -476,10 +476,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
-        ? ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming)
+        ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
+              .create(enableTiming)
         : nullptr;
-    ncclEndEvent_ =
-        ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
+    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
+                        .create(enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -828,10 +829,27 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
-ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
-  // Return a singleton instance of CUDAEventCache.
-  static ProcessGroupNCCL::CUDAEventCache cache;
-  return cache;
+ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
+    at::DeviceIndex device) {
+  // A per-thread singleton of device-to-CUDAEventCache map.
+  // Map is needed because events cannot be reused across devices.
+  // Per-thread ownership is needed to support multi-threaded case (instead of
+  // multi-process case).
+  static thread_local std::
+      map<at::DeviceIndex, ProcessGroupNCCL::CUDAEventCache>
+          cacheDeviceMap;
+  // Check if device has already been in the map, if not, add a new entry
+  auto it = cacheDeviceMap.find(device);
+  if (it == cacheDeviceMap.end()) {
+    // Use in-place contruction, which avoids move or copy of the cache
+    // (the mutex of the cache is not movable/copiable)
+    it = cacheDeviceMap.emplace_hint(
+        it,
+        std::piecewise_construct,
+        std::forward_as_tuple(device),
+        std::forward_as_tuple());
+  }
+  return it->second;
 }
 
 static std::atomic<size_t> process_group_id = 0;
@@ -885,7 +903,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
-  cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, false));
+  cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
@@ -1113,11 +1131,6 @@ bool ProcessGroupNCCL::isInitialized() {
   return initialized;
 }
 
-ErrorType ProcessGroupNCCL::getError() {
-  std::lock_guard<std::mutex> lock(errorMutex_);
-  return error_;
-}
-
 void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
   const auto key = std::to_string(pool->device());
   auto device = at::Device(at::DeviceType::CUDA, pool->device());
@@ -1335,18 +1348,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-    at::cuda::OptionalCUDAGuard gpuGuard;
-    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
-    if (deviceIndex >= 0) {
-      // For P2P comms, the deviceIndex could be -1 (invalid), as the keys in
-      // the map could be non deviceIndex, but rank to rank numbers. So we
-      // indeed need to check if deviceIndex >= 0
-      // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
-      gpuGuard.set_index(deviceIndex);
-    }
-
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
+    // abort() call now has GPU guard inside
     ncclComm->abort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -1590,7 +1594,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         bool checkExceptionDump = false;
         try {
           checkExceptionDump =
-              globalStore_->check({std::string(kStoreDumpKey)});
+              globalStore_->check({std::string(EXCEPTION_DUMP)});
         } catch (const std::exception& e) {
           LOG(WARNING)
               << logPrefix()
@@ -1610,7 +1614,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           shouldDump_.store(true);
           try {
-            auto vec = globalStore_->get(std::string(kStoreDumpKey));
+            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -1940,91 +1944,38 @@ bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
       DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
-void ProcessGroupNCCL::broadcastSignal(
-    c10::intrusive_ptr<Store>& store,
-    const std::string& signal,
-    int srcRank) {
-  try {
-    auto vec = std::vector<uint8_t>(
-        reinterpret_cast<uint8_t*>(&srcRank),
-        reinterpret_cast<uint8_t*>(&srcRank) + sizeof(srcRank));
-    store->set(signal, vec);
-    LOG(ERROR) << logPrefix() << "Broadcasting signal " << signal
-               << " to other ranks via TCPStore.";
-  } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Failed to broadcast signal " << signal
-               << " through TCPStore. Error: " << e.what();
-  }
-}
-
-int ProcessGroupNCCL::getSignalSrcRank(
-    c10::intrusive_ptr<Store>& store,
-    const std::string& signal) {
-  // This function is 'non blocking'. We first 'check' if the key exists in the
-  // store, then read/get the value only if the key exists.
-  int srcRank = -1;
-  bool signalExists = false;
-  try {
-    signalExists = store->check({signal});
-  } catch (const std::exception& e) {
-    LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
-                 << " on TCPStore, " << e.what();
-  }
-
-  if (signalExists) {
-    // key exists, now read and parse the value (source rank)
-    try {
-      auto vec = store->get(std::string(signal));
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          vec.size() == sizeof(int),
-          "Invalid size for the timeout rank ID");
-      std::memcpy(&srcRank, vec.data(), vec.size());
-    } catch (const std::exception& e) {
-      LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
-                 << signal << " from TCPStore." << e.what();
-    }
-  }
-  return srcRank;
-}
-
+// Broadcast flight-recorder dump signal
 void ProcessGroupNCCL::broadcastDumpSignal() {
-  // broadcast dump signal to all other global ranks.
-  broadcastSignal(globalStore_, std::string(kStoreDumpKey), globalRank());
-  // signal the local rank to start dumping
-  if (!shouldDump_.load()) {
-    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
-  }
-  // signal the monitor thread on PG0 to start dumping
-  shouldDump_.store(true);
-  // Give time for dumping before throwing exception
-  auto start = std::chrono::steady_clock::now();
-  auto status = promiseFlightRecorderDump_.get_future().wait_for(
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-  if (status == std::future_status::timeout) {
-    LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                 << waitTimeoutDumpInMilSec_ << "ms"
-                 << " flight recorder dumps to finish.";
-  } else if (status == std::future_status::ready) {
-    auto end = std::chrono::steady_clock::now();
-    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-              << "ms"
-              << " giving time for flight recorder dumps to finish.";
-  }
-}
-
-void ProcessGroupNCCL::checkAndSetRemoteError() {
-  // if the error is already set, no need to check again
-  if (getError() != ErrorType::SUCCESS) {
-    return;
-  }
-  int remoteErrorRank =
-      getSignalSrcRank(store_, std::string(kStoreErrorSignalKey));
-  if (remoteErrorRank != -1) {
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    error_ = ErrorType::REMOTE_ERROR;
-    LOG(ERROR) << c10::str(
-        logPrefix(), " remote error detected from rank: ", remoteErrorRank);
+  try {
+    auto rank = globalRank();
+    auto vec = std::vector<uint8_t>(
+        reinterpret_cast<uint8_t*>(&rank),
+        reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
+    globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+    if (!shouldDump_.load()) {
+      LOG(ERROR)
+          << logPrefix()
+          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+    }
+    // signal the monitor thread on PG0 to start dumping
+    shouldDump_.store(true);
+    // Give time for dumping before throwing exception
+    auto start = std::chrono::steady_clock::now();
+    auto status = promiseFlightRecorderDump_.get_future().wait_for(
+        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+    if (status == std::future_status::timeout) {
+      LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                   << waitTimeoutDumpInMilSec_ << "ms"
+                   << " flight recorder dumps to finish.";
+    } else if (status == std::future_status::ready) {
+      auto end = std::chrono::steady_clock::now();
+      LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
+                << "ms"
+                << " giving time for flight recorder dumps to finish.";
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Failed to set dump signal in tcpstore. "
+               << "Error: " << e.what();
   }
 }
 
@@ -2091,9 +2042,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
 
-    // Check and set remote error if it has not been set before
-    checkAndSetRemoteError();
-
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
@@ -2106,13 +2054,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
-      if (work.exception()) {
-        // set the error to the first error found
-        std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::SUCCESS) {
-          error_ = ErrorType::COMM_ERROR;
-        }
-      }
       // Then check if work has timed out
       // Skip if work has encountered an error
       bool timedout = !work.exception() && work.checkTimeout();
@@ -2120,10 +2061,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
       if (timedout) {
-        std::lock_guard<std::mutex> lock(errorMutex_);
-        if (error_ == ErrorType::SUCCESS) {
-          error_ = ErrorType::TIMEOUT;
-        }
         desyncDebugger_.run();
       }
 
@@ -2137,9 +2074,6 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastEnqueuedSeq,
             ", last completed work: ",
             pgStatus_->lastCompletedSeq);
-
-        // broadcast remote error signal to all other ranks in this specific PG.
-        broadcastSignal(store_, std::string(kStoreErrorSignalKey), rank_);
 
         // Print the traceback of the collective at call time
         work.printTraceback();
@@ -2564,9 +2498,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     }
 
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID, options_->config);
+    ncclComm =
+        NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID);
+    ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
 #endif
   }
 
