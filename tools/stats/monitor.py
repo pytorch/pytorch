@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     Returns:
         argparse.Namespace: Parsed arguments.
     """
-    parser = argparse.ArgumentParser(description=" System-level Usage Logger")
+    parser = argparse.ArgumentParser(description=" System-level Usage Logger ")
 
     # debug mode used in local to gracefully exit the script when ctrl+c is pressed, and print out the json output in a pretty format.
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
