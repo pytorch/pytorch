@@ -9,8 +9,8 @@ from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, TypedDict, U
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import MultiOutputLayout, NoneLayout
-from .utils import get_dtype_size
+from .ir import MultiOutputLayout, NoneLayout, Operation
+from .utils import get_dtype_size, is_collective
 from .virtualized import V
 
 
@@ -58,6 +58,17 @@ class FreeableInputBuffer:
 
     def __hash__(self) -> int:
         return hash(self.name)
+
+
+def is_torchrec_collective(ir_node: Operation) -> bool:
+    # TODO: this is a temporary solution to ensure that we can identify torchrec's
+    # communication ops. But in order to allow better communication and computation
+    # overlap, torchrec's communication ops should be not used.
+    return getattr(ir_node, "python_kernel_name", None) in (
+        "torch.ops.torchrec.all_to_all_single.default",
+        "torch.ops.torchrec.reduce_scatter_tensor",
+        "torch.ops.torchrec.all_gather_into_tensor",
+    )
 
 
 def get_freeable_input_buf(
@@ -427,13 +438,50 @@ def topological_sort_lpmf(
             if buf_info[buf]["outdegree"] == 0:
                 node_info[node]["memory_to_free"] += buf.mpi_buffer.size_free
 
+    # get list of collective nodes
+    collective_indices_remaining = [
+        node.mpi_node.index
+        for node in nodes
+        if (node.node)
+        and (is_collective(node.node) or is_torchrec_collective(node.node))
+    ]
+    next_collective_index = (
+        collective_indices_remaining.pop(0)
+        if collective_indices_remaining
+        else len(nodes)
+    )
+    need_new_subgraph = True
+    nodes_to_schedule_allowed = nodes_to_schedule
+
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
     num_iters: int = 0
     while num_iters < len(nodes) and nodes_to_schedule:
+        # if there is a collective node in the graph, we restrict reordering to nodes
+        # that are before the next collective node
+        if collective_indices_remaining:
+            if num_iters == next_collective_index:
+                nodes_to_schedule_allowed = OrderedSet([nodes[next_collective_index]])
+                next_collective_index = (
+                    collective_indices_remaining.pop(0)
+                    if collective_indices_remaining
+                    else len(nodes)
+                )
+                need_new_subgraph = True
+            elif need_new_subgraph:
+                nodes_to_schedule_allowed = OrderedSet(
+                    [
+                        node
+                        for node in nodes_to_schedule
+                        if node.mpi_node.index < next_collective_index
+                    ]
+                )
+                need_new_subgraph = False
+
         # select a node to schedule:
+        assert nodes_to_schedule_allowed
         selected_node = min(
-            nodes_to_schedule,
+            nodes_to_schedule_allowed,
             key=lambda node: (
                 max(live_memory + node.mpi_node.size, max_memory),
                 node.mpi_node.size - node_info[node]["memory_to_free"],
@@ -600,6 +648,8 @@ def reorder_for_peak_memory(
     """
 
     torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
+    if len(nodes) == 0:
+        return nodes
 
     @dataclasses.dataclass
     class PeakMemoryResult:
@@ -628,6 +678,14 @@ def reorder_for_peak_memory(
         PeakMemoryResult(nodes, estimated_peak_memory, "baseline")
     )
     torch_log.info("Baseline peak memory: %d", estimated_peak_memory)
+
+    # if there are collectives, only run lpmf
+    if any(
+        is_collective(node.node) or is_torchrec_collective(node.node)
+        for node in nodes
+        if node.node
+    ):
+        methods = [topological_sort_lpmf]
 
     # other methods
     for method in methods:
