@@ -635,7 +635,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 AOTAutogradCache.clear()
 
                 with mock.patch(
-                    "torch._inductor.compile_fx.complex_memory_overlap",
+                    "torch._inductor.output_code.complex_memory_overlap",
                     new=complex_memory_overlap_new,
                 ):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
