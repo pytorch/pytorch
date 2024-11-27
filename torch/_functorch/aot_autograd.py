@@ -962,11 +962,11 @@ def handle_dynamo_gm(
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
     # Additionally, we mark static indices for cudagraphs.
 
-    assert "_param_name_to_source" in mod.meta
-    param_name_to_source = mod.meta["_param_name_to_source"]
-    aot_autograd_arg_pos_to_source = []
+    assert hasattr(mod, "_param_name_to_source")
+    param_name_to_source = mod._param_name_to_source
     seen_sources = set()
 
+    aot_autograd_arg_pos_to_source = []
     # Collect the new inputs lifted by aotdispatch
     for name in params.keys():
         assert name in param_name_to_source, f"{name} not found."

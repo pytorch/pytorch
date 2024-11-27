@@ -1109,13 +1109,16 @@ class ExportResult(NamedTuple):
     # destructuring so it is BC-breaking
 
 
-def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
+# NOTE: this function only supports graphs created by Dynamo's OutputGraph module
+def check_signature_rewritable(graph):
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
+        # set in OutputGraph._call_user_compiler
         assert hasattr(node, "_dynamo_source")
+        assert hasattr(graph, "_source_to_user_stacks")
+
         source = node._dynamo_source
-        assert "_source_to_user_stacks" in graph.meta
-        user_stacks = graph.meta["_source_to_user_stacks"].get(source)
+        user_stacks = graph._source_to_user_stacks.get(source)
         if user_stacks is None:
             continue
         assert len(user_stacks) > 0
