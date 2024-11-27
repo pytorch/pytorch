@@ -62,7 +62,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
     if namespace == "math":
         return getattr(math, op_name)
     if namespace == "torchvision":
-        if importlib.util.find_spec("torchvision.ops") is None:
+        if importlib.util.find_spec("torchvision") is None:
             logger.warning("torchvision is not installed. Skipping %s", qualified_name)
             return None
     try:
