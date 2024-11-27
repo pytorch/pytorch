@@ -17,6 +17,7 @@ from torch.distributed.tensor._random import (
     manual_seed,
     OffsetBasedRNGTracker,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -102,10 +103,80 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_manual_seed(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        manual_seed(1234, device_mesh)
-        self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
-        with self.assertRaisesRegex(RuntimeError, "different seed values"):
+
+        # in the case of calling ``torch.distributed.tensor._random.manual_seed``,
+        # no seed synchronization should happen since we fully trust the users' input
+        # and will not override the value.
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            # Test 1: set different seed on different ranks
+            # RNG tracker should not be initialized until DTensor ``manual_seed``
+            # is called.
+            self.assertTrue(random._rng_tracker is None)
             manual_seed(self.rank, device_mesh)
+            # RNG tracker should already be initialized
+            self.assertTrue(random._rng_tracker is not None)
+            self.assertEqual(self.rank, random._rng_tracker.get_seed("parallel-rng"))
+
+            # Test 2: set same seed on different ranks
+            manual_seed(1234, device_mesh)
+            self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_manual_seed_submesh(self):
+        # the current rank is not a part of the mesh
+        single_rank_device_mesh = DeviceMesh(
+            self.device_type, [(self.rank + 1) % self.world_size]
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "manual_seed requires the current rank to be a part of the device mesh",
+        ):
+            manual_seed(self.rank, single_rank_device_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_pipeline_parallel_manual_seed(self):
+        # This test is to verify the `manual_seed` API works as expected in the
+        # pipeline parallel setting.
+        world_mesh = init_device_mesh(
+            self.device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("pp", "spmd"),
+        )
+        pp_mesh = world_mesh["pp"]
+        pp_rank = pp_mesh.get_local_rank()  # rank 0,1 = 0; rank 2,3 = 1
+        spmd_mesh = world_mesh["spmd"]
+
+        # set the seed for each pipeline stage to 123 + pp_rank
+        manual_seed(123 + pp_rank, spmd_mesh)
+        self.assertEqual(123 + pp_rank, random._rng_tracker.get_seed("parallel-rng"))
+
+        # mimic initializing a model weight sharded on the SPMD mesh
+        spmd_dtensor = torch.distributed.tensor.ones(
+            2 * spmd_mesh.size(), 2, device_mesh=spmd_mesh, placements=[Shard(0)]
+        )
+        torch.nn.init.normal_(spmd_dtensor)
+
+        # gather all the shards to compare initialization results
+        WORLD = torch.distributed.group.WORLD
+        assert WORLD is not None
+        tensor_gather = funcol.all_gather_tensor(
+            spmd_dtensor.to_local(),
+            gather_dim=0,
+            group=WORLD,
+        )
+
+        # verify the weights are initialized differently on all ranks
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                self.assertNotEqual(
+                    spmd_dtensor.to_local(),
+                    tensor_gather[2 * other_rank : 2 * (other_rank + 1), :],
+                )
 
     @with_comms
     @skip_unless_torch_gpu
