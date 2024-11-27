@@ -1419,6 +1419,11 @@ class OutputGraph:
             if node.op == "placeholder":
                 placeholders.append(node)
         increment_op_count(tot)
+        for pl in placeholders:
+            arg = pl.meta["grapharg"]
+            # TODO: Why isn't this stored in meta :think:
+            # can't move to meta due to https://github.com/pytorch/pytorch/issues/141640
+            pl._dynamo_source = arg.source
 
         gm.meta["_param_name_to_source"] = self.param_name_to_source
         gm.meta["_source_to_user_stacks"] = self.source_to_user_stacks
