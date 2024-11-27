@@ -2350,7 +2350,16 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         func = getattr(func, s)
 
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
-    result = func(*converted_args)
+
+    # convert any kwarg-only arguments to kwargs
+    kwargs = dict()
+    for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
+        if func_arg.kwarg_only:
+            kwargs[func_arg.name] = conv_arg
+    if kwargs:
+        del converted_args[-len(kwargs) :]
+
+    result = func(*converted_args, **kwargs)
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
@@ -2733,13 +2742,17 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             std::vector<AtenTensorHandle> output_handles(%s);
             try {
                 inductor_entry_impl(input_handles.data(), output_handles.data());
+                if (PyErr_Occurred())
+                {
+                    return nullptr;
+                }
                 return pack_tensor_handle_list(output_handles);
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
-                return {};
+                return nullptr;
             } catch(...) {
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
-                return {};
+                return nullptr;
             }
         }
         """
