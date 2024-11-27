@@ -625,10 +625,12 @@ void reflection_pad2d_backward_out_template(
       "reflection_pad2d_backward_out_template",
       [&] {
         if (at::globalContext().deterministicAlgorithms()) {
+          const int grid_size = 1024;
+          const int block_size = 256;
 
           reflection_pad2d_backward_det_out_kernel<<<
-              1024,
-              256,
+              grid_size,
+              block_size,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
               grad_input.mutable_data_ptr<scalar_t>(),
