@@ -17,7 +17,7 @@ from .cpp import get_export_declaration
 from .cpp_gemm_template import (
     CppPackedGemmTemplate,
     expand_bias,
-    gen_2d_view_of_epilogues_buf,
+    gen_2d_view_of_epilogue_buf,
     get_padded_n,
     pack_w,
     prune_tensors,
@@ -399,7 +399,7 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            Y_2d, reindexers = gen_2d_view_of_epilogues_buf(
+            Y_2d, reindexers = gen_2d_view_of_epilogue_buf(
                 Y,
                 template_buffer,
                 epilogue_nodes,
