@@ -275,7 +275,7 @@ class TritonBlockPointerTest(InductorTestCase):
                 "\n".join(load_lines),
                 """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
-    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[((7 + XBLOCK) // 8)], order=[0], offsets=[(xoffset // 8)]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [((7 + XBLOCK) // 8), ((1) * ((1) <= (((7 + XBLOCK) // 8))) + (((7 + XBLOCK) // 8)) * ((((7 + XBLOCK) // 8)) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
+    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[(7 + XBLOCK) // 8], order=[0], offsets=[xoffset // 8]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [(7 + XBLOCK) // 8, ((1) * ((1) <= ((7 + XBLOCK) // 8)) + ((7 + XBLOCK) // 8) * (((7 + XBLOCK) // 8) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
             )
             self.assertExpectedInline(
                 "\n".join(store_lines),
@@ -314,6 +314,11 @@ class TritonBlockPointerTest(InductorTestCase):
         full_size = tuple(2 * dim for dim in view_size)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
+
+        if num_triton_kernels == 2 and config.triton.cooperative_reductions:
+            # fewer kernels with cooperative reductions
+            num_triton_kernels = 1
+            num_block_pointers -= 2
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.

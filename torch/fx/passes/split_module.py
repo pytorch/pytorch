@@ -553,6 +553,9 @@ def split_module(
             partition.graph.output(output_vals[0])
         elif num_output_vals > 1:
             partition.graph.output(output_vals)
+        else:
+            # Invariant - Graph should always have an output node.
+            partition.graph.output(())
 
         if keep_original_order:
             # first get the attr nodes required by this partition
@@ -598,6 +601,17 @@ def split_module(
         elif num_outputs == 1:
             base_mod_env[next(iter(partition.outputs))] = output_val
 
+    # When keep_original_order=True and if the graph doesn't have any
+    # `call_function` node then `base_mod_graph`, `base_mod_env` and `base_mod_attrs`
+    # are never populated.
+    # For this case, we call `construct_graph` here which takes care of updating them.
+    if keep_original_order and not base_mod_env:
+        for node in m.graph.nodes:
+            base_mod_env, base_mod_attrs = construct_graph(
+                node, base_mod_env, base_mod_attrs
+            )
+
+    # Add output node to `base_mod_graph` (i.e. the split graph) which will be returned.
     for node in m.graph.nodes:
         if node.op == "output":
             base_mod_graph.output(

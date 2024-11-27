@@ -9,7 +9,7 @@ from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, TypedDict, U
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import MultiOutputLayout
+from .ir import MultiOutputLayout, NoneLayout
 from .utils import get_dtype_size
 from .virtualized import V
 
@@ -93,7 +93,9 @@ def get_freeable_input_buf(
     dep_name_to_size: Dict[str, int] = dict()
     for node in nodes:
         for dep in node.read_writes.reads:
-            if dep.name in graph_inputs and not dep.name.startswith("primals_"):
+            if dep.name in graph_inputs and not dep.name.startswith(
+                ("primals_", "arg")
+            ):
                 dep_name_to_succ_nodes[dep.name].add(node)
                 dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
@@ -137,7 +139,10 @@ def compute_size_for_scheduler_buffer(
     def _compute_and_update_buf_size(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
-        if isinstance(sched_buf.node.layout, MultiOutputLayout):
+        if isinstance(sched_buf.node.layout, NoneLayout):
+            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
+        elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0
             for user in sched_buf.users:
                 if isinstance(user.node, OutputNode):
@@ -442,7 +447,7 @@ def topological_sort_lpmf(
         # update memory usage
         live_memory += selected_node.mpi_node.size
         max_memory = max(max_memory, live_memory)
-        live_memory -= node_info[node]["memory_to_free"]
+        live_memory -= node_info[selected_node]["memory_to_free"]
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi_node.succ_nodes:

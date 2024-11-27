@@ -224,9 +224,7 @@ def _shard_dict_of_args(
     for chunk_idx in range(real_num_chunks):
         chunk_args = {}
         for key, arg in args_sharded_replicated.items():
-            arg_single_chunk = []
-            for v_flat in arg:
-                arg_single_chunk.append(v_flat[chunk_idx])
+            arg_single_chunk = [v_flat[chunk_idx] for v_flat in arg]
             chunk_args[key] = arg_single_chunk
         chunks_flat.append(chunk_args)
 
@@ -340,9 +338,10 @@ def split_args_kwargs_into_chunks(
             f"{len(args_split_dict)}, {len(kwargs_split)}"
         )
 
-    args_split = []
-    for chunk_args in args_split_dict:
-        args_split.append(tuple(chunk_args[i] for i in range(len(chunk_args))))
+    args_split = [
+        tuple(chunk_args[i] for i in range(len(chunk_args)))
+        for chunk_args in args_split_dict
+    ]
 
     return args_split, kwargs_split
 

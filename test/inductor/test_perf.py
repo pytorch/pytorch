@@ -501,6 +501,9 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
+        if config.triton.cooperative_reductions:
+            expected_numel = 134225922
+
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
         self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
@@ -1241,7 +1244,7 @@ class InplacingTests(TestCase):
             return out
 
         inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """370""")
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
 
 
 # Test cases where we don't do the right thing yet.

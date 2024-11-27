@@ -105,7 +105,7 @@ void THPUtils_setError(const char* format, ...) {
 
 void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
-    PyMethodDef* methods) {
+    const PyMethodDef* methods) {
   if (!vector.empty()) {
     // remove nullptr terminator
     vector.pop_back();
@@ -272,7 +272,6 @@ char* tensor_repr(const at::Tensor& tensor) {
   // observed that sometimes gdb passes the outer Tensor address exactly as is
   // into this function.
   // See https://github.com/pytorch/pytorch/issues/134762
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)

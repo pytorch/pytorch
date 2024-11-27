@@ -119,7 +119,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
 // The ZeroTensor allocator ignores whatever allocation is requested and always
 // gives you nullptr
 struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ZeroTensorAllocator(at::Device device) : device_(device) {}
   ~ZeroTensorAllocator() override = default;
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
@@ -136,7 +136,7 @@ struct ZeroTensorAllocator final : public at::Allocator {
 
 using binary_fn = void (*)(TensorIterator&);
 
-DECLARE_DISPATCH(binary_fn, complex_stub);
-DECLARE_DISPATCH(binary_fn, polar_stub);
+DECLARE_DISPATCH(binary_fn, complex_stub)
+DECLARE_DISPATCH(binary_fn, polar_stub)
 
 } // namespace at::native

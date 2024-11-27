@@ -272,7 +272,7 @@ void max_unpool3d_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
-REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
+REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl)
+REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl)
 
 } // at::native

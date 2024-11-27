@@ -191,10 +191,7 @@ static void handle_tensor_tensor_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
-    mtl_setBuffer(commandEncoder, other, 3);
+    mtl_setArgs(commandEncoder, length, output, self, other);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -221,10 +218,7 @@ static void handle_tensor_scalar_binary_op(const Tensor& self,
 
     [commandEncoder pushDebugGroup:[NSString stringWithFormat:@"Dispatch %s kernel", kernel_name.c_str()]];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
-    mtl_setBytes(commandEncoder, sval, 3);
+    mtl_setArgs(commandEncoder, length, output, self, sval);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -316,9 +310,7 @@ static void _bitwise_not_out_mps(const Tensor& self, const Tensor& output_) {
 
     [commandEncoder pushDebugGroup:@"Dispatch bitwise_not kernel"];
     [commandEncoder setComputePipelineState:cplState];
-    mtl_setBytes(commandEncoder, length, 0);
-    mtl_setBuffer(commandEncoder, output, 1);
-    mtl_setBuffer(commandEncoder, self, 2);
+    mtl_setArgs(commandEncoder, length, output, self);
     mtl_dispatch1DJob(commandEncoder, cplState, length);
 
     getMPSProfiler().endProfileKernel(cplState);
@@ -356,7 +348,7 @@ TORCH_IMPL_FUNC(bitwise_not_out_mps)(const Tensor& self, const Tensor& output) {
   mps::_bitwise_not_out_mps(self, output);
 }
 
-REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps);
-REGISTER_MPS_DISPATCH(rshift_stub, &rshift_kernel_mps);
+REGISTER_MPS_DISPATCH(lshift_stub, &lshift_kernel_mps)
+REGISTER_MPS_DISPATCH(rshift_stub, &rshift_kernel_mps)
 
 } // namespace at::native

@@ -22,7 +22,12 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 from .cpp import get_export_declaration
-from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
+from .cpp_micro_gemm import (
+    CppMicroBrgemm,
+    CppMicroGemmAMX,
+    create_micro_gemm,
+    LayoutType,
+)
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -35,21 +40,7 @@ from .cpp_utils import (
 
 log = logging.getLogger(__name__)
 
-GEMM_TEMPLATE = r"""
-{{template.header().getvalue()}}
-
-{{micro_gemm.codegen_define(kernel)}}
-
-{%- if x_scale is not none %}
-    {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
-{%- else %}
-    {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
-{%- endif %}
-
-extern "C" {{export_declaration}}
-{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
-{
-    {{kernel.maybe_codegen_profile()}}
+GEMM_TEMPLATE_INIT_BLOCKING = r"""
     constexpr int64_t num_threads = {{num_threads}};
     constexpr int64_t N = {{N}};
     constexpr int64_t K = {{K}};
@@ -116,6 +107,77 @@ extern "C" {{export_declaration}}
         Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= Mr_blocks * Nr_blocks * Kr_blocks,
         "Not all partitions are assigned."
     );
+"""
+
+GEMM_TEMPLATE_MULTI_THREADS_PARAMS = r"""
+const int tid = omp_get_thread_num();
+const int64_t k_group_id = tid / num_Kt_blocks;
+const int64_t k_slice_id = tid % num_Kt_blocks;
+const int64_t n_group_id = k_group_id / num_Nt_blocks;
+const int64_t n_slice_id = k_group_id % num_Nt_blocks;
+const int64_t k_block_start = k_slice_id * Kt_blocks;
+const int64_t k_block_end = std::min(k_block_start + Kt_blocks, Kr_blocks);
+const int64_t n_block_start = n_slice_id * Nt_blocks;
+const int64_t n_block_end = std::min(n_block_start + Nt_blocks, Nr_blocks);
+const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
+const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
+const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
+"""
+
+GEMM_TEMPLATE_SINGLE_THREAD_PARAMS = r"""
+constexpr int tid = 0;
+constexpr int64_t k_group_id = 0;
+constexpr int64_t k_slice_id = 0;
+constexpr int64_t n_group_id = 0;
+constexpr int64_t n_slice_id = 0;
+constexpr int64_t m_block_start = 0;
+constexpr int64_t n_block_start = 0;
+constexpr int64_t n_block_end = Nr_blocks;
+constexpr int64_t k_block_start = 0;
+constexpr int64_t k_block_end = Kr_blocks;
+{%- if is_dynamic_M %}
+const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+const int64_t m_block_end = Mr_blocks;
+{%- else %}
+constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+constexpr int64_t m_block_end = Mr_blocks;
+{%- endif %}
+"""
+
+GEMM_TEMPLATE_M_LOOP_PARAMS = r"""
+const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
+const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
+const int64_t m_start = mc * Mr;
+const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
+const int64_t m_size = m_end - m_start;
+"""
+
+GEMM_TEMPLATE_N_LOOP_PARAMS = r"""
+const int64_t n_start = nc * Nr;
+const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
+const int64_t n_size = n_end - n_start;
+// NB: assume we pad N, nc_block_end won't exceed padded N here.
+const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+"""
+
+GEMM_TEMPLATE = r"""
+{{template.header().getvalue()}}
+
+{{micro_gemm.codegen_define(kernel)}}
+
+{%- if x_scale is not none %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
+{%- else %}
+    {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
+{%- endif %}
+
+extern "C" {{export_declaration}}
+{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
+{
+    {{ kernel.maybe_codegen_profile() }}
+    {{ template.codegen_blocks(
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
+    ) }}
 
 {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
@@ -127,37 +189,10 @@ extern "C" {{export_declaration}}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        const int tid = omp_get_thread_num();
-        const int64_t k_group_id = tid / num_Kt_blocks;
-        const int64_t k_slice_id = tid % num_Kt_blocks;
-        const int64_t n_group_id = k_group_id / num_Nt_blocks;
-        const int64_t n_slice_id = k_group_id % num_Nt_blocks;
-        const int64_t k_block_start = k_slice_id * Kt_blocks;
-        const int64_t k_block_end = std::min(k_block_start + Kt_blocks, Kr_blocks);
-        const int64_t n_block_start = n_slice_id * Nt_blocks;
-        const int64_t n_block_end = std::min(n_block_start + Nt_blocks, Nr_blocks);
-        const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
-        const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
-        const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
+        {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
     {
-        constexpr int tid = 0;
-        constexpr int64_t k_group_id = 0;
-        constexpr int64_t k_slice_id = 0;
-        constexpr int64_t n_group_id = 0;
-        constexpr int64_t n_slice_id = 0;
-        constexpr int64_t m_block_start = 0;
-        constexpr int64_t n_block_start = 0;
-        constexpr int64_t n_block_end = Nr_blocks;
-        constexpr int64_t k_block_start = 0;
-        constexpr int64_t k_block_end = Kr_blocks;
-    {%- if is_dynamic_M %}
-        const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
-        const int64_t m_block_end = Mr_blocks;
-    {%- else %}
-        constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
-        constexpr int64_t m_block_end = Mr_blocks;
-    {%- endif %}
+        {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
@@ -165,17 +200,9 @@ extern "C" {{export_declaration}}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
-            const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
-            const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
-            const int64_t m_start = mc * Mr;
-            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
-            const int64_t m_size = m_end - m_start;
+            {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                const int64_t n_start = nc * Nr;
-                const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
-                const int64_t n_size = n_end - n_start;
-                // NB: assume we pad N, nc_block_end won't exceed padded N here.
-                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+                {{ template.codegen_n_loop_params()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
@@ -442,8 +469,16 @@ class CppPackedGemmTemplate(CppTemplate):
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
 
-            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
-            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+            dtype_A = self.input_nodes[0].get_dtype()
+            dtype_B = self.input_nodes[1].get_dtype()
+            num_byte_A = get_num_byte(dtype_A)
+            num_byte_B = get_num_byte(dtype_B)
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+                # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
+                # In this case, the choice of the micro-kernel being used can't be decoupled from
+                # the cache blocking.
+                # TODO: Decouple the choice of micro-kernel from cache blocking
+                num_byte_B *= num_byte_A
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -455,6 +490,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
@@ -649,7 +685,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = ir.Buffer(
                     name=W.get_name(),  # Borrow the registered buffer name
                     layout=ir.FixedLayout(
-                        W.get_device(),
+                        W.get_device_or_error(),
                         W.get_dtype(),
                         new_size,
                         ir.FlexibleLayout.contiguous_strides(new_size),
@@ -936,7 +972,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     return result
 
                 return ir.Pointwise(
-                    device=input_buffer.get_device(),
+                    device=input_buffer.get_device_or_error(),
                     dtype=self.layout.dtype,
                     inner_fn=copy_inner,
                     ranges=input_buffer.get_size(),
@@ -1061,6 +1097,8 @@ class CppPackedGemmTemplate(CppTemplate):
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
+        if isinstance(micro_gemm, CppMicroBrgemm):
+            counters["inductor"]["cpp_micro_brgemm_counter"] += 1
 
         L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
         assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
@@ -1107,3 +1145,52 @@ class CppPackedGemmTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             return self._template_from_string(GEMM_TEMPLATE).render(**options)
+
+    def codegen_blocks(
+        self,
+        num_threads,
+        N,
+        K,
+        micro_gemm,
+        is_dynamic_M,
+        kernel,
+        GemmOut,
+        config,
+        L1_cache_size,
+        L2_cache_size,
+        X,
+        W,
+    ):
+        options = dict(
+            num_threads=num_threads,
+            N=N,
+            K=K,
+            micro_gemm=micro_gemm,
+            is_dynamic_M=is_dynamic_M,
+            kernel=kernel,
+            GemmOut=GemmOut,
+            config=config,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
+            template=self,
+            X=X,
+            W=W,
+        )
+        return self._template_from_string(GEMM_TEMPLATE_INIT_BLOCKING).render(options)
+
+    def codegen_multi_threads_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_MULTI_THREADS_PARAMS).render()
+
+    def codegen_single_thread_params(self, is_dynamic_M):
+        options = dict(
+            is_dynamic_M=is_dynamic_M,
+        )
+        return self._template_from_string(GEMM_TEMPLATE_SINGLE_THREAD_PARAMS).render(
+            options
+        )
+
+    def codegen_m_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_M_LOOP_PARAMS).render()
+
+    def codegen_n_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_N_LOOP_PARAMS).render()
