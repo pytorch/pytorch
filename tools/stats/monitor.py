@@ -106,9 +106,7 @@ class UsageLogger:
         including the start time, end time, and the interval of the log.
         """
 
-        self._summary_info["start_time"] = datetime.datetime.now(
-            timezone.utc
-        ).isoformat()
+        self._summary_info["start_time"] = datetime.datetime.now().timestamp(),
         self.log_json(self._summary_info)
 
         # start data collection
@@ -119,7 +117,8 @@ class UsageLogger:
                 stats.update(
                     {
                         "level": "record",
-                        "time": datetime.datetime.now(timezone.utc).isoformat(),
+
+                        "time": datetime.datetime.now().timestamp()
                     }
                 )
                 # collect cpu and memory metrics
@@ -138,7 +137,7 @@ class UsageLogger:
             except Exception as e:
                 stats = {
                     "level": "record",
-                    "time": datetime.datetime.now(timezone.utc).isoformat(),
+                    "time": datetime.datetime.now().timestamp(),
                     "error": str(e),
                 }
             finally:
