@@ -1638,6 +1638,10 @@ class FxGraphCache:
         # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
         cache_state = cache_info["cache_state"]
+        # Here for grepping:
+        # fx_graph_cache_hit
+        # fx_graph_cache_miss
+        # fx_graph_cache_bypass
         chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}",
             cache_info["cache_event_time"],
