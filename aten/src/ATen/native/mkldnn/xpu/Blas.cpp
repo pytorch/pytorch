@@ -98,6 +98,7 @@ Tensor& addmm_out(
       bias = is_inplace ? self.clone() : self;
     } else {
       Tensor binary;
+      // unsqueeze(0) here is to handle mv cases.
       if (is_inplace)
         binary = self.dim() == 1 ? self.unsqueeze(0).clone() : self.clone();
       else
@@ -228,6 +229,7 @@ Tensor& baddbmm_out(
       binary = input.dim() < 3 ? input.unsqueeze(0).clone() : input.clone();
     else
       binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     float alpha_ = alpha.to<float>() / beta_;
     if (alpha_ != 1.f)
