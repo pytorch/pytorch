@@ -620,27 +620,11 @@ def _compile_fx_inner(
         inputs_to_check: Sequence[int],
         fx_kwargs: _CompileFxKwargs,
     ) -> Union[CompiledFxGraph, str]:
-        """
-        This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
-        compiled fx graph. The metadata is saved to FXGraphCache.
-        """
+        # Just fx_codegen_and_compile, but this is only called when we
+        # ACTUALLY do compilation (so the fx_codegen_and_compile counter also
+        # includes cache activity)
         with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
-            compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-            if isinstance(compiled_graph, str) or fx_kwargs["aot_mode"]:
-                # We only return a string in aot mode, in which case we don't
-                # need to do any post-compilation steps: we just return the string,
-                # which is the filename of the compiled code.
-                return compiled_graph
-            compiled_graph.post_compile1(
-                cudagraphs,
-                example_inputs,
-                gm,
-                static_input_idxs,
-                fx_kwargs,
-                inputs_to_check,
-                boxed_forward_device_index,
-            )
-            return compiled_graph
+            return fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
         use_cache = (
@@ -794,6 +778,15 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
 
+        compiled_graph.post_compile1(
+            cudagraphs,
+            example_inputs,
+            gm,
+            static_input_idxs,
+            graph_kwargs,
+            inputs_to_check,
+            boxed_forward_device_index,
+        )
         compiled_graph.post_compile2(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
