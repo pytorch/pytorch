@@ -2036,42 +2036,6 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
-    def compile_to_fn(self) -> Any:
-        with dynamo_timed("GraphLowering.compile_to_fn", log_pt2_compile_event=True):
-            return self._compile_to_fn()
-
-    def _compile_to_fn(self) -> Any:
-        if self.aot_mode:
-            from .codecache import AotCodeCompiler
-
-            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
-            code, linemap = self.codegen_with_cpp_wrapper()
-            output_code_log.debug("Output code: \n%s", code)
-
-            serialized_extern_kernel_nodes = None
-            if self.extern_kernel_nodes:
-                serialized_extern_kernel_nodes = self.extern_node_serializer(
-                    self.extern_kernel_nodes
-                )
-                output_code_log.debug(
-                    "Serialized Extern Kernel Nodes: \n%s",
-                    serialized_extern_kernel_nodes,
-                )
-
-            additional_files = self.wrapper_code.additional_files
-
-            with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
-                # Directly return the file path with the compiled code
-                return AotCodeCompiler.compile(
-                    self,
-                    code,
-                    serialized_extern_kernel_nodes,
-                    device_type=self.device_type,
-                    additional_files=additional_files,
-                )
-        else:
-            return self.compile_to_module().call
-
     def get_output_names(self) -> List[str]:
         return [
             node.get_name()
