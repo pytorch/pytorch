@@ -160,7 +160,7 @@ jobs:
           python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
-          
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
