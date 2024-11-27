@@ -4145,7 +4145,7 @@ class ComputedBuffer(OperationBuffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges,
             reduce_ranges,
-            prefix="z",
+            prefix="p",
         )
         body = LoopBody(
             body,

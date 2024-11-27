@@ -215,7 +215,7 @@ class LoopBody:
         # use the original symbol prefix
         # Can try to optimize if this is a bottleneck for compilation time
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            iter_sizes, reduce_sizes, prefix="z"
+            iter_sizes, reduce_sizes, prefix="p"
         )
         new_body2 = LoopBody(
             new_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
@@ -239,7 +239,7 @@ class LoopBody:
         new_sizes = (new_iter_size, reduce_size)
 
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="t"  # type: ignore[arg-type]
+            *new_sizes, prefix="p"  # type: ignore[arg-type]
         )
 
         inverse_order = {b: a for a, b in enumerate(new_order)}
