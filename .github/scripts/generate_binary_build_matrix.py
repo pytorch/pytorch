@@ -146,7 +146,7 @@ def arch_type(arch_version: str) -> str:
 
 
 # This can be updated to the release version when cutting release branch, i.e. 2.1
-DEFAULT_TAG = "4aa0d704b33b8954a9e48a643c7105e570ab0e5f"
+DEFAULT_TAG = "efc34a54fb31461a8b1aac0e95602d7785f9df20"
 
 WHEEL_CONTAINER_IMAGES = {
     "11.8": f"308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cuda11.8:{DEFAULT_TAG}",

@@ -139,7 +139,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:4aa0d704b33b8954a9e48a643c7105e570ab0e5f
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:efc34a54fb31461a8b1aac0e95602d7785f9df20
       DESIRED_PYTHON: "3.9"
       build_name: wheel-py3_9-cpu
       use_s3: False
@@ -255,7 +255,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:4aa0d704b33b8954a9e48a643c7105e570ab0e5f
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:efc34a54fb31461a8b1aac0e95602d7785f9df20
       DESIRED_PYTHON: "3.10"
       build_name: wheel-py3_10-cpu
       use_s3: False
@@ -371,7 +371,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:4aa0d704b33b8954a9e48a643c7105e570ab0e5f
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:efc34a54fb31461a8b1aac0e95602d7785f9df20
       DESIRED_PYTHON: "3.11"
       build_name: wheel-py3_11-cpu
       use_s3: False
@@ -487,7 +487,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:4aa0d704b33b8954a9e48a643c7105e570ab0e5f
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:efc34a54fb31461a8b1aac0e95602d7785f9df20
       DESIRED_PYTHON: "3.12"
       build_name: wheel-py3_12-cpu
       use_s3: False
@@ -603,7 +603,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:4aa0d704b33b8954a9e48a643c7105e570ab0e5f
+      DOCKER_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/manylinux-builder-cpu:efc34a54fb31461a8b1aac0e95602d7785f9df20
       DESIRED_PYTHON: "3.13"
       build_name: wheel-py3_13-cpu
       use_s3: False
