@@ -10,6 +10,7 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from itertools import count
 from typing import (
     Any,
@@ -18,6 +19,7 @@ from typing import (
     Dict,
     Generator,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -55,6 +57,7 @@ from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import (
     _StrideExprStr,
+    BypassFxGraphCache,
     code_hash,
     CompiledFxGraph,
     FxGraphCache,
@@ -141,6 +144,10 @@ if TYPE_CHECKING:
 # For testing - force using the async path rather than shortcutting to
 # codegen_and_compile_sync() when available.
 _debug_force_async = False
+
+# For testing - use the serde FxCompile scheme to debug serialization and
+# deserialization of GraphMoule and CompiledFxGraph.
+_debug_serde_compile = False
 
 
 log = logging.getLogger(__name__)
@@ -1088,6 +1095,158 @@ class _InProcessFxCompile(_FxCompileSync):
             return compiled_graph
 
 
+def _current_fake_mode() -> torch._subclasses.FakeTensorMode:
+    fake_mode = None
+    if context := torch._guards.TracingContext.try_get():
+        fake_mode = context.fake_mode
+    if fake_mode is not None:
+        return fake_mode
+
+    shape_env = torch.fx.experimental.symbolic_shapes.ShapeEnv()
+    return torch._subclasses.FakeTensorMode(shape_env=shape_env)
+
+
+# From parent -> subprocess
+@dataclass
+class _WireProtocolInput:
+    gm: torch.fx.GraphModule
+    example_inputs: Sequence[InputType]
+    kwargs: _CompileFxKwargs
+
+    def serialize(self) -> _WireProtocolPickledInput:
+        from torch.fx._graph_pickler import _SubprocPickler
+
+        return _WireProtocolPickledInput(_SubprocPickler.dumps(self))
+
+
+@dataclass
+class _WireProtocolPickledInput:
+    value: bytes
+
+    def deserialize(self) -> _WireProtocolInput:
+        from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
+
+        fake_mode = _current_fake_mode()
+        state = _UnpickleState(fake_mode)
+        result = _SubprocUnpickler.loads(self.value, state)
+        assert isinstance(result, _WireProtocolInput)
+        return result
+
+
+# From subprocess -> parent
+@dataclass
+class _WireProtocolOutput:
+    graph: Union[CompiledFxGraph, str]
+
+    def serialize(self) -> _WireProtocolPickledOutput:
+        from torch.fx._graph_pickler import _SubprocPickler
+
+        if isinstance(self.graph, CompiledFxGraph):
+            self.graph.prepare_for_serialization()
+        return _WireProtocolPickledOutput(_SubprocPickler.dumps(self))
+
+
+@dataclass
+class _WireProtocolPickledOutput:
+    value: bytes
+
+    def deserialize(self, gm: Optional[GraphModule]) -> _WireProtocolOutput:
+        from torch.fx._graph_pickler import _SubprocUnpickler, _UnpickleState
+
+        fake_mode = _current_fake_mode()
+        state = _UnpickleState(fake_mode)
+        result = _SubprocUnpickler.loads(self.value, state)
+        assert isinstance(result, _WireProtocolOutput)
+        if isinstance(result.graph, CompiledFxGraph):
+            result.graph.after_deserialization(gm)
+        return result
+
+
+class _FxCompileSerialized(FxCompile):
+    @override
+    async def codegen_and_compile(
+        self,
+        gm: GraphModule,
+        example_inputs: Sequence[InputType],
+        **kwargs: Unpack[_CompileFxKwargs],
+    ) -> Union[CompiledFxGraph, str]:
+        context = torch._guards.TracingContext.try_get()
+
+        try:
+            input = _WireProtocolInput(
+                gm,
+                example_inputs,
+                kwargs,
+            ).serialize()
+        except (AttributeError, BypassFxGraphCache):
+            # For example: AttributeError: Can't pickle local object
+            # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
+
+            # TODO: scuba record about not being able to do this?
+            log.debug("Unable to pickle input graph or example inputs", exc_info=True)
+
+            # Fallback to in-process
+            return _InProcessFxCompile().codegen_and_compile_sync(
+                gm, example_inputs, **kwargs
+            )
+
+        output = (await self._send_to_child(input)).deserialize(gm)
+
+        self._postprocess(output)
+
+        # TODO: Do we need to figure out what changed in TracingContext in the child and plumb that back up to the parent?
+
+        return output.graph
+
+    @abstractmethod
+    async def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        # The implementation of this should transfer `input` to the child, call
+        # `_run_in_child(input)` and transfer the result back.
+        ...
+
+    def _postprocess(self, output: _WireProtocolOutput) -> None:
+        pass
+
+    @classmethod
+    def _run_in_child(
+        cls,
+        pickled_input: _WireProtocolPickledInput,
+        extra_env: Optional[Mapping[str, str]] = None,
+    ) -> _WireProtocolPickledOutput:
+        with contextlib.ExitStack() as stack:
+            if extra_env is not None:
+                import unittest
+
+                stack.enter_context(unittest.mock.patch.dict("os.environ", extra_env))
+
+            # TODO: Should we split the input into multiple sections where each
+            # section sets up state for the previous section? (i.e. a Config section
+            # which we decode and apply, followed by a FakeTensorMode section which
+            # we decode and apply, etc)
+            input = pickled_input.deserialize()
+
+            stack.enter_context(DebugContext())
+
+            output_graph = _InProcessFxCompile().codegen_and_compile_sync(
+                input.gm, input.example_inputs, **input.kwargs
+            )
+
+        return _WireProtocolOutput(
+            output_graph,
+        ).serialize()
+
+
+class _DebugSerdeFxCompile(_FxCompileSerialized):
+    @override
+    async def _send_to_child(
+        self, pickled_input: _WireProtocolPickledInput
+    ) -> _WireProtocolPickledOutput:
+        # For debugging just serde the input and output but don't run in a subprocess.
+        return self._run_in_child(pickled_input)
+
+
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -1103,7 +1262,11 @@ def fx_codegen_and_compile(
 ) -> Union[CompiledFxGraph, str]:
     static_input_idxs = static_input_idxs or ()
 
-    scheme: FxCompile = _InProcessFxCompile()
+    scheme: FxCompile
+    if _debug_serde_compile:
+        scheme = _DebugSerdeFxCompile()
+    else:
+        scheme = _InProcessFxCompile()
 
     if not _debug_force_async and isinstance(scheme, _FxCompileSync):
         # As a debugging optimization if the scheme supports sync then run it

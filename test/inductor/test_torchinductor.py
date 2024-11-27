@@ -865,7 +865,6 @@ class CommonTemplate:
             ),
         )
 
-    @skip_if_dynamic  # Nothing dynamic about this test
     @patch("torch._inductor.compile_fx._debug_force_async", True)
     def test_force_async_in_async_context(self):
         # Make sure that compiling works when we do and when we don't have an
@@ -878,10 +877,20 @@ class CommonTemplate:
         self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
         async def async_sub():
-            self.common(fn, (torch.tensor([True]), torch.tensor([False])))
+            self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
         # And test in an async context
         asyncio.run(async_sub())
+
+    @patch("torch._inductor.compile_fx._debug_serde_compile", True)
+    def test_serde_compile(self):
+        # Make sure that compiling works when we pass the input + output from
+        # fx_codegen_and_compile() through serde.
+
+        def fn(a, b):
+            return a + b
+
+        self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti

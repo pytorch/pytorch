@@ -1226,6 +1226,12 @@ def get_np_to_tnp_map():
     return np_fn_to_tnp_fn
 
 
+@functools.lru_cache(maxsize=1)
+def get_tnp_to_np_map():
+    m = get_np_to_tnp_map()
+    return {v: k for k, v in m.items()}
+
+
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
