@@ -428,7 +428,7 @@ class TestFxGraphCache(TestCase):
         self.reset()
 
         with mock.patch(
-            "torch._inductor.codecache.has_frozen_params", return_value=True
+            "torch._inductor.output_code.has_frozen_params", return_value=True
         ):
             # A call to fn1 should miss in the cache since we do not consider
             # the constant values.
