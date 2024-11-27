@@ -47,6 +47,9 @@ ncclComm_t NCCLComm::getNcclComm() {
 }
 
 void NCCLComm::waitReady() {
+  LockType lock(mutex_);
+  if (aborted_)
+    return;
   // If timeout is reached, throw an exception.
   C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
 }
@@ -118,6 +121,11 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 
 void NCCLComm::finalize() {
   LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already invalided. Skip finalize.";
+    return;
+  }
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   auto comm = getNcclComm();
   C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
@@ -125,6 +133,11 @@ void NCCLComm::finalize() {
 
 void NCCLComm::destroy() {
   LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already invalided. Skip destroy.";
+    return;
+  }
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
   auto comm = getNcclComm();
   C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
