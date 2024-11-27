@@ -1531,11 +1531,14 @@ EXPANDABLE_SEGMENTS: bool = TestEnvironment.def_flag(
     enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'),
 )
 
+MAX_CUDA_MEM: Optional[int] = None
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
     # other libraries take up about a little under 1 GB of space per process
-    torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
+    mem_fraction = round((gb_available - num_procs * .85) / gb_available / num_procs, 2)
+    torch.cuda.set_per_process_memory_fraction(mem_fraction)
+    MAX_CUDA_MEM = int(torch.cuda.mem_get_info()[1] * mem_fraction)
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
