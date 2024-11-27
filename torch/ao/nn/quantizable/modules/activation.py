@@ -309,7 +309,9 @@ class MultiheadAttention(nn.MultiheadAttention):
               the embedding dimension. :math:`(N, S, E)` if ``batch_first`` is ``True``.
             - key_padding_mask: :math:`(N, S)` where N is the batch size, S is the source sequence length.
               If a BoolTensor is provided, the positions with the
-              value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
+              value of ``True`` will be ignored (masked out) while the position with the value of ``False`` will be unchanged.
+              FloatTensor: specified additive penalties to the attention weights. Typically, large negatves values like -inf mask positions
+              by reducing their attention contributions, while 0.0 keeps positions unchanged.
             - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
               3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
               S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
