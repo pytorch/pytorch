@@ -30,6 +30,7 @@ class MetalShaderLibrary {
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
   virtual ~MetalShaderLibrary() = default;
+  std::vector<std::string> getFunctionNames();
   inline MTLComputePipelineState_t getPipelineStateForFunc(
       const std::string& fname) {
     return getLibraryPipelineState(getLibrary(), fname).first;

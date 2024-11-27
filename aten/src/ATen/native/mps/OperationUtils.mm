@@ -853,6 +853,21 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   return cplMap[key];
 }
 
+std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  if (C10_UNLIKELY(!library && nparams > 0)) {
+    throw std::runtime_error("Library must be initialized first");
+  }
+  std::vector<std::string> rc;
+  @autoreleasepool {
+    NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
+    for (auto idx : c10::irange([names count])) {
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
+    }
+  }
+  return rc;
+}
+
 class BundledShaderLibary : public MetalShaderLibrary {
  public:
   BundledShaderLibary() : MetalShaderLibrary("") {}
