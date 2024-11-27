@@ -2756,6 +2756,95 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         self.assertEqual(depth, 0)
 
 
+class GeneratorTests(torch._dynamo.test_case.TestCase):
+    def test_generator_simple(self):
+        def whoo():
+            yield 1
+            yield 2
+            yield 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo()
+            t = t + next(gen)
+            t = t + next(gen)
+            t = t + next(gen)
+            return t
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 6)
+
+    def test_infinite_generator(self):
+        def whoo():
+            i = 0
+            while True:
+                yield i
+                i += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo()
+            t = t + next(gen)
+            t = t + next(gen)
+            t = t + next(gen)
+            return t
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + 3)
+
+    def test_infinite_generator_2(self):
+        def whoo(x):
+            while True:
+                yield x
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(zip(range(3), whoo(1)))
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, list(zip(range(3), whoo(1))))
+
+    def test_iter(self):
+        def whoo():
+            i = 0
+            while True:
+                yield i
+                i += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            s = 0
+            for i in whoo():
+                if i > 5:
+                    break
+                s += i
+            return t + s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + sum(range(6)))
+
+    def test_graph_break(self):
+        def whoo():
+            yield 1
+            torch._dynamo.graph_break()
+            yield 2
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo()
+            s = next(gen)
+            s += next(gen)
+            return s
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t + sum(range(5)))
+
+
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
 

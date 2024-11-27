@@ -19,6 +19,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from ..exc import (
     AttributeMutationError,
+    ObservedUserStopIteration,
     unimplemented,
     Unsupported,
     UserError,
@@ -1299,6 +1300,13 @@ class BuiltinVariable(VariableTracker):
                 mutation_type=ValueMutationNew(),
             )
 
+    def _call_iter_tuple_generator(self, tx, obj, *args, **kwargs):
+        cls = variables.BaseListVariable.cls_for(self.fn)
+        return cls(
+            list(obj.force_unpack_var_sequence(tx)),  # exhaust generator
+            mutation_type=ValueMutationNew(),
+        )
+
     def _call_tuple_list(self, tx, obj=None, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             cls = variables.BaseListVariable.cls_for(self.fn)
@@ -1306,6 +1314,8 @@ class BuiltinVariable(VariableTracker):
                 list(obj.force_unpack_var_sequence(tx)),
                 mutation_type=ValueMutationNew(),
             )
+        elif isinstance(obj, variables.GeneratorFunctionVariable):
+            return self._call_iter_tuple_generator(tx, obj, *args, **kwargs)
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
 
@@ -1383,6 +1393,7 @@ class BuiltinVariable(VariableTracker):
                     TupleVariable,
                     ListIteratorVariable,
                     variables.IteratorVariable,
+                    variables.GeneratorFunctionVariable,
                 ),
             ):
                 items = dict(

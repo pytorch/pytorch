@@ -40,13 +40,11 @@ import torch.distributed
 import torch.utils._content_store
 from torch.utils import _config_module
 
-from .bytecode_transformation import is_generator
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
-    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
     GeneratorFunctionVariable,
     NestedUserFunctionVariable,
@@ -3520,7 +3518,6 @@ def check_verbose(obj, is_inlined_call=False):
             UserMethodVariable,
             NestedUserFunctionVariable,
             GeneratorFunctionVariable,
-            FunctionDecoratedByContextlibContextManagerVariable,
         ),
     ):
         try:
@@ -3694,8 +3691,6 @@ def lookup_inner(
         reasons.add(skip_result.reason)
     if skip_result.skipped:
         return SkipFunctionVariable
-    elif hasattr(obj, "__code__") and is_generator(obj.__code__):
-        return GeneratorFunctionVariable
     else:
         return UserFunctionVariable
 
