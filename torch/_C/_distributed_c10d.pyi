@@ -679,3 +679,12 @@ class _SymmetricMemory:
     def stream_write_value32(
         tensor: torch.Tensor, offset: int, val: int
     ) -> torch.Tensor: ...
+
+class ProcessGroupXCCL(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+    ): ...
+    

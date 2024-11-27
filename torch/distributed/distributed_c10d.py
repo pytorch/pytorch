@@ -89,6 +89,7 @@ __all__ = [
     "is_nccl_available",
     "is_torchelastic_launched",
     "is_ucc_available",
+    "is_xccl_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -132,6 +133,7 @@ _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
+_XCCL_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -195,6 +197,14 @@ try:
 except ImportError:
     _UCC_AVAILABLE = False
 
+try:
+    from torch._C._distributed_c10d import ProcessGroupXCCL
+
+    ProcessGroupXCCL.__module__ = "torch.distributed.distributed_c10d"
+    __all__ += ["ProcessGroupXCCL"]
+except ImportError:
+    _XCCL_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
@@ -224,7 +234,7 @@ class Backend(str):
     """
     An enum-like class for backends.
 
-    Available backends: GLOO, NCCL, UCC, MPI, and other registered backends.
+    Available backends: GLOO, NCCL, UCC, MPI, XCCL, and other registered backends.
 
     The values of this class are lowercase strings, e.g., ``"gloo"``. They can
     be accessed as attributes, e.g., ``Backend.NCCL``.
@@ -244,21 +254,24 @@ class Backend(str):
     NCCL = "nccl"
     UCC = "ucc"
     MPI = "mpi"
+    XCCL = "xccl"
 
     _BackendPlugin = namedtuple("_BackendPlugin", ["creator_fn", "extended_api"])
 
     _plugins: Dict[str, _BackendPlugin] = {}
 
-    backend_list = [UNDEFINED, GLOO, NCCL, UCC, MPI]
+    backend_list = [UNDEFINED, GLOO, NCCL, XCCL, UCC, MPI]
 
     default_device_backend_map: Dict[str, str] = {
         "cpu": GLOO,
         "cuda": NCCL,
+        "xpu": XCCL,
     }
 
     backend_capability: Dict[str, List[str]] = {
         GLOO: ["cpu", "cuda"],
         NCCL: ["cuda"],
+        XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
         MPI: ["cpu", "cuda"],
     }
@@ -267,6 +280,7 @@ class Backend(str):
         UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
         GLOO: ProcessGroup.BackendType.GLOO,
         NCCL: ProcessGroup.BackendType.NCCL,
+        XCCL: ProcessGroup.BackendType.XCCL,
         UCC: ProcessGroup.BackendType.UCC,
         MPI: ProcessGroup.BackendType.MPI,
     }
@@ -327,7 +341,7 @@ class Backend(str):
         Backend.backend_list.append(name.lower())
         if devices is not None:
             for device in devices:
-                if device != "cpu" and device != "cuda":
+                if device != "cpu" and device != "cuda" and device != "xpu":
                     Backend.default_device_backend_map[device] = name.lower()
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
@@ -340,7 +354,7 @@ class Backend(str):
                 "`cuda`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            Backend.backend_capability[name.lower()] = ["cpu", "cuda", "xpu"]
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -1185,6 +1199,11 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
+def is_xccl_available() -> bool:
+    """Check if the XCCL backend is available."""
+    return _XCCL_AVAILABLE
+
+
 def is_backend_available(backend: str) -> bool:
     """
     Check backend availability.
@@ -1437,6 +1456,10 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
             backends.add(backend)  # type: ignore[arg-type]
+    if torch.device("xpu") in devices and is_xccl_available():
+        backend = group._get_backend(torch.device("xpu"))
+        if isinstance(backend, ProcessGroupXCCL):
+            backends.add(backend)  # type: ignore[arg-type]
     if len(backends) == 0:
         warnings.warn("Set timeout is now only supported for either nccl or gloo.")
     for backend in backends:
@@ -1472,7 +1495,7 @@ def init_process_group(
 
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
-            build-time configurations, valid values include ``mpi``, ``gloo``,
+            build-time configurations, valid values include ``mpi``, ``gloo``, ``xccl``,
             ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
             and ``nccl`` backend will be created, see notes below for how multiple
             backends are managed. This field can be given as a lowercase string
@@ -1752,10 +1775,9 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type != "cuda"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be a cuda device with an "
-            "id, e.g. cuda:0, not just cuda or cpu"
+            "init_process_group device_id parameter must be a device with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -1885,6 +1907,17 @@ def _new_process_group_helper(
                 backend_prefix_store, group_rank, group_size, timeout=timeout
             )
             backend_type = ProcessGroup.BackendType.UCC
+        elif backend_str == Backend.XCCL:
+            if not is_xccl_available():
+                raise RuntimeError("Distributed package doesn't have XCCL built in")
+            if backend_options is not None:
+                assert isinstance(
+                    backend_options, ProcessGroupXCCL.Options
+                ), "Expected backend_options argument to be of type ProcessGroupXCCL.Options"
+            backend_class = ProcessGroupXCCL(
+                backend_prefix_store, group_rank, group_size
+            )
+            backend_type = ProcessGroup.BackendType.XCCL
         else:
             assert (
                 backend_str.upper() in Backend._plugins
@@ -2693,14 +2726,13 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
             return _IllegalWork()
         else:
             return None
-
+        
     work = group.allreduce([tensor], opts)
 
     if async_op:
         return work
     else:
         work.wait()
-
 
 @_exception_logger
 @deprecated(
@@ -4059,14 +4091,13 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
             return _IllegalWork()
         else:
             return None
-
+        
     work = group._reduce_scatter_base(output, input, opts)
 
     if async_op:
         return work
     else:
         work.wait()
-
 
 @deprecated(
     "`torch.distributed._reduce_scatter_base` is a private function and will be deprecated. "
