@@ -994,6 +994,11 @@ def record_compilation_metrics(
             return None
         return ",".join(safe_str(item) for item in metric)
 
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        REMOTE_CACHE_VERSION = None
+
     structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
     common_metrics = {
         "compile_id": str(torch._guards.CompileContext.current_compile_id()),
@@ -1012,6 +1017,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
             "inductor_fx_remote_cache_miss_keys"
         ),
+        "remote_cache_version": REMOTE_CACHE_VERSION,
     }
 
     # TODO: The following are legacy fields, populated from the fields that replace
