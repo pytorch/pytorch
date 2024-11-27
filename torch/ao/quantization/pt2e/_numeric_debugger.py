@@ -5,9 +5,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
-from torch.ao.quantization.pt2e.graph_utils import (
-    bfs_trace_executorch_program_with_node_process,
-)
+from torch.ao.quantization.pt2e.graph_utils import bfs_trace_with_node_process
 from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
@@ -64,13 +62,13 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     # Find the max ID that exists in the graph first, in case part of the graph
     # has already been annotated. This way we guarantee there are no duplicate
     # handle IDs.
-    bfs_trace_executorch_program_with_node_process(ep, _find_max_id)
+    bfs_trace_with_node_process(ep, _find_max_id)
 
     unique_id += 1
 
     # Assign debug handles to all nodes in the graph that don't have one based on the
     # max ID found in the previous step.
-    bfs_trace_executorch_program_with_node_process(ep, _assign_debug_handle)
+    bfs_trace_with_node_process(ep, _assign_debug_handle)
 
 
 class OutputLogger(torch.nn.Module):
