@@ -57,7 +57,6 @@ def init_lists():
         # General ASAN Failure due to related to generating bool values.
         # https://github.com/pytorch/pytorch/issues/74519
         # https://github.com/pytorch/pytorch/issues/63034
-        "nonzero",  # ASAN failure (paste: P501906539)
         "all",  # ASAN failure
         "any",  # ASAN failure
         "logdet",  # ASAN failure
