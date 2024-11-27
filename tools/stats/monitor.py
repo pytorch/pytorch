@@ -131,9 +131,9 @@ class UsageLogger:
                         "total_cpu_percent": used_cpu_percent,
                         "total_memory_percent": memory.percent,
                         "processes": self._get_process_info(),  # type: ignore[dict-item]
+                        "gpu_info": self._collect_gpu_data(),  # type: ignore[dict-item]
                     }
                 )
-                stats["gpu_info"] = self._collect_gpu_data()  # type: ignore[assignment]
 
             except Exception as e:
                 stats = {
