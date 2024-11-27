@@ -2030,9 +2030,7 @@ def flex_attention_backward(*args, **kwargs):
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
-                for w in [
-                    4
-                ]  # TODO num_warps: 8  is failing see: https://github.com/pytorch/pytorch/issues/141603
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
                 for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
