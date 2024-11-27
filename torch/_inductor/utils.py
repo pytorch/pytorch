@@ -466,7 +466,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Protocol, Generic[P, RV]):
+class CachedMethod(Protocol, Generic[RV, P]):
     @staticmethod
     def clear_cache(self) -> None:
         ...
