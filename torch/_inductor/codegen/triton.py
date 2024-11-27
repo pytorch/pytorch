@@ -1248,9 +1248,6 @@ class TritonKernelOverrides(TritonOverrides):
         with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # if "30" in repr(result) or "31" in repr(result):
-        #     breakpoint()
-
         if need_where:
             # Remove once CSEVariables track the dtype
             if result.bounds.is_bool:

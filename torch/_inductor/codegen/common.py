@@ -1405,9 +1405,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
-        self.use_count = 1  # track how many tims this expression is used
-        if dtype == "tl.float64":
-            breakpoint()
+        self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
 
     def __str__(self):
@@ -1544,9 +1542,6 @@ class CSE:
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
-
-        # if torch.float16 == dtype:
-        #     breakpoint()
 
         return var
 
@@ -1829,17 +1824,12 @@ class Kernel(CodeGen):
                             # cpp backend doesnt track dtype yet
                             output_dtype = None
 
-                        # if output_dtype == torch.float16:
-                        #     breakpoint()
-
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
                             v,
                             bounds=bounds,
                             dtype=output_dtype,
                         )
-                        # if "tmp5" in repr(csevar):
-                        #     breakpoint()
 
                         nonlocal output_idx
                         if (
