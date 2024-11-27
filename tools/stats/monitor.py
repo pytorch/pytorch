@@ -41,6 +41,7 @@ try:
 except ModuleNotFoundError:
     pass
 
+
 def parse_args() -> argparse.Namespace:
     """
     Parse command line arguments.
@@ -69,7 +70,11 @@ class UsageLogger:
     """
 
     def __init__(
-        self, log_interval=5, is_debug_mode=False, pynvml_enabled=False, amdsmi_enabled=False
+        self,
+        log_interval=5,
+        is_debug_mode=False,
+        pynvml_enabled=False,
+        amdsmi_enabled=False,
     ) -> None:
         """
         log_interval: Time interval in seconds for collecting usage data; default is 5 seconds.
@@ -182,10 +187,11 @@ class UsageLogger:
             for idx, handle in enumerate(self._gpu_handles):
                 gpu_utilization = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_processes = self._rocm_get_per_process_gpu_info(handle)
+                gpu_meme_utilization = gpu_utilization["umc_activity"]
                 info.update(
                     {
                         f"total_gpu_utilization_{idx}": gpu_utilization["gfx_activity"],
-                        f"total_gpu_mem_utilization_{idx}": gpu_utilization["umc_activity"],
+                        f"total_gpu_mem_utilization_{idx}": gpu_meme_utilization,
                         f"gpu_processes_{idx}": gpu_processes,
                     }
                 )
@@ -264,7 +270,11 @@ class UsageLogger:
                 try:
                     if "python" in process.name() and process.cmdline():
                         python_processes.append(process)
-                except (psutil.ZombieProcess,psutil.NoSuchProcess,psutil.AccessDenied):
+                except (
+                    psutil.ZombieProcess,
+                    psutil.NoSuchProcess,
+                    psutil.AccessDenied,
+                ):
                     # access denied or the process died
                     pass
             return python_processes
@@ -318,7 +328,9 @@ def main():
         except amdsmi.AmdSmiException:
             pass
     args = parse_args()
-    usagelogger = UsageLogger(args.log_interval, args.debug, pynvml_enabled, amdsmi_enabled)
+    usagelogger = UsageLogger(
+        args.log_interval, args.debug, pynvml_enabled, amdsmi_enabled
+    )
     # gracefully exit the script when pid is killed
     signal.signal(signal.SIGTERM, usagelogger.stop)
     # gracefully exit the script when keyboard ctrl+c is pressed.
