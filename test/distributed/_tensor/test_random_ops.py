@@ -15,7 +15,7 @@ from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
     manual_seed,
-    TensorParallelRNGTracker,
+    OffsetBasedRNGTracker,
 )
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests
@@ -129,7 +129,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         model.reset_parameters()
         self.assertTrue(
             random._rng_tracker is not None
-            and isinstance(random._rng_tracker, TensorParallelRNGTracker)
+            and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
         assert isinstance(model.weight, DTensor)
@@ -180,7 +180,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         model.reset_parameters()
         self.assertTrue(
             random._rng_tracker is not None
-            and isinstance(random._rng_tracker, TensorParallelRNGTracker)
+            and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
         assert isinstance(model.weight, DTensor)
@@ -196,13 +196,12 @@ class DistTensorRandomOpTest(DTensorTestBase):
         )
 
         # verify the weights are initialized differently on all ranks
-        with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    self.assertNotEqual(
-                        weight_local,
-                        weight_gather[other_rank : other_rank + 1, :],
-                    )
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                self.assertNotEqual(
+                    weight_local,
+                    weight_gather[other_rank : other_rank + 1, :],
+                )
 
     @with_comms
     @skip_unless_torch_gpu
