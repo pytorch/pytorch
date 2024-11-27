@@ -532,7 +532,7 @@ at::Tensor memset32_(
 
   auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
-      offset + count < input.numel(),
+      offset + count <= input.numel(),
       "symm_mem::memset32_: offset + count (",
       offset + count,
       ") exceeded the numel of the input (",

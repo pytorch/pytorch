@@ -420,7 +420,7 @@ def conv_layout(
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         sizes,
         stride,

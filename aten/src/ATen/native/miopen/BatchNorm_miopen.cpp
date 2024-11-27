@@ -17,7 +17,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -33,7 +33,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   TORCH_CHECK(false, "miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
-}}  // namespace at::native
+}  // namespace at::native
 
 #else // AT_ROCM_ENABLED
 
