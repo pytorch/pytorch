@@ -52,7 +52,10 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     Args:
         seed (int): The desired seed.
-        device_mesh (:class:`DeviceMesh`): The device mesh to set the seed.
+        device_mesh (:class:`DeviceMesh`): The device mesh to set the seed. It is
+            required that the ``device_mesh`` include the calling rank. This is
+            to ensure that the SPMD region maintains a synchronous RNG state, which
+            means no ranks should be initialized with values other than ``seed``.
 
     Returns:
         None
@@ -62,7 +65,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         ensure on their own that the value passed in is the desired ``seed`` for ranks
         within ``device_mesh``.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        ``manual_seed`` will not set its GPU device's generator seed.
+        ``manual_seed`` will throw an error.
         Current implementation only supports a GPU device mesh.
     """
     device_handle = _get_device_handle(device_mesh.device_type)
@@ -82,6 +85,12 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
         _rng_tracker._manual_seed(seed)
+    else:
+        raise RuntimeError(
+            "manual_seed requires the current rank to be a part of the device mesh "
+            "otherwise DTensor RNG state on the rank will not be initialized and "
+            "the behavior of DTensor random ops is undefined."
+        )
 
 
 class _RNGStateTracker:
@@ -130,8 +139,12 @@ class _RNGStateTracker:
         return int(seed_tensor.item())
 
     def set_seed(self, name: str, seed: int) -> None:
-        seed_tensor = torch.tensor([seed], dtype=torch.uint64).view(torch.uint8)
-        offset_tensor = torch.tensor([0]).view(torch.uint8)
+        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
+        offset_tensor = torch.tensor([0], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _distribute_region(self, spec: DTensorSpec):
@@ -198,7 +211,9 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             )
 
         seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset], dtype=torch.uint64).view(torch.uint8)
+        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
@@ -277,7 +292,6 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             total_num_shards = 1
             # the tensor dim is sharded on more than 1 mesh dim
             if isinstance(mesh_dim, List):
-                assert isinstance(mesh_dim, List)
                 rank_coord = [mesh_coordinate[d] for d in mesh_dim]
                 num_shards = [mesh_size[d] for d in mesh_dim]
                 # compute the shard idx and total number of shards
