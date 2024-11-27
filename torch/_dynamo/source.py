@@ -391,6 +391,23 @@ class TensorPropertySource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class IndexedSource(ChainedSource):
+    idx: int
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        raise NotImplementedError
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"({self.idx}, {self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None

@@ -82,7 +82,7 @@ from torch.utils._sympy.functions import (
     PythonMod,
 )
 from torch.utils._sympy.numbers import int_oo
-from torch.utils._sympy.printers import PythonPrinter
+from torch.utils._sympy.printers import CppPrinter, PythonPrinter
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
@@ -2162,6 +2162,35 @@ class ShapeGuardPythonPrinter(_ShapeGuardPrinter, PythonPrinter):
 )
 class ShapeGuardPrinter(ShapeGuardPythonPrinter):
     pass
+
+
+class ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
+    def __init__(self, *args: Any) -> None:
+        self.all_symbols: Set[str] = set()
+        self.source_to_symbol: Dict[Source, sympy.Symbol] = {}
+        super().__init__(*args)
+
+    def print_source(self, source: Source) -> str:
+        if source in self.source_to_symbol:
+            return self.source_to_symbol[source].name
+
+        source_name = source.name()
+        mangled_name = re.sub("[^0-9a-zA-Z_]+", "_", source_name)
+        old_mangled_name = mangled_name
+        count = 0
+        while mangled_name in self.all_symbols:
+            mangled_name = f"{old_mangled_name}_{count}"
+            count += 1
+        self.source_to_symbol[source] = sympy.Symbol(mangled_name)
+        self.all_symbols.add(mangled_name)
+        return mangled_name
+
+
+# A dataclass for storing C++ expressions and helper variables
+@dataclass(frozen=True)
+class _CppShapeGuardsHelper:
+    exprs: List[str]
+    source_to_symbol: Dict[Source, sympy.Symbol]
 
 
 class LoggingShapeGuardPrinter(ShapeGuardPythonPrinter):
@@ -4447,7 +4476,7 @@ class ShapeEnv:
         _simplified: bool = False,
         # Indicates if we should produce guards for known static values.
         ignore_static: bool = True,
-    ) -> Tuple[List[str], List[str]]:  # python, verbose
+    ) -> Tuple[List[str], List[str], _CppShapeGuardsHelper]:  # python, verbose, cpp
         """
         Generates a list of guards strings which, when evaluated in a context that
         defines tensors for all the sources, returns True or False depending
@@ -4584,6 +4613,9 @@ class ShapeEnv:
         ] = collections.defaultdict(set)
         constraint_violations: List[Tuple[bool, str, Callable[[], str]]] = []
 
+        cpp_printer = ShapeGuardCppPrinter(
+            symbol_to_source, source_ref, self.var_to_sources
+        )
         py_printer = ShapeGuardPythonPrinter(
             symbol_to_source, source_ref, self.var_to_sources
         )
@@ -4846,6 +4878,7 @@ class ShapeEnv:
         #    This does a lot of work: it covers duck sizing and equality guards.
         python_exprs = []
         verbose_exprs = []
+        cpp_exprs = []
         self.dim_constraints = DimConstraints(
             symbol_to_source,
             self.var_to_val,
@@ -4886,6 +4919,9 @@ class ShapeEnv:
 
                 res = f"{py_printer.print_source(source)} == {py_printer.doprint(expr)}"
                 python_exprs.append(res)
+                cpp_exprs.append(
+                    f"{cpp_printer.print_source(source)} == {cpp_printer.doprint(expr)}"
+                )
 
                 if (s0 := self.source_to_var.get(srcname)) is not None:
                     if source != self.var_to_sources[s0][0]:
@@ -4978,6 +5014,7 @@ class ShapeEnv:
                 guard_expr = py_printer.doprint(expr)
                 python_exprs.append(guard_expr)
                 verbose_exprs.append(f"{guard_expr}  # {guard.sloc}")
+                cpp_exprs.append(cpp_printer.doprint(expr))
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
@@ -5056,6 +5093,7 @@ class ShapeEnv:
             if bounds:
                 bound = sympy.And(*bounds, evaluate=False)
                 python_exprs.append(py_printer.doprint(bound))
+                cpp_exprs.append(cpp_printer.doprint(bound))
                 # NB: verbose_exprs are done above
 
                 # Check constraints
@@ -5090,6 +5128,7 @@ class ShapeEnv:
                 verbose_exprs.append(
                     f"{res}  # implicit guard for float input due to NaN specialization in the framework"
                 )
+                cpp_exprs.append(f"~std::isnan({cpp_printer.print_source(sources[0])})")
 
         if constraint_violations:
             warn_msgs: List[str] = []
@@ -5157,7 +5196,11 @@ class ShapeEnv:
         # Only run translation validation when we are not passing custom guards
         if guards is None:
             self._check_translation_validate()
-        return python_exprs, verbose_exprs
+
+        cpp_exprs_helper = _CppShapeGuardsHelper(
+            cpp_exprs, cpp_printer.source_to_symbol
+        )
+        return python_exprs, verbose_exprs, cpp_exprs_helper
 
     def produce_guards_expression(
         self,
