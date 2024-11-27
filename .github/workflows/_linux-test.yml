@@ -157,6 +157,16 @@ jobs:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        shell: bash
+        continue-on-error: true
+        run: |
+          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
@@ -190,16 +200,6 @@ jobs:
           JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
-
-      - name: Start monitoring script
-        id: monitor-script
-        if: ${{ !inputs.disable-monitor }}
-        shell: bash
-        continue-on-error: true
-        run: |
-          python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
-          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Test
         id: test
