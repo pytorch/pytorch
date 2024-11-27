@@ -52,7 +52,7 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import code_hash, FxGraphCache
+from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
@@ -983,7 +983,45 @@ def fx_codegen_and_compile(
                             output_strides.append(None)
 
                 _check_triton_bf16_support(graph)
-                compiled_fn = graph.compile_to_fn()
+
+                compiled_fn: Any
+
+                with dynamo_timed(
+                    "GraphLowering.compile_to_fn", log_pt2_compile_event=True
+                ):
+                    if graph.aot_mode:
+                        from .codecache import AotCodeCompiler
+
+                        assert graph.cpp_wrapper, "AOT mode only supports C++ wrapper"
+                        code, linemap = graph.codegen_with_cpp_wrapper()
+                        output_code_log.debug("Output code: \n%s", code)
+
+                        serialized_extern_kernel_nodes = None
+                        if graph.extern_kernel_nodes:
+                            serialized_extern_kernel_nodes = (
+                                graph.extern_node_serializer(graph.extern_kernel_nodes)
+                            )
+                            output_code_log.debug(
+                                "Serialized Extern Kernel Nodes: \n%s",
+                                serialized_extern_kernel_nodes,
+                            )
+
+                        additional_files = graph.wrapper_code.additional_files
+
+                        with dynamo_timed(
+                            "AotCodeCompiler.compile", log_pt2_compile_event=True
+                        ):
+                            # Directly return the file path with the compiled code
+                            compiled_fn = AotCodeCompiler.compile(
+                                graph,
+                                code,
+                                serialized_extern_kernel_nodes,
+                                device_type=graph.device_type,
+                                additional_files=additional_files,
+                            )
+                    else:
+                        compiled_fn = graph.compile_to_module().call
+
                 num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                 metrics.num_bytes_accessed += num_bytes
                 metrics.node_runtimes += node_runtimes
