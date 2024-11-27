@@ -108,7 +108,7 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
-void DebugInfoWriter::write(const std::string& ncclTrace) {
+void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
   std::ofstream file(filename_, std::ios::binary);
@@ -120,7 +120,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
+  file.write(trace.data(), static_cast<std::streamsize>(trace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;

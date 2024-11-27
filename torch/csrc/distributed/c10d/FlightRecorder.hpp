@@ -69,7 +69,7 @@ DEFINE_CONSTANT(started_state, "started")
 class TORCH_API DebugInfoWriter {
  public:
   virtual ~DebugInfoWriter() = default;
-  virtual void write(const std::string& ncclTrace);
+  virtual void write(const std::string& trace);
   static DebugInfoWriter& getWriter(int rank);
   static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
   virtual std::string getWriterTarget() {
