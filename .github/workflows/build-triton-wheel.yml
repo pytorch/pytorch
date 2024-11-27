@@ -126,7 +126,8 @@ jobs:
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           if [[ "${{ matrix.device }}" == "cuda" ]]; then
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat manylinux_2_28_x86_64 ${{ runner.temp }}/artifacts/*.whl"
+            docker exec -t "${container_name}"  bash -c "ls -las //artifacts/"
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat manylinux_2_28_x86_64 //artifacts/*.whl"
           fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
