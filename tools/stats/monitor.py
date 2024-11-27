@@ -190,11 +190,11 @@ class UsageLogger:
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_processes = self._rocm_get_per_process_gpu_info(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
-                gpu_meme_utilization = gpu_utilization["umc_activity"]
+                gpu_mem_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
                     {
                         "total_gpu_utilization": gpu_utilization,
-                        "total_gpu_mem_utilization": gpu_meme_utilization,
+                        "total_gpu_mem_utilization": gpu_mem_utilization,
                         "gpu_processes": gpu_processes,
                     }
                 )
