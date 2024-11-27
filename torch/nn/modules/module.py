@@ -261,9 +261,8 @@ def register_module_forward_hook(
 
     The input contains only the positional arguments given to the module.
     Keyword arguments won't be passed to the hooks and only to the ``forward``.
-    The hook can modify the output. It can modify the input inplace but
-    it will not have effect on forward since this is called after
-    :func:`forward` is called.
+    You can optionally modify the output of the module by returning a new value
+    that will replace the output from the :func:`forward` function.
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
@@ -1912,14 +1911,10 @@ class Module:
         if "_backward_pre_hooks" not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
-    # On the return type:
-    # We choose to return `Any` in the `__getattr__` type signature instead of a more strict `Union[Tensor, Module]`.
-    # This is done for better interop with various type checkers for the end users.
-    # Having a stricter return type doesn't play nicely with `register_buffer()` and forces
-    # people to excessively use type-ignores, asserts, casts, etc.
-    # See full discussion on the problems with returning `Union` here
-    # https://github.com/microsoft/pyright/issues/4213
-    def __getattr__(self, name: str) -> Any:
+    # It is crucial that the return type is not annotated as `Any`, otherwise type checking
+    # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
+    # https://github.com/pytorch/pytorch/pull/115074
+    def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
         if "_parameters" in self.__dict__:
             _parameters = self.__dict__["_parameters"]
             if name in _parameters:
