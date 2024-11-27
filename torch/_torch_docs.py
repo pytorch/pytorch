@@ -10592,6 +10592,9 @@ Args:
 Keyword args:
     {dtype}
 
+.. note:: Use the `dtype` argument if you need the result in a specific tensor type.
+          Otherwise, the result type may be automatically promoted (e.g., from `torch.int32` to `torch.int64`).
+
 Example::
 
     >>> a = torch.randn(1, 3)
@@ -12670,14 +12673,14 @@ the default computation is
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{1}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{1}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`dx` is specified the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{\Delta x}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{\Delta x}{2} (y_i + y_{i-1})
     \end{aligned}
 
 effectively multiplying the result by :attr:`dx`. When :attr:`x` is specified,
@@ -12686,7 +12689,7 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
@@ -13829,7 +13832,7 @@ are freshly created instead of aliasing the input.
 add_docstr(
     torch.expand_copy,
     r"""
-Performs the same operation as :func:`torch.expand`, but all output tensors
+Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )
