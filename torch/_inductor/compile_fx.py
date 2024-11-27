@@ -51,12 +51,7 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import (
-    _StrideExprStr,
-    code_hash,
-    CompiledFxGraph,
-    FxGraphCache,
-)
+from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -110,6 +105,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
 
     from .ir import ExternKernelNode
