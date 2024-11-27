@@ -326,7 +326,7 @@ def expand_bias(
     return B
 
 
-def get_block_w(
+def pack_w(
     W: Union[ir.IRNode, torch.Tensor],
     padded_n: int,
     block_n: int,
@@ -386,7 +386,7 @@ def get_block_w(
 
 def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
     """
-    Prune unused tensors since the GEMM Template use new packed weight.
+    Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
     """
 
     def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
@@ -451,27 +451,24 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
                 delattr(V.graph.graph.owning_module, node.name)
 
 
-def process_out_template_epilogues(
-    epilogues: List[ir.IRNode],
-    epilogue_nodes: List[ir.IRNode],
+def gen_2d_view_of_epilogues_buf(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
+    epilogue_nodes: List[ir.IRNode],
     reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
 ) -> tuple[
-    List[ir.IRNode],
-    ir.Buffer,
-    List[Optional[Callable[[List[Any]], List[Any]]]],
     Union[ir.Buffer, ir.ReinterpretView],
+    List[Optional[Callable[[List[Any]], List[Any]]]],
 ]:
     """
-    Helper function to pre-process out template epilogues for code generation.
+    The dimension and the indexing could be different between the GEMM output, i.e. `template_buffer`, which is
+    2D with MxN) and the output from the template after epilogues, i.e. `Y`. In the GEMM template code,
+    we are not aware of the dimension and the indexing of the epilogues and always work on 2D tiles according to
+    the indexing of the GEMM output.
+    In this function, we return a 2D buffer (`Y_2d`) according to GEMM output (reinterpreted from `Y` if needed) and
+    build a reindexer that converts the indexing of `Y` into `Y_2d`.
     """
-    epilogues.extend(epilogue_nodes)
-    assert Y.get_numel() == epilogues[-1].get_numel()
-    Y = cast(ir.Buffer, epilogues[-1])
-
     Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-
     if (
         Y.get_size() == template_buffer.get_size()
         and Y.get_stride() == template_buffer.get_stride()
@@ -524,7 +521,7 @@ def process_out_template_epilogues(
             assert isinstance(Y, ir.Buffer)
             storage = ir.StorageBox(Y)
         Y_2d = ir.ReinterpretView(data=storage, layout=template_buffer.get_layout())
-    return epilogues, Y, reindexers, Y_2d
+    return Y_2d, reindexers
 
 
 class CppPackedGemmTemplate(CppTemplate):
@@ -904,7 +901,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def pack_weight(inputs, layout_or_out):
             W = inputs[1]
             new_inputs = list(inputs)
-            new_inputs[1] = get_block_w(W, padded_n, block_n, k, n, micro_gemm)
+            new_inputs[1] = pack_w(W, padded_n, block_n, k, n, micro_gemm)
 
             def _is_int8_gemm(inputs):
                 return (
@@ -1130,11 +1127,13 @@ class CppPackedGemmTemplate(CppTemplate):
         if epilogue_nodes:
             if not template_buffer_has_other_users:
                 Y_aliases.add(template_buffer.get_name())
-            epilogues, Y, reindexers, Y_2d = process_out_template_epilogues(
-                epilogues,
-                epilogue_nodes,
+            epilogues.extend(epilogue_nodes)
+            assert Y.get_numel() == epilogues[-1].get_numel()
+            Y = cast(ir.Buffer, epilogues[-1])
+            Y_2d, reindexers = gen_2d_view_of_epilogues_buf(
                 Y,
                 template_buffer,
+                epilogue_nodes,
                 reindexers,
             )
 
