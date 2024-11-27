@@ -1005,8 +1005,8 @@ def record_compilation_metrics(
 
         remote_cache_version = REMOTE_CACHE_VERSION
         if (os.environ.get("TORCHINDUCTOR_USE_ZIPPYDB") == "1") or justknobs_check(
-                "pytorch/remote_cache:fx_graph_cache_use_zippydb"
-            ):
+            "pytorch/remote_cache:fx_graph_cache_use_zippydb"
+        ):
             inductor_fx_remote_cache_backend_type = "ZippyDBCache"
         else:
             inductor_fx_remote_cache_backend_type = "_ManifoldCache"
@@ -1032,7 +1032,7 @@ def record_compilation_metrics(
             "inductor_fx_remote_cache_miss_keys"
         ),
         "remote_cache_version": remote_cache_version,
-        "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type
+        "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
 
     # TODO: The following are legacy fields, populated from the fields that replace
