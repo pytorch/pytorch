@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Optional, Set, Union
+from typing import Any, Callable, cast, List, Optional, Set, Union
 from unittest.mock import patch
 
 import torch
@@ -17,9 +17,9 @@ from .cpp import get_export_declaration
 from .cpp_gemm_template import (
     CppPackedGemmTemplate,
     expand_bias,
-    get_block_w,
+    gen_2d_view_of_epilogues_buf,
     get_padded_n,
-    process_out_template_epilogues,
+    pack_w,
     prune_tensors,
     transpose_w,
 )
@@ -356,7 +356,7 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
             new_inputs = list(inputs)
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
             for W in W_list:
-                new_W_list.append(get_block_w(W, padded_n, block_n, k, n, micro_gemm))
+                new_W_list.append(pack_w(W, padded_n, block_n, k, n, micro_gemm))
             new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
             return new_inputs, layout_or_out
 
@@ -496,11 +496,13 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
             reindexers.append(None)
 
         if epilogue_nodes:
-            epilogues, Y, reindexers, Y_2d = process_out_template_epilogues(
-                epilogues,
-                epilogue_nodes,
+            epilogues.extend(epilogue_nodes)
+            assert Y.get_numel() == epilogues[-1].get_numel()
+            Y = cast(ir.Buffer, epilogues[-1])
+            Y_2d, reindexers = gen_2d_view_of_epilogues_buf(
                 Y,
                 template_buffer,
+                epilogue_nodes,
                 reindexers,
             )
 
