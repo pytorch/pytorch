@@ -2996,11 +2996,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
                 )
                 # Matched nodes:
-                # (1) quantize x, (2) dequantize x, (3) dequantize w, (4) permute w, (5) mm/addmm
-                # If x.ndim == 3, two view nodes are added.
-                nodes_count = 5
+                # (1) dequantize w, (2) permute w, (3) mm/addmm/bmm
+                # If x.ndim == 3 and x is contiguous, two view nodes are added.
+                # If x.ndim == 3 and x is not contiguous, two expand nodes and one add node are added.
+                nodes_count = 3
                 if input_ndim > 2:
-                    nodes_count += 2
+                    if x_contig:
+                        nodes_count += 2
+                    else:
+                        nodes_count += 3 if bias else 2
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
                     nodes_count,
