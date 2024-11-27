@@ -3761,7 +3761,8 @@ class TritonScheduling(SIMDScheduling):
 
             launchers = wrapped_jit_function.launchers
             assert len(launchers) == 1
-            if launchers[0].n_spills > 0:
+            # register spills don't necessarily imply bad perf
+            if False and launchers[0].n_spills > 0:
                 # skip benchmarking the kernel if there are register spills
                 ms = ms_clone = float("inf")
             else:
