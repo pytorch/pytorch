@@ -11,6 +11,7 @@ import unittest
 from collections import namedtuple
 from enum import Enum
 from functools import partial, wraps
+from math import inf
 from typing import (
     Any,
     ClassVar,
@@ -44,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    MAX_CUDA_MEM,
     NATIVE_DEVICES,
     PRINT_REPRO_ON_FAILURE,
     skipCUDANonDefaultStreamIf,
@@ -1312,7 +1314,13 @@ def _has_sufficient_memory(device, size):
         # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
         if device == "cuda":
             device = "cuda:0"
-        return torch.cuda.memory.mem_get_info(device)[0] >= size
+        return (
+            min(
+                MAX_CUDA_MEM if MAX_CUDA_MEM else inf,
+                torch.cuda.memory.mem_get_info(device)[0],
+            )
+            >= size
+        )
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
