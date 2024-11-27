@@ -1454,8 +1454,8 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 
 
 def run_and_get_graph_lowering(fn, *args, **kwargs):
-    from torch._inductor.codecache import CompiledFxGraph
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.output_code import CompiledFxGraph
 
     real_init = CompiledFxGraph.__init__
     graph_lowerings = []
