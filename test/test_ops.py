@@ -121,7 +121,6 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("abs"),
     xfail("addbmm"),
     xfail("addmv"),
     xfail("alias_copy"),
@@ -133,7 +132,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("as_strided_copy"),
     xfail("baddbmm"),
     xfail("bucketize"),
-    xfail("ceil"),
     xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
@@ -144,8 +142,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("expand_copy"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
-    xfail("floor"),
-    xfail("frac"),
     xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
@@ -154,8 +150,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("index_copy"),
     xfail("index_select"),
     xfail("isin"),
-    xfail("isneginf"),
-    xfail("isposinf"),
     xfail("kthvalue"),
     xfail("lerp"),
     xfail("linalg.cross"),
@@ -174,7 +168,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("log_softmax"),
     xfail("logcumsumexp"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
@@ -209,22 +202,16 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("sgn"),
-    xfail("sign"),
-    xfail("signbit"),
     xfail("slice_scatter"),
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("square"),
     xfail("squeeze_copy"),
     xfail("t_copy"),
     xfail("take"),
     xfail("transpose_copy"),
     xfail("tril"),
-    xfail("triangular_solve"),
     xfail("triu"),
-    xfail("trunc"),
     xfail("unfold_copy"),
     xfail("unsqueeze_copy"),
     xfail("vdot"),
@@ -1095,17 +1082,15 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
-            if torch.device(device).type != "cpu":
-                wrong_device = "cpu"
-            elif torch.cuda.is_available():
-                wrong_device = "cuda"
-
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
             )
-            if wrong_device is not None:
+
+            if torch.device(device).type != "cpu":
+                wrong_device = "cpu"
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
