@@ -161,6 +161,9 @@ class UsageLogger:
         self._kill_now = True
 
     def log_json(self, stats: Any) -> None:
+        """
+        Logs the stats in json format to stdout.
+        """
         if self._debug_mode:
             print(json.dumps(stats, indent=4))
             return
@@ -170,26 +173,27 @@ class UsageLogger:
         gpu_data_list = []
         if self._has_pynvml:
             # Iterate over the available GPUs
-            for idx, gpu_handle in enumerate(self._gpu_handles):
+            for gpu_handle in self._gpu_handles:
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_processes = self._get_per_process_gpu_info(gpu_handle)
                 gpu_data_list.append(
                     {
-                        "idx": idx,
                         "total_gpu_utilization": gpu_utilization.gpu,
                         "total_gpu_mem_utilization": gpu_utilization.memory,
                         "gpu_processes": gpu_processes,
-                    })
+                    }
+                )
         elif self._has_amdsmi:
             # Iterate over the available GPUs
-            for idx, handle in enumerate(self._gpu_handles):
-                gpu_utilization = amdsmi.amdsmi_get_gpu_activity(handle)
+            for handle in self._gpu_handles:
+                # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
+                engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_processes = self._rocm_get_per_process_gpu_info(handle)
+                gpu_utilization = engine_usage["gfx_activity"]
                 gpu_meme_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
                     {
-                        "idx": idx,
-                        "total_gpu_utilization": gpu_utilization["gfx_activity"],
+                        "total_gpu_utilization": gpu_utilization,
                         "total_gpu_mem_utilization": gpu_meme_utilization,
                         "gpu_processes": gpu_processes,
                     }
@@ -203,6 +207,8 @@ class UsageLogger:
         try:
             if self._has_pynvml:
                 self._gpu_libs_detected.append("pynvml")
+                # Todo: investigate if we can use device uuid instead of index.
+                # there is chance that the gpu index can change when the gpu is rebooted.
                 self._gpu_handles = [
                     pynvml.nvmlDeviceGetHandleByIndex(i)
                     for i in range(pynvml.nvmlDeviceGetCount())
