@@ -783,7 +783,7 @@ def _compile_fx_inner(
             local_cache_enabled=local,
         )
 
-        # Don't clog up the main tlparse output with empty cache
+        # Don't clog up the main tlparse output with disabled cache
         if cache_info is not None:
             torch._logging.trace_structured(
                 "artifact",
