@@ -6,7 +6,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
@@ -14,7 +13,6 @@ from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as py_pytree
-from torch.autograd.forward_ad import UnpackedDualTensor
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -23,6 +21,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -40,14 +39,6 @@ class GlobalDummyType:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-
-
-cxx_pytree.register_pytree_node(
-    GlobalDummyType,
-    lambda dummy: ([dummy.x, dummy.y], None),
-    lambda xs, _: GlobalDummyType(*xs),
-    serialized_type_name="GlobalDummyType",
-)
 
 
 class TestGenericPytree(TestCase):
@@ -727,153 +718,6 @@ class TestGenericPytree(TestCase):
         with self.assertRaises(TypeError):
             pytree_impl.treespec_dumps("random_blurb")
 
-    @parametrize(
-        "pytree_impl",
-        [
-            subtest(py_pytree, name="py"),
-            subtest(cxx_pytree, name="cxx"),
-        ],
-    )
-    def test_unpacked_dual_tensor_is_leaf(self, pytree_impl):
-        # Test that an UnpackedDualTensor is considered a leaf node
-        dt = UnpackedDualTensor(primal=1, tangent=2)
-        leaves, spec = pytree_impl.tree_flatten(dt)
-        self.assertEqual(leaves, [dt])
-        self.assertTrue(spec.is_leaf())
-
-    @parametrize(
-        "pytree_impl",
-        [
-            subtest(py_pytree, name="py"),
-            subtest(cxx_pytree, name="cxx"),
-        ],
-    )
-    def test_is_namedtuple(self, pytree_impl):
-        DirectNamedTuple1 = namedtuple("DirectNamedTuple1", ["x", "y"])
-
-        class DirectNamedTuple2(NamedTuple):
-            x: int
-            y: int
-
-        class IndirectNamedTuple1(DirectNamedTuple1):
-            pass
-
-        class IndirectNamedTuple2(DirectNamedTuple2):
-            pass
-
-        self.assertTrue(pytree_impl.is_namedtuple(DirectNamedTuple1(0, 1)))
-        self.assertTrue(pytree_impl.is_namedtuple(DirectNamedTuple2(0, 1)))
-        self.assertTrue(pytree_impl.is_namedtuple(IndirectNamedTuple1(0, 1)))
-        self.assertTrue(pytree_impl.is_namedtuple(IndirectNamedTuple2(0, 1)))
-        self.assertFalse(pytree_impl.is_namedtuple(time.gmtime()))  # PyStructSequence
-        self.assertFalse(pytree_impl.is_namedtuple((0, 1)))
-        self.assertFalse(pytree_impl.is_namedtuple([0, 1]))
-        self.assertFalse(pytree_impl.is_namedtuple({0: 1, 1: 2}))
-        self.assertFalse(pytree_impl.is_namedtuple({0, 1}))
-        self.assertFalse(pytree_impl.is_namedtuple(1))
-
-        self.assertTrue(pytree_impl.is_namedtuple(DirectNamedTuple1))
-        self.assertTrue(pytree_impl.is_namedtuple(DirectNamedTuple2))
-        self.assertTrue(pytree_impl.is_namedtuple(IndirectNamedTuple1))
-        self.assertTrue(pytree_impl.is_namedtuple(IndirectNamedTuple2))
-        self.assertFalse(
-            pytree_impl.is_namedtuple(time.struct_time)
-        )  # PyStructSequence
-        self.assertFalse(pytree_impl.is_namedtuple(tuple))
-        self.assertFalse(pytree_impl.is_namedtuple(list))
-
-        self.assertTrue(pytree_impl.is_namedtuple_class(DirectNamedTuple1))
-        self.assertTrue(pytree_impl.is_namedtuple_class(DirectNamedTuple2))
-        self.assertTrue(pytree_impl.is_namedtuple_class(IndirectNamedTuple1))
-        self.assertTrue(pytree_impl.is_namedtuple_class(IndirectNamedTuple2))
-        self.assertFalse(
-            pytree_impl.is_namedtuple_class(time.struct_time)
-        )  # PyStructSequence
-        self.assertFalse(pytree_impl.is_namedtuple_class(tuple))
-        self.assertFalse(pytree_impl.is_namedtuple_class(list))
-
-    @parametrize(
-        "pytree_impl",
-        [
-            subtest(py_pytree, name="py"),
-            subtest(cxx_pytree, name="cxx"),
-        ],
-    )
-    def test_is_structseq(self, pytree_impl):
-        class FakeStructSeq(tuple):
-            n_fields = 2
-            n_sequence_fields = 2
-            n_unnamed_fields = 0
-
-            __slots__ = ()
-            __match_args__ = ("x", "y")
-
-            def __new__(cls, sequence):
-                return super().__new__(cls, sequence)
-
-            @property
-            def x(self):
-                return self[0]
-
-            @property
-            def y(self):
-                return self[1]
-
-        DirectNamedTuple1 = namedtuple("DirectNamedTuple1", ["x", "y"])
-
-        class DirectNamedTuple2(NamedTuple):
-            x: int
-            y: int
-
-        self.assertFalse(pytree_impl.is_structseq(FakeStructSeq((0, 1))))
-        self.assertTrue(pytree_impl.is_structseq(time.gmtime()))  # PyStructSequence
-        self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple1(0, 1)))
-        self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple2(0, 1)))
-        self.assertFalse(pytree_impl.is_structseq((0, 1)))
-        self.assertFalse(pytree_impl.is_structseq([0, 1]))
-        self.assertFalse(pytree_impl.is_structseq({0: 1, 1: 2}))
-        self.assertFalse(pytree_impl.is_structseq({0, 1}))
-        self.assertFalse(pytree_impl.is_structseq(1))
-
-        self.assertFalse(pytree_impl.is_structseq(FakeStructSeq))
-        self.assertTrue(
-            pytree_impl.is_structseq(time.struct_time),
-        )  # PyStructSequence
-        self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple1))
-        self.assertFalse(pytree_impl.is_structseq(DirectNamedTuple2))
-        self.assertFalse(pytree_impl.is_structseq(tuple))
-        self.assertFalse(pytree_impl.is_structseq(list))
-
-        self.assertFalse(pytree_impl.is_structseq_class(FakeStructSeq))
-        self.assertTrue(
-            pytree_impl.is_structseq_class(time.struct_time),
-        )  # PyStructSequence
-        self.assertFalse(pytree_impl.is_structseq_class(DirectNamedTuple1))
-        self.assertFalse(pytree_impl.is_structseq_class(DirectNamedTuple2))
-        self.assertFalse(pytree_impl.is_structseq_class(tuple))
-        self.assertFalse(pytree_impl.is_structseq_class(list))
-
-        # torch.return_types.* are all PyStructSequence types
-        for cls in vars(torch.return_types).values():
-            if isinstance(cls, type) and issubclass(cls, tuple):
-                self.assertTrue(pytree_impl.is_structseq(cls))
-                self.assertTrue(pytree_impl.is_structseq_class(cls))
-                self.assertFalse(pytree_impl.is_namedtuple(cls))
-                self.assertFalse(pytree_impl.is_namedtuple_class(cls))
-
-                inst = cls(range(cls.n_sequence_fields))
-                self.assertTrue(pytree_impl.is_structseq(inst))
-                self.assertTrue(pytree_impl.is_structseq(type(inst)))
-                self.assertFalse(pytree_impl.is_structseq_class(inst))
-                self.assertTrue(pytree_impl.is_structseq_class(type(inst)))
-                self.assertFalse(pytree_impl.is_namedtuple(inst))
-                self.assertFalse(pytree_impl.is_namedtuple_class(inst))
-            else:
-                self.assertFalse(pytree_impl.is_structseq(cls))
-                self.assertFalse(pytree_impl.is_structseq_class(cls))
-                self.assertFalse(pytree_impl.is_namedtuple(cls))
-                self.assertFalse(pytree_impl.is_namedtuple_class(cls))
-
 
 class TestPythonPytree(TestCase):
     def test_deprecated_register_pytree_node(self):
@@ -904,13 +748,12 @@ class TestPythonPytree(TestCase):
         script = """
 import sys
 import torch
-assert "torch.utils.pytree" in sys.modules
+import torch.utils._pytree
 assert "torch.utils._pytree" in sys.modules
-if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
-    if "torch.utils._cxx_pytree" in sys.modules:
-        raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
-    if "optree" in sys.modules:
-        raise RuntimeError("importing torch.utils._pytree should not import optree")
+if "torch.utils._cxx_pytree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+if "optree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import optree")
 """
         try:
             subprocess.check_output(
@@ -948,6 +791,7 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
             py_pytree.TreeSpec(tuple, None, []) != py_pytree.TreeSpec(list, None, []),
         )
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -960,6 +804,20 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
                 "    *,\n"
                 "    TreeSpec(list, None, [*])])])"
             ),
+        )
+
+    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
+    def test_treespec_repr_dynamo(self):
+        # Check that it looks sane
+        pytree = (0, [0, 0, [0]])
+        _, spec = py_pytree.tree_flatten(pytree)
+        self.assertExpectedInline(
+            repr(spec),
+            """\
+TreeSpec(tuple, None, [*,
+  TreeSpec(list, None, [*,
+    *,
+    TreeSpec(list, None, [*])])])""",
         )
 
     @parametrize(
@@ -1072,15 +930,6 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
                         ],
                     ),
                     py_pytree.TreeSpec(dict, [], []),
-                ],
-            ),
-            # py_pytree.tree_structure(torch.return_types.sort((torch.zeros(1), torch.zeros(1))))
-            py_pytree.TreeSpec(
-                py_pytree.structseq,
-                torch.return_types.sort,
-                [
-                    py_pytree.LeafSpec(),
-                    py_pytree.LeafSpec(),
                 ],
             ),
         ],
@@ -1454,12 +1303,21 @@ class TestCxxPytree(TestCase):
     def test_treespec_equality(self):
         self.assertEqual(cxx_pytree.LeafSpec(), cxx_pytree.LeafSpec())
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')"
+        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
+
+    @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
+    def test_treespec_repr_dynamo(self):
+        # Check that it looks sane
+        pytree = (0, [0, 0, [0]])
+        _, spec = cxx_pytree.tree_flatten(pytree)
+        self.assertExpectedInline(
+            repr(spec),
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
         )
 
     @parametrize(
@@ -1478,9 +1336,6 @@ class TestCxxPytree(TestCase):
             cxx_pytree.tree_structure([(0, 1, [2, 3])]),
             cxx_pytree.tree_structure(
                 defaultdict(list, {"a": [0, 1], "b": [1, 2], "c": {}})
-            ),
-            cxx_pytree.tree_structure(
-                torch.return_types.sort((torch.zeros(1), torch.zeros(1)))
             ),
         ],
     )
@@ -1517,6 +1372,12 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
+        cxx_pytree.register_pytree_node(
+            GlobalDummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: GlobalDummyType(*xs),
+            serialized_type_name="GlobalDummyType",
+        )
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)

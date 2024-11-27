@@ -34,7 +34,6 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
-import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -309,7 +308,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils.pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py",
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
         )
 
     def test_scalar_device_movement(self):
@@ -8669,9 +8668,9 @@ def ___make_guard_fn():
 
     def test_tracing_py_tree(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
 
@@ -8682,9 +8681,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = [xs, xs, xs, xs]
@@ -8698,9 +8697,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_tuples(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = (xs, xs, xs, xs)
@@ -8714,9 +8713,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_dicts(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = {
@@ -8750,9 +8749,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_mixed_all(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsa = (xs, xs)
@@ -8802,7 +8801,7 @@ def ___make_guard_fn():
 
         def fn(xs):
             nested_xs = [[xs]]
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             return flat_xs[0].clone()
 
         # use checkpoint to trigger a "sourceless" tensor subclass
@@ -8821,7 +8820,7 @@ def ___make_guard_fn():
             def mapper(x):
                 return x.clone()
 
-            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
             return y
 
         xs = [torch.tensor(i) for i in range(3)] + ["hi"]
@@ -10175,7 +10174,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
+        implemtations = [("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -10209,9 +10208,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", python_pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10248,7 +10245,7 @@ def ___make_guard_fn():
                         torch.ones(3, 2),
                         1,
                     ]
-                    new_tree = module.tree_unflatten(new_leaves, treespec)
+                    new_tree = module.tree_unflatten(leaves, treespec)
                     return leaves, new_tree
 
             x = torch.randn(3, 2)
@@ -10260,9 +10257,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("generic", pytree), ("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", python_pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10455,7 +10450,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  >  Left: {(Mod(s0, 3)) < 0: False, (Mod(s0, 3)) <= 0: True, 0 < (Mod(s0, 3)): False, 0 <= (Mod(s0, 3)): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
   > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
@@ -10574,7 +10569,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  >  Left: {(PythonMod(u0, 3)) < 0: False, (PythonMod(u0, 3)) <= 0: True, 0 < (PythonMod(u0, 3)): False, 0 <= (PythonMod(u0, 3)): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False}
   > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
@@ -12011,6 +12006,22 @@ fn
 
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
+
+    def test_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Foo:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, foo0):
+            if dataclasses.is_dataclass(foo0):
+                foo1 = dataclasses.replace(foo0, **{"x": 1})
+                return x + 1, foo1
+            return x + 2, foo0
+
+        res, foo = run(torch.zeros(1), Foo(0))
+        self.assertTrue(res, torch.ones(1))
+        self.assertEqual(foo.x, 1)
 
 
 class TestTracer(JitTestCase):
