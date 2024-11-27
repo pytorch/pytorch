@@ -322,9 +322,7 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -1122,7 +1120,8 @@ def _get_amdsmi_device_memory_used(device: Optional[Union[Device, int]] = None) 
 def _get_amdsmi_memory_usage(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler()
     device = _get_amdsmi_device_index(device)
-    return amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
 def _get_amdsmi_utilization(device: Optional[Union[Device, int]] = None) -> int:

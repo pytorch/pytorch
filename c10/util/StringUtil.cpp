@@ -83,7 +83,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
+size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   if (from.empty()) {
     return 0;
   }
