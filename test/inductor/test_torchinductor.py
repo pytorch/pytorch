@@ -865,7 +865,6 @@ class CommonTemplate:
             ),
         )
 
-    @skip_if_dynamic  # Nothing dynamic about this test
     @patch("torch._inductor.compile_fx._debug_force_async", True)
     def test_force_async_in_async_context(self):
         # Make sure that compiling works when we do and when we don't have an
@@ -878,7 +877,7 @@ class CommonTemplate:
         self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
         async def async_sub():
-            self.common(fn, (torch.tensor([True]), torch.tensor([False])))
+            self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
         # And test in an async context
         asyncio.run(async_sub())
