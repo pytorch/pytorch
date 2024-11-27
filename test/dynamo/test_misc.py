@@ -3921,10 +3921,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_writes_to_cells_across_frames2(self):
         # This regression test was added when Dynamo didn't fully account for
-        # already established `NewCellVariable` instance for pre-existing cell,
+        # already established `CellVariable` instance for pre-existing cell,
         # while encountering the same cell again (we should reuse the instance
         # rather than creating a new one). This caused buffered writes to escape
-        # the newly created `NewCellVariable`.
+        # the newly created `CellVariable`.
         x = 0
 
         def inc_x_and_get_x(obj):

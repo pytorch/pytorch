@@ -99,8 +99,8 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    CellVariable,
     GetAttrVariable,
-    NewCellVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -1132,7 +1132,7 @@ class InstructionTranslatorBase(
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
-        assert isinstance(cell, NewCellVariable)  # tame mypy
+        assert isinstance(cell, CellVariable)  # tame mypy
         if cell.is_root_frame_cell():
             val.set_name_hint(cell.source.local_name)  # type: ignore[attr-defined]
 
@@ -2771,7 +2771,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # 1. Dynamo only uses these cell objects for their ids, so that
                     # if we encounter the same cell (if it's captured by some
                     # pre-existing function), we'll reuse the original
-                    # `NewCellVariable` instance we created for the cell object.
+                    # `CellVariable` instance we created for the cell object.
                     #
                     # 2. In this case the original cell object should've
                     # never been accessed by anyone else, as Dynamo intercepts
