@@ -1109,12 +1109,13 @@ class ExportResult(NamedTuple):
     # destructuring so it is BC-breaking
 
 
-def check_signature_rewritable(graph):
+def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
         assert hasattr(node, "_dynamo_source")
         source = node._dynamo_source
-        user_stacks = graph._source_to_user_stacks.get(source)
+        assert "_source_to_user_stacks" in graph.meta
+        user_stacks = graph.meta["_source_to_user_stacks"].get(source)
         if user_stacks is None:
             continue
         assert len(user_stacks) > 0
@@ -1643,7 +1644,6 @@ def export(
                 graph.print_readable(print_output=False, colored=True),
             )
         else:
-            assert hasattr(graph, "_source_to_user_stacks")
             assert out_guards is not None, "Failed to produce guards during tracing"
             assert fake_mode is not None
 
