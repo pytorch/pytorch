@@ -47,6 +47,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlapping_guard,
     profile_guard_manager,
     RootGuardManager,
 )
@@ -66,6 +67,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageOverlap,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -491,14 +493,14 @@ def strip_getattr_getitem(name):
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     extra = ""
-    if guard.user_stack:
-        for fs in reversed(guard.user_stack):
-            if fs.filename not in uninteresting_files():
-                extra = f"  # {format_frame(fs, line=True)}"
-                break
-    elif guard.stack:
-        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
-
+    if guard is not None:
+        if guard.user_stack:
+            for fs in reversed(guard.user_stack):
+                if fs.filename not in uninteresting_files():
+                    extra = f"  # {format_frame(fs, line=True)}"
+                    break
+        elif guard.stack:
+            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
     return f"{code_part:<60}{extra}"
 
 
@@ -1883,6 +1885,10 @@ class GuardBuilder(GuardBuilderBase):
         for code in code_parts:
             self._set_guard_export_info(guard, [code])
 
+        # Make ShapeEnv guards available for testing.
+        if compile_context := CompileContext.try_get():
+            compile_context.shape_env_guards.extend(verbose_code_parts)
+
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
@@ -2386,12 +2392,12 @@ class CheckFunctionManager:
                     "code": code_part,
                     "stack": (
                         structured.from_traceback(guard.stack.summary())
-                        if guard.stack
+                        if guard and guard.stack
                         else None
                     ),
                     "user_stack": (
                         structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
+                        if guard and guard.user_stack
                         else None
                     ),
                 }
@@ -2457,6 +2463,26 @@ class CheckFunctionManager:
                 install_object_aliasing_guard(
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
+                    [code_part],
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlap):
+                overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.overlapping_sources
+                ]
+                non_overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.non_overlapping_sources
+                ]
+                code_part = (
+                    """check_overlapping("""
+                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
+                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                )
+                install_storage_overlapping_guard(
+                    overlapping_guard_managers,
+                    non_overlapping_guard_managers,
                     [code_part],
                 )
                 add_code_part(code_part, None, True)
