@@ -145,8 +145,8 @@ class _RNGStateTracker:
         return int(seed_tensor.item())
 
     def set_seed(self, name: str, seed: int) -> None:
-        seed_tensor = torch.tensor([seed]).view(torch.uint8)
-        offset_tensor = torch.tensor([0]).view(torch.uint8)
+        seed_tensor = torch.tensor([seed], device="cpu").view(torch.uint8)
+        offset_tensor = torch.tensor([0], device="cpu").view(torch.uint8)
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _distribute_region(self, spec: DTensorSpec):
@@ -208,7 +208,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             )
 
         seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset]).view(torch.uint8)
+        offset_tensor = torch.tensor([offset], device="cpu").view(torch.uint8)
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
@@ -343,7 +343,9 @@ class TensorParallelRNGTracker(_RNGStateTracker):
     def __init__(self, device_type: str = "cuda"):
         super().__init__(device_type)
         # copy the default RNG state
-        self.rng_states["tensor-parallel-rng"] = self._device_handle.get_rng_state()
+        self.rng_states["tensor-parallel-rng"] = self._device_handle.get_rng_state().to(
+            "cpu"
+        )
 
     def _manual_seed(
         self,
