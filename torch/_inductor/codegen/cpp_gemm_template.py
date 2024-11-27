@@ -389,7 +389,7 @@ def expand_bias(
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
                 B = ir.TensorBox(B)
-            assert isinstance(X, ir.TensorBox)
+            assert hasattr(X, "get_size")
             B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
             assert isinstance(B, torch.Tensor)
