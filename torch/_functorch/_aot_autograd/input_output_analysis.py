@@ -275,60 +275,6 @@ def create_synthetic_base_metadata(
 
 
 def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
-    max_aliased_inps_w_dyn_shapes = (
-        config._max_aliased_inputs_with_dynamic_shapes_enabled
-    )
-    definitely_error_on_dyn_shapes = False
-    # If the JK is false / not set, we will fall back to obeying the config above
-    # If it is true, we will always error when there are aliased + mutated inps with dynamic shapes
-    if torch._inductor.config.is_fbcode():
-        definitely_error_on_dyn_shapes = torch._utils_internal.justknobs_check(
-            "pytorch/dynamo:disable_aliased_inputs_with_mutation_and_dyn_shapes"
-        )
-
-    actual_aliased_indices = set()
-    num_aliases = len(aliased_input_indices)
-    # > 2 check because num_aliases==1 means no aliasing
-    if num_aliases >= 2 and (
-        definitely_error_on_dyn_shapes or num_aliases > max_aliased_inps_w_dyn_shapes
-    ):
-        dynamic_shape_indices = set()
-        for j in range(num_aliases):
-            j_ = aliased_input_indices[j]
-            curr_inp = fwd_inputs[j_]
-            if any(
-                isinstance(x, torch.SymInt)
-                for x in itertools.chain(
-                    curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()]
-                )
-            ):
-                dynamic_shape_indices.add(j_)
-        err_message = f"""\
-Encountered a graph where:
-- {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
-- at least one of these aliased inputs was mutated
-- at least one of these inputs is being compiled with dynamic shapes (indices: {str(dynamic_shape_indices)})
-
-Current limit: {str(max_aliased_inps_w_dyn_shapes)}
-Killswitch enabled: {str(definitely_error_on_dyn_shapes)}
-
-The most common way to run into this situation is when your model parameters are allocated as one giant buffer
-and are all mutated by the optimizer, and some of your parameters end up getting compiled with dynamic shapes.
-
-You can avoid this problem by marking your parameters so they explicitly do not participate in dynamic shapes,
-by marking each dim of your parameter static:
-
-torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the parameter).
-
-If you are running into this issue in a situation where your parameters are static but some other inputs
-are aliased and mutated, and they should be dynamic, please file an issue.
-"""
-        if len(dynamic_shape_indices) != 0:
-            raise Unsupported(
-                err_message,
-                case_name="dynamic_shapes_validation",
-            )
-
     shape_env = None
     maybe_suppress_guards = contextlib.nullcontext
     tracing_context = torch._guards.TracingContext.try_get()

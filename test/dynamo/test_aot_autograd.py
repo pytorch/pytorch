@@ -1555,8 +1555,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # the first 50 of them. Then, make sure that none of the produced ShapeEnv
         # guards came from the overlapping computation.
 
-        torch._functorch.config._max_aliased_inputs_with_dynamic_shapes_enabled = 101
-
         def f(*args):
             for a in args:
                 a.add_(1)
