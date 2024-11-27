@@ -72,7 +72,6 @@ from torch._inductor.codegen.rocm.compile_command import (
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
 
-from .compile_fx import CompiledFxGraph
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -85,7 +84,7 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .compile_fx import _CompileFxKwargs
+    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
     from .output_code import OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
@@ -1332,6 +1331,8 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
+        from .compile_fx import CompiledFxGraph
+
         assert isinstance(
             compiled_graph, CompiledFxGraph
         ), f"serialization for {type(compiled_graph)} NYI"
