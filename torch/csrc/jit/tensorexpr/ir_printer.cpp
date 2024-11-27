@@ -203,8 +203,8 @@ static void formatFPSuffix(std::ostream& os, T v, bool flag) {
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   const int precision = 16;
-  constexpr T lower_bound = static_cast<T>(-std::pow(10, precision));
-  constexpr T upper_bound = -lower_bound ;
+  const T lower_bound = static_cast<T>(-std::pow(10, precision));
+  const T upper_bound = -lower_bound;
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
