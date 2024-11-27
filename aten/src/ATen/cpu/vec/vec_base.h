@@ -164,7 +164,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vectorized(Args... vals) : values{vals...}{
+  Vectorized(Args... vals) : values{static_cast<T>(vals)...}{
   }
   Vectorized(const T(&arr)[kSize]) {
     std::memcpy(values, arr, sizeof(values));
