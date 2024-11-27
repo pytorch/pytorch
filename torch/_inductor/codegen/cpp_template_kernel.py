@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -261,8 +261,8 @@ class CppTemplateKernel(CppKernel):
     def store_output(
         self,
         dst: ir.Buffer,
-        src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
+        src: Union[ir.IRNode, Tuple[ir.IRNode]],
+        orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
@@ -287,13 +287,40 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        if isinstance(src, Iterable):
+            # Group GEMM may have multi outputs to be localized
+            assert all(dst.get_size() == _src.get_size() for _src in src)
+            assert epilogue_nodes
+        else:
+            assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
-                if orig_src.get_name() != src.get_name():
+                if (
+                    isinstance(src, Iterable)
+                    and isinstance(orig_src, Iterable)
+                    and orig_src[0].get_name() != src[0].get_name()
+                ):
+                    # For Group GEMM
+                    assert all(
+                        _orig_src.get_name() != _src.get_name()
+                        for _orig_src, _src in zip(orig_src, src)
+                    )
+                    for _orig_src, _src in zip(orig_src, src):
+                        scope.add_local_buffer(
+                            _src,
+                            [
+                                _orig_src,
+                            ],
+                        )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
+                elif (
+                    isinstance(src, ir.IRNode)
+                    and isinstance(orig_src, ir.IRNode)
+                    and orig_src.get_name() != src.get_name()
+                ):
                     scope.add_local_buffer(
                         src,
                         [
@@ -305,6 +332,8 @@ class CppTemplateKernel(CppKernel):
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
+            assert isinstance(src, ir.IRNode)
+            assert isinstance(dst, ir.IRNode)
             if dst.get_name() != src.get_name():
                 # src is local
                 copy = L.copy(dst, src).data.data
@@ -312,7 +341,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
+                assert dst.get_layout() == src.get_layout(), f"{dst=}, {src=}"
                 return ""
 
 
