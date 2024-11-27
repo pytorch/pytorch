@@ -132,8 +132,12 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
-          # after repair new wheel is located in wheelhouse subfolder
+          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
+          else
+            docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
+            docker exec -t "${container_name}"  bash -c "mv //artifacts/*.whl //artifacts/wheelhouse/"
+          fi
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts/wheelhouse
 
       - uses: actions/upload-artifact@v4.4.0
