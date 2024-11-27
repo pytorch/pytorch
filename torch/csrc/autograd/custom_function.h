@@ -229,7 +229,21 @@ struct CppNode : public Node {
     saved.before(ctx_.has_freed_buffers_);
     saved.before(input_info_);
     saved.before(output_info_);
+
     auto results = apply(variable_list(inputs));
+    // TODO(rzou): following is problematic
+    // auto stack = retrieve_saved(saved);
+    // const auto& interface =
+    // torch::dynamo::autograd::getPyCompilerInterface(); variable_list results
+    // = interface->call_function(
+    //     saved.get_py_compiler(),
+    //     "apply_functional",
+    //     get_functional().value(),
+    //     inputs,
+    //     stack,
+    //     num_outputs(),
+    //     name());
+
     saved.after(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
@@ -240,6 +254,113 @@ struct CppNode : public Node {
     saved.after(input_info_);
     saved.after(output_info_);
     return results;
+  }
+
+  c10::optional<functional_apply_t> get_functional() override {
+    auto name = this->name();
+
+    // TODO(rzou): probably need to pre compute needs_input_grad
+    return [name](
+               const variable_list& inputs,
+               const std::vector<c10::IValue>& saved) {
+      SavedState state;
+      state.stack = saved;
+      auto ctx = AutogradContext();
+      std::vector<VariableInfo> output_info;
+      std::vector<bool> is_variable_input;
+      state.dequeue(ctx.saved_data);
+      state.dequeue(ctx.saved_variables_);
+      state.dequeue(ctx.materialize_grads_);
+      state.dequeue(output_info);
+      state.dequeue(is_variable_input);
+
+      // TODO(rzou): refactor to share code with CppNode<T>::apply
+      at::OptionalDeviceGuard _device_guard;
+      auto num_inputs = inputs.size();
+      variable_list backward_inputs;
+      backward_inputs.reserve(num_inputs);
+      for (const auto i : c10::irange(num_inputs)) {
+        if (inputs[i].defined() || !ctx.materialize_grads_) {
+          backward_inputs.emplace_back(inputs[i]);
+        } else {
+          backward_inputs.emplace_back(output_info[i].zeros(_device_guard));
+        }
+      }
+
+      auto outputs = T::backward(&ctx, inputs);
+
+      const auto num_forward_inputs =
+          static_cast<int64_t>(is_variable_input.size());
+      auto num_outputs = static_cast<int64_t>(outputs.size());
+      // Returning too many results is ok, but only as long as they're all
+      // undefined. Truncate the result vector in that case.
+      if (num_outputs > num_forward_inputs) {
+        bool all_undef = true;
+        for (const auto i : c10::irange(num_forward_inputs, num_outputs)) {
+          all_undef &= (!outputs[i].defined());
+        }
+        if (all_undef) {
+          outputs.resize(num_forward_inputs);
+          num_outputs = num_forward_inputs;
+        }
+      }
+
+      if (num_outputs != num_forward_inputs) {
+        std::string msg("function ");
+        msg += name + " returned an incorrect number of gradients (expected ";
+        msg += std::to_string(num_forward_inputs) + ", got ";
+        msg += std::to_string(num_outputs) + ")";
+        throw std::runtime_error(msg);
+      }
+
+      variable_list results;
+      results.reserve(num_outputs);
+      for (const auto i : c10::irange(num_outputs)) {
+        if (!is_variable_input[i]) {
+          if (outputs[i].defined()) {
+            std::string msg("function ");
+            msg += name +
+                " returned a gradient different that is defined at position ";
+            msg += std::to_string(i + 1) +
+                ", std the corresponding forward input was not a Variable";
+            throw std::runtime_error(msg);
+          }
+          continue;
+        }
+        results.emplace_back(outputs[i]);
+      }
+      return results;
+    };
+  }
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override {
+    saved.before(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.before(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.before(ctx_.materialize_grads_);
+    saved.before(ctx_.has_freed_buffers_);
+    saved.before(input_info_);
+    saved.before(output_info_);
+
+    SavedState state;
+    state.enqueue(ctx_.saved_data);
+    state.enqueue(ctx_.saved_variables_, shared_from_this());
+    state.enqueue(ctx_.materialize_grads_);
+    state.enqueue(output_info_);
+    state.enqueue(is_variable_input_);
+
+    saved.after(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.after(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.after(ctx_.materialize_grads_);
+    saved.after(ctx_.has_freed_buffers_);
+    saved.after(input_info_);
+    saved.after(output_info_);
+
+    return state.stack;
   }
 };
 

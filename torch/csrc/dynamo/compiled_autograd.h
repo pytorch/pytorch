@@ -899,6 +899,344 @@ class SwapSavedVariables {
   StashedVars<at::IValue> stashed_ivalues;
 };
 
+struct SavedState {
+  std::vector<at::IValue> stack;
+  int64_t idx = 0;
+
+  void enqueue(
+      const SavedVariable& sv,
+      const std::shared_ptr<Node>& saved_for) {
+    stack.emplace_back(sv.unpack(saved_for));
+  }
+  void dequeue(SavedVariable& sv) {
+    sv = SavedVariable(stack[idx++].toTensor(), /*is_output*/ true);
+  }
+
+  void enqueue(
+      const std::vector<SavedVariable>& sv,
+      const std::shared_ptr<Node>& saved_for) {
+    enqueue(static_cast<int64_t>(sv.size()));
+    for (const auto& v : sv) {
+      enqueue(v, saved_for);
+    }
+  }
+  void dequeue(std::vector<SavedVariable>& sv) {
+    int64_t size = 0;
+    dequeue(size);
+    sv.clear();
+    for (int64_t idx = 0; idx < size; idx++) {
+      sv.emplace_back();
+      dequeue(sv.back());
+    }
+  }
+
+  /*
+  void enqueue(const PyObject*& t) {
+    enqueue_ivalue(t);
+  }
+  void dequeue(PyObject*& t) {
+    dequeue_ivalue(t);
+  }
+  */
+
+  void enqueue(const VariableInfo& t) {
+    enqueue(t.layout);
+    enqueue(t.device);
+    enqueue(t.scalar_type);
+    enqueue(t.size);
+    enqueue(t.requires_grad);
+    enqueue(t.is_empty);
+  }
+  void dequeue(VariableInfo& t) {
+    dequeue(t.layout);
+    dequeue(t.device);
+    dequeue(t.scalar_type);
+    dequeue(t.size);
+    dequeue(t.requires_grad);
+    dequeue(t.is_empty);
+  }
+
+  void enqueue(size_t t) {
+    enqueue(static_cast<int64_t>(t));
+  }
+  void dequeue(size_t& t) {
+    int64_t tmp = 0;
+    dequeue(tmp);
+    t = static_cast<size_t>(tmp);
+  }
+
+  // TODO: probably wildly inefficient
+  template <class T>
+  void enqueue(const c10::List<T> t) {
+    enqueue(t.vec());
+  }
+  template <class T>
+  void dequeue(c10::List<T>& t) {
+    std::vector<T> tmp;
+    dequeue(tmp);
+    t = c10::List<T>(tmp);
+  }
+
+  void enqueue(const TypeAndSize& value) {
+    enqueue(value.sym_sizes);
+    enqueue(value.options);
+  }
+  void dequeue(TypeAndSize& value) {
+    dequeue(value.sym_sizes);
+    dequeue(value.options);
+  }
+
+  void enqueue(const InputMetadata& value) {
+    enqueue(value.options());
+    // std::cout << "enqueue: " << value.shape_as_dim_vector() << std::endl;
+    enqueue(value.shape_as_dim_vector().vec());
+    enqueue(value.is_tensor_subclass());
+    TORCH_INTERNAL_ASSERT(!value.is_nested_tensor());
+  }
+  // Special case: InputMetadata has no copy ctor
+  // TODO(rzou): ??
+  void dequeue(InputMetadata& value) {
+    at::TensorOptions options;
+    dequeue(options);
+    std::vector<at::SymInt> shape;
+    dequeue(shape);
+    // std::cout << "dequeue: " << shape << std::endl;
+    bool is_tensor_subclass = false;
+    dequeue(is_tensor_subclass);
+    SymIntSmallVec sym_shape;
+    for (const auto& s : shape) {
+      sym_shape.emplace_back(s);
+    }
+    value = InputMetadata(options, sym_shape, is_tensor_subclass, false);
+  }
+
+  void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+    std::vector<std::string> keys;
+    std::vector<at::IValue> values;
+    for (const auto& [key, value] : dct) {
+      keys.emplace_back(key);
+      values.emplace_back(value);
+    }
+    enqueue(keys);
+    enqueue(values);
+  }
+  void enqueue(const at::IValue& iv) {
+    stack.emplace_back(iv);
+  }
+  void dequeue(at::IValue& iv) {
+    iv = stack[idx++];
+  }
+  void dequeue(ska::flat_hash_map<std::string, at::IValue>& dct) {
+    std::vector<std::string> keys;
+    std::vector<at::IValue> values;
+    dequeue(keys);
+    dequeue(values);
+    dct.clear();
+    for (const auto i : c10::irange(keys.size())) {
+      dct.insert({keys[i], values[i]});
+    }
+  }
+
+  void enqueue(const at::TensorOptions& value) {
+    enqueue(value.requires_grad_opt());
+    enqueue(value.memory_format_opt());
+    enqueue(value.device_opt());
+    enqueue(value.dtype_opt());
+    enqueue(value.layout_opt());
+    enqueue(value.pinned_memory_opt());
+  }
+  void dequeue(at::TensorOptions& value) {
+    auto result = at::TensorOptions();
+    c10::optional<bool> requires_grad_opt;
+    dequeue(requires_grad_opt);
+    if (requires_grad_opt) {
+      result = result.requires_grad(*requires_grad_opt);
+    }
+    c10::optional<c10::MemoryFormat> memory_format_opt;
+    dequeue(memory_format_opt);
+    if (memory_format_opt) {
+      result = result.memory_format(*memory_format_opt);
+    }
+    c10::optional<c10::Device> device_opt;
+    dequeue(device_opt);
+    if (device_opt) {
+      result = result.device(*device_opt);
+    }
+    c10::optional<caffe2::TypeMeta> dtype_opt;
+    dequeue(dtype_opt);
+    if (dtype_opt) {
+      result = result.dtype(*dtype_opt);
+    }
+    c10::optional<c10::Layout> layout_opt;
+    dequeue(layout_opt);
+    if (layout_opt) {
+      result = result.layout(*layout_opt);
+    }
+    c10::optional<bool> pinned_memory_opt;
+    dequeue(pinned_memory_opt);
+    if (pinned_memory_opt) {
+      result = result.pinned_memory(*pinned_memory_opt);
+    }
+    value = result;
+  }
+
+  void enqueue(const caffe2::TypeMeta& value) {
+    enqueue(at::typeMetaToScalarType(value));
+  }
+  void dequeue(caffe2::TypeMeta& value) {
+    at::ScalarType result = at::kFloat;
+    dequeue(result);
+    value = caffe2::TypeMeta::fromScalarType(result);
+  }
+
+  template <typename T>
+  void enqueue(const c10::OptionalArray<T>& t) {
+    enqueue(t.list);
+  }
+  template <typename T>
+  void dequeue(c10::OptionalArray<T>& t) {
+    dequeue(t.list);
+  }
+
+  template <typename T>
+  void enqueue(const std::optional<T>& t) {
+    enqueue(t.has_value());
+    if (t.has_value()) {
+      enqueue(*t);
+    }
+  }
+  template <typename T>
+  void dequeue(c10::optional<T>& value) {
+    bool has_value = false;
+    dequeue(has_value);
+    if (has_value) {
+      T tmp;
+      dequeue(tmp);
+      value = tmp;
+    } else {
+      value = c10::nullopt;
+    }
+  }
+
+  void enqueue(const at::TensorGeometry& t) {
+    enqueue(t.sym_sizes().vec());
+    enqueue(t.sym_strides().vec());
+    enqueue(t.sym_storage_offset());
+  }
+  void dequeue(at::TensorGeometry& t) {
+    std::vector<at::SymInt> sym_sizes;
+    std::vector<at::SymInt> sym_strides;
+    at::SymInt sym_storage_offset;
+    dequeue(sym_sizes);
+    dequeue(sym_strides);
+    dequeue(sym_storage_offset);
+    t = at::TensorGeometry(sym_sizes, sym_strides, sym_storage_offset);
+  }
+
+  template <typename T>
+  void enqueue(const std::vector<T>& t) {
+    enqueue(static_cast<int64_t>(t.size()));
+    for (const T& i : t) {
+      enqueue(i);
+    }
+  }
+  template <typename T>
+  void dequeue(std::vector<T>& t) {
+    int64_t size = 0;
+    dequeue(size);
+    t.clear();
+    for (int64_t idx = 0; idx < size; idx++) {
+      t.emplace_back();
+      dequeue(t.back());
+    }
+  }
+
+  void enqueue(const c10::SymInt& t) {
+    stack.emplace_back(t);
+  }
+  void dequeue(c10::SymInt& t) {
+    t = stack[idx++].toSymInt();
+  }
+
+  void enqueue(int64_t t) {
+    stack.emplace_back(t);
+  }
+  void dequeue(int64_t& t) {
+    t = stack[idx++].toInt();
+  }
+
+  void enqueue(const std::vector<c10::SymInt>& t) {
+    enqueue_ivalue(t);
+  }
+  void dequeue(std::vector<c10::SymInt>& t) {
+    t = stack[idx++].toSymIntVector();
+  }
+
+  void enqueue(const std::vector<int64_t>& t) {
+    enqueue_ivalue(t);
+  }
+  void dequeue(std::vector<int64_t>& t) {
+    t = stack[idx++].toIntVector();
+  }
+
+  template <class ivalue_t>
+  void enqueue_ivalue(const ivalue_t& t) {
+    stack.emplace_back(t);
+  }
+  template <class ivalue_t>
+  void dequeue_ivalue(ivalue_t& value) {
+    value = stack[idx++].to<ivalue_t>();
+  }
+#define HANDLE_IVALUE(ivalue_t)                            \
+  void enqueue(const ivalue_t& value) {                    \
+    return enqueue_ivalue<ivalue_t>(value);                \
+  }                                                        \
+  void enqueue(const std::vector<ivalue_t>& value) {       \
+    return enqueue_ivalue<std::vector<ivalue_t>>(value);   \
+  }                                                        \
+  void enqueue(const c10::optional<ivalue_t>& value) {     \
+    return enqueue_ivalue<c10::optional<ivalue_t>>(value); \
+  }                                                        \
+  void dequeue(ivalue_t& value) {                          \
+    return dequeue_ivalue<ivalue_t>(value);                \
+  }                                                        \
+  void dequeue(std::vector<ivalue_t>& value) {             \
+    return dequeue_ivalue<std::vector<ivalue_t>>(value);   \
+  }                                                        \
+  void dequeue(c10::optional<ivalue_t>& value) {           \
+    return dequeue_ivalue<c10::optional<ivalue_t>>(value); \
+  }
+  HANDLE_IVALUE(at::Tensor)
+  HANDLE_IVALUE(c10::ScalarType)
+  HANDLE_IVALUE(c10::Scalar)
+  HANDLE_IVALUE(c10::Layout)
+  HANDLE_IVALUE(c10::Device)
+  HANDLE_IVALUE(c10::MemoryFormat)
+  HANDLE_IVALUE(bool)
+  HANDLE_IVALUE(double)
+  HANDLE_IVALUE(std::string)
+#undef HANDLE_IVALUE
+};
+
+struct TORCH_API PyCompilerInterface {
+  virtual ~PyCompilerInterface(){};
+  virtual variable_list call_function(
+      PyObject* py_compiler,
+      const char* name,
+      functional_apply_t fn,
+      const variable_list& inputs,
+      const ivalue_list& saved_state,
+      int64_t num_outputs,
+      const std::string& debug) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+};
+
+TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
+TORCH_API void setPyCompilerInterface(
+    std::unique_ptr<PyCompilerInterface>&& impl);
+TORCH_API void resetPyCompilerInterface();
+
 } // namespace torch::dynamo::autograd
 
 template <>

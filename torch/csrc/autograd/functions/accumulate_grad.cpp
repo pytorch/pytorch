@@ -103,4 +103,42 @@ variable_list AccumulateGrad::apply_with_saved(
   return variable_list();
 }
 
+ivalue_list AccumulateGrad::retrieve_saved(SwapSavedVariables& saved) {
+  TORCH_INTERNAL_ASSERT(false, "use apply_with_saved");
+  auto should_visit = variable.defined() && variable.requires_grad();
+  if (should_visit) {
+    saved.before(variable);
+  }
+
+  SavedState state;
+  state.enqueue(variable);
+
+  if (should_visit) {
+    saved.after(variable);
+  }
+
+  return state.stack;
+}
+
+c10::optional<functional_apply_t> AccumulateGrad::get_functional() {
+  TORCH_INTERNAL_ASSERT(false, "use apply_with_saved");
+  return [](const variable_list& inputs,
+            const std::vector<c10::IValue>& saved) -> variable_list {
+    SavedState state;
+    state.stack = saved;
+    Variable foo;
+    state.dequeue(foo);
+    if (!(foo.defined() && foo.requires_grad()) || !inputs[0].defined()) {
+      return variable_list();
+    }
+    // op is intentionally static
+    static auto op = c10::Dispatcher::singleton()
+                         .findSchemaOrThrow("inductor::accumulate_grad_", "")
+                         .typed<void(const at::Tensor&, const at::Tensor&)>();
+    op.call(foo, inputs[0]);
+    // TODO(rzou): tensor_post_acc_grad_hooks
+    return variable_list();
+  };
+}
+
 } // namespace torch::autograd

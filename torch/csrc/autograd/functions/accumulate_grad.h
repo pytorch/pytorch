@@ -267,6 +267,13 @@ struct TORCH_API AccumulateGrad : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
 
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
+  c10::optional<functional_apply_t> get_functional() override;
+
+  bool use_apply_with_saved() override {
+    return true;
+  }
+
   Variable variable;
 };
 

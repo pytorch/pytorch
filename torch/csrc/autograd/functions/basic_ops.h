@@ -76,6 +76,8 @@ struct TORCH_API UndefinedGradBackward : public Node {
       SwapSavedVariables& saved) override {
     return apply(variable_list(inputs));
   }
+  ivalue_list retrieve_saved(SwapSavedVariables&) override;
+  c10::optional<functional_apply_t> get_functional() override;
 };
 
 struct TORCH_API GraphRoot : public Node {
@@ -97,6 +99,8 @@ struct TORCH_API GraphRoot : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
+  c10::optional<functional_apply_t> get_functional() override;
 
   variable_list outputs;
 };

@@ -61,6 +61,21 @@ auto UndefinedGradBackward::apply(variable_list&& output_grads)
   }
   return input_grads;
 }
+ivalue_list UndefinedGradBackward::retrieve_saved(SwapSavedVariables&) {
+  return {};
+}
+c10::optional<functional_apply_t> UndefinedGradBackward::get_functional() {
+  return [](const variable_list& inputs,
+            const ivalue_list& stack) -> variable_list {
+    variable_list outputs;
+    outputs.reserve(inputs.size());
+    for (auto& grad : inputs) {
+      (void)grad; // Suppress unused variable warning
+      outputs.emplace_back();
+    }
+    return outputs;
+  };
+}
 
 auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
@@ -76,6 +91,23 @@ variable_list GraphRoot::apply_with_saved(
   variable_list result(outputs);
   saved.after(outputs);
   return result;
+}
+ivalue_list GraphRoot::retrieve_saved(SwapSavedVariables& saved) {
+  saved.before(outputs);
+  SavedState state;
+  state.enqueue(outputs);
+  saved.after(outputs);
+  return state.stack;
+}
+c10::optional<functional_apply_t> GraphRoot::get_functional() {
+  return [](const variable_list& inputs,
+            const std::vector<c10::IValue>& saved) -> variable_list {
+    SavedState state;
+    state.stack = saved;
+    variable_list outputs;
+    state.dequeue(outputs);
+    return outputs;
+  };
 }
 
 } // namespace torch::autograd

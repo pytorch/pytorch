@@ -25,6 +25,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
+#include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -367,6 +368,7 @@ variable_list PyNode::apply_with_saved(
   variable_list result;
   if (!compiled_autograd_should_lift()) {
     if (_backward_state_idx.has_value()) {
+      // TODO(rzou): need to excise this branch?
       PyObject* r = PyObject_CallMethod(
           saved.get_py_compiler(),
           "bind_backward_state",
@@ -394,6 +396,100 @@ variable_list PyNode::apply_with_saved(
   saved.after(f->output_info);
   saved.after(f->input_info);
   return result;
+}
+
+ivalue_list PyNode::retrieve_saved(SwapSavedVariables& saved) {
+  auto f = (THPFunction*)obj;
+  saved.before(f->compiled_autograd_symints);
+  saved.before(f->saved_variables);
+  saved.before(f->needs_input_grad);
+  saved.before(f->materialize_non_diff_grads);
+  saved.before(f->output_info);
+  saved.before(f->input_info);
+
+  SavedState state;
+  state.enqueue(f->compiled_autograd_symints);
+  state.enqueue(f->saved_variables, shared_from_this());
+  // state.enqueue(f->needs_input_grad);
+  // state.enqueue(f->materialize_non_diff_grads);
+  // state.enqueue(f->output_info);
+  // state.enqueue(f->input_info);
+
+  saved.after(f->compiled_autograd_symints);
+  saved.after(f->saved_variables);
+  saved.after(f->needs_input_grad);
+  saved.after(f->materialize_non_diff_grads);
+  saved.after(f->output_info);
+  saved.after(f->input_info);
+
+  state.enqueue(f->compiled_autograd_symints);
+  state.enqueue(f->saved_variables, shared_from_this());
+  // state.enqueue(f->needs_input_grad);
+  // state.enqueue(f->materialize_non_diff_grads);
+  // state.enqueue(f->output_info);
+  // state.enqueue(f->input_info);
+
+  return state.stack;
+}
+
+// TODO(rzou): compiled autograd needs special handling of the following.
+c10::optional<functional_apply_t> PyNode::get_functional() {
+  return c10::nullopt;
+  /*
+  auto node = std::static_pointer_cast<PyNode>(shared_from_this());
+  // TODO(rzou): probably need to pre compute needs_input_grad
+  return
+      [node](
+          const variable_list& inputs, const std::vector<c10::IValue>& saved) {
+        SavedState state;
+        state.stack = saved;
+
+        auto f = (THPFunction*)node->obj;
+
+        state.dequeue(f->compiled_autograd_symints);
+        state.dequeue(f->saved_variables);
+        // state.dequeue(f->needs_input_grad);
+        // state.dequeue(f->materialize_non_diff_grads);
+        // state.dequeue(f->output_info);
+        // state.dequeue(f->input_info);
+
+        f->compiled_autograd_tracing = true;
+        variable_list result;
+        if (!node->compiled_autograd_should_lift()) {
+          if (node->_backward_state_idx.has_value()) {
+            PyObject* r = PyObject_CallMethod(
+                torch::dynamo::autograd::current_py_compiler(),
+                "bind_backward_state",
+                "i",
+                *node->_backward_state_idx);
+            if (r == nullptr) {
+              throw python_error();
+            }
+            THPObjectPtr prior(f->compiled_autograd_backward_state);
+            f->compiled_autograd_backward_state = r;
+            result = node->apply(variable_list(inputs));
+            Py_CLEAR(f->compiled_autograd_backward_state);
+            f->compiled_autograd_backward_state = prior.release();
+          } else {
+            result = node->apply(variable_list(inputs));
+          }
+        } else {
+          result = node->defer_to_dynamo(
+              variable_list(inputs),
+              torch::dynamo::autograd::current_py_compiler());
+        }
+        f->compiled_autograd_tracing = false;
+
+        state.dequeue(f->compiled_autograd_symints);
+        state.dequeue(f->saved_variables);
+        // state.dequeue(f->needs_input_grad);
+        // state.dequeue(f->materialize_non_diff_grads);
+        // state.dequeue(f->output_info);
+        // state.dequeue(f->input_info);
+
+        return result;
+      };
+    */
 }
 
 PyObject* PyNode::to_py_args(

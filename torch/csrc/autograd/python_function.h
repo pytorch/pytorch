@@ -42,6 +42,10 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
+  bool use_apply_with_saved() override {
+    return true;
+  }
+
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
@@ -70,6 +74,9 @@ struct PyNode : public Node {
       Py_DECREF(obj);
     }
   }
+
+  c10::optional<functional_apply_t> get_functional() override;
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
 };
 
 /**

@@ -64,6 +64,9 @@ struct TORCH_API ${op} : public ${superclass} {
   }
   ${will_release_variables}
   void compiled_args(CompiledNodeArgs& args) override;
+  ivalue_list get_state();
+  ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
+  c10::optional<functional_apply_t> get_functional() override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -117,9 +120,41 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
     ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
+    // variable_list result = apply(variable_list(grads));
+    auto state = get_state();
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    variable_list result = interface->call_function(
+        saved.get_py_compiler(),
+        "apply_functional",
+        get_functional().value(),
+        grads,
+        state,
+        num_outputs(),
+        name());
     ${apply_with_saved_after}
     return result;
+}
+ivalue_list ${op}::get_state() {
+  SavedState saved_state;
+  ${unpacks}
+  ${get_state}
+  return saved_state.stack;
+}
+ivalue_list ${op}::retrieve_saved(SwapSavedVariables& saved) {
+  ${apply_with_saved_before}
+  auto state = get_state();
+  ${apply_with_saved_after}
+  return state;
+}
+
+c10::optional<functional_apply_t> ${op}::get_functional() {
+  ${compute_needs_input_grad}
+  return [needs_input_grad](const variable_list& inputs, const std::vector<c10::IValue>& saved) {
+    SavedState state;
+    state.stack = saved;
+    ${saved_var_dequeues}
+    return ${op}_apply_functional(variable_list(inputs), needs_input_grad${,unpacked_saved_vars});
+  };
 }
 """
 )
@@ -950,7 +985,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     masks = []
 
     need_any_grad_defined_var = False
-    for derivative in info.derivatives:
+    for idx, derivative in enumerate(info.derivatives):
         checks_any_grad_defined, derivative_text = emit_derivative(
             derivative, info.args_with_derivatives
         )
@@ -984,6 +1019,15 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     unpacked_saved_vars_signature = [
         f"{T} {x}" for T, x in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars)
     ]
+    get_state = "\n".join(
+        f"saved_state.enqueue({name});" for name in unpacked_saved_vars
+    )
+    saved_var_dequeues = []
+    for typ, name in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars):
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        saved_var_dequeues.append(f"{typ} {name};")
+        saved_var_dequeues.append(f"state.dequeue({name});")
 
     return template.substitute(
         unpacks="\n".join(unpack),
@@ -992,6 +1036,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         unpacked_saved_vars_signature=unpacked_saved_vars_signature,
         compute_needs_input_grad=compute_needs_input_grad,
         num_vars=len(var_name_map),
+        saved_var_dequeues="\n".join(saved_var_dequeues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1006,4 +1051,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_state=get_state,
     )

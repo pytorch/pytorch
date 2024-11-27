@@ -41,6 +41,31 @@ static variable_list CopyBackwards_apply_functional(
   return grad_inputs;
 }
 
+ivalue_list CopyBackwards::retrieve_saved(SwapSavedVariables& saved) {
+  saved.before(src_options);
+  SavedState state;
+  state.enqueue(src_options);
+  saved.after(src_options);
+  return state.stack;
+}
+
+c10::optional<functional_apply_t> CopyBackwards::get_functional() {
+  auto needs_input_grad = std::array<bool, 2>{
+      task_should_compute_output(0), task_should_compute_output(1)};
+  return [needs_input_grad](
+             const variable_list& inputs,
+             const ivalue_list& stack) -> variable_list {
+    SavedState state;
+    state.stack = stack;
+    at::TensorOptions src_options;
+    state.dequeue(src_options);
+    auto inputs_copy = inputs;
+
+    return CopyBackwards_apply_functional(
+        std::move(inputs_copy), needs_input_grad, src_options);
+  };
+}
+
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   return CopyBackwards_apply_functional(
       std::move(grads),
@@ -81,24 +106,16 @@ CopySlices::CopySlices(
   }
 }
 
-// common code between apply/apply_with_saved
-template <typename T>
-inline variable_list CopySlices::apply_impl(
+template <typename F1>
+static variable_list CopySlices_apply_functional(
     variable_list&& inputs,
-    const T& call_fn) {
-  check_input_variables("CopySlices", inputs, 1, -1, true);
+    const std::vector<bool>& needs_input_grad,
+    const at::TensorGeometry& base,
+    const at::TensorGeometry& view,
+    int64_t num_outputs,
+    const F1& call_fn,
+    const std::unique_ptr<ViewFunc>& view_fn) {
   auto& grad = inputs[0];
-  if (!grad.defined()) {
-    return variable_list(num_outputs());
-  }
-
-  // Acquire lock to here protect thread safety on fn
-  // see Note [Thread Safety on Autograd Node]
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (!fn) {
-    throw std::runtime_error(ERR_BACKWARD_TWICE);
-  }
 
   auto result =
       grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
@@ -112,6 +129,50 @@ inline variable_list CopySlices::apply_impl(
     grad_slice =
         result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
   }
+
+  // TODO: We clone grad_slice because we modify it below and "fn" might save
+  // it for the backward of res. We might be able to avoid the clone() if
+  // double-backprop is disabled.
+  auto res = call_fn({grad_slice.clone(at::MemoryFormat::Contiguous)});
+
+  variable_list grad_inputs(num_outputs);
+  for (const auto i : c10::irange(res.size())) {
+    if (needs_input_grad[i]) {
+      if (!res[i].defined()) {
+        // If the output is not defined, treat it as if it was a zero tensor.
+        // This can happen if users define a custom Function.
+        continue;
+      }
+      if (i == 0) {
+        grad_slice.copy_(res[i]);
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
+        grad_inputs[i] = std::move(result); // NOLINT(bugprone-use-after-move)
+      } else {
+        grad_inputs[i] = std::move(res[i]);
+      }
+    }
+  }
+  return grad_inputs;
+}
+
+// common code between apply/apply_with_saved
+template <typename T>
+inline variable_list CopySlices::apply_impl(
+    variable_list&& inputs,
+    const T& call_fn) {
+  check_input_variables("CopySlices", inputs, 1, -1, true);
+  auto& grad = inputs[0];
+  if (!grad.defined()) {
+    return variable_list(num_outputs());
+  }
+
+  if (!fn) {
+    throw std::runtime_error(ERR_BACKWARD_TWICE);
+  }
+
+  // Acquire lock to here protect thread safety on fn
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
 
   // See Note [View + Inplace update for view tensor] For more details on this
   // block Since the gradient edge for the 0th input is different between `this`
@@ -156,30 +217,19 @@ inline variable_list CopySlices::apply_impl(
         fn->next_edge(i).function.get() == this->next_edge(i).function.get());
   }
 
-  // TODO: We clone grad_slice because we modify it below and "fn" might save
-  // it for the backward of res. We might be able to avoid the clone() if
-  // double-backprop is disabled.
-  auto res = call_fn({grad_slice.clone(at::MemoryFormat::Contiguous)});
-
-  variable_list grad_inputs(num_outputs());
-  for (const auto i : c10::irange(res.size())) {
-    if (task_should_compute_output(i)) {
-      if (!res[i].defined()) {
-        // If the output is not defined, treat it as if it was a zero tensor.
-        // This can happen if users define a custom Function.
-        continue;
-      }
-      if (i == 0) {
-        grad_slice.copy_(res[i]);
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)
-        grad_inputs[i] = std::move(result); // NOLINT(bugprone-use-after-move)
-      } else {
-        grad_inputs[i] = std::move(res[i]);
-      }
-    }
+  std::vector<bool> needs_input_grad;
+  for (const auto i : c10::irange(num_outputs())) {
+    needs_input_grad.emplace_back(task_should_compute_output(i));
   }
 
-  return grad_inputs;
+  return CopySlices_apply_functional(
+      std::move(inputs),
+      needs_input_grad,
+      base,
+      view,
+      num_outputs(),
+      call_fn,
+      view_fn);
 }
 
 void CopySlices::release_variables() {
@@ -213,6 +263,61 @@ variable_list CopySlices::apply_with_saved(
   saved.after(base);
   saved.after(view);
   return result;
+}
+
+ivalue_list CopySlices::retrieve_saved(SwapSavedVariables& saved) {
+  saved.before(base);
+  saved.before(view);
+
+  SavedState state;
+  state.enqueue(base);
+  state.enqueue(view);
+
+  auto fn_state = fn->retrieve_saved(saved);
+  state.stack.insert(state.stack.end(), fn_state.begin(), fn_state.end());
+
+  saved.after(base);
+  saved.after(view);
+
+  return state.stack;
+}
+
+c10::optional<functional_apply_t> CopySlices::get_functional() {
+  TORCH_INTERNAL_ASSERT(
+      !view_fn, "NYI: compiled autograd with CopySlices with view_fn");
+  auto num_out = num_outputs();
+  std::vector<bool> needs_input_grad;
+  for (const auto i : c10::irange(num_outputs())) {
+    needs_input_grad.emplace_back(task_should_compute_output(i));
+  }
+  auto fn2 = fn;
+
+  return [fn2, num_out, needs_input_grad](
+             const variable_list& inputs,
+             const std::vector<c10::IValue>& saved) -> variable_list {
+    SavedState state;
+    state.stack = saved;
+    at::TensorGeometry base;
+    at::TensorGeometry view;
+    state.dequeue(base);
+    state.dequeue(view);
+
+    // TODO(rzou): somehow we need to restore the state...
+    auto call_fn = [fn2](variable_list&& inputs2) -> variable_list {
+      return (*fn2)(std::move(inputs2));
+    };
+    // TODO(rzou): wut
+    variable_list copied_inputs = inputs;
+
+    return CopySlices_apply_functional(
+        std::move(copied_inputs),
+        needs_input_grad,
+        base,
+        view,
+        num_out,
+        call_fn,
+        {});
+  };
 }
 
 auto CopySlices::apply(variable_list&& inputs1) -> variable_list {

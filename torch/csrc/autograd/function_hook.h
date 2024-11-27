@@ -8,6 +8,7 @@
 namespace torch::dynamo::autograd {
 class CompiledNodeArgs;
 class SwapSavedVariables;
+struct SavedState;
 } // namespace torch::dynamo::autograd
 
 // A hook that's called on gradients
