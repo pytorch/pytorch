@@ -68,6 +68,7 @@ from ..utils import (
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
+from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
     CSE,
@@ -82,7 +83,6 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .simd import (
-    BlockPatternMatcher,
     constant_repr,
     IterationRanges,
     IterationRangesEntry,
