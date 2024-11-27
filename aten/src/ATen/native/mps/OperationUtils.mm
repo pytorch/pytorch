@@ -863,8 +863,9 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   std::vector<std::string> rc;
   @autoreleasepool {
     NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
     for (auto idx : c10::irange([names count])) {
-      rc.push_back([[names objectAtIndex:idx] UTF8String]);
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
     }
   }
   return rc;
