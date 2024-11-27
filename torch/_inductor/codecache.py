@@ -49,6 +49,12 @@ from typing import (
 )
 
 import torch
+
+# WARNING: Do not directly import has_frozen_params, it is monkeypatched in
+# python test/inductor/test_codecache.py
+# TestFxGraphCache.test_constant_handling_device_cpu
+# TODO: Why are we monkeypatching it......
+import torch._inductor.output_code as output_code
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
@@ -66,7 +72,6 @@ from torch._inductor.codegen.rocm.compile_command import (
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
 
-from .output_code import CompiledFxGraph, has_frozen_params
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -80,6 +85,7 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
 
     from .compile_fx import _CompileFxKwargs
+    from .output_code import CompiledFxGraph
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -892,7 +898,7 @@ def compiled_fx_graph_hash(
     # To support caching when the graph has frozen params, we ignore the tensor values
     # of non-inlined constants since they won't be included in the cache entry. Without
     # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not has_frozen_params(gm)
+    include_non_inlined = not output_code.has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
@@ -1390,7 +1396,9 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
+        if output_code.has_frozen_params(
+            gm
+        ) and not torch._utils_internal.justknobs_check(
             "pytorch/inductor:allow_freezing_with_caching"
         ):
             raise BypassFxGraphCache("Skipping graph with frozen constants")
