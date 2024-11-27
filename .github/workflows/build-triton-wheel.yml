@@ -132,16 +132,15 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          if [[ "${{ matrix.device }}" == "cuda" ]]; then
-            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
-          fi
-          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+          docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
+          # after repair new wheel is located in wheelhouse subfolder
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts/wheelhouse
 
       - uses: actions/upload-artifact@v4.4.0
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/wheelhouse/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
