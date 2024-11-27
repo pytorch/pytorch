@@ -65,6 +65,11 @@ class TestOpenReg(TestCase):
 
         self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
 
+    def test_generator(self):
+        generator = torch.Generator(device="openreg:1")
+        self.assertEqual(generator.device.type, "openreg")
+        self.assertEqual(generator.device.index, 1)
+
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
         self.assertFalse(cpu_a.is_pinned())
