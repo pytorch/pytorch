@@ -138,6 +138,10 @@ if TYPE_CHECKING:
         GraphSignature,
     )
 
+# For testing - force using the async path rather than shortcutting to
+# codegen_and_compile_sync() when available.
+_debug_force_async = False
+
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1082,9 +1086,6 @@ class _InProcessFxCompile(_FxCompileSync):
                     )
 
             return compiled_graph
-
-
-_debug_force_async = False
 
 
 def fx_codegen_and_compile(
