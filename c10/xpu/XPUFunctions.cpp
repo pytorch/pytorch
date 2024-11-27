@@ -52,7 +52,8 @@ inline void initGlobalDevicePoolState() {
     enumDevices(gDevicePool.devices);
   } catch (const sycl::exception& e) {
     TORCH_WARN(
-        "Failed to initialize XPU devices. Did you install the driver correctly?");
+        "Failed to initialize XPU devices. The driver may not be installed, installed incorrectly, or incompatible with the current setup. ",
+        "Please refer to this guideline (https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support) for proper installation and configuration.");
     return;
   }
   if (gDevicePool.devices.empty()) {
