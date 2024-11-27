@@ -3642,6 +3642,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 full_q_indices=None,
                 BLOCK_SIZE=(64, 64),
                 mask_mod=noop_mask,
+                seq_lengths=(1, 1),
             )
 
     @supported_platform
@@ -3661,6 +3662,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 full_q_indices=None,  # Mismatched, should raise error
                 BLOCK_SIZE=(64, 64),
                 mask_mod=noop_mask,
+                seq_lengths=(1, 1),
             )
 
     @supported_platform
@@ -3787,6 +3789,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
     @common_utils.parametrize("compile", [False, True])
+    @supported_platform
     def test_block_mask_vs_sequence_lengths(self, compile):
         if compile:
             flex_attention_call = torch.compile(flex_attention)

@@ -2036,6 +2036,9 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
             continue
+        if num_warps == 8:
+            # Working around https://github.com/pytorch/pytorch/issues/141603
+            continue
 
         # Performance tuning
         cur_kernel_options = original_kernel_options.copy()

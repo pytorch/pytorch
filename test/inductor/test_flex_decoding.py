@@ -682,7 +682,7 @@ class TestFlexDecoding(InductorTestCase):
         score_mod: Callable,
         BLOCK_SIZE: Union[int, Tuple[int, int]],
     ):
-        block_mask = create_block_mask(noop_mask, B, 1, S, S, BLOCK_SIZE=BLOCK_SIZE)
+        block_mask = create_block_mask(noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE)
         self.run_test(score_mod, dtype, block_mask=block_mask)
 
     def input_strides_1(B, H, S, D):
