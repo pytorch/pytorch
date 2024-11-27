@@ -60,6 +60,7 @@ jobs:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
+      PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -123,11 +124,6 @@ jobs:
             RELEASE="--release"
           fi
 
-          PLATFORM="manylinux_2_28_x86_64"
-          if [[ "${DOCKER_IMAGE}" == "pytorch/manylinux-builder:cpu" ]]; then
-            PLATFORM="manylinux2014_x86_64"
-          fi
-
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
           if [[ "${{ matrix.device }}" == "cuda" &&  "${PLATFORM}" == "manylinux_2_28_x86_64" ]]; then
@@ -143,7 +139,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
