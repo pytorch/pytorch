@@ -308,7 +308,8 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: str = None,
+    # fix noqa next time bc breaking changes added
+    disable_def: str = None,  # noqa: RUF013
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
