@@ -37,7 +37,6 @@ from torch.export.graph_signature import (
     OutputSpec,
     SymIntArgument,
     SymBoolArgument,
-    SymFloatArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
