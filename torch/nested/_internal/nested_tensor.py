@@ -8,9 +8,20 @@ from torch._C import DispatchKey, DispatchKeySet, SymIntType
 from torch._prims_common import is_expandable_to
 from torch.nested._internal.cached_tensor import make_cached_tensor
 from torch.nested._internal.nested_int import NestedIntNode
-from torch.nested._internal.offload_tensor import make_offload_tensor
+from torch.nested._internal.offload_tensor import (
+    init_offload_tensor_registry,
+    make_offload_tensor,
+    OffloadTensorRegistry,
+)
+from torch.nested._internal.tensor_registry import register_tensor, try_get_int
 from torch.nested._internal.utils import _try_get_fake_mode
-from torch.utils.weak import WeakTensorKeyDictionary
+
+
+def update_tensor_registry_hook(host_tensor, device_tensor):
+    register_tensor(host_tensor, try_get_int(device_tensor))
+
+
+init_offload_tensor_registry(OffloadTensorRegistry(update_tensor_registry_hook))
 
 
 # Fully represents raggedness

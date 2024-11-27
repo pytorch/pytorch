@@ -1208,10 +1208,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-        import torch.nested._internal.offload_tensor
+        import torch.nested._internal.tensor_registry
 
         self.nt_tensor_id_initial_count = (
-            torch.nested._internal.offload_tensor._global_tensor_registry._next_id
+            torch.nested._internal.tensor_registry._global_tensor_registry._next_id
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 

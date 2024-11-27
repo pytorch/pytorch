@@ -38,7 +38,7 @@ class NestedIntNode:
     def __init__(self, cache: torch.Tensor, coeff: int):
         self.cache = cache
         from torch.nested._internal.nested_tensor import source_fields
-        from torch.nested._internal.offload_tensor import try_get_int
+        from torch.nested._internal.tensor_registry import try_get_int
 
         self.t_id = -1
         for k in source_fields:

@@ -331,7 +331,7 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.offload_tensor import _global_tensor_registry
+        from torch.nested._internal.tensor_registry import _global_tensor_registry
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?

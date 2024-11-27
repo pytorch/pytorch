@@ -4,79 +4,6 @@ import weakref
 import torch
 from torch.nested._internal.utils import _try_get_fake_mode
 from torch.utils import _pytree as pytree
-from torch.utils.weak import WeakTensorKeyDictionary
-
-
-__all__ = ["make_offload_tensor", "request_offload_all"]
-
-
-class TensorRegistry:
-    def __init__(self):
-        self._tensor_to_id = WeakTensorKeyDictionary()
-        self._id_to_tensor = dict()
-        self._next_id = 0
-
-    def register(self, t, t_id=None):
-        if not t_id:
-            t_id = self._next_id
-            self._next_id += 1
-        self._tensor_to_id[t] = t_id
-        self._id_to_tensor[t_id] = weakref.ref(t)
-        return t_id
-
-    def try_get_tensor(self, id: int):
-        ref = self._id_to_tensor.get(id)
-        if ref is None:
-            return None
-        if (t := ref()) is None:
-            del self._id_to_tensor[id]
-            return None
-        return t
-
-    def try_get_int(self, tensor: torch.Tensor):
-        return self._tensor_to_id.get(tensor)
-
-    def get_int(self, tensor: torch.Tensor):
-        if (ret := self.try_get_int(tensor)) is None:
-            return self.register(tensor)
-        return ret
-
-    def copy(self):
-        ret = TensorRegistry()
-        ret._id_to_tensor = self._tensor_to_id.copy()
-        ret._tensor_to_id = self._tensor_to_id.copy()
-        ret._next_id = self._next_id
-
-
-# Make sure dynamo doesn't try to trace through this
-def register_tensor(t, t_id=None):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    if isinstance((t := mb_unwrap_functional_tensor(t)), FakeTensor):
-        return t.register_nested_int_id(t_id)
-    else:
-        return _global_tensor_registry.register(t, t_id=t_id)
-
-
-def try_get_int(t):
-    from torch._subclasses.fake_tensor import FakeTensor
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-
-    if isinstance((t := mb_unwrap_functional_tensor(t)), FakeTensor):
-        return t.try_get_nested_int_id()
-    else:
-        return _global_tensor_registry.try_get_int(t)
-
-
-# short id
-def sid(t):
-    if t is None:
-        return "None"
-    return id(t) % 10000
-
-
-_global_tensor_registry = TensorRegistry()
 
 
 # Don't create these directly, use make_offload_tensor so that we can track them.
@@ -90,6 +17,7 @@ class OffloadTensor(torch.Tensor):
         device: Optional[torch.device] = None,
         device_tensor: Optional[torch.Tensor] = None,
         host_tensor: Optional[torch.Tensor] = None,
+        offload_hook: Optional[Callable] = None,
     ):
         source = device_tensor if device_tensor is not None else host_tensor
         assert source is not None
@@ -111,9 +39,11 @@ class OffloadTensor(torch.Tensor):
         device: Optional[torch.device] = None,
         device_tensor: Optional[torch.Tensor] = None,
         host_tensor: Optional[torch.Tensor] = None,
+        offload_hook: Optional[Callable] = None,
     ):
         self.device_tensor = device_tensor
         self.host_tensor = host_tensor
+        self.offload_hook = offload_hook
 
     def __repr__(self):
         source_tensor = (
@@ -123,42 +53,25 @@ class OffloadTensor(torch.Tensor):
         # TODO(soulitzer): improve this
         return f"OffloadTensor({repr(source_tensor)}, host_is_cached={host_is_cached})"
 
-    # Once a tensor has been offloaded it can never be restored
     def offload(self):
-        # users should not call into this
-        # Mutating the tensor's fields is fine because we are not in tracing.
+        # Mutating the subclass field is fine because we are not tracing
         if self.host_tensor is None:
             assert self.device_tensor is not None
             self.host_tensor = self.device_tensor.to("cpu", non_blocking=True)
-            register_tensor(self.host_tensor, try_get_int(self.device_tensor))
-            print("offload", sid(self.device_tensor), " -> ", sid(self.host_tensor))
-        else:
-            print(
-                "offload (cached)",
-                sid(self.device_tensor),
-                " -> ",
-                sid(self.host_tensor),
-            )
+            if self.offload_hook is not None:
+                ret = self.offload_hook(self.host_tensor, self.device_tensor)
+                assert ret is None
         self.device_tensor = None
         return self.host_tensor
 
     def restore(self):
         if self.device_tensor is None:
             assert self.host_tensor is not None
-            # It would be nice to cache the device tensor upon restore, but not sure
-            # we can mutate fields of a subclass during compile.
-            # in this case we
+            # Do not cache the device_tensor to avoid mutating subclass fields
+            # during compile.
             ret = self.host_tensor.to(self.device, non_blocking=True)
-            print("restore", sid(self.host_tensor), " -> ", sid(ret))
             return ret
-
         else:
-            print(
-                "restore (no-op)",
-                sid(self.host_tensor),
-                " -> ",
-                sid(self.device_tensor),
-            )
             return self.device_tensor
 
     def is_offloaded(self):
@@ -214,16 +127,19 @@ def request_offload_all():
 
 
 class OffloadTensorRegistry:
-    def __init__(self):
+    def __init__(self, offload_hook: Optional[Callable] = None):
         self.wrapper_refs = []
+        # Upon execution, the hook
+        # hook(host_tensor, device_tensor) -> None
+        self.offload_hook = None
 
-    def create(self, device, device_tensor, host_tensor):
+    def create(self, device, device_tensor, host_tensor, offload_hook):
         ret = OffloadTensor(
             device=device,
             device_tensor=device_tensor,
             host_tensor=host_tensor,
+            offload_hook=self.offload_hook,
         )
-        # TODO(soulitzer): Who is responsible for registering the tensors for the first time?
         self.wrapper_refs.append(weakref.ref(ret))
         return ret
 
@@ -246,10 +162,16 @@ class OffloadTensorRegistry:
         ret.wrapper_refs = self.wrapper_refs.copy()
 
 
-_global_offload_tensor_registry = OffloadTensorRegistry()
+_global_offload_tensor_registry = None
+
+
+def init_offload_tensor_registry(registry):
+    global _global_offload_tensor_registry
+    _global_offload_tensor_registry = registry
 
 
 def create_offload_tensor(device, device_tensor, host_tensor):
+    assert _global_offload_tensor_registry is not None
     if _try_get_fake_mode(device_tensor if device_tensor is not None else host_tensor):
         return OffloadTensor(
             device=device,
@@ -263,6 +185,7 @@ def create_offload_tensor(device, device_tensor, host_tensor):
 
 
 def maybe_offload_all(device_tensor):
+    assert _global_offload_tensor_registry is not None
     if _try_get_fake_mode(device_tensor):
         # Do nothing here. Offloading is an eager-only optimization.
         return
