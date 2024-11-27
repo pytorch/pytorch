@@ -18,13 +18,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
-from torch._dynamo.exc import Unsupported
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
-from .. import config
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .schemas import (
     BackwardSignature,
@@ -275,6 +273,8 @@ def create_synthetic_base_metadata(
 
 
 def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
+    num_aliases = len(aliased_input_indices)
+
     shape_env = None
     maybe_suppress_guards = contextlib.nullcontext
     tracing_context = torch._guards.TracingContext.try_get()
@@ -293,7 +293,11 @@ def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     symbolic = any(
         isinstance(x, torch.SymInt)
         for i in aliased_input_indices
-        for x in [*fwd_inputs[i].shape, *fwd_inputs[i].stride(), fwd_inputs[i].storage_offset()]
+        for x in [
+            *fwd_inputs[i].shape,
+            *fwd_inputs[i].stride(),
+            fwd_inputs[i].storage_offset(),
+        ]
     )
 
     with maybe_suppress_guards():
