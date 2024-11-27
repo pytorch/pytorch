@@ -291,8 +291,12 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<
       DynamicMetalShaderLibrary,
-      std::shared_ptr<DynamicMetalShaderLibrary>>(
-      m, "_mps_ShaderLibrary", py::dynamic_attr())
+      std::shared_ptr<DynamicMetalShaderLibrary>>(m, "_mps_ShaderLibrary")
+      .def(
+          "__getattr__",
+          [](DynamicMetalShaderLibrary& self, const std::string& name) {
+            return self.getKernelFunction(name);
+          })
       .def_property_readonly(
           "function_names", &DynamicMetalShaderLibrary::getFunctionNames);
   py::class_<MetalKernelFunction, std::shared_ptr<MetalKernelFunction>>(
@@ -319,12 +323,7 @@ void initModule(PyObject* module) {
           "static_thread_group_memory_length",
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
   m.def("_mps_compileShader", [](const std::string& source) {
-    auto lib = std::make_shared<DynamicMetalShaderLibrary>(source);
-    auto rc = py::cast(lib);
-    for (auto func : lib->getFunctionNames()) {
-      py::setattr(rc, func.c_str(), py::cast(lib->getFunction(func)));
-    }
-    return rc;
+    return std::make_shared<DynamicMetalShaderLibrary>(source);
   });
 }
 #endif /* USE_MPS */
