@@ -451,7 +451,7 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
                 delattr(V.graph.graph.owning_module, node.name)
 
 
-def gen_2d_view_of_epilogues_buf(
+def gen_2d_view_of_epilogue_buf(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
     epilogue_nodes: List[ir.IRNode],
@@ -1129,7 +1129,7 @@ class CppPackedGemmTemplate(CppTemplate):
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-            Y_2d, reindexers = gen_2d_view_of_epilogues_buf(
+            Y_2d, reindexers = gen_2d_view_of_epilogue_buf(
                 Y,
                 template_buffer,
                 epilogue_nodes,
