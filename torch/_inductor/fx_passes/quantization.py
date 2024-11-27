@@ -63,7 +63,7 @@ def _get_pattern_output_dtype(match: Match):
     output_node = pattern_output_nodes[0]
     assert isinstance(output_node, torch.fx.Node)
     output_dtype = output_node.meta["val"].dtype
-    assert output_dtype in [torch.uint8, torch.float32, torch.bfloat16]
+    assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16]
     return output_dtype
 
 
@@ -335,10 +335,18 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [torch.uint8, torch.float32, torch.bfloat16]
+        assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16]
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if (output_dtype == torch.uint8 or output_dtype == torch.int8)
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"]
+            if (output_dtype == torch.uint8 or output_dtype == torch.int8)
+            else 0
+        )
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
@@ -1778,10 +1786,12 @@ def _is_valid_dequant_conv2d_pattern(dtype):
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or meta_value.device.type != "cpu"
+                or (meta_value.device.type != "cpu" and meta_value.device.type != "xpu")
                 or meta_value.dim() != 4
+                or (meta_value.device.type == "xpu" and match.kwargs["groups"] != 1)
             ):
                 # Only support conv2d now
+                # Grouped quantized convolution is not supported at XPU backend
                 return False
 
         assert dtype in [torch.float32, torch.bfloat16]
