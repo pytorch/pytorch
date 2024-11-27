@@ -345,30 +345,18 @@ def get_default_x86_inductor_quantization_config(
 @functools.lru_cache
 def get_x86_inductor_linear_dynamic_fp16_config():
     """
-    For linear_dynamic_fp16
-    Although it is called dynamic, it is actually static in the sense that input and weight are converted to fp16 directly.
-    So, `is_dynamic` is set to False below.
+    For linear_dynamic_fp16. The name may be confusing.
+    The op's behavior is fp32_input * (fp16_weight -> to_fp32) -> fp32_output.
     """
-    act_quantization_spec = QuantizationSpec(
-        dtype=torch.float16,
-        qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
-        observer_or_fake_quant_ctr=PlaceholderObserver,
-    )
-
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.float16,
-        qscheme=torch.per_tensor_symmetric,
-        is_dynamic=False,
         observer_or_fake_quant_ctr=PlaceholderObserver,
     )
-    bias_quantization_spec = None  # will use placeholder observer by default
     quantization_config = QuantizationConfig(
-        act_quantization_spec,
-        act_quantization_spec,
+        None,  # input_quantization_spec
+        None,  # output_quantization_spec
         weight_quantization_spec,
-        bias_quantization_spec,
-        is_qat=False,
+        None,  # bias_quantization_spec
     )
     return quantization_config
 
