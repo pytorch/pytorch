@@ -689,8 +689,9 @@ class TilingTests(TestCase):
         inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
 
+
 @instantiate_parametrized_tests
-class EnableFusionTest(self):
+class EnableFusionTest(TestCase):
     @parametrize(
         "fusion_enabled",
         (True, False),
@@ -700,12 +701,16 @@ class EnableFusionTest(self):
         Test that config thresholds enable/disable fusion.
         """
 
-        inductor_config = {
-            "max_fusion_size": 1,
-            "realize_reads_threshold": 1,
-            "realize_opcount_threshold": 1,
-            "inplace_buffers": False,
-        } if not fusion_enabled else {}
+        inductor_config = (
+            {
+                "max_fusion_size": 1,
+                "realize_reads_threshold": 1,
+                "realize_opcount_threshold": 1,
+                "inplace_buffers": False,
+            }
+            if not fusion_enabled
+            else {}
+        )
 
         def foo(x, y, z):
             return x + y + z
