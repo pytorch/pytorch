@@ -3267,7 +3267,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+        if max(node1_dep_len, node2_dep_len) > min(node1_dep_len, node2_dep_len) * 4:
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
