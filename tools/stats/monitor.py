@@ -1,5 +1,5 @@
 """
-A Python script that monitors the usage of resource during the pytorch tests.
+A Python script that monitors the system-level usage of resource during the pytorch tests.
 Data collected: CPU, memory, and GPU utilization.
 
 Usage:
@@ -72,7 +72,7 @@ class UsageLogger:
     ) -> None:
         """
         log_interval: Time interval in seconds for collecting usage data; default is 5 seconds.
-        is_debug_mode: Useful if you're testing on a local machine and want to see the output in a pretty format.
+        is_debug_mode: Useful if you're testing on a local machine and want to see the output in a pretty format with more information.
         """
         self._log_interval = log_interval
         self._summary_info = {
@@ -129,11 +129,12 @@ class UsageLogger:
                 memory = psutil.virtual_memory()
                 used_cpu_percent = psutil.cpu_percent()
 
+                # collect disk_usage every 10 loop
                 counter += 1
-                if counter == 12:
+                if counter == 10:
                     disk_usage = psutil.disk_usage('/')
-                    counter = 0
                     stats["disk_usage"]= disk_usage.percent
+                    counter = 0
 
                 stats.update(
                     {
@@ -153,14 +154,11 @@ class UsageLogger:
             finally:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
-                stats["log_duration"] = f"{time_diff*1000:.2f}ms"
+                stats["log_duration"] = f"{time_diff*1000:.2f} ms"
 
                 # output the data to stdout
                 self.log_json(stats)
-
-                # sleep for the remaining time to meet the log interval.
-                if time_diff < self._log_interval:
-                    time.sleep(self._log_interval - time_diff)
+                time.sleep(self._log_interval)
 
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
