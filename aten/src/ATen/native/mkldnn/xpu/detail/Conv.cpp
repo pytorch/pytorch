@@ -213,7 +213,7 @@ sycl::event convolution_backward_weights(
   }
 #endif
 
-  apply_tf32_if_allowed(pattr);
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto conv_fwd_pd = dnnl::convolution_forward::primitive_desc(
@@ -324,7 +324,7 @@ sycl::event convolution_backward_data(
       padding_back_bottom_right.vec();
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
 
-  apply_tf32_if_allowed(pattr);
+  at::native::onednn::apply_tf32_if_allowed(pattr);
 
   auto conv_forward_pd = dnnl::convolution_forward::primitive_desc(
       engine,
