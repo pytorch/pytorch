@@ -8,17 +8,6 @@
 
 
 // Many APIs have changed/don't exist anymore
-#if IS_PYTHON_3_12_PLUS
-
-#include "dim.h"
-
-// Re-enable this some day
-PyObject* Dim_init() {
-    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
-    return nullptr;
-}
-
-#else
 
 #include "minpybind.h"
 #include <frameobject.h>
@@ -431,7 +420,14 @@ static PyObject* DimList_bind(DimList *self,
     PY_BEGIN
     mpy::handle sizes;
     static const char * const _keywords[] = {"sizes", nullptr};
-    static _PyArg_Parser parser = {"O", _keywords, 0};
+#if IS_PYTHON_3_12_PLUS
+    static _PyArg_Parser parser = {
+      .format = "O",
+      .keywords = _keywords,
+      .kwtuple = 0};
+#else
+static _PyArg_Parser parser = {"O", _keywords, 0};
+#endif
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &sizes)) {
         return nullptr;
     }
@@ -455,7 +451,14 @@ static PyObject* DimList_bind_len(DimList *self,
     PY_BEGIN
     int size;
     static const char * const _keywords[] = {"N", nullptr};
+#if IS_PYTHON_3_12_PLUS
+    static _PyArg_Parser parser = {
+            .format = "i",
+            .keywords =  _keywords,
+            .kwtuple = 0};
+#else
     static _PyArg_Parser parser = {"i", _keywords, 0};
+#endif
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &size)) {
         return nullptr;
     }
@@ -1458,7 +1461,7 @@ PyTypeObject Tensor::Type = {
 
 // dim() --------------------
 
-static bool relevant_op(_Py_CODEUNIT c) {
+static bool relevant_op(uint8_t c) {
     switch(c) {
         case STORE_NAME:
         case STORE_GLOBAL:
@@ -1577,12 +1580,13 @@ static PyObject* _dims(PyObject *self,
     auto c = mpy::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
-    #if IS_PYTHON_3_11_PLUS
+    #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
     if (decoder.opcode() == PRECALL) {
         decoder.next();
     }
+    // note that this opcode was removed in 3.12
     #endif
     decoder.next();
 
@@ -3246,4 +3250,3 @@ PyObject* Dim_init() {
     }
 }
 
-#endif
