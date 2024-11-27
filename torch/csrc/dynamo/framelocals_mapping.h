@@ -15,6 +15,7 @@ extern "C" {
 typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
  private:
   std::unordered_map<std::string, PyObject*> _map;
+  std::vector<std::string> names_ordered;
   py::object _dict{py::none()};
 
  public:
@@ -23,10 +24,13 @@ typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
   }
 
   PyObject* get(py::handle key) {
-    return _map[key.cast<std::string>()];
+    return _map[py::str(key).cast<std::string>()];
   }
 
   void set(const std::string& key, PyObject* value) {
+    if (!_map.count(key)) {
+      names_ordered.push_back(key);
+    }
     _map[key] = value;
   }
 
@@ -42,8 +46,8 @@ typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
   PyDictObject* to_dict() {
     if (this->dict_realized()) {
       _dict = py::dict();
-      for (auto& [name, value] : _map) {
-        _dict[py::str(name)] = py::cast<py::object>(value);
+      for (auto& name : names_ordered) {
+        _dict[py::str(name)] = py::cast<py::object>(_map[name]);
       }
     }
     return (PyDictObject*)_dict.ptr();

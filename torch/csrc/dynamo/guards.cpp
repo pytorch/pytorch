@@ -3243,7 +3243,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
             example_value,
             guard_manager_enum),
         _key(key.ptr()),
-        _key_str(key.cast<std::string>()),
+        _key_str(py::str(key).cast<std::string>()),
         _is_immutable_object(is_immutable_object(example_value)) {}
 
   // NB: Intentional duplication between check_nopybind and

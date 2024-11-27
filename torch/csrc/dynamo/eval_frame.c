@@ -286,7 +286,7 @@ static PyObject* dynamo_call_callback(
   if (frame == NULL) {
     return NULL;
   }
-  frame->locals = framelocals_mapping_to_dict(locals);
+  frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
   PyObject* res = PyObject_CallFunction(
