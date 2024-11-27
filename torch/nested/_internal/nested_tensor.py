@@ -4,9 +4,9 @@ from collections import namedtuple
 from typing import Tuple
 
 import torch
-from torch._C import DispatchKey, DispatchKeySet, SymIntType
+from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.nested._internal.cached_tensor import make_cached_tensor
+from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor
 from torch.nested._internal.nested_int import NestedIntNode
 from torch.nested._internal.offload_tensor import (
     init_offload_tensor_registry,
@@ -70,6 +70,7 @@ def _rebuild_njt(constructor_kwargs):
 
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
+    _non_contig_offsets: torch.Tensor
     # NOTE [ Nested ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
@@ -94,6 +95,7 @@ class NestedTensor(torch.Tensor):
         cls,
         values: torch.Tensor,
         metadata: torch.Tensor,  # This will be a subclass representing raggedness
+        non_contig_offsets: Optional[torch.Tensor] = None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -109,7 +111,9 @@ class NestedTensor(torch.Tensor):
         # (create a new one if needed).
         ragged_size = get_tensor_symint(metadata, coeff=1)
         _ragged_idx = kwargs.get("_ragged_idx", 1)
-        B = metadata.shape[0] - 1
+
+        # When non_contig_offsets is not None, metadata represents lengths
+        B = metadata.shape[0] - 1 if non_contig_offsets is None else metadata.shape[0]
 
         # subtract 1 to convert to values dim space
         r = _ragged_idx - 1
@@ -141,10 +145,11 @@ class NestedTensor(torch.Tensor):
 
         return r
 
-    def __init__(self, values, metadata, **kwargs):
+    def __init__(self, values, metadata, non_contig_offsets=None, **kwargs):
         super().__init__()
 
         self._values = values
+        self._non_contig_offsets = non_contig_offsets
 
         # collapsed ragged dim must always be dynamic
         torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
@@ -154,11 +159,20 @@ class NestedTensor(torch.Tensor):
         # dispatch to get proper view relationship
         return torch._nested_get_values(self)  # type: ignore[attr-defined]
 
+    # Lengths and offsets returns CachedTensor so that if the user reconstructs
+    # user either lengths and offsets, they would have any metadata cached.
     def offsets(self):
-        return self._host_offsets if self.is_cpu else self._device_offsets
+        if self._non_contig_offsets is not None:
+            return self._non_contig_offsets
+        return self._metadata
 
     def lengths(self):
-        return self._host_lengths if self.is_cpu else self._device_lengths
+        if self._non_contig_offsets is not None:
+            return self._metadata
+        else:
+            # We should wrap this in another CachedTensor
+            # But we probably shouldn't even reach here today.
+            return self._host_lengths if self.is_cpu else self._device_lengths
 
     def __getattr__(self, name):
         from torch.nested._internal.nested_int import NestedIntNode
@@ -191,6 +205,19 @@ class NestedTensor(torch.Tensor):
         else:
             metadata = node.hint.node.nested_int_cache()
         return metadata
+
+    # Allow user to access nt._metadata_cache for BC
+    # This is dangerous to allow mutation!
+    @property
+    def _metadata_cache(self):
+        ret = self._metadata.metadata.copy()
+        if (max_seqlen := ret.get("_max_seqlen_tensor")) is not None:
+            del ret["_max_seqlen_tensor"]
+            ret["max_seqlen"] = max_seqlen
+        if (min_seqlen := ret.get("_min_seqlen_tensor")) is not None:
+            del ret["_min_seqlen_tensor"]
+            ret["min_seqlen"] = min_seqlen
+        return ret
 
     # Private accessor functions for min / max sequence length. They're
     # purposefully not @properties because those don't work with PT2 (yet).
@@ -236,12 +263,12 @@ class NestedTensor(torch.Tensor):
     # compute / cache them if they're not.
     @property
     def _maybe_max_seqlen(self) -> Optional[int]:
-        mt = self._max_seqlen_tensor
+        mt = self._metadata.metadata.get("_max_seqlen_tensor")
         return None if mt is None else _load_val_from_tensor(mt)
 
     @property
     def _maybe_min_seqlen(self) -> Optional[int]:
-        mt = self._min_seqlen_tensor
+        mt = self._metadata.metadata.get("_min_seqlen_tensor")
         return None if mt is None else _load_val_from_tensor(mt)
 
     def __repr__(self):  # type: ignore[override]
@@ -271,6 +298,7 @@ class NestedTensor(torch.Tensor):
         constructor_kwargs = {
             "values": self._values,
             "metadata": self._metadata,
+            "non_contig_offsets": self._non_contig_offsets,
             "_ragged_idx": self._ragged_idx,
             "requires_grad": self.requires_grad,
         }
@@ -283,6 +311,8 @@ class NestedTensor(torch.Tensor):
             "ragged_idx": self._ragged_idx,
         }
         inner_tensors = ["_values", "_metadata"]
+        if self._non_contig_offsets is not None:
+            inner_tensors.append("_non_contig_offsets")
         return inner_tensors, ctx
 
     @staticmethod
@@ -290,6 +320,7 @@ class NestedTensor(torch.Tensor):
         return NestedTensor(
             inner_tensors["_values"],
             inner_tensors["_metadata"],
+            non_contig_offsets=inner_tensors.get("_non_contig_offsets"),
             requires_grad=meta["requires_grad"],
             _ragged_idx=meta["ragged_idx"],
         )
@@ -353,8 +384,8 @@ class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(
-            gO,
+        return _construct_nested_tensor_compat(
+            values=gO,
             offsets=offsets,
             _metadata_cache=ctx.metadata_cache,
             _ragged_idx=ctx.ragged_idx,
@@ -370,17 +401,13 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         offsets: torch.Tensor,
         metadata_cache: Optional[Dict[str, Any]] = None,
     ):  # type: ignore[override]
-        return NestedTensor(
-            values.detach(),
-            # maintain BC with this usages of this where the seqlens are stuffed
-            # directly into the metadata cache as non-Tensors / ints
-            # This is handled by _make_cached_tensor.
-            _make_cached_tensor(
-                offsets=offsets,
-                lengths=None,
-                min_seqlen=metadata_cache.get("min_seqlen") if metadata_cache else None,
-                max_seqlen=metadata_cache.get("max_seqlen") if metadata_cache else None,
-            ),
+        # This maintains BC with this usages of this where the seqlens are stuffed
+        # directly into the metadata cache as non-Tensors / ints
+        return _construct_nested_tensor_compat(
+            values=values.detach(),
+            offsets=offsets,
+            lengths=None,
+            _metadata_cache=metadata_cache,
         )
 
     @staticmethod
@@ -569,58 +596,113 @@ def normalize_min_max_seqlen(metadata):
     # }
     if (max_seqlen := metadata.get("max_seqlen")) is not None:
         del metadata["max_seqlen"]
-        if isinstance(max_seqlen, int):
+        if isinstance(max_seqlen, (int, torch.SymInt)):
             metadata["_max_seqlen_tensor"] = _store_val_in_tensor(max_seqlen)
         else:
             metadata["_max_seqlen_tensor"] = max_seqlen
-        torch._dynamo.mark_dynamic(metadata["_max_seqlen_tensor"], 0)
+    torch._dynamo.mark_dynamic(metadata["_max_seqlen_tensor"], 0)
     if (min_seqlen := metadata.get("min_seqlen")) is not None:
         del metadata["min_seqlen"]
-        if isinstance(min_seqlen, int):
+        if isinstance(min_seqlen, (int, torch.SymInt)):
             metadata["_min_seqlen_tensor"] = _store_val_in_tensor(min_seqlen)
         else:
             metadata["_min_seqlen_tensor"] = min_seqlen
-        torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
+    torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
 
 
-# Unnormalized
-def _make_cached_tensor(offsets, lengths, min_seqlen, max_seqlen):
+def _make_ragged_tensors_compat(*, offsets, lengths, min_seqlen, max_seqlen):
+    assert offsets is not None or lengths is not None
     metadata = {}
-    if offsets is not None:
-        metadata["offsets"] = offsets
-    if lengths is not None:
-        metadata["lengths"] = lengths
+    if offsets is not None and lengths is not None:
+        non_contig_offsets = offsets
+        if isinstance(lengths, CachedTensor):
+            if lengths.is_cpu:
+                metadata["_host_lengths"] = lengths._host_lengths
+            else:
+                metadata["_device_lengths"] = lengths._device_lengths
+        else:
+            metadata["lengths"] = lengths
+    else:
+        non_contig_offsets = None
+        if isinstance(offsets, CachedTensor):
+            if offsets.is_cpu:
+                metadata["_host_offsets"] = offsets._host_offsets
+            else:
+                metadata["_device_offsets"] = offsets._device_offsets
+        else:
+            metadata["offsets"] = offsets
     if min_seqlen is not None:
         metadata["min_seqlen"] = min_seqlen
     if max_seqlen is not None:
         metadata["max_seqlen"] = max_seqlen
-
     normalize_lengths_offsets(metadata)
     normalize_min_max_seqlen(metadata)
     metadata_tensor = make_cached_tensor(metadata)
-    return metadata_tensor
+    return metadata_tensor, non_contig_offsets
 
 
-# TODO(soulitzer): clean up these two functions
+# Useful for tests that previously constructed the NestedTensor directly via
+# the raw constructor.
+# kwargs that are not _metadata_cache or _ragged_idx are ignored.
+# Fields in _metadata_cache that are not _metadata_cache are ignored.
+def _construct_nested_tensor_compat(
+    values: torch.Tensor,
+    offsets: torch.Tensor,
+    lengths: Optional[torch.Tensor] = None,
+    **kwargs,
+):
+    ragged_idx = kwargs.get("_ragged_idx", 1)
+    metadata_cache = kwargs.get("_metadata_cache") or {}
+
+    max_seqlen = metadata_cache.get("max_seqlen")
+    min_seqlen = metadata_cache.get("min_seqlen")
+
+    metadata, non_contig_offsets = _make_ragged_tensors_compat(
+        offsets=offsets,
+        lengths=lengths,
+        max_seqlen=max_seqlen,
+        min_seqlen=min_seqlen,
+    )
+    return NestedTensor(
+        values=values,
+        metadata=metadata,
+        non_contig_offsets=non_contig_offsets,
+        _ragged_idx=ragged_idx,
+    )
+
+
 def nested_view_from_values_offsets(
     values, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
-    metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
-    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
+    metadata_tensor, non_contig_offsets = _make_ragged_tensors_compat(
+        offsets=offsets,
+        lengths=None,
+        max_seqlen=max_seqlen,
+        min_seqlen=min_seqlen,
+    )
+    assert non_contig_offsets is None
+    ret = torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
-        # Putting metadata_tensor AFTER so multiple dispatch hits nested tensor first
         metadata_tensor,
+        None,
         ragged_idx,
     )  # type: ignore[return-value]
+    return ret
 
 
 def nested_view_from_values_offsets_lengths(
     values, offsets, lengths, ragged_idx=1, min_seqlen=None, max_seqlen=None
 ):
-    metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
+    metadata_tensor, non_contig_offsets = _make_ragged_tensors_compat(
+        offsets=offsets,
+        lengths=lengths,
+        max_seqlen=max_seqlen,
+        min_seqlen=min_seqlen,
+    )
     return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values,
         metadata_tensor,
+        non_contig_offsets,
         ragged_idx,
     )  # type: ignore[return-value]
 
@@ -630,7 +712,13 @@ def nested_from_padded(
 ):
     if ragged_idx != 1:
         raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
-    metadata_tensor = _make_cached_tensor(offsets, None, min_seqlen, max_seqlen)
+    metadata_tensor, non_contig_offsets = _make_ragged_tensors_compat(
+        offsets=offsets,
+        lengths=None,
+        max_seqlen=max_seqlen,
+        min_seqlen=min_seqlen,
+    )
+    assert non_contig_offsets is None
     return torch._nested_from_padded_tensor(
         padded,
         metadata_tensor,

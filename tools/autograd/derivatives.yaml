@@ -2850,12 +2850,13 @@
   nested_size: non_differentiable
   nested_strides: non_differentiable
 
-- name: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, int ragged_idx=1) -> Tensor(a)
+- name: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor(a)
   self: grad.values()
-  metadata: metadata
+  metadata: non_differentiable
+  non_contig_offsets: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad, at::_nested_get_jagged_metadata(self), at::_nested_get_ragged_idx(self))"
+  self: "_nested_view_from_jagged(grad, at::_nested_get_jagged_metadata(self), at::_nested_get_non_contig_offsets(self), at::_nested_get_ragged_idx(self))"
 
 # Transformer
 - name:  _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor

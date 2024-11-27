@@ -9,7 +9,7 @@ class TensorRegistry:
         self._next_id = 0
 
     def register(self, t, t_id=None):
-        if not t_id:
+        if t_id is None:
             t_id = self._next_id
             self._next_id += 1
         self._tensor_to_id[t] = t_id

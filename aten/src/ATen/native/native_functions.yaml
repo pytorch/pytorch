@@ -6213,12 +6213,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, int ragged_idx=1) -> Tensor(a)
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_view_from_jagged_copy(Tensor self, Tensor metadata, int ragged_idx=1) -> Tensor
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy
@@ -6240,6 +6240,11 @@
   autogen: _nested_get_values_copy.out
 
 - func: _nested_get_offsets(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch: {}
+
+- func: _nested_get_non_contig_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}

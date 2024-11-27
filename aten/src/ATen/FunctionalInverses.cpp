@@ -304,7 +304,7 @@ Tensor FunctionalInverses::_nested_view_from_buffer_inverse(const Tensor& base, 
     return Tensor();
 }
 
-Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& metadata, int64_t ragged_idx) {
+Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& metadata, const c10::optional<Tensor>& non_contig_offsets, int64_t ragged_idx) {
   auto values = at::_nested_get_values(mutated_view);
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return values;
@@ -316,7 +316,8 @@ Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, 
 Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
   auto ragged_idx = at::_nested_get_ragged_idx(base);
   auto metadata = at::_nested_get_jagged_metadata(base);
-  auto nt = at::_nested_view_from_jagged(mutated_view, metadata, ragged_idx);
+  auto non_contig_offsets = at::_nested_get_non_contig_offsets(base);
+  auto nt = at::_nested_view_from_jagged(mutated_view, metadata, non_contig_offsets, ragged_idx);
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;
