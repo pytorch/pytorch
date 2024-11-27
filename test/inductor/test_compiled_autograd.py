@@ -2136,6 +2136,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
+            extra_cflags=["-g", "-O0"],
         )
 
         def same_autograd_fn():
@@ -2174,8 +2175,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_saved(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;

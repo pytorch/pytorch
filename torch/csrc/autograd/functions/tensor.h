@@ -19,6 +19,8 @@ struct TORCH_API CopyBackwards : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+  ivalue_list retrieve_saved(SwapSavedVariables&) override;
+  c10::optional<functional_apply_t> get_functional() override;
 
   at::TensorOptions src_options;
 };
@@ -172,6 +174,8 @@ struct TORCH_API CopySlices : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+  ivalue_list retrieve_saved(SwapSavedVariables&) override;
+  c10::optional<functional_apply_t> get_functional() override;
 
   at::TensorGeometry base;
   // view and view_fn are redundant and view_fn will be used if available.
