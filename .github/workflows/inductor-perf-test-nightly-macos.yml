@@ -12,10 +12,10 @@ on:
         type: boolean
         default: true
       inference:
-        description: Run inference (off by default)?
+        description: Run inference (on by default)?
         required: false
         type: boolean
-        default: false
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
