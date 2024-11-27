@@ -67,6 +67,7 @@ class UsageLogger:
     """
     Collect and display usage data, including CPU, memory, GPU memory utilization, and GPU utilization.
     """
+
     def __init__(
         self, log_interval=5, is_debug_mode=False, pynvmlExist=False, amdsmiExist=False
     ) -> None:
@@ -132,8 +133,8 @@ class UsageLogger:
                 # collect disk_usage every 10 loop
                 counter += 1
                 if counter == 10:
-                    disk_usage = psutil.disk_usage('/')
-                    stats["disk_usage"]= disk_usage.percent
+                    disk_usage = psutil.disk_usage("/")
+                    stats["disk_usage"] = disk_usage.percent
                     counter = 0
 
                 stats.update(
@@ -277,10 +278,11 @@ class UsageLogger:
                 try:
                     if "python" in process.name() and process.cmdline():
                         python_processes.append(process)
-                except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.ZombieProcess,psutil.NoSuchProcess,psutil.AccessDenied):
                     # access denied or the process died
                     pass
             return python_processes
+
         processes = get_processes_running_python_tests()
         per_process_info = []
         for p in processes:
@@ -306,6 +308,7 @@ class UsageLogger:
                 pass
             per_process_info.append(info)
         return per_process_info
+
 
 def main():
     """
