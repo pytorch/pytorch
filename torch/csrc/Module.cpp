@@ -920,7 +920,7 @@ static PyObject* THPModule_setDeterministicAlgorithms(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_setAllowTF32Onednn(
+static PyObject* THPModule_setAllowTF32oneDNN(
     PyObject* _unsued,
     PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -929,15 +929,15 @@ static PyObject* THPModule_setAllowTF32Onednn(
       "_set_onednn_allow_tf32 expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setAllowTF32Onednn(arg == Py_True);
+  at::globalContext().setAllowTF32oneDNN(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_allowTF32Onednn(
+static PyObject* THPModule_allowTF32oneDNN(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowTF32Onednn())
+  if (at::globalContext().allowTF32oneDNN())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1487,8 +1487,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O, nullptr},
-    {"_get_onednn_allow_tf32", THPModule_allowTF32Onednn, METH_NOARGS, nullptr},
-    {"_set_onednn_allow_tf32", THPModule_setAllowTF32Onednn, METH_O, nullptr},
+    {"_get_onednn_allow_tf32", THPModule_allowTF32oneDNN, METH_NOARGS, nullptr},
+    {"_set_onednn_allow_tf32", THPModule_setAllowTF32oneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
     {"_get_cudnn_deterministic",
