@@ -44,8 +44,18 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
 }
 
 inline void initGlobalDevicePoolState() {
-  // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  // Attempt to initialize XPU devices. If no device is found or the driver is
+  // not installed correctly, issue a warning message instead of raising an
+  // exception to avoid disrupting the user experience.
+  try {
+    // Enumerate all GPU devices and record them.
+    enumDevices(gDevicePool.devices);
+  } catch (const sycl::exception& e) {
+    TORCH_WARN(
+        "Failed to initialize XPU devices. The driver may not be installed, installed incorrectly, or incompatible with the current setup. ",
+        "Please refer to the guideline (https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support) for proper installation and configuration.");
+    return;
+  }
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
