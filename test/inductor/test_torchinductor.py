@@ -5202,6 +5202,32 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_matmul_layer_norm(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 256
+
+        inp = torch.randn(
+            batch_size,
+            seq_length,
+            hidden_size,
+            requires_grad=True,
+            device=self.device,
+        )
+        weight = torch.randn(
+            hidden_size, hidden_size, requires_grad=True, device=self.device
+        )
+
+        layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+
+        def foo(inp, weight):
+            matmul_output = inp @ weight
+            final_output = layer_norm(matmul_output)
+            return final_output
+
+        self.common(foo, (inp, weight), check_lowp=False)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -12867,6 +12893,44 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        @torch._functorch.config.patch("donated_buffer", True)
+        def test_donated_buffer_inplace(self):
+            batch_size = 32
+            seq_length = 50
+            hidden_size = 256
+
+            inp = torch.randn(
+                batch_size,
+                seq_length,
+                hidden_size,
+                requires_grad=True,
+                device=self.device,
+            )
+            weight = torch.randn(
+                hidden_size, hidden_size, requires_grad=True, device=self.device
+            )
+
+            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+
+            def fn(inp, weight):
+                matmul_output = inp @ weight
+                final_output = layer_norm(matmul_output)
+                return final_output
+
+            fn_opt = torch.compile(fn)
+
+            def wrapper(inp, weight):
+                return fn_opt(inp, weight).sum().backward()
+
+            _, code = run_and_get_code(wrapper, inp, weight)
+
+            if config.cpp_wrapper:
+                # when using cpp_wrapper, backward triton code is in code[2]
+                self.assertTrue("in_out_ptr" in code[2])
+            else:
+                # when not using cpp_wrapper, backward triton code is in code[1]
+                self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
