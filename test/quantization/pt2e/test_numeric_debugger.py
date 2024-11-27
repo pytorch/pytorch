@@ -14,9 +14,7 @@ from torch.ao.quantization import (
     NUMERIC_DEBUG_HANDLE_KEY,
     prepare_for_propagation_comparison,
 )
-from torch.ao.quantization.pt2e.graph_utils import (
-    bfs_trace_executorch_program_with_node_process,
-)
+from torch.ao.quantization.pt2e.graph_utils import bfs_trace_with_node_process
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -37,9 +35,7 @@ class TestNumericDebugger(TestCase):
                 f"Node {node} doesn't have debug handle",
             )
 
-        bfs_trace_executorch_program_with_node_process(
-            model, _assert_node_has_debug_handle
-        )
+        bfs_trace_with_node_process(model, _assert_node_has_debug_handle)
 
     def _extract_debug_handles(self, model) -> Dict[str, int]:
         debug_handle_map: Dict[str, int] = {}
@@ -54,9 +50,7 @@ class TestNumericDebugger(TestCase):
                     NUMERIC_DEBUG_HANDLE_KEY
                 ]
 
-        bfs_trace_executorch_program_with_node_process(
-            model, _extract_debug_handles_from_node
-        )
+        bfs_trace_with_node_process(model, _extract_debug_handles_from_node)
 
         return debug_handle_map
 
@@ -73,7 +67,7 @@ class TestNumericDebugger(TestCase):
                     str(node.meta.get("nn_module_stack"))
                 ] = node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
 
-        bfs_trace_executorch_program_with_node_process(
+        bfs_trace_with_node_process(
             model, _extract_debug_handles_with_prev_decomp_op_from_node
         )
         return debug_handle_to_prev_decomp_op_map
