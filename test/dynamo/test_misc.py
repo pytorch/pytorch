@@ -1778,6 +1778,17 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops=9,
         )
 
+    def test_range_iter(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, it):
+            n = next(it)
+            return x + n
+
+        it = iter(range(1, 3))
+        res = run(torch.zeros(1), it)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(next(it), 2)
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
