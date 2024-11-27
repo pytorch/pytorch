@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-A Python script that logging the system-level utilization usage.
-Data collected: CPU, memory, disk usage, GPU memeory utilzation, and GPU utilization if available.
+A Python script that logging the system-level utilization usage and output it in json format.
+Data collected: CPU, memory, GPU memeory utilzation, and GPU utilization if available.
 
 Usage:
     python3 monitor.py --log-interval 10
@@ -94,9 +94,9 @@ class UsageLogger:
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
 
-    def execute(self) -> None:
+    def start(self) -> None:
         """
-        Executes the main loop of the program.
+        runs the main loop of the program.
         the firstt json record is the metadata of the run, including the start time, end time, and the interval of the log.
         """
 
@@ -105,7 +105,6 @@ class UsageLogger:
         ).isoformat()
         self.log_json(self._summary_info)
 
-        counter = 0
         # start data collection
         while not self._kill_now:
             collecting_start_time = time.time()
@@ -120,13 +119,6 @@ class UsageLogger:
                 # collect cpu and memory metrics
                 memory = psutil.virtual_memory()
                 used_cpu_percent = psutil.cpu_percent()
-
-                # collect disk_usage every 10 loop
-                counter += 1
-                if counter == 10:
-                    disk_usage = psutil.disk_usage("/")
-                    stats["disk_usage"] = disk_usage.percent
-                    counter = 0
 
                 stats.update(
                     {
@@ -331,12 +323,14 @@ def main():
     usagelogger = UsageLogger(
         args.log_interval, args.debug, pynvml_enabled, amdsmi_enabled
     )
+
     # gracefully exit the script when pid is killed
     signal.signal(signal.SIGTERM, usagelogger.stop)
     # gracefully exit the script when keyboard ctrl+c is pressed.
     signal.signal(signal.SIGINT, usagelogger.stop)
-    # start the logging loop
-    usagelogger.execute()
+
+    # start the logging
+    usagelogger.start()
 
 
 if __name__ == "__main__":
