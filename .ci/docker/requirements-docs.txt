@@ -14,7 +14,8 @@ matplotlib==3.5.3
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 3.5.3
 
-tensorboard==2.13.0
+tensorboard==2.13.0 ; python_version < "3.13"
+tensorboard==2.18.0 ; python_version >= "3.13"
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 2.13.0
 
