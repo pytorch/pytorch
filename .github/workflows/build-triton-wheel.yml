@@ -125,11 +125,10 @@ jobs:
             docker exec -t "${container_name}" dnf install clang lld -y
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
-
-          if[[ "${BUILD_DEVICE}" == 'cuda' ]]; then
+          if [[ "${{ matrix.device }}" == "cuda" ]]; then
             docker exec -t "${container_name}" auditwheel repair --plat manylinux_2_28_x86_64 /artifacts/*.whl
           fi
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v4.4.0
         with:
