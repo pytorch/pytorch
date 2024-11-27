@@ -35,6 +35,7 @@ from typing import (
     Set,
     Tuple,
     TYPE_CHECKING,
+    Union,
 )
 from typing_extensions import TypeAlias
 
@@ -75,6 +76,21 @@ class OutputCode(Protocol):
         static_input_idxs: Sequence[int],
         inputs_to_check: Sequence[int],
     ) -> None:
+        ...
+
+    # TODO: Not sure if I really want these to be properties, this is easy
+    # though
+    #
+    # TODO: Remove leading underscores
+
+    # None if the output is not remote cacheable
+    _fx_graph_cache_key: Optional[str]
+
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int]
+
+    # TODO: Get rid of this
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
         ...
 
 
@@ -310,6 +326,9 @@ class CompiledFxGraph:
         # TODO: Not sure why this isn't just set by default on CompiledFxGraph
         self._boxed_call = True
 
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        self._triton_bundle = triton_bundle
+
     def get_constants(
         self, gm: Optional[torch.fx.GraphModule]
     ) -> Dict[str, torch.Tensor]:
@@ -332,4 +351,39 @@ class CompiledFxGraph:
 
 
 def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
+    return h
+
+
+@dataclasses.dataclass
+class CompiledAOTI:
+    """
+    Class holding an AOTInductor compiled so.
+    """
+
+    filename: Union[str, List[str]]
+
+    # TODO: Figure out if these make sense or not here
+    _fx_graph_cache_key: Optional[str] = None
+    _time_taken_ns: Optional[int] = None
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        raise NotImplementedError("NYI")
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        gm: GraphModule,
+        fx_kwargs: _CompileFxKwargs,
+        cudagraphs: BoxedBool,
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
+        static_input_idxs: Sequence[int],
+        inputs_to_check: Sequence[int],
+    ) -> None:
+        pass
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
+
+
+def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
     return h
