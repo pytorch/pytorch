@@ -49,7 +49,7 @@ jobs:
         docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
         exclude:
           - device: "rocm"
-            docker-image: "pytorch/manylinux2_28-builder"
+            docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
             rocm_version: "6.2"
@@ -129,7 +129,7 @@ jobs:
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
-          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+          if [[ "${{ matrix.device }}" == "cuda" &&  "${PLATFORM}"" == "manylinux_2_28_x86_64" ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
           fi
