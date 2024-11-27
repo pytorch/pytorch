@@ -954,21 +954,20 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def handle_dynamo_gm(
+def try_get_metadata_from_dynamo(
     mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor], full_args_num: int
 ) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
-    if (
-        isinstance(mod, torch.fx.GraphModule)
-        # graph is captured by dynamo
-        and "dynamo_compile_id" in mod.meta
-    ):
-        if (
-            # TODO(xmfan): make compiled autograd go through guard dedup
-            torch._dynamo.compiled_autograd.in_compiled_autograd_region
-            # is from export
-            or not hasattr(mod, "_param_name_to_source")
-        ):
-            return None, []
+    if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
+        # graph was not captured by dynamo
+        return None, []
+
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        # TODO(xmfan): make compiled autograd go through guard dedup
+        return None, []
+
+    if not hasattr(mod, "_param_name_to_source"):
+        # is from export
+        return None, []
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
@@ -1063,7 +1062,9 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(mod, params, len(full_args))
+    aot_autograd_arg_pos_to_source, static_input_indices = try_get_metadata_from_dynamo(
+        mod, params, len(full_args)
+    )
 
     dynamic_shapes = False
     for x in full_args:

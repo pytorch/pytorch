@@ -898,7 +898,7 @@ class _PyTreeCodeGen(CodeGen):
             return super().generate_output(output_args)
 
 
-class CompiledAutogradCodeGen(CodeGen):
+class _CompiledAutogradCodeGen(CodeGen):
     def __init__(self, boxed_inputs_count):
         super().__init__()
         self._boxed_inputs_count = boxed_inputs_count

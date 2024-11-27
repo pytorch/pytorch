@@ -3420,7 +3420,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     ]
 
     if is_compiled_autograd_gm(gm):
-        assert isinstance(gm.graph._codegen, torch.fx.graph.CompiledAutogradCodeGen)
+        assert isinstance(gm.graph._codegen, torch.fx.graph._CompiledAutogradCodeGen)
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3429,7 +3429,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         def flatten_fn(args):
             return args[0] + list(args[1:])
 
-        # unflattening is handled by CompiledAutogradCodeGen.process_inputs
+        # unflattening is handled by _CompiledAutogradCodeGen.process_inputs
         compiled_fn = compile_gm(gm, flatten_fn(inputs))
     else:
         # slow path, don't know inputs structure

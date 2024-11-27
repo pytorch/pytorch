@@ -1432,7 +1432,7 @@ class OutputGraph:
             assert type(gm.graph._codegen) is torch.fx.graph.CodeGen
             assert gm.graph._codegen._body_transformer is None
             boxed_inputs_count = len(self.example_inputs()[0])
-            gm.graph._codegen = torch.fx.graph.CompiledAutogradCodeGen(
+            gm.graph._codegen = torch.fx.graph._CompiledAutogradCodeGen(
                 boxed_inputs_count
             )
             mark_compiled_autograd_gm(gm)
