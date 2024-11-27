@@ -524,15 +524,6 @@ class BlockMask:
             self.mask_mod,
         )
 
-    # @property
-    # def shape(self):
-    #     """Returns the shape of the mask."""
-    #     return self.shape
-    # *batch_dims, q_length, _ = self.kv_indices.shape
-    # q_length = self.kv_indices.shape[-2] * self.BLOCK_SIZE[0]
-    # kv_length = self.kv_indices.shape[-1] * self.BLOCK_SIZE[1]
-    # return tuple(batch_dims + [q_length, kv_length])
-
     def numel(self):
         """Returns the number of elements (not accounting for sparsity) in the mask."""
         shape = self.shape
