@@ -1518,6 +1518,12 @@ class FxGraphCache:
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
+            if remote_cache:
+                # Count remote cache hit stats
+                get_metrics_context().increment("inductor_fx_remote_cache_hit_count", 1)
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_hit_keys", key
+                )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
@@ -1531,6 +1537,14 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
+            if remote_cache:
+                # Count remote cache miss stats
+                get_metrics_context().increment(
+                    "inductor_fx_remote_cache_miss_count", 1
+                )
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_miss_keys", key
+                )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
@@ -1624,6 +1638,10 @@ class FxGraphCache:
         # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
         cache_state = cache_info["cache_state"]
+        # Here for grepping:
+        # fx_graph_cache_hit
+        # fx_graph_cache_miss
+        # fx_graph_cache_bypass
         chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}",
             cache_info["cache_event_time"],

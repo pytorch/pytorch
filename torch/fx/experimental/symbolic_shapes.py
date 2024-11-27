@@ -10,7 +10,6 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 """
 
 import atexit
-import builtins
 import collections
 import functools
 import inspect
@@ -82,6 +81,7 @@ from torch.utils._sympy.functions import (
     PythonMod,
 )
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.printers import PythonPrinter
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
@@ -109,8 +109,6 @@ log = logging.getLogger(__name__)
 
 import sympy
 from sympy import S
-from sympy.printing.precedence import PRECEDENCE, precedence
-from sympy.printing.str import StrPrinter
 
 
 class GuardOnDataDependentSymNode(RuntimeError):
@@ -454,7 +452,6 @@ def rebind_unbacked(
     has the old binding information) and the new result (which we can extract the
     new unbacked SymInts out from).
     """
-    from torch._dynamo.tensor_version_op import _tensor_version
 
     # Inputs never need rebinding
     if n.op == "placeholder":
@@ -466,12 +463,51 @@ def rebind_unbacked(
         assert shape_env is not None
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
-            # tensor_version ops get specialized after AOTAutograd, it's OK,
-            # we don't actually want to do asserts on them.  This is all a bit
-            # questionable though
-            if isinstance(u1, int) and n.target is _tensor_version:
+            # Sometimes, things were previously unbacked bindings become constants.
+            # There are two situations this can happen.
+            #
+            # First, you might have a runtime assert that causes the
+            # constant-ification.  In this case, the /binding/ itself will
+            # still be an unbacked symbol (because we will only force it
+            # to be a constant later in fake tensor propagation).  In this
+            # case, u1 is a SymInt and we still do all our work as normal.
+            #
+            # But second, it might be that fake tensor propagation DIRECTLY
+            # converted the unbacked SymInt into a constant.  This happens
+            # more rarely, but we have identified two situations it can
+            # validly occur:
+            #
+            # - If you have a tensor_version operator, these are initially
+            #   allocated as unbacked SymInts, but after AOTAutograd they
+            #   get forced specialized to specific values.  In this case,
+            #   there is no reason to do runtime asserts on them, this is
+            #   just a hack to properly keep track of them to start.
+            #
+            # - If you have an item() call on a constant tensor, the result
+            #   of the item() call is constant and we do not need runtime
+            #   asserts on this symbol.  In
+            #   https://github.com/pytorch/pytorch/issues/140625 we have a
+            #   case where in the initial trace of the program we are unable
+            #   to determine that torch.tensor is constant, but then
+            #   subsequent passes cause torch.tensor to become a constant and
+            #   then the unbacked symbol goes poof.
+            #
+            # In all of these cases, it is no longer necessary to generate
+            # deferred runtime asserts, since other subsystems (e.g., the
+            # constant-ification pass) ensure that the quantity is now truly
+            # static and cannot change at runtime.  So it's OK to discard
+            # in these situations.
+            #
+            # There is one more hazard (re
+            # https://github.com/pytorch/pytorch/issues/141248), the problem
+            # is that you can end up with "dangling" unbacked symbols that
+            # exist in the ShapeEnv but are never bound anywhere.  You might
+            # like an invariant that unbacked symbols never get lost.  But
+            # we do not have this invariant, so do not try to enforce it.
+            if isinstance(u1, int):
                 log.info(
-                    "rebind_unbacked: discard _tensor_version %s %s -> %s",
+                    "rebind_unbacked: discard %s %s %s -> %s",
+                    n.target,
                     raw_u0,
                     path,
                     u1,
@@ -507,7 +543,13 @@ def rebind_unbacked(
                 # Cancel the to_int(to_bool(x)). This is sound because x in
                 # [0, 1]
                 raw_u1 = new_raw_u1
-            assert isinstance(raw_u1, sympy.Symbol)
+
+            if not isinstance(raw_u1, sympy.Symbol):
+                assert (
+                    not raw_u1.free_symbols
+                ), f"should have been constant, but got {raw_u1}"
+                continue
+
             # The old and new could be the same if you improperly hit the memo
             # while retracing.  Make sure you updated FakeTensorMode.epoch
             assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
@@ -1360,13 +1402,13 @@ def fx_placeholder_targets(gm: torch.fx.GraphModule) -> List[str]:
 def eval_guards(
     gm: torch.fx.GraphModule, *args: Tensor, ignore_static: bool = True
 ) -> bool:
-    return gm.shape_env.evaluate_guards_for_args(
+    return gm.shape_env.evaluate_guards_for_args(  # type: ignore[operator, union-attr]
         fx_placeholder_vals(gm), args, ignore_static=ignore_static
     )
 
 
 def bind_symbols(gm: torch.fx.GraphModule, *args: Tensor) -> Dict[sympy.Symbol, int]:
-    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
+    return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)  # type: ignore[operator, union-attr]
 
 
 class DimDynamic(Enum):
@@ -1988,43 +2030,9 @@ def cast_symbool_to_symint_guardless(
 
 
 SYMPY_INTERP = {
-    "Abs": operator.abs,
-    "Eq": operator.eq,
-    "Ne": operator.ne,
-    "Gt": operator.gt,
-    "Lt": operator.lt,
-    "Le": operator.le,
-    "Ge": operator.ge,
-    "Min": min,
-    "Max": max,
-    "Mod": operator.mod,
-    "PythonMod": operator.mod,
-    "FloorDiv": operator.floordiv,
-    "TrueDiv": operator.truediv,
-    "PowByNatural": operator.pow,
     "IsNonOverlappingAndDenseIndicator": eval_is_non_overlapping_and_dense,
-    "floor": math.floor,
-    "ceiling": math.ceil,
-    "FloorToInt": math.floor,
-    "FloatPow": math.pow,
-    "CeilToInt": math.ceil,
     "cast_symbool_to_symint_guardless": cast_symbool_to_symint_guardless,
-    "RoundToInt": builtins.round,
-    "RoundDecimal": builtins.round,
-    "TruncToInt": math.trunc,
-    "IntTrueDiv": operator.truediv,
-    "FloatTrueDiv": operator.truediv,
-    "ToFloat": builtins.float,
-    "OpaqueUnaryFn_cos": math.cos,
-    "OpaqueUnaryFn_cosh": math.cosh,
-    "OpaqueUnaryFn_acos": math.acos,
-    "OpaqueUnaryFn_sin": math.sin,
-    "OpaqueUnaryFn_sinh": math.sinh,
-    "OpaqueUnaryFn_asin": math.asin,
-    "OpaqueUnaryFn_tan": math.tan,
-    "OpaqueUnaryFn_tanh": math.tanh,
-    "OpaqueUnaryFn_atan": math.atan,
-    "OpaqueUnaryFn_sqrt": math.sqrt,
+    "math": math,
 }
 
 
@@ -2095,12 +2103,12 @@ class RuntimeAssert:
 
 
 # Used for printing SymExprs in compile_fx
-class SymExprPrinter(StrPrinter):
+class SymExprPrinter(PythonPrinter):
     def _print_Float(self, expr: sympy.Float) -> str:
         return str(float(expr))
 
 
-class ShapeGuardPrinter(SymExprPrinter):
+class ShapeGuardPrinter(PythonPrinter):
     def __init__(
         self,
         symbol_to_source: Mapping[sympy.Symbol, List[Source]],
@@ -2112,14 +2120,8 @@ class ShapeGuardPrinter(SymExprPrinter):
         self.source_ref = source_ref
         self.var_to_sources = var_to_sources
 
-    def _print_Not(self, expr: SympyBoolean) -> str:
-        return "not {}".format(self.parenthesize(expr.args[0], PRECEDENCE["Not"]))
-
-    def _print_And(self, expr: SympyBoolean) -> str:
-        return self.stringify(expr.args, " and ", PRECEDENCE["And"])
-
-    def _print_Or(self, expr: SympyBoolean) -> str:
-        return self.stringify(expr.args, " or ", PRECEDENCE["Or"])
+    def _print_Float(self, expr: sympy.Float) -> str:
+        return str(float(expr))
 
     def _print_Symbol(self, expr: sympy.Symbol) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
@@ -2145,7 +2147,7 @@ class LoggingShapeGuardPrinter(ShapeGuardPrinter):
         super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
 
-class DynamicDimConstraintPrinter(StrPrinter):
+class DynamicDimConstraintPrinter(PythonPrinter):
     """
     Printer for dynamic dim constraints.
     - Instead of symbol s_k it prints its source t.size()[i]
@@ -2169,9 +2171,6 @@ class DynamicDimConstraintPrinter(StrPrinter):
             expr
         ), f"Unknown symbol {expr} created by constraints solver"
         return self.symbol_to_source[expr][0].name()
-
-    def _print_Relational(self, expr: sympy.core.relational.Relational) -> str:
-        return f"{self.parenthesize(expr.lhs, precedence(expr))} {expr.rel_op} {self.parenthesize(expr.rhs, precedence(expr))}"  # type: ignore[attr-defined]
 
 
 class DimConstraints:
@@ -4037,6 +4036,17 @@ class ShapeEnv:
             maybe_extra_debug,
             stack_info=is_debug,
         )
+        trace_structured(
+            "create_unbacked_symbol",
+            metadata_fn=lambda: {
+                "symbol": str(symbol),
+                "vr": f"[{vr.lower}, {vr.upper}]",
+                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
+        )
 
     @record_shapeenv_event()
     def create_unbacked_symfloat(self) -> SymFloat:
@@ -4345,6 +4355,21 @@ class ShapeEnv:
                 maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
+            )
+            trace_structured(
+                "create_symbol",
+                metadata_fn=lambda: {
+                    "symbol": str(sympy_expr),
+                    "val": repr(val),
+                    "vr": range_str,
+                    "source": source.name(),
+                    "user_stack": structured.from_traceback(
+                        TracingContext.extract_stack()
+                    ),
+                    "stack": structured.from_traceback(
+                        CapturedTraceback.extract(skip=1).summary()
+                    ),
+                },
             )
 
             self.counter["create_symbol"] += 1
@@ -6102,6 +6127,16 @@ class ShapeEnv:
                 },
             },
         )
+        trace_structured(
+            "guard_added_fast",
+            metadata_fn=lambda: {
+                "expr": str(g),
+                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
+        )
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = (
@@ -6610,7 +6645,7 @@ def _blame_user_code(e: Exception, frame: types.FrameType) -> None:
     e.args = (msg,)
 
 
-class _PythonPrinter(sympy.printing.str.StrPrinter):
+class _PythonMsgPrinter(PythonPrinter):
     """
     Util printer that replaces sympy symbols with their source-level names
     and renders sympy relational operators (e.g., Eq, Ne, Ge, Le) inline
@@ -6624,13 +6659,6 @@ class _PythonPrinter(sympy.printing.str.StrPrinter):
     def _print_Symbol(self, sym: sympy.Symbol) -> str:
         return self.src_map[sym.name][0]
 
-    def _print_Relational(self, expr: sympy.core.relational.Relational) -> str:
-        lhs = self.parenthesize(expr.lhs, sympy.printing.precedence.precedence(expr))
-        assert hasattr(expr, "rel_op")
-        rel_op = expr.rel_op
-        rhs = self.parenthesize(expr.rhs, sympy.printing.precedence.precedence(expr))
-        return f"{lhs} {rel_op} {rhs}"
-
 
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: DefaultDict[str, List[str]]
@@ -6641,7 +6669,7 @@ def _suggest_torch_checks(
     if diff:
         log.warning("Unable to find user code corresponding to {%s}", diff)
         return
-    printer = _PythonPrinter(src_map)
+    printer = _PythonMsgPrinter(src_map)
     msg = e.args[0]
     msg += "\nTo fix the error, insert one of the following checks before this call:"
     # suggested fixes to resolve `cond`` are to tell the compiler to assume
