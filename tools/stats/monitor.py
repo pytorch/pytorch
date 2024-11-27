@@ -41,7 +41,6 @@ try:
 except ModuleNotFoundError:
     pass
 
-
 def parse_args() -> argparse.Namespace:
     """
     Parse command line arguments.
@@ -70,7 +69,7 @@ class UsageLogger:
     """
 
     def __init__(
-        self, log_interval=5, is_debug_mode=False, pynvmlExist=False, amdsmiExist=False
+        self, log_interval=5, is_debug_mode=False, pynvml_enabled=False, amdsmi_enabled=False
     ) -> None:
         """
         log_interval: Time interval in seconds for collecting usage data; default is 5 seconds.
@@ -81,27 +80,13 @@ class UsageLogger:
             "level": "metadata",
             "interval": self._log_interval,
         }
-        self._has_pynvml = False
-        self._has_amdsmi = False
+        self._has_pynvml = pynvml_enabled
+        self._has_amdsmi = amdsmi_enabled
         self._kill_now = False
         self._gpu_handles = []
         self._gpu_libs_detected = []
         self._num_of_cpus = 0
         self._debug_mode = is_debug_mode
-
-        # initialize gpu management libraries
-        if pynvmlExist:
-            try:
-                pynvml.nvmlInit()
-                self._has_pynvml = True
-            except pynvml.NVMLError:
-                pass
-        if amdsmiExist:
-            try:
-                amdsmi.amdsmi_init()
-                self._has_amdsmi = True
-            except amdsmi.AmdSmiException:
-                pass
         self._initial_gpu_handler()
 
     def execute(self) -> None:
@@ -315,8 +300,25 @@ def main():
     """
     Main function of the program.
     """
+
+    # initialize gpu management libraries
+    pynvml_enabled = False
+    amdsmi_enabled = False
+
+    if _HAS_PYNVML:
+        try:
+            pynvml.nvmlInit()
+            pynvml_enabled = True
+        except pynvml.NVMLError:
+            pass
+    if _HAS_AMDSMI:
+        try:
+            amdsmi.amdsmi_init()
+            amdsmi_enabled = True
+        except amdsmi.AmdSmiException:
+            pass
     args = parse_args()
-    usagelogger = UsageLogger(args.log_interval, args.debug, _HAS_PYNVML, _HAS_AMDSMI)
+    usagelogger = UsageLogger(args.log_interval, args.debug, pynvml_enabled, amdsmi_enabled)
     # gracefully exit the script when pid is killed
     signal.signal(signal.SIGTERM, usagelogger.stop)
     # gracefully exit the script when keyboard ctrl+c is pressed.
