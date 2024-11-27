@@ -443,6 +443,8 @@ def _templated_ring_attention(
         raise NotImplementedError(
             "is_causal requires the same query and context sequence lengths"
         )
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
 
     if isinstance(mesh, dist.ProcessGroup):
         pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
@@ -616,6 +618,8 @@ def _templated_ring_attention_backward(
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     """This API implements the backward of the ring attention."""
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
     pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
     rank = dist.get_rank(pg)
@@ -717,7 +721,7 @@ def _templated_ring_attention_backward(
                 grad_value.shape
             )
 
-            if i <= rank and _cp_options.enable_load_balance and is_causal:
+            if i <= rank and _cp_options.enable_load_balance:
                 grad_key = _partial_update(
                     grad_key,
                     grad_key_,
@@ -742,7 +746,7 @@ def _templated_ring_attention_backward(
         # Send the grad key, and grad value to the next rank.
         dkv_rotater.exchange_buffers(next_grad_kv)
 
-        if i <= rank or not _cp_options.enable_load_balance or not is_causal:
+        if i <= rank or not _cp_options.enable_load_balance:
             grad_query += grad_query_
         else:
             grad_query = _partial_update(
