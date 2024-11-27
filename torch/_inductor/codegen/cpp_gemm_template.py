@@ -456,7 +456,11 @@ def get_block_w(
     return blocked_w
 
 
-def prune_tensors(input_nodes, new_input_nodes):
+def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
+    """
+    Prune unused tensors since the GEMM Template use new packed weight.
+    """
+
     def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
         return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
             is_same_tensor(base_tensor, comp_tensor)
@@ -525,7 +529,15 @@ def process_out_template_epilogues(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
     reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-):
+) -> tuple[
+    List[ir.IRNode],
+    ir.Buffer,
+    List[Optional[Callable[[List[Any]], List[Any]]]],
+    Union[ir.Buffer, ir.ReinterpretView],
+]:
+    """
+    Helper function to pre-process out template epilogues for code generation.
+    """
     epilogues.extend(epilogue_nodes)
     assert Y.get_numel() == epilogues[-1].get_numel()
     Y = cast(ir.Buffer, epilogues[-1])
