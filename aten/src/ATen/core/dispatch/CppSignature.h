@@ -52,7 +52,7 @@ public:
     }
 
 private:
-    explicit CppSignature(std::type_index signature): signature_(std::move(signature)) {}
+    explicit CppSignature(std::type_index signature): signature_(signature) {}
     std::type_index signature_;
 };
 

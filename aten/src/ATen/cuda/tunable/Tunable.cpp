@@ -127,7 +127,7 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew) {
-      untuned_file << op_signature << "," << params_signature << std::endl;
+      untuned_file << op_signature << "," << params_signature << '\n';
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
@@ -729,12 +729,12 @@ bool TuningContext::WriteFile(const std::string& filename_) {
   }
   auto validators = GetTuningResultsValidator().GetAllValidators();
   for (const auto& [key, val] : validators) {
-    file << "Validator," << key << "," << val << std::endl;
+    file << "Validator," << key << "," << val << '\n';
   }
   auto results = GetTuningResultsManager().Dump();
   for (const auto& [op_sig, kernelmap] : results) {
     for (const auto& [param_sig, result] : kernelmap) {
-      file << op_sig << "," << param_sig << "," << result << std::endl;
+      file << op_sig << "," << param_sig << "," << result << '\n';
     }
   }
   file.close();

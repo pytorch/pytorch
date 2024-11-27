@@ -6,8 +6,8 @@
 #include <magma_v2.h>
 #endif
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 #if AT_MAGMA_ENABLED()
 
@@ -84,5 +84,5 @@ struct MagmaStreamSyncGuard {
 };
 #endif
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+

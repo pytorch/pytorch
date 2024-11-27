@@ -44,8 +44,8 @@ struct adl_serializer<std::optional<T>> {
 };
 NLOHMANN_JSON_NAMESPACE_END
 
-namespace torch {
-namespace _export {
+
+namespace torch::_export {
 
 template <typename T>
 class ForwardRef {
@@ -2182,7 +2182,6 @@ inline void from_json(const nlohmann::json& nlohmann_json_j, UserOutputSpec& nlo
   nlohmann_json_t.arg = nlohmann_json_j.value("arg", nlohmann_json_default_obj.arg);
 }
 
-} // namespace _export
-} // namespace torch
+} // namespace torch::_export
 
 // clang-format on
