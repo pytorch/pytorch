@@ -151,12 +151,6 @@ jobs:
           nvidia-smi
         if: ${{ contains(matrix.runner, 'a100') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
-      - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
-        with:
-          name: ${{ inputs.build-environment }}
-          s3-bucket: ${{ inputs.s3-bucket }}
-
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
@@ -166,6 +160,12 @@ jobs:
           python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+          
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Download TD artifacts
         continue-on-error: true
