@@ -971,8 +971,20 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
+    prop = torch.cuda.get_device_properties(index)
+
+    # SM logic is not relevant to ROCm gpus
+    # Arbitrarily skipping the older models
+    if torch.version.hip is not None:
+        if prop.major < 9 or prop.major == 10:
+            log.warning(
+                "GPU arch does not support max_autotune_gemm mode usage"
+            )
+            return False
+        return True
+
     min_sms = 68  # 3080
-    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
             "Not enough SMs to use max_autotune_gemm mode",
