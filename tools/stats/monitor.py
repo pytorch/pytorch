@@ -24,6 +24,7 @@ from typing import Any
 
 import psutil  # type: ignore[import]
 
+
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
@@ -51,7 +52,8 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description=" System-level Usage Logger ")
 
-    # debug mode used in local to gracefully exit the script when ctrl+c is pressed, and print out the json output in a pretty format.
+    # debug mode used in local to gracefully exit the script when ctrl+c is
+    # pressed,and print out the json output in a pretty format.
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     parser.add_argument(
@@ -66,19 +68,22 @@ def parse_args() -> argparse.Namespace:
 
 class UsageLogger:
     """
-    Collect and display usage data, including CPU, memory, GPU memory utilization, and GPU utilization.
+    Collect and display usage data, including:
+    CPU, memory, GPU memory utilization, and GPU utilization.
     """
 
     def __init__(
         self,
-        log_interval=5,
-        is_debug_mode=False,
-        pynvml_enabled=False,
-        amdsmi_enabled=False,
+        log_interval: int = 5,
+        is_debug_mode: bool = False,
+        pynvml_enabled: bool = False,
+        amdsmi_enabled: bool = False,
     ) -> None:
         """
         log_interval: Time interval in seconds for collecting usage data; default is 5 seconds.
-        is_debug_mode: Useful if you're testing on a local machine and want to see the output in a pretty format with more information.
+        is_debug_mode:
+            Useful if you're testing on a local machine and want to see the output
+            in a pretty format with more information.
         """
         self._log_interval = log_interval
         self._summary_info = {
@@ -88,8 +93,8 @@ class UsageLogger:
         self._has_pynvml = pynvml_enabled
         self._has_amdsmi = amdsmi_enabled
         self._kill_now = False
-        self._gpu_handles = []
-        self._gpu_libs_detected = []
+        self._gpu_handles: list[Any] = []
+        self._gpu_libs_detected: list[str] = []
         self._num_of_cpus = 0
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
@@ -97,7 +102,8 @@ class UsageLogger:
     def start(self) -> None:
         """
         runs the main loop of the program.
-        the firstt json record is the metadata of the run, including the start time, end time, and the interval of the log.
+        the first json record is the metadata of the run,
+        including the start time, end time, and the interval of the log.
         """
 
         self._summary_info["start_time"] = datetime.datetime.now(
@@ -124,7 +130,7 @@ class UsageLogger:
                     {
                         "total_cpu_percent": used_cpu_percent,
                         "total_memory_percent": memory.percent,
-                        "processes": self._get_process_info(),
+                        "processes": self._get_process_info(),  # type: ignore[dict-item]
                     }
                 )
                 stats.update(self._collect_gpu_data())
@@ -138,7 +144,7 @@ class UsageLogger:
             finally:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
-                stats["log_duration"] = f"{time_diff*1000:.2f} ms"
+                stats["log_duration"] = f"{time_diff * 1000:.2f} ms"
 
                 # output the data to stdout
                 self.log_json(stats)
@@ -154,7 +160,7 @@ class UsageLogger:
         # TODO: add interruptable timer, that if the script is killed, it will stop the sleep immediatly.
         self._kill_now = True
 
-    def log_json(self, stats) -> None:
+    def log_json(self, stats: Any) -> None:
         if self._debug_mode:
             print(json.dumps(stats, indent=4))
             return
@@ -287,10 +293,10 @@ class UsageLogger:
             # requires higher user privileges and could throw AccessDenied error, i.e. mac
             try:
                 memory_full_info = p.memory_full_info()
-                info["uss_memory"] = f"{memory_full_info.uss/ (1024 * 1024):.2f}"
+                info["uss_memory"] = f"{memory_full_info.uss / (1024 * 1024):.2f}"
                 if "pss" in memory_full_info:
                     # only availiable in linux
-                    info["pss_memory"] = f"{memory_full_info.pss/ (1024 * 1024):.2f}"
+                    info["pss_memory"] = f"{memory_full_info.pss / (1024 * 1024):.2f}"
             except psutil.AccessDenied as e:
                 # It's ok to skip this
                 pass
@@ -298,7 +304,7 @@ class UsageLogger:
         return per_process_info
 
 
-def main():
+def main() -> None:
     """
     Main function of the program.
     """
