@@ -1820,15 +1820,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.nn.Linear, xiq.get_x86_inductor_linear_dynamic_fp16_config()
                 )
                 node_occurrence = {
-                    # 2 quantize and 2 dequantize ops are inserted, and
-                    # one of the quantize_per_tensor is folded during convert
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    # quantize and dequantize are inserted for weight, and
+                    # quantize_per_tensor is folded during convert
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
                 }
                 node_list = [
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
                 ]
