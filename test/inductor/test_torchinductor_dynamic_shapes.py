@@ -969,7 +969,7 @@ class TestInductorDynamic(TestCase):
             "divide": operator.truediv,
         }
 
-        for name, op in operations.items():
+        for i, (name, op) in enumerate(operations.items()):
             with self.subTest(operation=name):
 
                 def fn(x, y):
@@ -982,7 +982,13 @@ class TestInductorDynamic(TestCase):
                 self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
                 self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
                 self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
-                self.assertEqual(cnt.frame_count, 2)
+                if i == 0:
+                    # Automatic dynamic state persists across
+                    # compiles so only the first compile
+                    # goes through the automatic dynamic step.
+                    self.assertEqual(cnt.frame_count, 2)
+                else:
+                    self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_specialization(self):
@@ -1006,9 +1012,8 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
         self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
         self.assertEqual(fn(x, 4.0, z), fn_opt(x, 4.0, z))
-        # We expect frame count to be 3 since we will have
-        # one sledgehammer restart and two from automatic dynamic.
-        self.assertEqual(cnt.frame_count, 3)
+        # Automatic dynamic float arguments
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
@@ -1022,10 +1027,8 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
         self.assertEqual(fn(3.0, y), fn_opt(3.0, y))
         self.assertEqual(fn(4.0, y), fn_opt(4.0, y))
-        # We expect frame count to be N + 2 since we will have
-        # one sledgehammer restart for the first compile and
-        # one from automatic dynamic.
-        self.assertEqual(cnt.frame_count, 5)
+        # N + 1 for automatic dynamic float arguments
+        self.assertEqual(cnt.frame_count, 4)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
