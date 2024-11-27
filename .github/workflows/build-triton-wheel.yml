@@ -123,7 +123,7 @@ jobs:
           fi
 
           PLATFORM="manylinux_2_28_x86_64"
-          if [[ "${{ matrix.device }}" == "pytorch/manylinux-builder:cpu" ]]; then
+          if [[ "${DOCKER_IMAGE}" == "pytorch/manylinux-builder:cpu" ]]; then
             PLATFORM="manylinux2014_x86_64"
           fi
 
