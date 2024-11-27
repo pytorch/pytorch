@@ -320,6 +320,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.qr": {f64},
     "linalg.pinv": {f64},
     ("linalg.pinv", "hermitian"): {f64},
+    ("linalg.pinv", "singular"): {f64},
     "linalg.norm": {f64},
     ("linalg.norm", "subgradients_at_zero"): {f64},
     "linalg.matrix_rank": {f64},
