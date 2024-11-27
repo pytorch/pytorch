@@ -44,8 +44,11 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
 }
 
 inline void initGlobalDevicePoolState() {
-  // Enumerate all GPU devices and record them.
+  // Attempt to initialize XPU devices. If no device is found or the driver is
+  // not installed correctly, issue a warning message instead of raising an
+  // exception to avoid disrupting the user experience.
   try {
+    // Enumerate all GPU devices and record them.
     enumDevices(gDevicePool.devices);
   } catch (const sycl::exception& e) {
     TORCH_WARN(
