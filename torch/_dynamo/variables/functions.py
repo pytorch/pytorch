@@ -348,11 +348,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         vt = UserFunctionVariable.create_with_source(value, source)
         return cls(vt)
 
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.vt.__class__.__name__})"
-
-    __repr__ = __str__
-
     def __init__(self, vt: VariableTracker, **kwargs):
         self.vt = vt
         self.inline_tracer = None

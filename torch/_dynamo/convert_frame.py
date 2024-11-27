@@ -58,7 +58,7 @@ from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
-    is_generator,
+    # is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
@@ -513,8 +513,8 @@ class ConvertFrameAssert:
             # len keyword in LIST_LEN guard.
             return None
 
-        if is_generator(code):
-            unimplemented("generator")
+        # if is_generator(code):
+        #     unimplemented("generator")
 
         if not has_tensor_in_frame(frame):
             return None
