@@ -2457,6 +2457,8 @@ coverage_ignore_classes = [
     "SharedQuantizationSpec",
     # torch.ao.quantization.quantizer.x86_inductor_quantizer
     "X86InductorQuantizer",
+    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
+    "XPUInductorQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer
     "XNNPACKQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
