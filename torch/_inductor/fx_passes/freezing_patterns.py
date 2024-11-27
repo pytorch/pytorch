@@ -136,8 +136,8 @@ def addmm_patterns_init():
             and "CPP" in config.max_autotune_gemm_backends
             and len(match.nodes) == 2
         ):
-            # Inductor CPP GEMM Template enables Linear Silu Linear Mul Fusion
-            # If that's the pattern, use the fusion of CPP GEMM Template.
+            # Inductor CPP Group GEMM Template enables Linear Silu Linear Mul Fusion
+            # Prefer using CPP Group GEMM Template for this pattern.
             node0 = match.nodes[0]
             node1 = match.nodes[1]
             if (
@@ -145,12 +145,10 @@ def addmm_patterns_init():
                 and next(iter(node0.users.keys())).target == aten.reshape.default
                 and next(iter(node1.users.keys())).target == aten.reshape.default
             ):
-                # If input is 3D, there is a view after mm
+                # there is a reshape node after addmm/mm when input is 3D
                 node0 = next(iter(node0.users.keys()))
                 node1 = next(iter(node1.users.keys()))
-            if node0.meta.get("val").device.type == "cpu" and all(
-                len(list(node.users.keys())) == 1 for node in [node0, node1]
-            ):
+            if all(len(list(node.users.keys())) == 1 for node in [node0, node1]):
                 user0 = next(iter(node0.users.keys()))
                 user1 = next(iter(node1.users.keys()))
 
