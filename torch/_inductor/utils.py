@@ -36,6 +36,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
     Union,
     ValuesView,
@@ -46,6 +47,11 @@ from unittest import mock
 import sympy
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+
 from torch.utils._pytree import tree_map_only
 
 
@@ -2184,6 +2190,45 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
         and data.dtype == value.dtype
         and data.device == value.device
         and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+    )
+
+
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "isinf",
+        "isnan",
+        "logical_not",
+        "logical_and",
+        "signbit",
+        "and_",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+        "or_",  # TODO should remove this op
+        "xor",
+    )
+
+
+@dataclasses.dataclass
+class OpDtypeRule:
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    override_return_dtype: Optional[torch.dtype]
+
+
+op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+
+
+def register_op_dtype_propagation_rules(
+    name,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    override_return_dtype: Optional[torch.dtype],
+):
+    op_dtype_propagation_rules[name] = OpDtypeRule(
+        type_promotion_kind, override_return_dtype
     )
 
 
