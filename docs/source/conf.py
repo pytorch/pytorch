@@ -92,6 +92,8 @@ templates_path = ["_templates"]
 
 # TODO: document these and remove them from here.
 
+html_domain_indices = False
+
 coverage_ignore_functions = [
     # torch
     "typename",
