@@ -188,9 +188,6 @@ class TestNumPyInterop(TestCase):
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
                             self.assertRaisesRegex(
-                                (RuntimeError, TypeError), error_msg, lambda: x.numpy()
-                            )
-                            self.assertRaisesRegex(
                                 (RuntimeError, TypeError),
                                 error_msg,
                                 lambda: x.numpy(force=False),
@@ -578,7 +575,7 @@ class TestNumPyInterop(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test___eq__(self, device, dtype):
         a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
-        b = a.clone().detach()
+        b = a.detach().clone()
         b_np = b.numpy()
 
         # Check all elements equal
