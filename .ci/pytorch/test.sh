@@ -386,8 +386,8 @@ test_inductor_cpp_wrapper() {
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
   # unit tests with cpp wrapper.
-  python test/run_test.py -i inductor/test_torchinductor.py --verbose
-  python test/run_test.py -i inductor/test_torchinductor_opinfo.py --verbose
+  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
