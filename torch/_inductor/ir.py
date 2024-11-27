@@ -523,7 +523,7 @@ class IRNode:
         except NotImplementedError:
             return None
 
-    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
+    def has_large_inner_fn(self) -> bool:
         return False
 
     def mark_reuse(self, users: int) -> None:
@@ -752,11 +752,8 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
-        if threshold is None:
-            threshold = 0
-        threshold = max(threshold, config.realize_opcount_threshold)
-        return self.inner_fn_opcount().num_ops > threshold
+    def has_large_inner_fn(self) -> bool:
+        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
 
     def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
@@ -6806,8 +6803,8 @@ class MutableBox(IRNode):
     def get_name(self) -> str:
         return self.data.get_name()
 
-    def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
-        return self.data.has_large_inner_fn(threshold)
+    def has_large_inner_fn(self) -> bool:
+        return self.data.has_large_inner_fn()
 
     def mark_reuse(self, users: int) -> None:
         return self.data.mark_reuse(users)
