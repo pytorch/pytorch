@@ -1446,7 +1446,7 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
     """
-    Main entrypoint to a compile given FX graph.  Despite the fact that this
+    Main entry point for compiling given FX graph.  Despite the fact that this
     lives in :mod:`torch._inductor`, this function is responsible for calling
     into AOT Autograd (and we will eventually get a callback to
     ``inner_compile`` to perform actual compilation.  In other words, this
@@ -1637,7 +1637,7 @@ def compile_fx(
                     orig_output_end_idx = (
                         original_output_start_index + num_orig_model_outputs
                     )
-                    # Sanity chec: we are about to splice out the "user" outputs from the full set
+                    # Sanity check: we are about to splice out the "user" outputs from the full set
                     # of "graph" outputs. Make sure we're within bounds.
                     assert orig_output_end_idx <= num_model_outputs
 
