@@ -1110,6 +1110,9 @@ def is_big_gpu(index) -> bool:
     # Arbitrarily skipping the older models
     if torch.version.hip is not None:
         if prop.major < 9 or prop.major == 10:
+            log.warning(
+                "GPU arch does not support max_autotune_gemm mode usage"
+            )
             return False
         return True
 
