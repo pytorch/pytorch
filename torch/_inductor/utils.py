@@ -1661,14 +1661,12 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+        if isinstance(
+            t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)
+        ):
+            if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
+                t.maybe_get_stride() or ()
             ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
@@ -1890,7 +1888,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: str):
+def is_gpu(device: Optional[str]):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 
@@ -2195,21 +2193,6 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
     )
 
 
-@dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
-        if sys.version_info >= (3, 10):
-            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
-        else:
-            # Polyfill for python=3.9. kw_only simply introduces an extra check
-            # that only kwargs are used (and is not available on 3.9)
-            return dataclasses.dataclass(cls, frozen=frozen)
-
-    if cls is None:
-        return wrap
-    return wrap(cls)
-
-
 @functools.lru_cache(None)
 def boolean_ops():
     return (
@@ -2247,3 +2230,27 @@ def register_op_dtype_propagation_rules(
     op_dtype_propagation_rules[name] = OpDtypeRule(
         type_promotion_kind, override_return_dtype
     )
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype in (torch.float16, torch.bfloat16)
+    ):
+        return torch.float32
+    return dtype
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)

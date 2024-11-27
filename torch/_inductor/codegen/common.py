@@ -23,7 +23,6 @@ from typing import (
 )
 
 import sympy
-from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
@@ -32,6 +31,7 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
+from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
@@ -137,6 +137,8 @@ class WorkspaceArg:
     def get_device(self):
         return self.device
 
+    get_device_or_error = get_device
+
     def get_dtype(self):
         return self.dtype
 
@@ -153,6 +155,10 @@ class WorkspaceArg:
     @property
     def layout(self):
         return self.get_layout()
+
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
 
     def get_size(self):
         return [self.count]
@@ -304,7 +310,9 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(device: Union[torch.device, str, None]):
+    if device is None:
+        return {}
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -376,6 +384,7 @@ def init_backend_registration():
             "xpu",
             TritonScheduling,
             PythonWrapperCodegen,
+            CppWrapperGpu,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -586,12 +595,22 @@ class DataTypePropagation:
         DataTypePropagation.propagate_loopbody(node._body)
 
 
-# This printer contains rules that are supposed to be generic for both C/C++ and
-# Python
-class ExprPrinter(Printer):
+class PythonPrinter(_PythonPrinter):
+    def doprint(self, expr, *, simplify: bool = True, p=True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
+
+class OpOverrides:
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
     @staticmethod
-    def paren(string):
-        def all_in_parens(string):
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
             if string[0] != "(" or len(string) < 2:
                 return False
             count = 1
@@ -616,260 +635,6 @@ class ExprPrinter(Printer):
         if all_in_parens(string):
             return string
         return f"({string})"
-
-    def _print_Relational(self, expr):
-        return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Mul(self, expr):
-        return "*".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_Add(self, expr):
-        return " + ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: this is OK to put here, because Mod is only defined for positive
-    # numbers, and so across C/Python its behavior is consistent
-    def _print_Mod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_FloatTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _print_CleanDiv(self, expr):
-        return self._print_FloorDiv(expr)
-
-    def _print_Identity(self, expr):
-        return self._print(expr.args[0])
-
-    def _print_GreaterThan(self, expr):
-        # GreaterThan:          >=
-        # StrictlyGreaterThan:  >
-        # Go figure...
-        return " >= ".join(map(self.paren, map(self._print, expr.args)))
-
-    # NB: The C implementation is injected into codegen at
-    # torch/_inductor/codegen/wrapper.py
-    def _print_align(self, expr):
-        assert len(expr.args) == 1
-        return f"align({self._print(expr.args[0])})"
-
-    # This must be implemented because sympy will collect x * x into Pow(x, 2), without
-    # any explicit intervention.  We print it just like x * x, notably, we
-    # never generate sympy.Pow with floats.
-    #
-    # NB: this pow by natural, you should never have used builtin sympy.pow
-    # for FloatPow, and a symbolic exponent should be PowByNatural.  These
-    # means exp is guaranteed to be integer.
-    def _print_Pow(self, expr):
-        base, exp = expr.args
-        base = self._print(base)
-        assert exp == int(exp), exp
-        exp = int(exp)
-        assert exp >= 0
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        return "1"
-
-    # Explicit NotImplemented functions are to prevent default sympy printing
-    # behavior, which will just barf out ToFloat(...) to your IR.  The error
-    # message is better here because it tells you which printer class it needs
-    # to go in.
-
-    def _print_ToFloat(self, expr):
-        raise NotImplementedError(f"_print_ToFloat not implemented for {type(self)}")
-
-    def _print_Infinity(self, expr):
-        raise NotImplementedError(f"_print_Infinity not implemented for {type(self)}")
-
-    def _print_NegativeInfinity(self, expr):
-        raise NotImplementedError(
-            f"_print_NegativeInfinity not implemented for {type(self)}"
-        )
-
-    def _print_FloorDiv(self, expr):
-        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
-
-    def _print_PythonMod(self, expr):
-        raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
-
-    def _print_IntTrueDiv(self, expr):
-        raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
-
-    def _print_PowByNatural(self, expr):
-        raise NotImplementedError(
-            f"_print_PowByNatural not implemented for {type(self)}"
-        )
-
-    def _print_FloatPow(self, expr):
-        raise NotImplementedError(f"_print_FloatPow not implemented for {type(self)}")
-
-    def _print_TruncToInt(self, expr):
-        raise NotImplementedError(f"_print_TruncToInt not implemented for {type(self)}")
-
-    def _print_RoundToInt(self, expr):
-        raise NotImplementedError(f"_print_RoundToInt not implemented for {type(self)}")
-
-    def _print_RoundDecimal(self, expr):
-        raise NotImplementedError(
-            f"_print_RoundDecimal not implemented for {type(self)}"
-        )
-
-    # NB: Some float operations are INTENTIONALLY not implemented for
-    # printers.  You can implement them as a quick unblock, but it is better
-    # to ask yourself why we haven't done this computation in the Tensor
-    # universe instead
-
-    def _print_TruncToFloat(self, expr):
-        raise NotImplementedError(
-            f"_print_TruncToFloat not implemented for {type(self)}"
-        )
-
-    def doprint(self, expr, *, simplify: bool = True):
-        # TODO: why are people passing strings to the printer here :think:
-        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
-            expr = V.graph.sizevars.simplify(expr)
-        return super().doprint(expr)
-
-
-class PythonPrinter(ExprPrinter):
-    def _print_ToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"float({self._print(expr.args[0])})"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} // {div})"
-        return f"{x} % {mod}"
-
-    def _print_Infinity(self, expr):
-        return "math.inf"
-
-    def _print_NegativeInfinity(self, expr):
-        return "-math.inf"
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_PythonMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    # WARNING: this is dangerous for Triton, which has C-style modulus
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"({x} // {div})"
-
-    # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
-    # does a special algorithm
-    def _print_IntTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _helper_sqrt(self, expr):
-        return f"math.sqrt({self._print(expr)})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return self._helper_sqrt(expr.args[0])
-
-    def _print_FloatPow(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    # TODO: Not sure this works with Triton, even when base/exp are integral
-    def _print_PowByNatural(self, expr):
-        base, exp = expr.args
-        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_FloorToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.floor({self._print(expr.args[0])})"
-
-    def _print_TruncToInt(self, expr):
-        assert len(expr.args) == 1
-        # This also could have been int(), they'll do the same thing for float
-        return f"math.trunc({self._print(expr.args[0])})"
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_CeilToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"math.ceil({self._print(expr.args[0])})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"abs({self._print(expr.args[0])})"
-
-    # NB: It's expected that we've made explicit any promotion in the sympy
-    # expression, so it doesn't matter that Python max/min doesn't perform
-    # promotion
-    def _print_Max(self, expr):
-        assert len(expr.args) >= 2
-        return f"max({', '.join(map(self._print, expr.args))})"
-
-    def _print_Min(self, expr):
-        assert len(expr.args) >= 2
-        return f"min({', '.join(map(self._print, expr.args))})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"math.acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"math.asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"math.tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"math.atan({self._print(expr.args[0])})"
-
-    def _print_RoundToInt(self, expr):
-        assert len(expr.args) == 1
-        return f"round({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        assert isinstance(ndigits, sympy.Integer)
-        return f"round({self._print(number)}, {ndigits})"
-
-
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
 
     def __getattr__(self, item):
         return getattr(self._parent, item)
@@ -959,31 +724,31 @@ class OpOverrides:
 
     @staticmethod
     def bitwise_not(x):
-        return f"~{ExprPrinter.paren(x)}"
+        return f"~{OpOverrides.paren(x)}"
 
     @staticmethod
     def logical_not(a):
-        return f"{ExprPrinter.paren(a)} == 0"
+        return f"{OpOverrides.paren(a)} == 0"
 
     @staticmethod
     def bitwise_and(x, y):
-        return f"{ExprPrinter.paren(x)} & {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} & {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_or(x, y):
-        return f"{ExprPrinter.paren(x)} | {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} | {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_xor(x, y):
-        return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} ^ {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_left_shift(x, y):
-        return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} << {OpOverrides.paren(y)}"
 
     @staticmethod
     def bitwise_right_shift(x, y):
-        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
+        return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
 
     @staticmethod
     def remainder(a, b):
@@ -1641,6 +1406,8 @@ class CSEVariable:
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many tims this expression is used
+        if dtype == "tl.float64":
+            breakpoint()
         self.dtype = dtype
 
     def __str__(self):
@@ -1679,7 +1446,7 @@ class CSE:
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self.cache = {}
+        self._cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
@@ -1692,11 +1459,11 @@ class CSE:
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self):
         # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
-        return CSE(
+        return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
             name_prefix=self.name_prefix,
@@ -1704,6 +1471,22 @@ class CSE:
             store_cache=self.store_cache,
             varname_map=self.varname_map,
         )
+
+    def augment_key(self, cache_key: object) -> object:
+        "Override this method to augment cache key with backend specifics"
+        return cache_key
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[self.augment_key(cache_key)] = val
+
+    def contains(self, cache_key) -> bool:
+        return self.augment_key(cache_key) in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(self.augment_key(cache_key), None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[self.augment_key(cache_key)]
 
     def generate(
         self,
@@ -1733,10 +1516,10 @@ class CSE:
         else:
             assert isinstance(expr, str)
             cache_key = expr
-        var = self.cache.get(cache_key, None)
+        var = self.try_get(cache_key)
         if not var:
             var = self.newvar(bounds, dtype)
-            self.cache[cache_key] = var
+            self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -1762,6 +1545,9 @@ class CSE:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
 
+        # if torch.float16 == dtype:
+        #     breakpoint()
+
         return var
 
     def newvar(
@@ -1772,6 +1558,17 @@ class CSE:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
+        return var
+
+    def namedvar(
+        self,
+        name: str,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
+        assert name not in self.varname_map, "duplicate name"
+        var = V.kernel.create_cse_var(name, bounds, dtype)
+        self.varname_map[name] = var
         return var
 
 
@@ -1864,7 +1661,7 @@ class Kernel(CodeGen):
     def swap_buffers(self, lb, cb=None, sb=None):
         def scope_cse(cse):
             new_cse = cse.clone()
-            new_cse.cache = ScopedDict(cse.cache)
+            new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
             new_cse.store_cache = ScopedDict(cse.store_cache)
             return new_cse
@@ -2010,14 +1807,30 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
                     dtype_handler = DtypePropagationOpsHandler()
 
-                    idx = 0
+                    output_idx = 0
 
                     def do_cse(v):
-                        # TODO - throw on default
-                        output_dtype = getattr(
-                            dtype_handler,
-                            name,
-                        )(*args)
+                        device_str = V.graph.get_current_device_or_throw().type
+                        triton_backend = (
+                            config.cpu_backend == "triton"
+                            if device_str == "cpu"
+                            else config.cuda_backend == "triton"
+                        )
+                        # only triton backend tracks dtype currently
+                        if triton_backend:
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
+                        else:
+                            # cpp backend doesnt track dtype yet
+                            output_dtype = None
+
+                        # if output_dtype == torch.float16:
+                        #     breakpoint()
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
@@ -2025,21 +1838,24 @@ class Kernel(CodeGen):
                             bounds=bounds,
                             dtype=output_dtype,
                         )
+                        # if "tmp5" in repr(csevar):
+                        #     breakpoint()
 
-                        nonlocal idx
+                        nonlocal output_idx
                         if (
                             config.test_configs.runtime_triton_dtype_assert
-                            and V.graph.get_current_device_or_throw().type == "cuda"
+                            and triton_backend
                         ):
                             from torch._inductor.codegen.triton import triton_type
 
+                            # we tree_map over the output, so we need to fetch corresponding dtype
                             if isinstance(output_dtype, (list, tuple)):
-                                output_dtype = output_dtype[idx]
+                                output_dtype = output_dtype[output_idx]
 
                             V.kernel.compute.writeline(
                                 f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
                             )
-                        idx += 1
+                        output_idx += 1
 
                         csevar.update_on_args(name, args, kwargs)
 

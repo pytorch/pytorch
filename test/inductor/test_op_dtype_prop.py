@@ -9,8 +9,9 @@ from torch._dynamo.utils import disable_cache_limit
 from torch._inductor import config
 from torch._inductor.codegen.triton import OpDtypeSupport
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import parametrize
@@ -182,6 +183,25 @@ class TestCase(InductorTestCase):
             pattern = rf"{triton_op_name}\(.*\.to\(tl\.float32\)\){output_cast}"
             cast_in_code = re.search(pattern, code, re.MULTILINE) is not None
             self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
+
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_constant(self):
+        def fn():
+            return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
+
+        out, code = run_and_get_code(torch.compile(fn))
+        FileCheck().check("static_assert").check_same(".dtype").run(code[0])
+        self.assertEqual(fn(), out)
+
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("triton.persistent_reductions", False)
+    def test_any(self):
+        def fn(x):
+            return torch.any(x)
+
+        x = torch.rand([40], device="cuda").to(torch.bool)
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(fn(x), out)
 
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
