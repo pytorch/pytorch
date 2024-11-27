@@ -1120,7 +1120,9 @@ def aot_module_simplified(
     else:
         compiled_fn = dispatch_and_compile()
 
-    if torch._dynamo.utils.is_compiled_autograd_gm(mod):
+    if isinstance(
+        mod, torch._dynamo.utils.GmWrapper
+    ) or torch._dynamo.utils.is_compiled_autograd_gm(mod):
         # Unlike `forward`, runtime_args is a List here
         # which allows us to steal references from runtime_args
         def boxed_forward(runtime_args: List[Any]):
