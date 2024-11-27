@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -1304,8 +1305,9 @@ def merge_view_inputs(
             mutated_input_info[inpt_idx].mutates_data
             for inpt_idx in aliased_input_indices
         ):
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
+            other_args.extend(
+                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+            )
             continue
 
         # Here, we attempt to do a more complicated check to detect false aliasing
@@ -1318,8 +1320,9 @@ def merge_view_inputs(
             fwd_inputs, aliased_input_indices
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
-            for curr_idx in aliased_input_indices:
-                other_args.append(fwd_inputs[curr_idx])
+            other_args.extend(
+                fwd_inputs[curr_idx] for curr_idx in aliased_input_indices
+            )
             continue
 
         # We detected an input that was mutated, AND aliases with another input.
@@ -1731,6 +1734,19 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 return CompiledFunctionBackward.apply(*all_args)
 
             @staticmethod
+            def _raise_if_functorch_active():
+                # not ideal but prevent the user from seeing a nasty traceback - See #138422
+                stack = torch._C._functorch.peek_interpreter_stack()
+                torch._check(
+                    stack is None,
+                    lambda: (
+                        "It looks like you're trying to call a compiled backward function within vmap/grad/vjp, "
+                        "which isn't supported. Try wrapping vmap inside torch.compile, or skip compiling the "
+                        "backward function."
+                    ),
+                )
+
+            @staticmethod
             def _backward_prologue(ctx, *flat_args):
                 # Calling convention: we expect a grad_out passed to the backward:
                 # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1741,6 +1757,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # - updated inputs due to metadata-only mutations.
                 # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
                 # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
+                CompiledFunction._raise_if_functorch_active()
+
                 num_intermediate_bases = (
                     CompiledFunction.metadata.num_intermediate_bases
                 )
@@ -2000,9 +2018,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     saved_compile_context = lazy_backward_info.saved_compile_context
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    metrics_context = get_metrics_context()
                     with tracing(saved_context), compile_context(
                         saved_compile_context
-                    ), context(), track_graph_compiling(aot_config, "backward"):
+                    ), context(), track_graph_compiling(
+                        aot_config, "backward"
+                    ), metrics_context, dynamo_timed(
+                        "backward._backward_impl",
+                        phase_name="entire_backward_compile",
+                        log_pt2_compile_event=True,
+                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
+                    ):
+                        metrics_context.update_outer({"is_forward": False})
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, placeholder_list
                         )

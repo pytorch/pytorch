@@ -263,6 +263,33 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         ep = export_for_training(net, inputs)
         ep = _export_forward_backward(ep)
 
+    def test_joint_loss_index(self):
+        from torch.export.graph_signature import OutputKind
+
+        class Foo(torch.nn.Module):
+            def __init__(self, index):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 4)
+                self.index = index
+
+            def forward(self, x):
+                x = self.l(x)
+                x = x.sum()
+                if self.index == 0:
+                    return x, -x.detach()
+                else:
+                    return x.detach(), x
+
+        inputs = (torch.randn(4, 4),)
+        for i in [0, 1]:
+            ep = export_for_training(Foo(i), inputs)
+            ep_joint = _export_forward_backward(ep, joint_loss_index=i)
+            for j, spec in enumerate(ep_joint.graph_signature.output_specs):
+                if i == j:
+                    self.assertTrue(spec.kind == OutputKind.LOSS_OUTPUT)
+                else:
+                    self.assertTrue(spec.kind != OutputKind.LOSS_OUTPUT)
+
 
 if __name__ == "__main__":
     run_tests()
