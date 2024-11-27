@@ -961,7 +961,7 @@ def try_get_metadata_from_dynamo(
         # graph was not captured by dynamo
         return None, []
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.utils.is_compiled_autograd_gm(mod):
         # TODO(xmfan): make compiled autograd go through guard dedup
         return None, []
 
