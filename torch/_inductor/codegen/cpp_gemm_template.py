@@ -24,6 +24,7 @@ from ..virtualized import ops, V
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import (
     CppMicroBrgemm,
+    CppMicroGemm,
     CppMicroGemmAMX,
     create_micro_gemm,
     LayoutType,
@@ -288,7 +289,12 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
-def transpose_w(W, trans_w):
+def transpose_w(
+    W: Union[ir.IRNode, torch.Tensor], trans_w: bool
+) -> Union[ir.IRNode, torch.Tensor]:
+    """
+    Transpose W based on the trans_w flag.
+    """
     if isinstance(W, ir.IRNode):
         if trans_w:
             if not isinstance(W, ir.TensorBox):
@@ -301,19 +307,36 @@ def transpose_w(W, trans_w):
     return W
 
 
-def expand_bias(B, X):
+def expand_bias(
+    B: Union[ir.IRNode, torch.Tensor], X: Union[ir.IRNode, torch.Tensor]
+) -> Union[ir.IRNode, torch.Tensor]:
+    """
+    Expand Bias to the same size of X.
+    """
     if B is not None:
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
                 B = ir.TensorBox(B)
+            assert isinstance(X, ir.TensorBox)
             B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
             assert isinstance(B, torch.Tensor)
+            assert isinstance(X, torch.Tensor)
             B = B.expand(X.shape[0], B.shape[-1])
     return B
 
 
-def get_block_w(W, padded_n, block_n, k, n, micro_gemm):
+def get_block_w(
+    W: Union[ir.IRNode, torch.Tensor],
+    padded_n: int,
+    block_n: int,
+    k: int,
+    n: int,
+    micro_gemm: CppMicroGemm,
+) -> Union[ir.IRNode, torch.Tensor]:
+    """
+    Pack W into block format of [padded_n // block_n, k, block_n] and VNNI Layout.
+    """
     blocked_w: Union[ir.IRNode, torch.Tensor] = W
     if isinstance(W, ir.IRNode):
         new_size = [padded_n // block_n, k, block_n]
