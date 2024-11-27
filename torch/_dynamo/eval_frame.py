@@ -1644,7 +1644,6 @@ def export(
                 graph.print_readable(print_output=False, colored=True),
             )
         else:
-            assert hasattr(graph, "_source_to_user_stacks")
             assert out_guards is not None, "Failed to produce guards during tracing"
             assert fake_mode is not None
 
