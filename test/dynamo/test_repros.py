@@ -934,6 +934,31 @@ class IncByTwo:
 
 
 class ReproTests(torch._dynamo.test_case.TestCase):
+    def setUp(self) -> None:
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack.enter_context(
+            install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
+        )
+        super().setUp()
+
+    def tearDown(self) -> None:
+        self.exit_stack.close()
+        super().tearDown()
+
+    def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals):
+        root = guard_manager_wrapper.root
+        cloned_root = root.clone_manager(lambda x: True)
+        cloned_wrapper = torch._dynamo.guards.GuardManagerWrapper(cloned_root)
+        self.assertEqual(str(guard_manager_wrapper), str(cloned_wrapper))
+        self.assertTrue(cloned_root.check(f_locals))
+        if guard_manager_wrapper.diff_guard_root:
+            self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -6337,6 +6362,58 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         ref = mod(x)
         res = opt_mod(x)
         self.assertEqual(ref, res)
+
+    def test_symnode_is_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t * 2, res)
+
+    def test_symnode_is_not_op(self):
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def f(x, xs):
+            if x.size(0) is not xs:
+                return x + 1
+            else:
+                return x * 2
+
+        t = torch.randn(2)
+        res = f(t, [1, 2])
+        self.assertEqual(t + 1, res)
+
+    def test_symint_bitwise(self):
+        def fn(x):
+            z = x.shape[0]
+            z |= z >> 1
+            z |= z << 1
+            z &= z | (z > 1)
+            y = (z > 1) | (z <= 1)
+            # test composition with non-bitwise ops
+            z = (z | z) % 6
+            return y, z
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_bitwise_op_guard(self):
+        # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
+        def fn(x):
+            if x.shape[0] | x.shape[1] > 4:
+                x = x + 1
+            if x.shape[0] & x.shape[1] > 2:
+                return x + 1
+            return x - 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
 
 
 instantiate_parametrized_tests(ReproTests)

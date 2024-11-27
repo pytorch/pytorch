@@ -7,6 +7,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     rebind_unbacked,
@@ -162,7 +163,7 @@ class FakeTensorUpdater:
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            with V.fake_mode:
+            with V.fake_mode, enable_python_dispatcher():
                 new_fake_tensor = node.target(*args, **kwargs)
             if "val" in node.meta and is_fake_tensor_same(
                 new_fake_tensor, node.meta["val"]

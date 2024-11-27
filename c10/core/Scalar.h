@@ -19,6 +19,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/overflows.h>
 
 namespace c10 {
 
