@@ -955,14 +955,25 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 
 def handle_dynamo_gm(
-    mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor]
+    mod: torch.fx.GraphModule, params: Dict[str, torch.Tensor], full_args_num: int
 ) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        # graph is captured by dynamo
+        and "dynamo_compile_id" in mod.meta
+    ):
+        if (
+            # TODO(xmfan): make compiled autograd go through guard dedup
+            torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            # is from export
+            or not hasattr(mod, "_param_name_to_source")
+        ):
+            return None, []
+
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
     # Additionally, we mark static indices for cudagraphs.
-
-    assert hasattr(mod, "_param_name_to_source")
     param_name_to_source = mod._param_name_to_source
     seen_sources = set()
 
@@ -978,8 +989,8 @@ def handle_dynamo_gm(
     # Collect the dynamo graph inputs
     static_input_indices = []
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert "grapharg" in node.meta and node.meta["grapharg"] is not None
-        source = node.meta["grapharg"].source
+        assert hasattr(node, "_dynamo_source")
+        source = node._dynamo_source
         assert source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
@@ -997,6 +1008,7 @@ def handle_dynamo_gm(
                 "Non-static input pos %s for source %s", pos, source_name
             )
 
+    assert full_args_num == len(aot_autograd_arg_pos_to_source)
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 
@@ -1051,18 +1063,7 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    aot_autograd_arg_pos_to_source = None
-    static_input_indices = []
-    # TODO(xmfan): make compiled autograd go through guard dedup
-    if (
-        isinstance(mod, torch.fx.GraphModule)
-        and "dynamo_compile_id" in mod.meta
-        and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-    ):
-        aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(
-            mod, params
-        )
-        assert len(full_args) == len(aot_autograd_arg_pos_to_source)
+    aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(mod, params, len(full_args))
 
     dynamic_shapes = False
     for x in full_args:
