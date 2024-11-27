@@ -63,6 +63,8 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
 
   TORCH_CHECK(input.dtype() == grad_output.dtype(),
     "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
+  TORCH_CHECK(indices.sizes() == grad_output.sizes(),
+    "expected sizes ", indices.sizes(), " for `grad_output` but got sizes ", grad_output.sizes());
 
   set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(input.suggest_memory_format()));
 }
