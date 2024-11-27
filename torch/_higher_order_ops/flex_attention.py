@@ -708,7 +708,8 @@ def flex_attention_autograd(
 
     with TransformGetItemToIndex():
         input_requires_grad = any(
-            t.requires_grad for t in (query, key, value, *score_mod_other_buffers)
+            isinstance(t, torch.Tensor) and t.requires_grad
+            for t in (query, key, value, *score_mod_other_buffers)
         )
         if torch.is_grad_enabled() and input_requires_grad:
             example_vals = (
@@ -1130,7 +1131,9 @@ def flex_attention_backward_fake_tensor_mode(
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer) if buffer.requires_grad else None
+                torch.empty_like(buffer)
+                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                else None
                 for buffer in score_mod_other_buffers
             ]
         )

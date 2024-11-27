@@ -471,6 +471,7 @@ class BlockMask:
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
+            seq_lengths=self.seq_lengths,
         )
 
     def __repr__(self):

@@ -668,62 +668,64 @@ class TestFlexAttention(InductorTestCase):
         D: int = D,
     ):
         score_mod, mask_mod = score_mask_mod
-        # If the seqlen becomes smaller than the seqlen of the previous batch,
-        # we can still reuse the block_mask created from a larger seqlen.
-        MAX_S = S
-        block_mask = create_block_mask(mask_mod, 1, 1, MAX_S, MAX_S)
-        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
-        # The first eager batch, shape (B, H, S, D)
+
+        # First batch with original dimensions (B, H, S, D)
+        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
+
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
-        ref_out1 = sdpa_partial(q1_ref, k1_ref, v1_ref)
-        golden_out1 = sdpa_partial(q1_gold, k1_gold, v1_gold)
+        ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
+        golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
 
         backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out1.backward(backward_grad1.to(torch.float64))
         ref_out1.backward(backward_grad1)
 
-        # The second eager batch, shape (B * 2, H, S / 2, D)
+        # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
+
         q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
         q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, torch.float64)
-        ref_out2 = sdpa_partial(q2_ref, k2_ref, v2_ref)
-        golden_out2 = sdpa_partial(q2_gold, k2_gold, v2_gold)
+        ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
+        golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
 
         backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
-        # The third eager batch, shape (B * 2, H, S / 4, D)
+        # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
+
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
         q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
-        ref_out3 = sdpa_partial(q3_ref, k3_ref, v3_ref)
-        golden_out3 = sdpa_partial(q3_gold, k3_gold, v3_gold)
+        ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
+        golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
 
         backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out3.backward(backward_grad3.to(torch.float64))
         ref_out3.backward(backward_grad3)
 
-        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
-        # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
+        # Clear dynamo counters
         torch._dynamo.reset()
-        # Compiling with dynamic shape in the first batch.
-        compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
-        compiled_out1 = compiled_sdpa(q1, k1, v1)
+
+        # First compilation with original dimensions
+        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        compiled_out1 = compiled_sdpa1(q1, k1, v1)
         compiled_out1.backward(backward_grad1)
 
         self._check_out_and_grad(
@@ -742,10 +744,11 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # Since current q_seqlen (MAX_S/2) is smaller than the seqlen from block_mask (MAX_S),
-        # recompile to include the BlockMask._adjust part.
-        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        # Second compilation with new dimensions
+        compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
+        compiled_out2 = compiled_sdpa2(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
+
         self._check_out_and_grad(
             golden_out2,
             ref_out2,
@@ -760,13 +763,13 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # No re-compilation, use the compiled dynamic shape version.
-        # The current q_seqlen (MAX_S/4) is still smaller than the seqlen from block_mask (MAX_S),
-        # we don't recompile since we can reuse the compiled graph, which already includes the BlockMask._adjust part.
-        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        # Third compilation with new dimensions
+        compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
+        compiled_out3 = compiled_sdpa3(q3, k3, v3)
         compiled_out3.backward(backward_grad3)
+
         self._check_out_and_grad(
             golden_out3,
             ref_out3,
@@ -781,18 +784,7 @@ class TestFlexAttention(InductorTestCase):
             v3_ref,
             v3,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
-
-        # The forth iteration, shape (B * 2, H, S * 2, D)
-        # Since seqlen is larger than the seqlen in block_mask, throw errors.
-        S = int(S * 8)
-        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed, "Q seqlen must be smaller than"
-        ):
-            compiled_sdpa(q3, k3, v3)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
     def run_automatic_dynamic_test(
         self,
@@ -915,11 +907,6 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_dynamic(
         self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
     ):
-        if score_mask_mod[0].__name__ == "_alibi_bias":
-            # TODO
-            self.skipTest(
-                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
-            )
         self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
@@ -3234,12 +3221,12 @@ def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torc
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
+    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
         l_query_ = L_query_
         l_key_ = L_key_
         l_value_ = L_value_
-        l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
         l_block_mask_kv_indices = L_block_mask_kv_indices
+        l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
         l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
         l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
         l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
