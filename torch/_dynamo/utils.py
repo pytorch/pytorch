@@ -45,6 +45,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Generic,
     Iterable,
     Iterator,
     KeysView,
@@ -1589,14 +1590,19 @@ def is_namedtuple_cls(cls):
             if isinstance(getattr(cls, "_fields", None), tuple) and callable(
                 getattr(cls, "_make", None)
             ):
-                if cls.__bases__ == (tuple,):
+                # The subclassing style namedtuple can have an extra base `typing.Generic`
+                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                if bases == (tuple,):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
-                if (
-                    # Subclass of namedtuple
-                    is_namedtuple_cls(cls.__bases__[0])
-                    # For subclasses of namedtuple, the __new__ method should not be customized
-                    and cls.__new__ is cls.__bases__[0].__new__
+                if bases and any(
+                    (
+                        # Subclass of namedtuple
+                        is_namedtuple_cls(t)
+                        # For subclasses of namedtuple, the __new__ method should not be customized
+                        and cls.__new__ is t.__new__
+                    )
+                    for t in bases
                 ):
                     return True
     except TypeError:
