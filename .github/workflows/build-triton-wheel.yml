@@ -119,13 +119,17 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
           if [[ "${{ matrix.device }}" == "cuda" ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
           fi
           docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+
+          if[[ "${BUILD_DEVICE}" == 'cuda' ]]; then
+            docker exec -t "${container_name}" auditwheel repair --plat manylinux_2_28_x86_64 /artifacts/*.whl
+          fi
 
       - uses: actions/upload-artifact@v4.4.0
         with:
