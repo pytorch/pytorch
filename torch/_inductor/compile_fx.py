@@ -1162,6 +1162,8 @@ class _WireProtocolPickledOutput:
         return result
 
 
+# This is used to represent an FxCompile which occurs across a serialized
+# boundary.
 class _FxCompileSerialized(FxCompile):
     @override
     async def codegen_and_compile(
@@ -1238,12 +1240,15 @@ class _FxCompileSerialized(FxCompile):
         ).serialize()
 
 
+# This is a debugging/testing implementation of FxCompile which serializes the
+# input and output but still runs the FxCompile in-process.
 class _DebugSerdeFxCompile(_FxCompileSerialized):
     @override
     async def _send_to_child(
         self, pickled_input: _WireProtocolPickledInput
     ) -> _WireProtocolPickledOutput:
-        # For debugging just serde the input and output but don't run in a subprocess.
+        # For debugging just serde the input and output but don't run in a
+        # subprocess.
         return self._run_in_child(pickled_input)
 
 
