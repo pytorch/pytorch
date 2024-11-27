@@ -92,9 +92,7 @@ def _fuse_modules_helper(
     additional_fuser_method_mapping = fuse_custom_config_dict.get(
         "additional_fuser_method_mapping", {}
     )
-    mod_list = []
-    for item in modules_to_fuse:
-        mod_list.append(_get_module(model, item))
+    mod_list = [_get_module(model, item) for item in modules_to_fuse]
 
     # Fuse list of modules
     new_mod_list = fuser_func(mod_list, is_qat, additional_fuser_method_mapping)
