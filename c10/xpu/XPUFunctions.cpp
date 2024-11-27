@@ -28,18 +28,23 @@ struct DevicePool {
 } gDevicePool;
 
 void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
-  auto platform_list = sycl::platform::get_platforms();
-  // Enumerated GPU devices from the specific platform.
-  for (const auto& platform : platform_list) {
-    if (platform.get_backend() != sycl::backend::ext_oneapi_level_zero) {
-      continue;
-    }
-    auto device_list = platform.get_devices();
-    for (const auto& device : device_list) {
-      if (device.is_gpu()) {
-        devices.push_back(std::make_unique<sycl::device>(device));
+  try {
+    auto platform_list = sycl::platform::get_platforms();
+    // Enumerated GPU devices from the specific platform.
+    for (const auto& platform : platform_list) {
+      if (platform.get_backend() != sycl::backend::ext_oneapi_level_zero) {
+        continue;
+      }
+      auto device_list = platform.get_devices();
+      for (const auto& device : device_list) {
+        if (device.is_gpu()) {
+          devices.push_back(std::make_unique<sycl::device>(device));
+        }
       }
     }
+  } catch (const sycl::exception& e) {
+    TORCH_WARN(
+        "Failed to initialize XPU devices. Do you forgot to install the driver?");
   }
 }
 
