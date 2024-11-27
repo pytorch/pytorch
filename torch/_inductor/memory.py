@@ -9,7 +9,7 @@ from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, TypedDict, U
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import MultiOutputLayout
+from .ir import MultiOutputLayout, NoneLayout
 from .utils import get_dtype_size
 from .virtualized import V
 
@@ -139,7 +139,10 @@ def compute_size_for_scheduler_buffer(
     def _compute_and_update_buf_size(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
-        if isinstance(sched_buf.node.layout, MultiOutputLayout):
+        if isinstance(sched_buf.node.layout, NoneLayout):
+            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            return 0
+        elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0
             for user in sched_buf.users:
                 if isinstance(user.node, OutputNode):
