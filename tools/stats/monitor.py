@@ -117,8 +117,7 @@ class UsageLogger:
                 stats.update(
                     {
                         "level": "record",
-
-                        "time": datetime.datetime.now().timestamp()
+                        "time": datetime.datetime.now().timestamp(),
                     }
                 )
                 # collect cpu and memory metrics
