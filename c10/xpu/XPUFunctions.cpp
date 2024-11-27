@@ -53,6 +53,7 @@ inline void initGlobalDevicePoolState() {
   } catch (const sycl::exception& e) {
     TORCH_WARN(
         "Failed to initialize XPU devices. Did you install the driver correctly?");
+    return;
   }
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
