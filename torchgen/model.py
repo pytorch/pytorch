@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator, List, Sequence
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 
@@ -245,10 +245,9 @@ class _TorchDispatchModeKey(Enum):
 
 
 def codegen_per_backend_entries() -> str:
-    r = []
+    r: List[str] = []
     for fk in FUNCTIONALITY_KEYS:
-        for bc in BACKEND_COMPONENTS:
-            r.append(f"    {fk}{bc} = auto()")
+        r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)
 
 
@@ -279,6 +278,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -289,6 +289,7 @@ dispatch_keys = [
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
+    DispatchKey.NestedTensorXPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,

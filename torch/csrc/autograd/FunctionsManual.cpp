@@ -485,7 +485,7 @@ Tensor pow_backward_self(
     const Tensor& exponent) {
   auto out = at::where(
       exponent == 0.0,
-      at::zeros({}, grad.options()),
+      at::scalar_tensor(0.0, grad.options()),
       grad * (exponent * self.pow(exponent - 1)).conj());
   return handle_r_to_c(self, std::move(out));
 }
@@ -515,10 +515,10 @@ Tensor pow_backward_exponent(
   // `.to()` is no-op if dtype is same.
   auto self_ = self.to(promoted_dtype);
 
-  auto out =
-      grad *
-      at::where(
-          cond, at::zeros({}, grad.options()), (result * self_.log()).conj());
+  auto out = grad *
+      at::where(cond,
+                at::scalar_tensor(0.0, grad.options()),
+                (result * self_.log()).conj());
   return handle_r_to_c(exponent, std::move(out));
 }
 
@@ -5080,7 +5080,8 @@ Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
   auto self_squared_pi = self * self * M_PI;
   auto out = grad *
       ((self_pi * self_pi.cos() - self_pi.sin()) / self_squared_pi).conj();
-  return at::where(self_squared_pi == 0.0, at::zeros({}, grad.options()), out);
+  return at::where(
+      self_squared_pi == 0.0, at::scalar_tensor(0.0, grad.options()), out);
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
@@ -5249,7 +5250,7 @@ static Tensor apply_simple_transformation(
       return condition_with_I ? K - transformation : -transformation;
     }
   }
-};
+}
 
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
@@ -5616,11 +5617,12 @@ Tensor i1_backward(
     // even for the part which didn't affect the output.
     // Look at https://github.com/pytorch/pytorch/issues/52248
     // Update if and when this is fixed.
-    auto safe_self =
-        at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
+    auto safe_self = at::where(
+        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
     auto gradx = (safe_self.i0() - (result * safe_self.reciprocal()));
     return grad *
-        at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
+        at::where(
+               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
   });
 }
 
@@ -5639,13 +5641,14 @@ Tensor i1e_backward(
     // even for the part which didn't affect the output.
     // Look at https://github.com/pytorch/pytorch/issues/52248
     // Update if and when this is fixed.
-    auto safe_self =
-        at::where(self_is_not_tiny, self, at::full({}, eps, self.options()));
+    auto safe_self = at::where(
+        self_is_not_tiny, self, at::scalar_tensor(eps, self.options()));
     auto gradx =
         (at::special_i0e(safe_self) -
          result * (safe_self.sgn() + safe_self.reciprocal()));
     return grad *
-        at::where(self_is_not_tiny, gradx, at::full({}, 0.5, self.options()));
+        at::where(
+               self_is_not_tiny, gradx, at::scalar_tensor(0.5, self.options()));
   });
 }
 

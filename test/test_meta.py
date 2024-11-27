@@ -6,7 +6,7 @@ import os
 import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_map, tree_map_only, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
@@ -1754,6 +1754,45 @@ class TestMeta(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be called on meta tensors"):
             meta_tensor = torch.randn(1, device='meta')
             meta_tensor.item()
+
+    def test_triangular_solve_out(self):
+        # Get what's the expected output for the given example.
+        A = torch.randn(2, 2).triu()
+        b = torch.randn(2, 3)
+        out = torch.triangular_solve(b, A)
+
+        # Call the function again, transforming every tensor input (including the out tensor)
+        # into a meta tensor.
+        meta_out = tree_map_only(torch.Tensor, lambda t: t.to("meta"), out)
+        torch.triangular_solve(b.to("meta"), A.to("meta"), out=meta_out)
+
+        self.assertEqual(out[0].shape, meta_out[0].shape)
+        self.assertEqual(out[0].dtype, meta_out[0].dtype)
+
+        self.assertEqual(out[1].shape, meta_out[1].shape)
+        self.assertEqual(out[1].dtype, meta_out[1].dtype)
+
+    def test_meta_consistency_out_dtype_mismatch_pow_Tensor_Scalar(self):
+        S = (5,)
+
+        def run(device):
+            a = torch.rand(S, device=device, dtype=torch.float32)
+            b = 2
+            out = torch.empty(S, device=device, dtype=torch.float64)
+
+            try:
+                torch.pow(a, b, out=out)
+            except Exception as e:
+                return e
+
+        cpu_err = run("cpu")
+        meta_err = run("meta")
+
+        if cpu_err is None and meta_err is not None:
+            raise RuntimeError("cpu didn't fail, but meta did.") from meta_err
+        elif cpu_err is not None and meta_err is None:
+            raise RuntimeError("cpu failed, but meta didn't.") from cpu_err
+
 
 instantiate_device_type_tests(TestMeta, globals())
 

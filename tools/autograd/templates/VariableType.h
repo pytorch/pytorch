@@ -18,7 +18,7 @@
 
 namespace at {
   struct Quantizer;
-};
+}
 
 namespace torch { namespace autograd {
 
@@ -54,6 +54,6 @@ namespace VariableType {
   const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   std::vector<at::Tensor> unpack(const at::ITensorListRef& tl, const char *name, int pos);
-};
+}
 
 }} // namespace torch::autograd
