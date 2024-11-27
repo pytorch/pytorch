@@ -392,11 +392,8 @@ class CachingAutotuner(KernelInterface):
                         continue
                     new_config = copy.deepcopy(triton_config)
 
-                    def get_block_size(kwarg: str) -> int:
-                        return triton_config.kwargs[kwarg]
-
                     # Reduce the largest Rn_BLOCK by a factor of 2.
-                    largest_rkwarg: str = max(reduction_kwargs, key=get_block_size)
+                    largest_rkwarg: str = max(reduction_kwargs, key=triton_config.kwargs.__getitem__)
                     new_config.kwargs[largest_rkwarg] //= 2
 
                     if new_config in seen_configs:
@@ -1548,7 +1545,7 @@ def _get_nd_reduction_numels(r: int, size_hints: Sequence[int]) -> List[int]:
         r == final_numel
     ), f"Expected ND reduction size ({rnumels}) to have {r} elements."
 
-    return list(rnumels)
+    return [*rnumels]
 
 
 def triton_config_reduction(

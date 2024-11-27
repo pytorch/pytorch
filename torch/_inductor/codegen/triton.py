@@ -2847,7 +2847,7 @@ class TritonKernel(SIMDKernel):
                 self.body.splice(self.stores)
 
             # Write loop suffixes.
-            for level, tree in sorted(enumerate(loop_trees), reverse=True):
+            for level, tree in reversed([*enumerate(loop_trees)]):
                 with self.body.indent(offset=level + 1):
                     # Advance pointers at the end of each loop.
                     for block_ptr, advancement in self.pointer_advancements[
