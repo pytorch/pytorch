@@ -1053,7 +1053,12 @@ def aot_module_simplified(
 
     aot_autograd_arg_pos_to_source = None
     static_input_indices = []
-    if isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta:
+    # TODO(xmfan): make compiled autograd go through guard dedup
+    if (
+        isinstance(mod, torch.fx.GraphModule)
+        and "dynamo_compile_id" in mod.meta
+        and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+    ):
         aot_autograd_arg_pos_to_source, static_input_indices = handle_dynamo_gm(
             mod, params
         )
@@ -1113,11 +1118,9 @@ def aot_module_simplified(
     else:
         compiled_fn = dispatch_and_compile()
 
-    if isinstance(mod, torch._dynamo.utils.GmWrapper):
-        # This function is called by the flatten_graph_inputs wrapper, which boxes
-        # the inputs so that they can be freed before the end of this scope.
-        # For overhead reasons, this is not the default wrapper, see comment:
-        # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+    if torch._dynamo.utils.is_compiled_autograd_gm(mod):
+        # Unlike `forward`, runtime_args is a List here
+        # which allows us to steal references from runtime_args
         def boxed_forward(runtime_args: List[Any]):
             flat_args = []
             flat_args.extend(params_flat)

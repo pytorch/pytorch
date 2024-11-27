@@ -898,6 +898,21 @@ class _PyTreeCodeGen(CodeGen):
             return super().generate_output(output_args)
 
 
+class CompiledAutogradCodeGen(CodeGen):
+    def __init__(self, boxed_inputs_count):
+        super().__init__()
+        self._boxed_inputs_count = boxed_inputs_count
+
+    def process_inputs(self, *args):
+        # Compiled Autograd's runtime inputs contain activations
+        # that must be freed ASAP during execution. We do this
+        # by passing the args in a list that we "steal" at runtime.
+        # However, we still want compile-time analysis to be done
+        # on unpacked inputs as we don't have first class support
+        # for lists. Hence, we unflatten the inputs here.
+        return (args[: self._boxed_inputs_count], *args[self._boxed_inputs_count :])
+
+
 class _FindNodesLookupTable:
     """
     Side table for the graph for the purpose of doing fast queries

@@ -3419,20 +3419,18 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if is_compiled_autograd_gm(gm):
+        assert isinstance(gm.graph._codegen, torch.fx.graph.CompiledAutogradCodeGen)
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
         assert isinstance(inputs[0], list)
-        boxed_inputs_count = len(inputs[0])
 
         def flatten_fn(args):
             return args[0] + list(args[1:])
 
-        def unflatten_fn(flat_args):
-            return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
-
-        compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
+        # unflattening is handled by CompiledAutogradCodeGen.process_inputs
+        compiled_fn = compile_gm(gm, flatten_fn(inputs))
     else:
         # slow path, don't know inputs structure
         flat_inputs, spec = pytree.tree_flatten(inputs)
@@ -3441,7 +3439,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
 
-    def wrapper(*args):
+    def runtime_wrapper(*args):
         flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
@@ -3451,7 +3449,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
         return compiled_fn(flat_args)
 
-    return wrapper
+    return runtime_wrapper
 
 
 def get_locals_to_steal(maybe_gm):
@@ -3462,6 +3460,17 @@ def get_locals_to_steal(maybe_gm):
 
 def set_locals_to_steal(gm, locals_to_steal):
     gm.meta["locals_to_steal"] = locals_to_steal
+
+
+def is_compiled_autograd_gm(maybe_gm: Any):
+    return isinstance(maybe_gm, torch.fx.GraphModule) and maybe_gm.meta.get(
+        "_compiled_autograd", False
+    )
+
+
+def mark_compiled_autograd_gm(gm: torch.fx.GraphModule):
+    assert "_compiled_autograd" not in gm.meta
+    gm.meta["_compiled_autograd"] = True
 
 
 class Lit:
