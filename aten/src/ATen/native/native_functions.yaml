@@ -312,25 +312,25 @@
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
 - func: dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
   tags: nondeterministic_seeded
@@ -480,7 +480,7 @@
 
 - func: conj_physical(Tensor self) -> Tensor
   variants: function, method
-  tags: pointwise
+  tags: [pointwise, maybe_aliasing_or_mutating]
 
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1035,17 +1035,20 @@
 
 - func: atleast_1d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_1d.Sequence(Tensor[] tensors) -> Tensor[]
 
 - func: atleast_2d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_2d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
 
 - func: atleast_3d(Tensor self) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: atleast_3d.Sequence(Tensor[] tensors) -> Tensor[]
   variants: function
@@ -1079,6 +1082,7 @@
   autogen: bartlett_window.periodic_out
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+  tags: maybe_aliasing_or_mutating
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   dispatch:
@@ -1086,6 +1090,7 @@
   autogen: quantized_batch_norm.out
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
+  tags: maybe_aliasing_or_mutating
 
 - func: _batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)
 
@@ -1468,6 +1473,7 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  tags: maybe_aliasing_or_mutating
 
 - func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -5012,7 +5018,7 @@
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
-  tags: nondeterministic_seeded
+  tags: [pointwise, nondeterministic_seeded]
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
@@ -5049,6 +5055,7 @@
 
 - func: relu6(Tensor self) -> Tensor
   python_module: nn
+  tags: pointwise
 
 - func: relu6_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
@@ -5133,6 +5140,7 @@
   structured_delegate: hardshrink.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  tags: pointwise
 
 - func: hardshrink_backward.grad_input(Tensor grad_out, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5197,6 +5205,7 @@
 
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5205,6 +5214,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: celu
+  tags: pointwise
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5255,6 +5265,7 @@
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
   python_module: nn
+  tags: pointwise
 
 - func: mish_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: mish.out
@@ -6055,6 +6066,7 @@
   structured_delegate: threshold.out
   dispatch:
     QuantizedCPU: threshold_quantized_cpu
+  tags: pointwise
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7758,6 +7770,7 @@
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
   variants: function
+  tags: maybe_aliasing_or_mutating
 
 - func: combinations(Tensor self, int r=2, bool with_replacement=False) -> Tensor
   variants: function
@@ -11774,6 +11787,7 @@
   structured_delegate: elu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11847,6 +11861,7 @@
   python_module: nn
   dispatch:
     QuantizedCPU: hardsigmoid_quantized_cpu
+  tags: pointwise
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: hardsigmoid.out
@@ -11878,7 +11893,7 @@
   dispatch:
     CPU, CUDA, MPS: hardtanh
     QuantizedCPU: hardtanh_quantized_cpu
-  tags: core
+  tags: [pointwise, core]
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -12042,6 +12057,7 @@
   structured_delegate: softplus.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softplus_backward.grad_input(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -12068,6 +12084,7 @@
   structured_delegate: softshrink.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
