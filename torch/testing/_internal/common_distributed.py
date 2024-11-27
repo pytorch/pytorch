@@ -29,9 +29,12 @@ import torch
 import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
+from torch._C._autograd import DeviceType
+from torch._C._distributed_c10d import _SymmetricMemory
 import torch.nn as nn
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
+    TEST_CUDA,
     find_free_port,
     IS_SANDCASTLE,
     retry_on_connect_failures,
@@ -41,6 +44,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
+    TEST_HPU,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -80,6 +84,7 @@ TEST_SKIPS = {
         86, "Test skipped at subprocess level, look at subprocess log for skip reason"
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
+    "no_accelerator": TestSkip(89, "accelerator is not available."),
 }
 
 
@@ -99,6 +104,8 @@ class DistTestCases:
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
+    if TEST_HPU:
+        backend_feature["hpu"] = {"hccl"}
 
 
 def skip_if_no_gpu(func):
@@ -111,6 +118,8 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if torch.cuda.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_HPU and torch.hpu.device_count < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -188,6 +197,8 @@ def skip_if_lt_x_gpu(x):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_HPU and torch.hpu.device_count() >= x:
                 return func(*args, **kwargs)
             sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
@@ -340,6 +351,17 @@ def requires_mpi():
     )
 
 
+def requires_multicast_support():
+    has_multicast_support = (
+        torch.cuda.is_available()
+        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+    )
+    return skip_but_pass_in_sandcastle_if(
+        not has_multicast_support,
+        "multicast support is not available",
+    )
+
+
 def skip_if_rocm_multiprocess(func):
     """Skips a test for ROCm"""
     func.skip_if_rocm_multiprocess = True
@@ -401,17 +423,28 @@ def create_tcp_store(
         )
 
 
-if TEST_WITH_TSAN:
-    # TSAN runs much slower.
-    TIMEOUT_DEFAULT = 500
-else:
-    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+# Try env setting first
+TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '0'))
+
+# If not set, use some default values
+if TIMEOUT_DEFAULT == 0:
+    if TEST_WITH_TSAN:
+        # TSAN runs much slower.
+        TIMEOUT_DEFAULT = 500
+    elif TEST_WITH_ROCM:
+        # ROCM runs slower.
+        TIMEOUT_DEFAULT = 120
+    elif TEST_CUDA:
+        TIMEOUT_DEFAULT = 60
+    else:
+        # CPU runs slower.
+        TIMEOUT_DEFAULT = 120
 
 
-# https://github.com/pytorch/pytorch/issues/75665
-if TEST_WITH_ROCM:
-    TIMEOUT_OVERRIDE["test_join_kwargs"] = 200
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_index": 300,
+}
 
 
 def create_device(interface=None):
@@ -487,6 +520,9 @@ def init_multigpu_helper(world_size: int, backend: str):
     divided to subsets, each process only uses a subset.
     """
     nGPUs = torch.cuda.device_count()
+    if TEST_HPU:
+        nGPUs = torch.hpu.device_count()
+
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -552,6 +588,15 @@ class MultiProcessTestCase(TestCase):
     # do not early terminate for distributed tests.
     def _should_stop_test_suite(self) -> bool:
         return False
+
+    # Many test cases init a process group but do not destroy it.  This property
+    # determines whether this base test class should call
+    # `destroy_process_group` on behalf of the test. Its value is customizable
+    # by derived TestCase's but it is a pan-TestCase value (cannot be customized
+    # for each test).
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return True
 
     @property
     def world_size(self) -> int:
@@ -713,6 +758,14 @@ class MultiProcessTestCase(TestCase):
             event_listener_thread.join()
             # Close pipe after done with test.
             parent_pipe.close()
+
+        if self.destroy_pg_upon_exit:
+            try:
+                # Some tests do destroy the pgs, and destroy can't be called twice.
+                # This avoids spewing warnings about improperly shutting down.
+                c10d.destroy_process_group()
+            except (AssertionError, ValueError):
+                pass
 
     def _get_timedout_process_traceback(self) -> None:
         pipes = []
@@ -878,6 +931,47 @@ class MultiProcessTestCase(TestCase):
     def is_master(self) -> bool:
         return self.rank == 0
 
+# Utility base class for distributed Multi Process Test cases
+# This abstracts the PG creation and deletion, the backends are selected based
+# on device type. The tests functions can be instantiated per device type using
+# common_device_type.instantiate_device_type_tests
+# other backends can add entry in backend() function
+class DistributedTestBase(MultiProcessTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def backend(self, device) -> str:
+        if "cuda" in device:
+            return "nccl"
+        elif "hpu" in device :   # intel gaudi
+            return "hccl"
+        else :
+            return "gloo"
+
+    def create_pg(self, device):
+        num_visible_devices = torch.get_device_module(device).device_count()
+        store = torch.distributed.FileStore(self.file_name, num_visible_devices)
+        torch.distributed.init_process_group(
+            backend=self.backend(device),
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store
+        )
+        if "nccl" in self.backend(device):
+            torch.cuda.set_device(self.rank)
+        return torch.distributed.distributed_c10d._get_default_group()
+
+    def rank_to_device(self, device):
+        num_visible_devices = torch.get_device_module(device).device_count()
+        return {i: [i % num_visible_devices] for i in range(self.world_size)}
 
 def run_subtests(
     cls_inst,

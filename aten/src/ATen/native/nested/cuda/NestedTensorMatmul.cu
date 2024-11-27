@@ -239,8 +239,11 @@ bool group_gemm_dispatch(
   }
 
   std::vector<cutlass::half_t*> aptr;
+  aptr.reserve(ntensors);
   std::vector<cutlass::half_t*> bptr;
+  bptr.reserve(ntensors);
   std::vector<cutlass::half_t*> dptr;
+  dptr.reserve(ntensors);
   for (int64_t i = 0; i < ntensors; i++) {
     aptr.push_back(reinterpret_cast<cutlass::half_t*>(aptr_[i]));
     bptr.push_back(reinterpret_cast<cutlass::half_t*>(bptr_[i]));
@@ -349,6 +352,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
         std::vector<int64_t> ldb(ntensors);
         std::vector<int64_t> ldd(ntensors);
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
+        gemm_sizes.reserve(ntensors);
         bool all_row_major = true;
         for (int64_t i = 0; i < ntensors; i++) {
           const IntArrayRef& self_shape = get_size_for_index(self, i);

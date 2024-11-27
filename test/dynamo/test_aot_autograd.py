@@ -1081,7 +1081,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
@@ -1095,9 +1095,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6, dtype=torch.float)
-        z = x.clone().detach()
-        x_opt = x.clone().detach()
-        z_opt = x.clone().detach()
+        z = x.detach().clone()
+        x_opt = x.detach().clone()
+        z_opt = x.detach().clone()
 
         z.requires_grad = True
         z_opt.requires_grad = True
@@ -1198,7 +1198,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         with self.assertRaises(Exception):
             fn(x)
         with self.assertRaises(Exception):

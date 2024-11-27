@@ -635,7 +635,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
-                setattr(gm, node.target, getattr(sub_gm, node.target))
+                new_target_name = new_node.target
+                if hasattr(gm, new_target_name):
+                    # Loop through and find the "submod_{i}" that have no name collision
+                    i = 1
+                    new_target_name = f"submod_{i}"
+                    while hasattr(gm, new_target_name):
+                        i += 1
+                        new_target_name = f"submod_{i}"
+                new_node.target = new_target_name
+                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
@@ -686,7 +695,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
 
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
-    ast_mod = ast.parse(mod.code)
+    ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
     ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
@@ -921,7 +930,7 @@ def remove_proxy_from_state_dict(state_dict: Dict, in_place: bool) -> Dict:
         new_state_dict = {}
         for k, v in state_dict.items():
             if hasattr(v, "proxy"):
-                new_state_dict[k] = v.clone().detach()
+                new_state_dict[k] = v.detach().clone()
             else:
                 new_state_dict[k] = v
         return new_state_dict

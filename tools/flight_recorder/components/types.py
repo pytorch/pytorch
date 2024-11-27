@@ -74,7 +74,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
+        details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
         return f"Error type: {self.name}{details}"
 
 
@@ -220,8 +220,12 @@ class EntryState:
         self.collective_state = entry["state"]
         self.collective_frames = entry["frames"]
         self.expected_ranks = expected_ranks
+        self.missing_ranks: Set[int]
+        self.input_numel: int
+        self.output_numel: int
+        self.errors: Set[Tuple[int, MatchState]]
 
-    def logging_info(
+    def log(
         self,
         logger: FlightRecorderLogger,
         logger_msg: str,
@@ -233,8 +237,8 @@ class EntryState:
         logger.info(
             logger_msg,
             self.collective_seq_id,
-            self.record_id,
         )
+        logger.info("internal record id: %s", self.record_id)
         logger.info("group info: %s", self.pg_desc)
         logger.info("collective: %s", self.profiling_name)
         if missing_ranks:
@@ -371,8 +375,8 @@ class Op:
     def __init__(
         self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]], pg_name: str
     ):
-        profiling_name = event["profiling_name"]
-        nccl, name = profiling_name.split(":")
+        self.profiling_name = event["profiling_name"]
+        nccl, name = self.profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
         parts = name.split(" ")
         type = parts[0]
@@ -403,6 +407,7 @@ class Op:
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
         self.time_created_ns = event["time_created_ns"]
+        self.collective_frames = event["frames"]
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
@@ -440,11 +445,8 @@ class Op:
                 f"state={self.state}",
             )
             return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
-        return (
-            f"{self.type}(%sinput_sizes={self.input_sizes}, state={self.state})"
-            % f"{p2p_info}, "
-            if p2p_info
-            else ""
+        return f"{self.type}(%sinput_sizes={self.input_sizes}, state={self.state})" % (
+            f"{p2p_info}, " if p2p_info else ""
         )
 
     def match(self, other: "Op") -> MatchState:
@@ -487,13 +489,14 @@ class Op:
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'"
                 )
             if (
-                other.input_dtypes != other.output_dtypes
-                or self.input_dtypes != other.input_dtypes
-                or self.output_dtypes != other.output_dtypes
+                set(self.input_dtypes) != set(self.output_dtypes)
+                or set(self.input_dtypes) != set(other.input_dtypes)
+                or set(self.input_dtypes) != set(other.output_dtypes)
             ):
                 return MatchState.COLLECTIVE_DTYPE_MISMATCH(
-                    f"Expected dtypes: '{self.input_dtypes}/{other.input_dtypes}' does not "
-                    f"match found dtype: '{self.output_dtypes}/{other.output_dtypes}'",
+                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
+                    f"match found dtype: '{set(self.output_dtypes)}/"
+                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
                 )
             if self.type == "all_to_all":
                 return MatchState.UNDECIDED

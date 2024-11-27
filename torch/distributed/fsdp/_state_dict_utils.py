@@ -338,7 +338,7 @@ def _full_post_state_dict_hook(
         # Clone parameters before exiting the `_unshard_fsdp_state_params()` context.
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
-                state_dict[fqn] = state_dict[fqn].clone().detach()
+                state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
             except BaseException as e:
                 warnings.warn(

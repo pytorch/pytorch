@@ -776,14 +776,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
-                items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.force_unpack_var_sequence(tx):
-                    items.append(
-                        TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
-                        )
+                items = [
+                    TupleVariable(
+                        [key, self.odict_getitem(tx, key)],
                     )
+                    for key in keys.force_unpack_var_sequence(tx)
+                ]
                 tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
@@ -1012,11 +1011,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
-    def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
-
     def get_source_by_walking_mro(self, name):
         assert self.cls_source is not None
 
@@ -1153,9 +1147,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
-            if self.is_supported_nn_module_method(subobj):
-                return variables.GetAttrVariable(self, name, source=source)
-
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
@@ -1433,7 +1424,10 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         # However, users can try to add a new attribute to the class using the
         # __dict__ attribute. To catch this, we save the ConstDictVariable for
         # the __dict__ and then lookup into this vt for each attr lookup.
-        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+        if name == "get" and type(self.value).get in (
+            collections.abc.Mapping.get,
+            dict.get,
+        ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         elif name == "__dict__" and self.source:
             self.generic_dict_vt = variables.LazyVariableTracker.create(

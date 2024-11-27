@@ -371,10 +371,9 @@ Tensor mkldnn_convolution_pointwise_binary(
 
   auto output_sizes = conv_output_size(
       input_t.sizes(), weight_t.sizes(), padding_expanded, stride_expanded, dilation_expanded);
-  // TODO: support broadcast binary fusion.
   TORCH_CHECK(
-      output_sizes == other_t.sizes(),
-      "Binary Fusion's inputs should have same shape");
+      input_t.dim() == other_t.dim(),
+      "Binary Fusion's inputs should have same dimensions");
   // Only calling fusion path for channels_last path.
   // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
   // at next OneDNN release.
@@ -405,18 +404,17 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto weight =
         weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
     auto other = other_t.contiguous(memory_format);
-    auto output = at::empty_like(other);
+    auto output = at::empty(output_sizes, input_t.options()).contiguous(memory_format);
     const ideep::tensor x = itensor_from_tensor(input);
     const ideep::tensor w = itensor_from_tensor(weight);
     const ideep::tensor z = itensor_from_tensor(other);
     ideep::tensor y = itensor_from_tensor(output);
-    auto output_size = other.sizes().vec();
     ideep::tag format_tag = ideep::tag::nhwc;
     if (input_t.ndimension() == 5) {
       format_tag = ideep::tag::ndhwc;
     }
     auto other_desc = ideep::tensor::desc(
-        output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
+        other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
 
     ideep::attr_t op_attr;
     ideep::post_ops po;
@@ -433,7 +431,7 @@ Tensor mkldnn_convolution_pointwise_binary(
           z,
           w,
           b,
-          output_size,
+          output_sizes,
           y,
           stride_expanded,
           dilation_expanded,
@@ -447,7 +445,7 @@ Tensor mkldnn_convolution_pointwise_binary(
           x,
           z,
           w,
-          output_size,
+          output_sizes,
           y,
           stride_expanded,
           dilation_expanded,
