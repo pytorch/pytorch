@@ -30,7 +30,7 @@ using namespace torch;
 
 PyObject* THPGeneratorClass = nullptr;
 
-PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
+PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
@@ -73,9 +73,9 @@ static PyObject* THPGenerator_pynew(
   }
 #endif
   else if (device.type() == at::kXPU) {
-    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+    self->cdata = at::detail::getXPUHooks().getNewGenerator(device.index());
   } else if (device.type() == at::kIPU) {
-    self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
+    self->cdata = at::detail::getIPUHooks().getNewGenerator(device.index());
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
@@ -391,7 +391,7 @@ PyObject* pyobj(const Generator& self) {
   return self.pyobj();
 }
 
-PyObject* THPGenerator_Wrap(Generator gen) {
+PyObject* THPGenerator_Wrap(const Generator& gen) {
   if (!gen.defined()) {
     Py_RETURN_NONE;
   }

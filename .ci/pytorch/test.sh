@@ -169,9 +169,13 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # Source Intel oneAPI envrioment script to enable xpu runtime related libraries
-  # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-5.html
+  # refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/umf/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/umf/latest/env/vars.sh
+  fi
   # Check XPU status before testing
   xpu-smi discovery
 fi
@@ -384,22 +388,30 @@ test_inductor_cpp_wrapper() {
   # unit tests with cpp wrapper.
   python test/run_test.py --include inductor/test_torchinductor.py --verbose
 
-  python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
+
+  # Run inductor benchmark tests with cpp wrapper.
+  # Skip benchmark tests if it's in rerun-disabled-mode.
+  if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+    echo "skip dynamo benchmark tests for rerun-disabled-test"
+  else
+    echo "run dynamo benchmark tests with cpp wrapper"
+    python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
 
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -940,6 +952,9 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
 
+    echo "Testing multi-GPU linalg tests"
+    python test/run_test.py -i test_linalg.py -k test_matmul_offline_mgpu_tunable --verbose
+
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       MPIEXEC=$(command -v mpiexec)
       if [[ -n "$MPIEXEC" ]]; then
@@ -1189,7 +1204,7 @@ EOF
   git reset --hard "${SHA_TO_COMPARE}"
   git submodule sync && git submodule update --init --recursive
   echo "::group::Installing Torch From Base Commit"
-  pip install -r requirements.txt
+  pip3 install -r requirements.txt
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
   python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
@@ -1346,10 +1361,11 @@ test_executorch() {
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
+  # For llama3
+  bash examples/models/llama3_2_vision/install_requirements.sh
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
-  # shellcheck disable=SC1091
-  source .ci/scripts/setup-linux.sh cmake
+  bash .ci/scripts/setup-linux.sh cmake
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
@@ -1397,7 +1413,11 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
+if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+  # Install numpy-2.0.2 and test inductor tracing
+  python -mpip install --pre numpy==2.0.2
+  python test/run_test.py --include dynamo/test_unspec.py
+elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility

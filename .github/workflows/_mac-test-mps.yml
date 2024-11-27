@@ -17,9 +17,9 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.8"
+        default: "3.9"
         description: |
-          The python version to be used. Will be 3.8 by default
+          The python version to be used. Will be 3.9 by default
       test-matrix:
         required: true
         type: string

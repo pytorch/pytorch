@@ -5,6 +5,7 @@ from enum import auto, Enum
 from typing import Dict, List, Optional, Union
 
 
+# The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 4096,
@@ -12,6 +13,7 @@ TRITON_MAX_BLOCK = {
     "Z": 1024,
     "R": 4096 * 16,  # * 16 is multi-kernel only
 }
+TRITON_MAX_RSPLIT = 64
 
 
 class ReductionHint(Enum):
@@ -51,7 +53,9 @@ if _is_triton_available():
             }
 
             # Instantiate AttrsDescriptor with the prepared arguments
-            res = AttrsDescriptor.from_dict(kwargs)
+            res = AttrsDescriptor.from_dict(
+                {"arg_properties": kwargs, "cls": AttrsDescriptor.__name__}
+            )
             assert res.property_values["tt.divisibility"] == 16
             assert res.property_values["tt.equal_to"] == 1
             return res
@@ -91,6 +95,7 @@ class HeuristicType(Enum):
     SPLIT_SCAN = auto()
     TEMPLATE = auto()
     USER_AUTOTUNE = auto()
+    FIXED = auto()
 
 
 class AutotuneHint(Enum):

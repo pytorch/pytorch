@@ -199,38 +199,38 @@ namespace c10d {
 // (minor when adding fields, major when changing existing fields)
 // Also update both JSON and Pickle dumps to make use of the newly defined
 // field(s).
-DEFINE_CONSTANT(version_val, "2.4");
-DEFINE_CONSTANT(entries_key, "entries");
-DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state");
-DEFINE_CONSTANT(version_key, "version");
-DEFINE_CONSTANT(pg_config_key, "pg_config");
-DEFINE_CONSTANT(pg_status_key, "pg_status");
-DEFINE_CONSTANT(record_id_key, "record_id");
-DEFINE_CONSTANT(pg_id_key, "pg_id");
-DEFINE_CONSTANT(pg_name_key, "process_group");
-DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id");
-DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id");
-DEFINE_CONSTANT(is_p2p_key, "is_p2p");
-DEFINE_CONSTANT(op_id_key, "op_id");
-DEFINE_CONSTANT(profiling_name_key, "profiling_name");
-DEFINE_CONSTANT(input_sizes_key, "input_sizes");
-DEFINE_CONSTANT(input_dtypes_key, "input_dtypes");
-DEFINE_CONSTANT(output_sizes_key, "output_sizes");
-DEFINE_CONSTANT(output_dtypes_key, "output_dtypes");
-DEFINE_CONSTANT(time_created_key, "time_created_ns");
-DEFINE_CONSTANT(duration_key, "duration_ms");
-DEFINE_CONSTANT(timeout_key, "timeout_ms");
-DEFINE_CONSTANT(frames_key, "frames");
-DEFINE_CONSTANT(state_key, "state");
-DEFINE_CONSTANT(line_key, "line");
-DEFINE_CONSTANT(name_key, "name");
-DEFINE_CONSTANT(filename_key, "filename");
-DEFINE_CONSTANT(retired_key, "retired");
-DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns");
-DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns");
-DEFINE_CONSTANT(completed_state, "completed");
-DEFINE_CONSTANT(scheduled_state, "scheduled");
-DEFINE_CONSTANT(started_state, "started");
+DEFINE_CONSTANT(version_val, "2.4")
+DEFINE_CONSTANT(entries_key, "entries")
+DEFINE_CONSTANT(nccl_comm_key, "nccl_comm_state")
+DEFINE_CONSTANT(version_key, "version")
+DEFINE_CONSTANT(pg_config_key, "pg_config")
+DEFINE_CONSTANT(pg_status_key, "pg_status")
+DEFINE_CONSTANT(record_id_key, "record_id")
+DEFINE_CONSTANT(pg_id_key, "pg_id")
+DEFINE_CONSTANT(pg_name_key, "process_group")
+DEFINE_CONSTANT(collective_seq_id_key, "collective_seq_id")
+DEFINE_CONSTANT(p2p_seq_id_key, "p2p_seq_id")
+DEFINE_CONSTANT(is_p2p_key, "is_p2p")
+DEFINE_CONSTANT(op_id_key, "op_id")
+DEFINE_CONSTANT(profiling_name_key, "profiling_name")
+DEFINE_CONSTANT(input_sizes_key, "input_sizes")
+DEFINE_CONSTANT(input_dtypes_key, "input_dtypes")
+DEFINE_CONSTANT(output_sizes_key, "output_sizes")
+DEFINE_CONSTANT(output_dtypes_key, "output_dtypes")
+DEFINE_CONSTANT(time_created_key, "time_created_ns")
+DEFINE_CONSTANT(duration_key, "duration_ms")
+DEFINE_CONSTANT(timeout_key, "timeout_ms")
+DEFINE_CONSTANT(frames_key, "frames")
+DEFINE_CONSTANT(state_key, "state")
+DEFINE_CONSTANT(line_key, "line")
+DEFINE_CONSTANT(name_key, "name")
+DEFINE_CONSTANT(filename_key, "filename")
+DEFINE_CONSTANT(retired_key, "retired")
+DEFINE_CONSTANT(time_discovered_started_key, "time_discovered_started_ns")
+DEFINE_CONSTANT(time_discovered_completed_key, "time_discovered_completed_ns")
+DEFINE_CONSTANT(completed_state, "completed")
+DEFINE_CONSTANT(scheduled_state, "scheduled")
+DEFINE_CONSTANT(started_state, "started")
 #undef DEFINE_CONSTANT
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
@@ -288,6 +288,7 @@ class NCCLComm {
     // barrier here.
     LockType lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
+      at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
       // ncclCommDestroy could block forever waiting for work to complete on
@@ -302,13 +303,16 @@ class NCCLComm {
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
       int rank,
-      ncclUniqueId commId) {
+      ncclUniqueId commId,
+      at::DeviceIndex deviceIndex) {
+    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
     auto comm = std::make_shared<NCCLComm>();
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank),
         std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->deviceIndex_ = deviceIndex;
     comm->initialized_ = true;
     // Old style comm is always blocking.
     comm->nonBlocking_ = false;
@@ -320,7 +324,9 @@ class NCCLComm {
       int numRanks,
       int rank,
       ncclUniqueId commId,
+      at::DeviceIndex deviceIndex,
       ncclConfig_t& config) {
+    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex);
     auto comm = std::make_shared<NCCLComm>();
     comm->nonBlocking_ = config.blocking == 0;
     LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
@@ -331,6 +337,7 @@ class NCCLComm {
         std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
+    comm->deviceIndex_ = deviceIndex;
     // Under blocking mode, comm is initialized immediately after NCCL init
     // returns; Under nonblocking mode, we check whether comm is initialized the
     // *next* time ncclComm_ is accessed.
@@ -380,6 +387,7 @@ class NCCLComm {
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
     std::swap(initialized_, other.initialized_);
     std::swap(nonBlocking_, other.nonBlocking_);
+    std::swap(deviceIndex_, other.deviceIndex_);
   }
 
   ncclComm_t getNcclComm();
@@ -389,9 +397,9 @@ class NCCLComm {
     return commFailureReason_;
   }
 
-  void ncclCommAbort(
-      std::optional<std::string> commFailureReason = std::nullopt) {
+  void abort(std::optional<std::string> commFailureReason = std::nullopt) {
     LockType lock(mutex_);
+    at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_ && !initialized_) {
       // Should not abort twice.
@@ -552,6 +560,8 @@ class NCCLComm {
   // creation or split. For safety, we give a default value of true (more
   // protection).
   bool nonBlocking_{true};
+  // Device index for which the NCCL comm is created
+  at::DeviceIndex deviceIndex_{-1};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
@@ -663,6 +673,9 @@ struct NCCLTraceBuffer {
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
+
+    // Returns the traceback of current entry, in string form.
+    std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -698,6 +711,10 @@ struct NCCLTraceBuffer {
   void update_state(Entry& r);
 
   std::vector<Entry> dump_entries();
+
+  // Returns the entry with the given id, if it exists. Otherwise, returns
+  // std::nullopt.
+  std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.

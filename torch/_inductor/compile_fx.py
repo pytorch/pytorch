@@ -5,7 +5,6 @@ import functools
 import io
 import itertools
 import logging
-import os
 import sys
 import time
 import warnings
@@ -46,7 +45,9 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_chromium_event_logger,
     lazy_format_graph_code,
+    set_feature_use,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -93,6 +94,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import get_device_type, IRNode
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -324,7 +326,11 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes"):
+    with dynamo_timed(
+        "_recursive_pre_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pre_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -334,14 +340,23 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph)
-    joint_graph_passes(gm)
+    with dynamo_timed(
+        "_recursive_joint_graph_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="joint_graph_pass_time_us",
+    ):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            _recursive_joint_graph_passes(subgraph)
+        joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes"):
+    with dynamo_timed(
+        "_recursive_post_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="post_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -563,7 +578,10 @@ def compile_fx_inner(
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(
-                "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
+                "compile_fx_inner",
+                phase_name="inductor_compile",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -574,6 +592,11 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
+
+        get_chromium_event_logger().add_event_data(
+            "inductor_compile",
+            is_backward=kwargs["is_backward"],
+        )
 
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
@@ -640,7 +663,7 @@ def _compile_fx_inner(
         """
         with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
             compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-            if isinstance(compiled_graph, str):
+            if isinstance(compiled_graph, str) or fx_kwargs["aot_mode"]:
                 # We only return a string in aot mode, in which case we don't
                 # need to do any post-compilation steps: we just return the string,
                 # which is the filename of the compiled code.
@@ -725,6 +748,7 @@ def _compile_fx_inner(
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -742,6 +766,7 @@ def _compile_fx_inner(
                 remote=fx_graph_remote_cache,
             )
         else:
+            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
             )
@@ -751,7 +776,7 @@ def _compile_fx_inner(
                 # to return the string directly.
                 return compiled_graph
             compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs
+                compiled_graph, example_inputs, cudagraphs, gm
             )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -939,12 +964,13 @@ def fx_codegen_and_compile(
                     p = SymExprPrinter()
                     for out in graph.graph_outputs:
                         if (
-                            hasattr(out, "layout")
-                            and len(free_unbacked_symbols(out.layout.stride)) == 0
+                            isinstance(out, IRNode)
+                            and out.has_tensor_output()
+                            and len(free_unbacked_symbols(out.get_stride())) == 0
                         ):
                             # Convert to string for eval on the load path
                             output_strides.append(
-                                tuple(p.doprint(s) for s in out.layout.stride)
+                                tuple(p.doprint(s) for s in out.get_layout().stride)
                             )
                         else:
                             output_strides.append(None)
@@ -1006,6 +1032,7 @@ def fx_codegen_and_compile(
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
                     graph,
+                    gm,
                     output_strides,
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
@@ -1087,7 +1114,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify"
+                "cudagraphify",
+                log_pt2_compile_event=True,
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1211,17 +1239,25 @@ def compile_fx_aot(
     example_inputs_: List[InputType],
     inner_compile: _CompileFxCallableEx = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
-) -> str:
+) -> Union[List[str], str]:
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
 
-    if (
-        "aot_inductor.output_path" not in config_patches
-        and not config.aot_inductor.output_path
-    ):
+    output_path = config_patches.get(
+        "aot_inductor.output_path", config.aot_inductor.output_path
+    )
+
+    if output_path:
+        assert not output_path.endswith(".pt2"), (
+            "The output path for aot_compile should not have an extension with .pt2 "
+            "this is for specifying the output path for the .so in AOTInductor. "
+            "If you would like to package the AOTInductor generated files "
+            "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
+        )
+    else:
         config_patches = {
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
@@ -1233,7 +1269,7 @@ def compile_fx_aot(
     with V.set_aot_compilation(True), torch._guards.compile_context(
         saved_compile_context
     ):
-        compiled_lib_path = compile_fx(
+        compiled_artifacts = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -1243,11 +1279,12 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
-        assert isinstance(compiled_lib_path, str)
-        assert os.path.exists(
-            compiled_lib_path
-        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
-        return compiled_lib_path
+
+        assert isinstance(compiled_artifacts, str) or (
+            isinstance(compiled_artifacts, list)
+            and isinstance(compiled_artifacts[0], str)
+        )
+        return compiled_artifacts
 
 
 _graph_counter = count(0)
@@ -1279,6 +1316,8 @@ def fw_compiler_freezing(
         aot_autograd_model,
         aot_example_inputs,  # type: ignore[arg-type]
     )
+
+    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
@@ -1405,8 +1444,10 @@ def compile_fx(
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
-) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str]:
-    with _use_lazy_graph_module(dynamo_config.use_lazy_graph_module):
+) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
+    with _use_lazy_graph_module(
+        dynamo_config.use_lazy_graph_module
+    ), enable_python_dispatcher():
         """Main entrypoint to a compile given FX graph"""
         if config_patches:
             with config.patch(config_patches):
@@ -1617,7 +1658,11 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            from torch._dynamo.convert_frame import compile_lock
+
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), compile_lock:
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
@@ -1682,12 +1727,12 @@ def compile_fx(
             context = (
                 torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
             )
-            with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
+            with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
         with V.set_fake_mode(fake_mode), torch._guards.tracing(
             tracing_context
-        ), compiled_autograd.disable(), functorch_config.patch(
+        ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
             return aot_autograd(
@@ -1760,7 +1805,7 @@ def handle_dynamo_export_graph(
 
     compiled_fn = compile_gm(gm, codegen.process_inputs(*inputs))
 
-    @functools.wraps(compiled_fn)
+    @functools.wraps(compiled_fn)  # type: ignore[misc]
     def wrapper(*args: Any) -> Any:
         return codegen.process_outputs(compiled_fn(*codegen.process_inputs(*args)))
 
@@ -1768,8 +1813,10 @@ def handle_dynamo_export_graph(
 
 
 def _check_triton_bf16_support(graph: GraphLowering) -> None:
-    def warn_and_skip(device: torch.device) -> Never:
+    def warn_and_skip(device: Optional[torch.device]) -> Never:
         from torch._dynamo.exc import SkipFrame
+
+        assert device is not None
 
         device_interface = get_interface_for_device(device.type)
         device_props = device_interface.get_device_properties(device)
@@ -1778,24 +1825,19 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         )
         raise SkipFrame("BF16 is not supported")
 
-    for inp in graph.graph_inputs.values():
-        device = getattr(inp, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or inp.get_dtype() != torch.bfloat16:
+    for node in itertools.chain(graph.graph_inputs.values(), graph.graph_outputs):
+        if not isinstance(node, IRNode):
+            continue
+        device_type = get_device_type(node)
+        if (
+            not device_type
+            or not is_gpu(device_type)
+            or node.get_dtype() != torch.bfloat16
+        ):
             continue
         # Print warning and skip frame if attempting to compile for bfloat16
         # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
+        device_interface = get_interface_for_device(device_type)
         if device_interface.is_bf16_supported(including_emulation=False):
             return
-        warn_and_skip(device)
-
-    for out in graph.graph_outputs:
-        device = getattr(out, "get_device", lambda: torch.device("meta"))()
-        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
-            continue
-        # Print warning and skip frame if attempting to compile for bfloat16
-        # on device without hardware support for dtype
-        device_interface = get_interface_for_device(device.type)
-        if device_interface.is_bf16_supported(including_emulation=False):
-            return
-        warn_and_skip(device)
+        warn_and_skip(node.get_device())

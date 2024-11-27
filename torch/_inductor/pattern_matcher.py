@@ -78,7 +78,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -953,9 +952,10 @@ class PatternPrettyPrinter:
         assert hasattr(obj, "pretty_print")
         out_str = obj.pretty_print(pp=pp)
 
-        output = []
-        for key in pp.memoized_objs_names:
-            output.append(f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}")
+        output = [
+            f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
+            for key in pp.memoized_objs_names
+        ]
 
         output.append(f"{output_name} = {out_str}")
 
@@ -1362,9 +1362,7 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> List[Any]:
-        args = []
-        for name in argnames_static:
-            args.append(kwargs.pop(name))
+        args = [kwargs.pop(name) for name in argnames_static]
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
@@ -1693,12 +1691,12 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta  # type: ignore[arg-type]
 
 
 def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
-    for nd in graph.nodes:
+    for nd in graph.nodes:  # type: ignore[union-attr]
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
@@ -1718,7 +1716,7 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: torch.fx.GraphModule) -> int:
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -1746,9 +1744,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
