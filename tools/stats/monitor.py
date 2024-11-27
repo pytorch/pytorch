@@ -6,9 +6,9 @@ Data collected: CPU, memory, and GPU utilization.
 Usage:
     python3 monitor.py --log-interval 10
 
-To log the data to a file, use the following command:
+- To log the data to a file, use the following command:
     python3 monitor.py > usage_log.txt 2>&1
-To gracefully exit the script, press ctrl+c, or kill the process:
+- To gracefully exit the script in the local machine, press ctrl+c, or kill the process using:
     kill <pid>
 """
 
