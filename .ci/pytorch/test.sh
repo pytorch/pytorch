@@ -952,6 +952,9 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
 
+    echo "Testing multi-GPU linalg tests"
+    python test/run_test.py -i test_linalg.py -k test_matmul_offline_mgpu_tunable --verbose
+
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       MPIEXEC=$(command -v mpiexec)
       if [[ -n "$MPIEXEC" ]]; then
@@ -1410,7 +1413,11 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
+if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
+  # Install numpy-2.0.2 and test inductor tracing
+  python -mpip install --pre numpy==2.0.2
+  python test/run_test.py --include dynamo/test_unspec.py
+elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
