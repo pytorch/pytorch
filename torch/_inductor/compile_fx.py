@@ -1017,9 +1017,6 @@ def fx_codegen_and_compile(
                             disable = f"{disable} Found from {stack_trace}\n"
                         V.graph.disable_cudagraphs_reason = disable
 
-                if V.aot_compilation is True:
-                    return compiled_fn
-
                 if cudagraphs and not V.graph.disable_cudagraphs_reason:
                     from torch._inductor.cudagraph_utils import (
                         check_lowering_disable_cudagraph,
@@ -1028,6 +1025,9 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason = (
                         check_lowering_disable_cudagraph(V.graph.device_node_mapping)
                     )
+
+                if V.aot_compilation is True:
+                    return compiled_fn
 
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
