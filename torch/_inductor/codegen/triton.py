@@ -27,6 +27,7 @@ from typing import (
 )
 
 import sympy
+from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
@@ -504,30 +505,30 @@ class TritonPrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
-        return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
+        s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
+        return f"{s}.to(tl.float64)"
 
     def _print_PythonMod(self, expr):
         quot, div = expr.args
+        if quot.is_nonnegative and div.is_nonnegative:
+            return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
         quot_s = self._print(quot)
         div_s = self._print(div)
-        if quot.is_nonnegative and div.is_nonnegative:
-            return f"{self.paren(quot_s)} % {self.paren(div_s)}"
         return f"triton_helpers.remainder_integer({quot_s}, {div_s})"
 
     def _print_FloorDiv(self, expr):
         assert expr.is_integer
         quot, div = expr.args
+        if quot.is_nonnegative and div.is_nonnegative:
+            return self.stringify(expr.args, " // ", PRECEDENCE["Atom"] - 0.5)
         quot_s = self._print(quot)
         div_s = self._print(div)
-        if quot.is_nonnegative and div.is_nonnegative:
-            return f"({self.paren(quot_s)} // {self.paren(div_s)})"
         return f"triton_helpers.div_floor_integer({quot_s},  {div_s})"
 
     # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
     # precision algorithm, which we would need to replicate here
     def _print_IntTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+        return self.stringify(expr.args, " / ", PRECEDENCE["Atom"] - 0.5)
 
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
@@ -646,7 +647,9 @@ class TritonPrinter(PythonPrinter):
             raise ValueError(
                 f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
             )
-        return f"libdevice.nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits}"
+
+        number_str = self.parenthesize(number, PRECEDENCE["Mul"])
+        return f"libdevice.nearbyint(1e{ndigits} * {number_str}) * 1e{-ndigits}"
 
 
 texpr = TritonPrinter().doprint
@@ -3179,7 +3182,8 @@ class TritonKernel(SIMDKernel):
 
         return code.getvalue()
 
-    def _get_persistent_RBLOCK(self, rnumel):
+    @staticmethod
+    def _get_persistent_RBLOCK(rnumel):
         rnumel = V.graph.sizevars.simplify(rnumel)
         if isinstance(rnumel, (sympy.Integer, int)):
             val = int(rnumel)
@@ -3187,9 +3191,18 @@ class TritonKernel(SIMDKernel):
         else:
             val = 128
             while not V.graph.sizevars.statically_known_leq(rnumel, val):
-                assert val <= 16 * 1024, f"Failed to find static RBLOCK for {rnumel}"
+                if val > 16 * 1024:
+                    raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
                 val *= 2
         return val
+
+    @staticmethod
+    def has_persistent_RBLOCK(rnumel):
+        try:
+            TritonKernel._get_persistent_RBLOCK(rnumel)
+            return True
+        except ValueError:
+            return False
 
     def codegen_static_numels(self, code):
         """
@@ -3622,6 +3635,11 @@ class TritonScheduling(SIMDScheduling):
         if kernel_features.contains_op("sort"):
             kernel_kwargs["override_persistent_reduction"] = True
             kernel_kwargs["override_cooperative_reduction"] = False
+
+        if not TritonKernel.has_persistent_RBLOCK(kernel_features.reduction_numel):
+            # Cannot use persistent reduction with unknown dynamic rnumel
+            assert not kernel_kwargs.get("override_persistent_reduction")
+            kernel_kwargs["override_persistent_reduction"] = False
 
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
