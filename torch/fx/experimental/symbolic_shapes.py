@@ -4036,6 +4036,17 @@ class ShapeEnv:
             maybe_extra_debug,
             stack_info=is_debug,
         )
+        trace_structured(
+            "create_unbacked_symbol",
+            metadata_fn=lambda: {
+                "symbol": str(symbol),
+                "vr": f"[{vr.lower}, {vr.upper}]",
+                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+            },
+        )
 
     @record_shapeenv_event()
     def create_unbacked_symfloat(self) -> SymFloat:
@@ -4344,6 +4355,21 @@ class ShapeEnv:
                 maybe_more_info,
                 maybe_extra_debug,
                 stack_info=is_debug,
+            )
+            trace_structured(
+                "create_symbol",
+                metadata_fn=lambda: {
+                    "symbol": str(sympy_expr),
+                    "val": repr(val),
+                    "vr": range_str,
+                    "source": source.name(),
+                    "user_stack": structured.from_traceback(
+                        TracingContext.extract_stack()
+                    ),
+                    "stack": structured.from_traceback(
+                        CapturedTraceback.extract(skip=1).summary()
+                    ),
+                },
             )
 
             self.counter["create_symbol"] += 1
@@ -6099,6 +6125,16 @@ class ShapeEnv:
                     for k, v in self.source_to_var.items()
                     if v in g.free_symbols
                 },
+            },
+        )
+        trace_structured(
+            "guard_added_fast",
+            metadata_fn=lambda: {
+                "expr": str(g),
+                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
             },
         )
         if self.log.isEnabledFor(logging.INFO):
