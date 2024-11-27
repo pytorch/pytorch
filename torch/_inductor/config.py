@@ -1353,7 +1353,7 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 class test_configs:
     force_extern_kernel_in_multi_template = False
 
-    runtime_triton_dtype_assert = True
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:

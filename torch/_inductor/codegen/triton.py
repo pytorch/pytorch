@@ -2334,10 +2334,10 @@ class TritonKernel(SIMDKernel):
                     # to
                     #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
                     # which is needed because tl.reduce doesn't support tl.int1
-                    accumulator = f"{accumulator}.to(tl.int8)"
+                    accumulator_casted_str = f"{accumulator}.to(tl.int8)"
                     result_type = triton_compute_type(dtype)
                     self.post_loop_combine.writeline(
-                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
+                        f"{result_var} = {final_reduction(accumulator_casted_str)}.to({result_type})"
                     )
                 else:
                     self.post_loop_combine.writeline(

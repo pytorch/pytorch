@@ -84,6 +84,16 @@ class TestCase(InductorTestCase):
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(), out)
 
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("triton.persistent_reductions", False)
+    def test_any(self):
+        def fn(x):
+            return torch.any(x)
+
+        x = torch.rand([40], device="cuda").to(torch.bool)
+        out, code = run_and_get_code(torch.compile(fn), x)
+        self.assertEqual(fn(x), out)
+
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
 
