@@ -29,7 +29,11 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_w = 1;
   int64_t nbatch = 1;
 
-  if (input.ndimension() == 3) {
+  int ndim = input.dim();
+  TORCH_CHECK(ndim == 2 || ndim == 3,
+              "reflection_pad1d(): Expected 2D or 3D tensor, but got: ", input.sizes());
+
+  if (ndim == 3) {
     nbatch = input.size(0);
     dim_w++;
     dim_plane++;
@@ -64,7 +68,7 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
       ") is too small. Calculated output W: ",
       output_w);
 
-  if (input.ndimension() == 2) {
+  if (ndim == 2) {
     set_output_raw_strided(0, {nplane, output_w}, {}, input.options());
   } else {
     set_output_raw_strided(0, {nbatch, nplane, output_w}, {}, input.options());
@@ -114,6 +118,10 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_h = 2;
   int64_t dim_d = 1;
   int64_t dim_plane = 0;
+
+  int ndim = input.dim();
+  TORCH_CHECK(ndim == 4 || ndim == 5,
+              "reflection_pad3d(): Expected 4D or 5D tensor, but got: ", input.sizes());
 
   at::native::padding::check_valid_input<3>(input, padding);
 
@@ -216,9 +224,12 @@ void reflection_pad2d_out_template(
   int dim_slices = 0;
   int64_t nbatch = 1;
 
+  int ndim = input.dim();
+  TORCH_CHECK(ndim == 3 || ndim == 4,
+              "reflection_pad2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
+
   at::native::padding::check_valid_input<2>(input, padding);
 
-  int ndim = input.dim();
   if (ndim == 4) {
     nbatch = input.size(0);
     dim_w++;
