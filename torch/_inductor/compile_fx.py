@@ -6,6 +6,7 @@ import io
 import itertools
 import json
 import logging
+import pathlib
 import sys
 import time
 import warnings
@@ -918,7 +919,9 @@ def fx_codegen_and_compile(
             const_graph = None
             const_code = None
 
-            if aot_mode and config.aot_inductor.use_runtime_constant_folding:
+            if (
+                aot_mode or config.aoti_wrapper
+            ) and config.aot_inductor.use_runtime_constant_folding:
                 const_gm, const_output_index = split_const_gm(gm)
 
                 const_graph = GraphLowering(
@@ -927,7 +930,7 @@ def fx_codegen_and_compile(
                     shape_env=shape_env,
                     graph_id=graph_id,
                     cpp_wrapper=cpp_wrapper,
-                    aot_mode=aot_mode,
+                    aot_mode=aot_mode or config.aoti_wrapper,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
                     is_backward=is_backward,
@@ -948,7 +951,7 @@ def fx_codegen_and_compile(
                 shape_env=shape_env,
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
-                aot_mode=aot_mode,
+                aot_mode=aot_mode or config.aoti_wrapper,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
                 is_backward=is_backward,
@@ -988,7 +991,7 @@ def fx_codegen_and_compile(
                 with dynamo_timed(
                     "GraphLowering.compile_to_fn", log_pt2_compile_event=True
                 ):
-                    if graph.aot_mode:
+                    if graph.aot_mode or config.aoti_wrapper:
                         from .codecache import AotCodeCompiler
 
                         assert graph.cpp_wrapper, "AOT mode only supports C++ wrapper"
@@ -1061,9 +1064,20 @@ def fx_codegen_and_compile(
                             disable = f"{disable} Found from {stack_trace}\n"
                         V.graph.disable_cudagraphs_reason = disable
 
-                if V.aot_compilation is True:
-                    assert isinstance(compiled_fn, str)
-                    return CompiledAOTI(compiled_fn)
+                if isinstance(compiled_fn, (str, list)):
+                    # TODO: unconditionally packaging this is not always
+                    # desirable
+                    # TODO: probably should live in codecache, maybe...
+                    from torch._inductor.codecache import get_hash, get_path
+                    from torch._inductor.package import package_aoti
+
+                    key = get_hash(":".join(compiled_fn), "", "code")
+                    basename, subdir, path = get_path(key, "pt2", "")
+                    pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+                    output_code_log.debug("Package written to %s", path)
+                    # TODO: This write isn't atomic
+                    # TODO: Not clear if non cuda:0 device handled correctly
+                    return CompiledAOTI(package_aoti(path, compiled_fn))
 
                 # TODO: Hoist this above V.aot_compilation
                 if cudagraphs and not V.graph.disable_cudagraphs_reason:

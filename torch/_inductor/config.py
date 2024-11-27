@@ -107,6 +107,10 @@ triton_kernel_default_layout_constraint = "needs_fixed_stride_order"
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# use CompiledAOTI (implies cpp wrapper) instead of python wrapper
+# TODO: remove me
+aoti_wrapper = False
+
 c_shim_version = os.environ.get("TORCHINDUCTOR_C_SHIM_VERSION", "2")
 
 # dead code elimination

@@ -1162,7 +1162,7 @@ class FxGraphCache:
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
-        graph = None
+        graph: Optional[OutputCode] = None
         cache_info: Dict[str, Any] = dict()
 
         for candidate in iterate_over_candidates():
@@ -1192,56 +1192,60 @@ class FxGraphCache:
         if graph is None:
             return None, cache_info
 
-        # See _save_graph(); we don't store the callable in the cache entry so
-        # recreate it here from the PyCodeCache disk cache.
-        artifact_path = get_path(graph.cache_key, "py")[2]
-        code = graph.source_code
-        if not os.path.exists(artifact_path):
-            counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            cpp_pp = cpp_prefix_path()
-            if os.path.basename(cpp_pp) in code:
-                if cpp_pp in code:
-                    # Great the name is correct
-                    pass
-                else:
-                    # Old dir name is included, replace it
-                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
-                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+        from .output_code import CompiledFxGraph
 
-            write_atomic(artifact_path, code, make_dirs=True)
+        # TODO: Do better here
+        if isinstance(graph, CompiledFxGraph):
+            # See _save_graph(); we don't store the callable in the cache entry so
+            # recreate it here from the PyCodeCache disk cache.
+            artifact_path = get_path(graph.cache_key, "py")[2]
+            code = graph.source_code
+            if not os.path.exists(artifact_path):
+                counters["inductor"]["fxgraph_lookup_write_file"] += 1
+                Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+                cpp_pp = cpp_prefix_path()
+                if os.path.basename(cpp_pp) in code:
+                    if cpp_pp in code:
+                        # Great the name is correct
+                        pass
+                    else:
+                        # Old dir name is included, replace it
+                        pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                        code = re.sub(pattern, f'#include "{cpp_pp}"', code)
 
-        if bundle := graph._triton_bundle:
-            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
-            if (meta := triton_bundler_meta) is not None:
-                cache_info["triton_bundler_meta"] = str(meta)
-                logger = get_chromium_event_logger()
-                if "inductor_compile" in logger.get_stack():
-                    # TODO: Clean up autograd cache integration
-                    logger.add_event_data(
-                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                    )
-                if len(meta.cached_kernel_names) > 0:
-                    get_metrics_context().increment("num_triton_bundles", 1)
+                write_atomic(artifact_path, code, make_dirs=True)
 
-        inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+            if bundle := graph._triton_bundle:
+                triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+                if (meta := triton_bundler_meta) is not None:
+                    cache_info["triton_bundler_meta"] = str(meta)
+                    logger = get_chromium_event_logger()
+                    if "inductor_compile" in logger.get_stack():
+                        # TODO: Clean up autograd cache integration
+                        logger.add_event_data(
+                            "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                        )
+                    if len(meta.cached_kernel_names) > 0:
+                        get_metrics_context().increment("num_triton_bundles", 1)
 
-        try:
-            with dynamo_timed(
-                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
-            ):
-                graph.current_callable = PyCodeCache.load_by_key_path(
-                    graph.cache_key,
-                    artifact_path,
-                    graph.cache_linemap,
-                    graph.get_constants(gm),
-                ).call
-        except OSError:
-            # Not expected, but in case the PyCodeCache entry is removed from
-            # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", artifact_path)
-            return None, cache_info
+            inductor_meta = autotune_cache.inductor_meta_from_config()
+            AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
+            try:
+                with dynamo_timed(
+                    "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
+                ):
+                    graph.current_callable = PyCodeCache.load_by_key_path(
+                        graph.cache_key,
+                        artifact_path,
+                        graph.cache_linemap,
+                        graph.get_constants(gm),
+                    ).call
+            except OSError:
+                # Not expected, but in case the PyCodeCache entry is removed from
+                # underneath us, treat it as a cache miss and recompile.
+                log.error("Failed to load cached artifact: %s", artifact_path)
+                return None, cache_info
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1256,20 +1260,22 @@ class FxGraphCache:
         # Increment the cached metrics/counters by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
-        metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
-        counters["inductor"] += graph.counter_deltas
+        # TODO: This shoujld increment all the time
+        if isinstance(graph, CompiledFxGraph):
+            metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+            counters["inductor"] += graph.counter_deltas
 
-        from .graph import GraphLowering
+            from .graph import GraphLowering
 
-        GraphLowering.save_output_code(code)
-        output_code_log.debug("Output code written to: %s", artifact_path)
-        output_code_log.debug("Output code: \n%s", code)
-        # On cache hit, use artifact path as filename
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": artifact_path},
-            payload_fn=lambda: code,
-        )
+            GraphLowering.save_output_code(code)
+            output_code_log.debug("Output code written to: %s", artifact_path)
+            output_code_log.debug("Output code: \n%s", code)
+            # On cache hit, use artifact path as filename
+            trace_structured(
+                "inductor_output_code",
+                lambda: {"filename": artifact_path},
+                payload_fn=lambda: code,
+            )
         return graph, cache_info
 
     @staticmethod
@@ -1331,17 +1337,13 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
-        from .compile_fx import CompiledFxGraph
 
-        assert isinstance(
-            compiled_graph, CompiledFxGraph
-        ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
         # TODO: This could be better if we're ever able to serialize compiled
         # models to disk.
-        disk_compiled_graph.current_callable = None
+        disk_compiled_graph.clear_uncacheable()
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
