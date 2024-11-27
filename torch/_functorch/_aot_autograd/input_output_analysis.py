@@ -424,7 +424,11 @@ are aliased and mutated, and they should be dynamic, please file an issue.
     symbolic = any(
         isinstance(x, torch.SymInt)
         for i in aliased_input_indices
-        for x in [*fwd_inputs[i].shape, *fwd_inputs[i].stride(), fwd_inputs[i].storage_offset()]
+        for x in [
+            *fwd_inputs[i].shape,
+            *fwd_inputs[i].stride(),
+            fwd_inputs[i].storage_offset(),
+        ]
     )
 
     with maybe_suppress_guards():
