@@ -6,12 +6,18 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
-from torch.distributed.tensor._random import is_rng_supported_mesh, manual_seed
+from torch.distributed.tensor._random import (
+    is_rng_supported_mesh,
+    manual_seed,
+    OffsetBasedRNGTracker,
+)
+from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -100,6 +106,102 @@ class DistTensorRandomOpTest(DTensorTestBase):
         self.assertEqual(1234, random._rng_tracker.get_seed("parallel-rng"))
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_tp_model_meta_init(self):
+        # initialize the 1-d device mesh for TP
+        tp_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+
+        # model meta init
+        with torch.device("meta"):
+            model = torch.nn.Linear(self.world_size, self.world_size, bias=False)
+            self.assertEqual(model.weight.device, torch.device("meta"))
+            parallelize_module(model, tp_mesh, ColwiseParallel())
+            if random._rng_tracker is not None:
+                random._rng_tracker.distribute_region_enabled = True
+
+            self.assertEqual(model.weight.device, torch.device("meta"))
+
+        # actual initialization
+        device = torch.device("cuda", torch.cuda.current_device())
+        model.to_empty(device=device)
+        model.reset_parameters()
+        self.assertTrue(
+            random._rng_tracker is not None
+            and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
+        )
+        self.assertEqual(model.weight.device, device)
+        assert isinstance(model.weight, DTensor)
+
+        # gather all the shards to compare initialization results
+        WORLD = torch.distributed.group.WORLD
+        assert WORLD is not None
+        weight_local = model.weight.to_local()
+        weight_gather = funcol.all_gather_tensor(
+            weight_local,
+            gather_dim=0,
+            group=WORLD,
+        )
+
+        # verify the weights are initialized differently on all ranks
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                self.assertNotEqual(
+                    weight_local,
+                    weight_gather[other_rank : other_rank + 1, :],
+                )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fsdp_tp_model_meta_init(self):
+        # initialize the 2-d device mesh
+        global_mesh = init_device_mesh(
+            self.device_type,
+            mesh_shape=(self.world_size // 2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+
+        # model meta init
+        with torch.device("meta"):
+            model = torch.nn.Linear(self.world_size, self.world_size, bias=False)
+            self.assertEqual(model.weight.device, torch.device("meta"))
+            parallelize_module(model, tp_mesh, ColwiseParallel())
+            if random._rng_tracker is not None:
+                random._rng_tracker.distribute_region_enabled = True
+
+            fully_shard(model, mesh=dp_mesh)
+            self.assertEqual(model.weight.device, torch.device("meta"))
+
+        # actual initialization
+        device = torch.device("cuda", torch.cuda.current_device())
+        model.to_empty(device=device)
+        model.reset_parameters()
+        self.assertTrue(
+            random._rng_tracker is not None
+            and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
+        )
+        self.assertEqual(model.weight.device, device)
+        assert isinstance(model.weight, DTensor)
+
+        # gather all the shards to compare initialization results
+        WORLD = torch.distributed.group.WORLD
+        assert WORLD is not None
+        weight_local = model.weight.to_local()
+        weight_gather = funcol.all_gather_tensor(
+            weight_local,
+            gather_dim=0,
+            group=WORLD,
+        )
+
+        # verify the weights are initialized differently on all ranks
+        for other_rank in range(self.world_size):
+            if self.rank != other_rank:
+                self.assertNotEqual(
+                    weight_local,
+                    weight_gather[other_rank : other_rank + 1, :],
+                )
 
     @with_comms
     @skip_unless_torch_gpu
