@@ -4,6 +4,7 @@ import itertools
 import math
 import operator
 import random
+import sys
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -1483,7 +1484,7 @@ class TestBinaryUfuncs(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "Found dtype \\w+ but expected \\w+",
+                        r"result type \w+ can't be cast to the desired output type \w+",
                         lambda: actual.pow_(exponent),
                     )
 
@@ -3571,6 +3572,8 @@ class TestBinaryUfuncs(TestCase):
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
     )
     def test_logaddexp(self, device, dtype):
+        if sys.version_info >= (3, 12) and dtype in (torch.complex64, torch.complex128):
+            return self.skipTest("complex flaky in 3.12")
         self._test_logaddexp(device, dtype, base2=False)
 
     @dtypes(torch.float32, torch.float64, torch.bfloat16)

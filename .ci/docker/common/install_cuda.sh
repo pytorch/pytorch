@@ -3,7 +3,7 @@
 set -ex
 
 NCCL_VERSION=v2.21.5-1
-CUDNN_VERSION=9.1.0.70
+CUDNN_VERSION=9.5.1.17
 
 function install_cusparselt_040 {
     # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
@@ -39,6 +39,7 @@ function install_cusparselt_062 {
 }
 
 function install_118 {
+    CUDNN_VERSION=9.1.0.70
     echo "Installing CUDA 11.8 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.4.0"
     rm -rf /usr/local/cuda-11.8 /usr/local/cuda
     # install CUDA 11.8.0 in the same container
@@ -105,6 +106,7 @@ function install_121 {
 }
 
 function install_124 {
+  CUDNN_VERSION=9.1.0.70
   echo "Installing CUDA 12.4.1 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
   rm -rf /usr/local/cuda-12.4 /usr/local/cuda
   # install CUDA 12.4.1 in the same container
@@ -138,13 +140,13 @@ function install_124 {
 }
 
 function install_126 {
-  echo "Installing CUDA 12.6.2 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
+  echo "Installing CUDA 12.6.3 and cuDNN ${CUDNN_VERSION} and NCCL ${NCCL_VERSION} and cuSparseLt-0.6.2"
   rm -rf /usr/local/cuda-12.6 /usr/local/cuda
-  # install CUDA 12.6.2 in the same container
-  wget -q https://developer.download.nvidia.com/compute/cuda/12.6.2/local_installers/cuda_12.6.2_560.35.03_linux.run
-  chmod +x cuda_12.6.2_560.35.03_linux.run
-  ./cuda_12.6.2_560.35.03_linux.run --toolkit --silent
-  rm -f cuda_12.6.2_560.35.03_linux.run
+  # install CUDA 12.6.3 in the same container
+  wget -q https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_560.35.05_linux.run
+  chmod +x cuda_12.6.3_560.35.05_linux.run
+  ./cuda_12.6.3_560.35.05_linux.run --toolkit --silent
+  rm -f cuda_12.6.3_560.35.05_linux.run
   rm -f /usr/local/cuda && ln -s /usr/local/cuda-12.6 /usr/local/cuda
 
   # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement

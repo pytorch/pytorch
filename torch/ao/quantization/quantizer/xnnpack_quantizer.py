@@ -93,10 +93,10 @@ def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
         ops = _supported_symmetric_quantized_operators()
-        for pattern_list in ops.values():
-            supported_config_and_operators.append(
-                OperatorConfig(quantization_config, pattern_list)
-            )
+        supported_config_and_operators.extend(
+            OperatorConfig(quantization_config, pattern_list)
+            for pattern_list in ops.values()
+        )
     return copy.deepcopy(supported_config_and_operators)
 
 
