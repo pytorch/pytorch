@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-A Python script that monitors the system-level usage of resource during the pytorch tests.
-Data collected: CPU, memory, and GPU utilization.
+A Python script that logging the system-level utilization usage.
+Data collected: CPU, memory, disk usage, GPU memeory utilzation, and GPU utilization if available.
 
 Usage:
     python3 monitor.py --log-interval 10
