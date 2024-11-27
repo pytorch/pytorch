@@ -435,7 +435,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
             user_stack_trace,
-            exc_info=exc_info,
         )
     else:
         # This log line MUST not contain the string "Graph break in user code",
