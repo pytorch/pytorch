@@ -2490,6 +2490,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.Tensor([]),))
 
+    @requires_multigpu()
+    def test_linspace4(self):
+        def fn(x):
+            return torch.linspace(0, 2, 0, device=f"{GPU_TYPE}:1")
+
+        self.common(fn, (torch.Tensor([]),))
+
     def test_tensor1(self):
         def fn(x):
             return torch.tensor([1], device=x.device) + x, torch.tensor(
