@@ -2,9 +2,9 @@
 #ifdef USE_C10D_NCCL
 
 #include <cuda_runtime.h>
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <mutex>
-#include <nlohmann/json.hpp>
 #include <vector>
 
 #include <c10/util/WaitCounter.h>

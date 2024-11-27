@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
-
 namespace c10d {
 
 #define DEFINE_CONSTANT(name, value) \
@@ -59,7 +58,6 @@ DEFINE_CONSTANT(scheduled_state, "scheduled")
 DEFINE_CONSTANT(started_state, "started")
 #undef DEFINE_CONSTANT
 
-
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constrains we set for the debug info writer:
 // 1. The writer should only be registered once.
@@ -88,7 +86,6 @@ class TORCH_API DebugInfoWriter {
   static std::unique_ptr<DebugInfoWriter> writer_;
   static std::atomic<bool> hasWriterRegistered_;
 };
-
 
 /* Helper used by work::getDuration() and nccl flight recorder */
 float getDurationFromEvent(
