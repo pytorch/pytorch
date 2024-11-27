@@ -30,7 +30,10 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        torch.export.export(self.m, (self.input,))
+        # enable_cpp_symbolic_shape_guards has impact on this benchmark
+        # Keep using False value for consistency.
+        with torch._dynamo.config.patch("enable_cpp_symbolic_shape_guards", False):
+            torch.export.export(self.m, (self.input,))
 
 
 def main():
