@@ -357,7 +357,7 @@ def get_x86_inductor_linear_dynamic_fp16_config():
     )
 
     weight_quantization_spec = QuantizationSpec(
-        dtype=torch.half,
+        dtype=torch.float16,
         qscheme=torch.per_tensor_symmetric,
         is_dynamic=False,
         observer_or_fake_quant_ctr=PlaceholderObserver,
