@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 2)
+SCHEMA_VERSION = (8, 1)
 TREESPEC_VERSION = 1
 
 
@@ -77,11 +77,6 @@ class SymInt(_Union):
     as_expr: SymExpr
     as_int: int
 
-@dataclass(repr=False)
-class SymFloat(_Union):
-    as_expr: SymExpr
-    as_int: float
-
 
 @dataclass(repr=False)
 class SymBool(_Union):
@@ -111,16 +106,6 @@ class SymIntArgument(_Union):
     as_name: str
     as_int: int
 
-# In most cases we will use the "as_name" field to store arguments which are
-# SymFloats.
-# The "as_float" field is used in the case where we have a list containing a mix
-# of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
-# be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
-# to the "as_float" field.
-@dataclass(repr=False)
-class SymFloatArgument(_Union):
-    as_name: str
-    as_float: float
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
@@ -180,8 +165,6 @@ class Argument(_Union):
     as_strings: List[str]
     as_sym_int: SymIntArgument
     as_sym_ints: List[SymIntArgument]
-    as_sym_float: SymFloatArgument
-    as_sym_floats: List[SymFloatArgument]
     as_scalar_type: ScalarType
     as_memory_format: MemoryFormat
     as_layout: Layout
@@ -225,7 +208,6 @@ class Graph:
     # list.
     is_single_tensor_return: bool = False
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
-    sym_float_values: Dict[str, SymFloat] = field(default_factory=dict)
 
 
 @dataclass

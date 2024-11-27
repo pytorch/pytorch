@@ -20,7 +20,6 @@ __all__ = [
     "OutputKind",
     "OutputSpec",
     "SymIntArgument",
-    "SymFloatArgument",
     "SymBoolArgument",
     "TensorArgument",
 ]
@@ -38,11 +37,6 @@ class TokenArgument:
 
 @dataclasses.dataclass
 class SymIntArgument:
-    name: str
-
-
-@dataclasses.dataclass
-class SymFloatArgument:
     name: str
 
 
@@ -67,7 +61,6 @@ class ConstantArgument:
 ArgumentSpec = Union[
     TensorArgument,
     SymIntArgument,
-    SymFloatArgument,
     SymBoolArgument,
     ConstantArgument,
     CustomObjArgument,
@@ -101,7 +94,6 @@ class InputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
-                SymFloatArgument,
                 SymBoolArgument,
                 ConstantArgument,
                 CustomObjArgument,
@@ -132,7 +124,6 @@ class OutputSpec:
             (
                 TensorArgument,
                 SymIntArgument,
-                SymFloatArgument,
                 SymBoolArgument,
                 ConstantArgument,
                 TokenArgument,
@@ -282,13 +273,7 @@ class ExportGraphSignature:
 
             if isinstance(
                 s.arg,
-                (
-                    TensorArgument,
-                    SymIntArgument,
-                    SymFloatArgument,
-                    SymBoolArgument,
-                    CustomObjArgument,
-                ),
+                (TensorArgument, SymIntArgument, SymBoolArgument, CustomObjArgument),
             ):
                 user_inputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
@@ -309,10 +294,7 @@ class ExportGraphSignature:
             ]:
                 continue
 
-            if isinstance(
-                s.arg,
-                (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument),
-            ):
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)
@@ -462,7 +444,6 @@ class ExportGraphSignature:
         arg_types = (
             TensorArgument,
             SymIntArgument,
-            SymFloatArgument,
             SymBoolArgument,
             CustomObjArgument,
             TokenArgument,
@@ -497,7 +478,7 @@ def _immutable_dict(items):
 
 
 def _make_argument_spec(node, token_names) -> ArgumentSpec:
-    from torch import ScriptObject, SymBool, SymFloat, SymInt
+    from torch import ScriptObject, SymBool, SymInt
     from torch._library.fake_class_registry import FakeScriptObject
     from torch._subclasses.fake_tensor import FakeTensor
 
@@ -515,8 +496,6 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
         return TensorArgument(name=node.name)
     elif isinstance(val, SymInt):
         return SymIntArgument(name=node.name)
-    elif isinstance(val, SymFloat):
-        return SymFloatArgument(name=node.name)
     elif isinstance(val, SymBool):
         return SymBoolArgument(name=node.name)
     elif isinstance(val, ScriptObject):
