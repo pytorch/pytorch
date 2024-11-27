@@ -175,7 +175,6 @@ class UsageLogger:
             # Iterate over the available GPUs
             for gpu_handle in self._gpu_handles:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
-                # python lib source code: https://github.com/gpuopenanalytics/pynvml/blob/master/pynvml/nvml.py
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
                 gpu_processes = self._get_per_process_gpu_info(gpu_handle)
