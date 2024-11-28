@@ -25,7 +25,7 @@ void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-      *(scalar_t*)dst = *(scalar_t*)(src + offset);
+      *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
     });
   });
 }
@@ -174,12 +174,12 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
           // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
           // this needs to be thread-safe.
           cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-            *(scalar_t*)(dst + offset) += *(scalar_t*)src;
+            *(scalar_t*)(dst + offset) += c10::load(reinterpret_cast<scalar_t*>(src));
           }, /*serial_execution=*/true);
         }
       } else {
         cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset) = c10::load(reinterpret_cast<scalar_t*>(src));
         }, /*serial_execution=*/is_deterministic);
       }
     }),
@@ -270,7 +270,7 @@ void index_copy_kernel(
               "index_copy_(): index ", idx, " is out of bounds for dimension ",
               dim, " with size ", self_dim_size);
 
-        self_data[idx * self_dim_stride] = *source_data;
+        self_data[idx * self_dim_stride] = c10::load(source_data);
 
         self_data_bytes += strides[0];
         index_data_bytes += strides[1];
@@ -289,7 +289,7 @@ void index_copy_kernel(
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
-        self_data[idx * self_dim_stride] = *source_data;
+        self_data[idx * self_dim_stride] = c10::load(source_data);
 
         self_data_bytes += strides[0];
         source_data_bytes += strides[2];
@@ -320,7 +320,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
     char* dst = data[0];
     char* mask = data[1];
     for (const auto i : c10::irange(n)) {
-      bool mask_value = *reinterpret_cast<bool*>(mask + strides[1] * i);
+      bool mask_value = c10::load(reinterpret_cast<bool*>(mask + strides[1] * i));
 
       if (mask_value) {
         *(scalar_t*)(dst + strides[0] * i) = value;
@@ -353,10 +353,11 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
     char* mask = data[1];
     const int64_t mask_stride = strides[1];
     for (const auto i : c10::irange(n)) {
-      auto mask_value = *reinterpret_cast<bool*>(mask + mask_stride * i);
+      auto mask_value = c10::load(reinterpret_cast<bool*>(mask + mask_stride * i));
+
       if (mask_value) {
         TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
-        *(scalar_t*)(dst + dst_stride * i) = *(source_ptr);
+        *(scalar_t*)(dst + dst_stride * i) = c10::load(source_ptr);
         source_ptr++;
         source_cntr++;
       }
@@ -387,7 +388,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* src = data[1];
     char* mask = data[2];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
+      mask_t mask_value = c10::load((mask_t*)(mask + strides[2] * i));
       if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
@@ -425,7 +426,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* mask = data[2];
     char* mask_prefix_sum = data[3];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
+      mask_t mask_value = c10::load((mask_t*)(mask + strides[2] * i));
       if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
