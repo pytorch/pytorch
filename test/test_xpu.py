@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
     onlyXPU,
     OpDTypes,
     ops,
-    skipXPUif,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
