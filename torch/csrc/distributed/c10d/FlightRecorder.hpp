@@ -190,9 +190,6 @@ struct FlightRecorder {
       std::vector<uint64_t> ranks);
 
   void markStart(std::optional<size_t> id);
-  void markEnd(
-      std::optional<size_t> id,
-      std::optional<float> duration = std::nullopt);
 
   std::vector<Entry> dump_entries();
 
@@ -201,16 +198,13 @@ struct FlightRecorder {
   std::optional<Entry*> getEntry(std::optional<size_t> id);
 
   /*
-  Mark an Event as completed and free its events.
+  Mark an Event as completed and record its duration, if provided.
   This is called by the watchdog thread, and is asynchronous from the
   perspective of the main thread.
-  compute_duration defaults to true since retire_id is only called in the
-  watchdog thread, which is currently a place we call cuda APIs which may hang,
-  but care should be taken to avoid computing duration in any function that must
-  never hang. (timing must also be enabled for compute_duration - see
-  TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id);
+  void retire_id(
+      std::optional<size_t> id,
+      std::optional<float> duration = std::nullopt);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,

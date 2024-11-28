@@ -266,17 +266,6 @@ void FlightRecorder::markStart(std::optional<size_t> id) {
   (*entry)->time_discovered_started_ = c10::getTime();
 }
 
-void FlightRecorder::markEnd(
-    std::optional<size_t> id,
-    std::optional<float> duration) {
-  auto entry = getEntry(id);
-  if (!entry)
-    return;
-  std::lock_guard<std::mutex> guard(mutex_);
-  (*entry)->time_discovered_completed_ = c10::getTime();
-  (*entry)->duration_ = duration;
-}
-
 std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
@@ -309,11 +298,15 @@ std::optional<FlightRecorder::Entry*> FlightRecorder::getEntry(
   }
 }
 
-void FlightRecorder::retire_id(std::optional<size_t> id) {
+void FlightRecorder::retire_id(
+    std::optional<size_t> id,
+    std::optional<float> duration) {
   auto entry = getEntry(id);
   if (!entry)
     return;
   std::lock_guard<std::mutex> guard(mutex_);
+  (*entry)->time_discovered_completed_ = c10::getTime();
+  (*entry)->duration_ = duration;
   (*entry)->retired_ = true;
 }
 

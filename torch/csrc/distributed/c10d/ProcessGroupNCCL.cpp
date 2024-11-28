@@ -2118,7 +2118,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.isCompleted()) {
         // Work status logging for desync debug
         desyncDebugger_.logWorkEnd(work);
-        FlightRecorder::get()->markEnd(work.trace_id_, work.getDuration());
 
         if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
             !work.futureWorkResult_->completed()) {
@@ -2139,7 +2138,13 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastCompletedNumelOut = work.numelOut_;
 
         // If the work is completed, we can retire the trace id.
-        FlightRecorder::get()->retire_id(work.trace_id_);
+        std::optional<float> duration = std::nullopt;
+        // Timing must be enabled to compute duration. See
+        // `TORCH_NCCL_ENABLE_TIMING`
+        if (work.timingEnabled_) {
+          duration = work.getDuration();
+        }
+        FlightRecorder::get()->retire_id(work.trace_id_, duration);
 
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
