@@ -50,8 +50,8 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
     from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.utils import InputType
 
 
