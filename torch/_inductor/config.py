@@ -21,7 +21,10 @@ def bundled_autotune_remote_cache_default() -> Optional[bool]:
 
 
 def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
-    return get_tristate_env("TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE")
+    return get_tristate_env(
+        "TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE",
+        True if not is_fbcode() else None,
+    )
 
 
 # Enable auto_functionalized_v2 (enabled by default)
@@ -618,12 +621,21 @@ def decide_compile_threads() -> int:
     2. Set to 1 if it's win32 platform
     3. decide by the number of CPU cores
     """
+    import logging
+
+    # Defined locally so install_config_module doesn't try to parse
+    # as a config option.
+    log = logging.getLogger(__name__)
+
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
-        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+        compile_threads = int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+        log.info("compile_threads set to %d via env", compile_threads)
     elif sys.platform == "win32":
-        return 1
+        compile_threads = 1
+        log.info("compile_threads set to 1 for win32")
     elif is_fbcode() and not parallel_compile_enabled_internally():
-        return 1
+        compile_threads = 1
+        log.info("compile_threads set to 1 in fbcode")
     else:
         cpu_count = (
             len(os.sched_getaffinity(0))
@@ -631,7 +643,10 @@ def decide_compile_threads() -> int:
             else os.cpu_count()
         )
         assert cpu_count
-        return min(32, cpu_count)
+        compile_threads = min(32, cpu_count)
+        log.info("compile_threads set to %d", compile_threads)
+
+    return compile_threads
 
 
 # TODO: Set directly after internal rollout.
@@ -783,6 +798,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
+# When True, complex_memory_overlap always reports True
+always_complex_memory_overlap_TESTING_ONLY: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -882,6 +900,12 @@ class cpp:
 
     # Whether to enable masked vectorization for the tail_loop.
     enable_loop_tail_vec = True
+
+    # Whether to enable concat linear for cpu device
+    # Currently concat linear on CPU not always have benefit, depends on linear'shape or
+    # computing resource. We set this default to False to avoid regressions. User and
+    # enable this feature by their need.
+    enable_concat_linear = False
 
 
 # config specific to codegen/triton.py
@@ -1142,7 +1166,7 @@ class cuda:
     # enable generation of inline standalone runner in CUDA CPP generated code
     # which allows to compile the generated code into a standalone executable.
     generate_test_runner: bool = (
-        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern
@@ -1323,6 +1347,8 @@ _cache_config_ignore_prefix = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    # tests assume that changes here don't invalidate cache
+    "always_complex_memory_overlap_TESTING_ONLY",
 ]
 
 # External callable for matmul tuning candidates
@@ -1331,6 +1357,8 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class test_configs:
     force_extern_kernel_in_multi_template = False
+
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:

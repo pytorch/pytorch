@@ -7,6 +7,7 @@ import functools
 import hashlib
 import importlib
 import io
+import itertools
 import json
 import logging
 import os
@@ -35,22 +36,25 @@ from typing import (
     Any,
     Callable,
     cast,
-    Counter,
     Dict,
     Generator,
     List,
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
 
 import torch
+
+# WARNING: Do not directly import has_frozen_params, it is monkeypatched in
+# python test/inductor/test_codecache.py
+# TestFxGraphCache.test_constant_handling_device_cpu
+# TODO: Why are we monkeypatching it......
+import torch._inductor.output_code as output_code
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
@@ -71,7 +75,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler, TritonKernelArtifacts
+from .triton_bundler import TritonBundler
 
 
 T = TypeVar("T")
@@ -81,6 +85,7 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
 
     from .compile_fx import _CompileFxKwargs
+    from .output_code import CompiledFxGraph
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -100,11 +105,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    log_cudagraph_skip_and_bump_counter,
-)
+from torch._inductor.cudagraph_utils import log_cudagraph_skip_and_bump_counter
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -525,7 +526,12 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
-    def __init__(self, include_non_inlined: bool = True) -> None:
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        include_non_inlined: bool = True,
+        has_user_defined_triton_kernels: bool = False,
+    ) -> None:
         """
         Create an FX graph pickler. If include_non_inlined=True, then pickling will
         include the _values_ for all Tensors. (Note that any tensors are constants
@@ -548,6 +554,11 @@ class FxGraphCachePickler(pickle.Pickler):
                 ),
             }
         )
+        if has_user_defined_triton_kernels:
+            # Need to use runtime type as GraphModule generates a singleton in __new__ function
+            self.dispatch_table[gm.__class__] = functools.partial(
+                self._reduce_graph_module
+            )
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
@@ -613,6 +624,25 @@ class FxGraphCachePickler(pickle.Pickler):
         raise to bypass caching.
         """
         raise BypassFxGraphCache("Reduce unsupported")
+
+    def _reduce_graph_module(
+        self, gm: torch.fx.GraphModule
+    ) -> Tuple[Any, Tuple[Dict[str, Any], str]]:
+        """
+        Custom reducer for graph module to handle irrelevant data for user
+        defined triton kernels
+        Essentially what we are doing here is a huge hack where user defined
+        triton kernel contain a dynamo time side table and the arguments to the
+        call_function are indicies into this side table. These arguments are not
+        for hashing purposes since we included the source code into the cache
+        key and the numbers are prone to give false negatives due to ordering.
+        """
+        fn, (data, imports) = gm.__reduce__()
+        code = data["_code"]
+        code = re.sub(r"kernel_idx = \d+", "", code)
+        code = re.sub(r"constant_args_idx = \d+", "", code)
+        data["_code"] = code
+        return fn, (data, imports)
 
     def dumps(self, obj: Any) -> bytes:
         """
@@ -775,6 +805,48 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = v
 
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
+        )
+
+        # Node meta will not be part of gm's reduce function, so lets remember
+        # the kernel source code separately
+        self.user_defined_triton_source: List[Any] = []
+        if gm is not None:
+            for module in gm.modules():
+                if not isinstance(module, torch.fx.GraphModule):
+                    continue
+                for node in itertools.chain(
+                    module.graph.find_nodes(
+                        op="call_function", target=triton_kernel_wrapper_functional
+                    ),
+                    module.graph.find_nodes(
+                        op="call_function", target=triton_kernel_wrapper_mutation
+                    ),
+                ):
+                    from triton.runtime.autotuner import Autotuner
+
+                    kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                    if isinstance(kernel, Autotuner):
+                        kernel = kernel.fn
+
+                    kernel_source = (
+                        user_defined_triton_kernel_transitive_closure_source_code(
+                            kernel
+                        )
+                    )
+                    constant_args = kernel_side_table.get_constant_args(
+                        node.kwargs["constant_args_idx"]
+                    )
+                    self.user_defined_triton_source.append(
+                        (kernel_source, constant_args)
+                    )
+
         # Alignment checks
         self.inputs_to_check = inputs_to_check
 
@@ -796,7 +868,6 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
-
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -814,10 +885,6 @@ class FxGraphHashDetails:
         return custom_pass.uuid()
 
 
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
-
-
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -830,10 +897,13 @@ def compiled_fx_graph_hash(
     # To support caching when the graph has frozen params, we ignore the tensor values
     # of non-inlined constants since they won't be included in the cache entry. Without
     # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not has_frozen_params(gm)
+    include_non_inlined = not output_code.has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
-    pickler = FxGraphCachePickler(include_non_inlined)
+    has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
+    pickler = FxGraphCachePickler(
+        gm, include_non_inlined, has_user_defined_triton_kernels
+    )
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + pickler.get_hash(details)
@@ -1158,9 +1228,7 @@ class FxGraphCache:
 
         try:
             with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
-                fwd_only=False,
+                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
             ):
                 graph.current_callable = PyCodeCache.load_by_key_path(
                     graph.cache_key,
@@ -1327,7 +1395,9 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
+        if output_code.has_frozen_params(
+            gm
+        ) and not torch._utils_internal.justknobs_check(
             "pytorch/inductor:allow_freezing_with_caching"
         ):
             raise BypassFxGraphCache("Skipping graph with frozen constants")
@@ -1445,6 +1515,12 @@ class FxGraphCache:
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
+            if remote_cache:
+                # Count remote cache hit stats
+                get_metrics_context().increment("inductor_fx_remote_cache_hit_count", 1)
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_hit_keys", key
+                )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
@@ -1458,6 +1534,14 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
+            if remote_cache:
+                # Count remote cache miss stats
+                get_metrics_context().increment(
+                    "inductor_fx_remote_cache_miss_count", 1
+                )
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_miss_keys", key
+                )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
@@ -1551,6 +1635,10 @@ class FxGraphCache:
         # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
         cache_state = cache_info["cache_state"]
+        # Here for grepping:
+        # fx_graph_cache_hit
+        # fx_graph_cache_miss
+        # fx_graph_cache_bypass
         chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}",
             cache_info["cache_event_time"],
@@ -1593,127 +1681,13 @@ class FxGraphCache:
             pass
 
 
-_StrideExprStr: TypeAlias = str
-
-
-@dataclasses.dataclass
-class CompiledFxGraph:
-    """
-    Class holding a compiled FX graph. This is the object serialized on disk
-    to support FxGraph caching.
-    """
-
-    current_callable: Optional[Callable[..., Any]]
-    cache_key: str
-    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
-    # We populate exactly one of the next two fields. In the common case, we store the
-    # constant attirbutes in the cache entry and re-attach them to the module created in
-    # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
-    # however, we save the mapping from attribute names in the GraphLowering to the
-    # original name of the attribute in the GraphModule. When we create the module from
-    # the cache entry, we then look up the constants from the current GraphModule. This
-    # scheme allows us to support caching with freezing.
-    allocated_constant_name: Optional[Dict[str, str]]
-    constants: Optional[Dict[str, torch.Tensor]]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
-    disabled_cudagraphs_reason: Optional[str]
-    metrics_deltas: metrics.CachedMetricsDeltas
-    counter_deltas: Counter[str]
-    # This is a string representation of an expression we serialize
-    # with the object so the guards can be evaluated in a different
-    # context in order to verify the validity of serving a cached
-    # fx graph. The expression must be generated by:
-    # ShapeEnv.produce_guards_expression()
-    guards_expr: Optional[str]
-
-    cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: _CompileFxKwargs
-    inputs_to_check: Sequence[int]
-    boxed_forward_device_index: Optional[BoxedDeviceIndex]
-
-    _time_taken_ns: Optional[int] = None
-    _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
-    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
-
-    def __init__(
-        self,
-        current_callable: Optional[Callable[..., Any]],
-        graph: GraphLowering,
-        gm: torch.fx.GraphModule,
-        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
-        disabled_cudagraphs_reason: Optional[str],
-        metrics_deltas: metrics.CachedMetricsDeltas,
-        counter_deltas: Counter[str],
-    ) -> None:
-        self.current_callable = current_callable
-        self.cache_key = graph.cache_key
-        if graph.cache_path:
-            with open(graph.cache_path) as f:
-                self.source_code = f.read()
-        self.cache_linemap = graph.cache_linemap
-        # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
-        if has_frozen_params(gm):
-            self.allocated_constant_name = graph.allocated_constant_name
-            self.constants = None
-        else:
-            self.allocated_constant_name = None
-            self.constants = graph.constants
-        self.torchbind_constants = graph.torchbind_constants
-        self.output_strides = output_strides
-        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
-        self.metrics_deltas = metrics_deltas
-        self.counter_deltas = counter_deltas
-        self.guards_expr = None
-        self.cudagraph_info = None
-        self.fx_kwargs = {}
-        self.inputs_to_check = ()
-        self.boxed_forward_device_index = None
-
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def get_constants(
-        self, gm: Optional[torch.fx.GraphModule]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Get the constant attributes.
-        """
-        # Normal case: The constants are stored in the entry.
-        if self.constants is not None:
-            return self.constants
-
-        # Freezing case: Look up the constants from attributes on the GraphModule using
-        # the allocated_constant_name map.
-        assert gm is not None
-        assert self.allocated_constant_name is not None
-        constants = {
-            name: getattr(gm, orig_name)
-            for name, orig_name in self.allocated_constant_name.items()
-        }
-        return constants
-
-
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
@@ -1763,7 +1737,14 @@ class AotCodeCompiler:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         device_type: str,
-    ) -> str:
+        additional_files: List[str],
+    ) -> Union[List[str], str]:
+        """
+        Returns the .so path, or returns a list of files that were generated if
+        config.aot_inductor.package=True.
+        """
+        generated_files = additional_files
+
         if sys.platform == "win32":
             raise RuntimeError("AotCodeCompiler not yet supported for inductor")
 
@@ -1802,6 +1783,10 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+
+        if config.aot_inductor.package:
+            generated_files.append(input_path)
+
         output_code_log.info("Output code written to: %s", input_path)
         trace_structured(
             "graph_dump",
@@ -1910,6 +1895,9 @@ class AotCodeCompiler:
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
+                if config.aot_inductor.package:
+                    generated_files.append(extern_kernel_nodes_json)
+
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
@@ -1922,6 +1910,9 @@ class AotCodeCompiler:
 
             with open(meta_json, "w") as f:
                 f.write(json.dumps(config.aot_inductor.metadata))
+
+            if config.aot_inductor.package:
+                generated_files.append(meta_json)
 
             output_so = (
                 config.aot_inductor.output_path
@@ -2009,9 +2000,10 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(compile_cmd)
 
-            if config.aot_inductor.package:
+            if config.aot_inductor.package_cpp_only:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
+                generated_files.append(compile_flags)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -2023,13 +2015,14 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
-            kernels_o = []
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            for entry in gpu_codecache.cache.values():
-                if entry.output_path.endswith(".o"):
-                    kernels_o.append(entry.output_path)
+            kernels_o = [
+                entry.output_path
+                for entry in gpu_codecache.cache.values()
+                if entry.output_path.endswith(".o")
+            ]
             kernels_o = " ".join(kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
@@ -2056,11 +2049,11 @@ class AotCodeCompiler:
                 f.write(f"// Compile cmd\n// {compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
-            if config.aot_inductor.package:
+            if config.aot_inductor.package_cpp_only:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
                 so_build_options.save_flags_to_file(linker_flags)
+                generated_files.append(linker_flags)
 
-            if config.aot_inductor.package_cpp_only:
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
 
@@ -2071,6 +2064,11 @@ class AotCodeCompiler:
                     with open(weight_file, "wb") as f_weights:
                         f_weights.write(serialized_weights)
                         f_weights.write(struct.pack("q", magic_number))
+
+                    generated_files.append(weight_file)
+
+                generated_files.append(consts_o)
+                generated_files.append(kernels_o)
 
             else:
                 if fbcode_aot_cpu_re:
@@ -2089,7 +2087,7 @@ class AotCodeCompiler:
                     consts_o,
                     os.path.splitext(consts_o)[0] + ".S",
                 ]:
-                    # No need to package .o or .S into the output artifact
+                    # Remove these as they are not needed anymore
                     os.remove(o_file)
 
                 if use_mmap_weights:
@@ -2105,10 +2103,14 @@ class AotCodeCompiler:
                         f_so.write(serialized_weights)
                         f_so.write(struct.pack("q", magic_number))
 
+                if config.aot_inductor.package:
+                    generated_files.append(output_so)
+
         if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
-            return os.path.split(output_so)[0]
+            # return os.path.split(output_so)[0]
+            return generated_files
 
         return output_so
 
@@ -3026,7 +3028,6 @@ class PyCodeCache:
     # than once, but attach different attributes, i.e., due to different
     # constant values.
     modules: List[ModuleType] = []
-    cache: Dict[str, ModuleType] = {}
     linemaps: Dict[str, List[Tuple[Any, ...]]] = {}
 
     @classmethod
@@ -3073,13 +3074,18 @@ class PyCodeCache:
         return mod
 
     @classmethod
-    def cache_clear(cls) -> None:
-        for mod in cls.modules:
-            try:
-                assert mod.__file__
-                os.remove(mod.__file__)
-            except FileNotFoundError:
-                pass
+    def cache_clear(cls, purge: bool = False) -> None:
+        """
+        Clear the in-memory module cache. If purge=True, also delete all the
+        corresponding on-disk source files.
+        """
+        if purge:
+            for mod in cls.modules:
+                try:
+                    assert mod.__file__
+                    os.remove(mod.__file__)
+                except FileNotFoundError:
+                    pass
         cls.modules.clear()
 
     @classmethod

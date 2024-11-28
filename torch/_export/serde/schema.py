@@ -27,6 +27,8 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
+    FLOAT8_E5M2 = 23
+    FLOAT8_E4M3FN = 24
     UINT16 = 28
 
 
@@ -226,7 +228,7 @@ class ConstantValue(_Union):
 
 
 @dataclass
-class ConstantInputSpec:
+class InputToConstantInputSpec:
     name: str
     value: ConstantValue
 
@@ -270,7 +272,7 @@ class InputSpec(_Union):
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
     token: InputTokenSpec
-    constant_input: ConstantInputSpec
+    constant_input: InputToConstantInputSpec
 
 
 @dataclass

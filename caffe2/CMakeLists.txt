@@ -336,8 +336,11 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
-  ${GENERATED_CXX_TORCH_XPU}
   )
+
+if(USE_XPU)
+  list(APPEND TORCH_GENERATED_CODE ${GENERATED_CXX_TORCH_XPU})
+endif()
 
 set(GEN_PER_OPERATOR_FLAG)
 if(USE_PER_OPERATOR_HEADERS)
@@ -1113,6 +1116,10 @@ if(USE_XPU)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+    message(INFO "Install ${TORCH_XPU_OPS_DIR}/src/ATen/xpu to ${TORCH_INSTALL_INCLUDE_DIR}/ATen/xpu")
+    install(DIRECTORY "${TORCH_XPU_OPS_DIR}/src/ATen/xpu"
+        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/ATen/
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
   endif()
 endif()
@@ -1831,9 +1838,6 @@ if(BUILD_TEST)
         endif()
       endif()
     endforeach()
-    if(TARGET context_gpu_test)
-      target_link_libraries(context_gpu_test caffe2::curand caffe2::cublas)
-    endif()
   endif()
 
   if(USE_XPU)
