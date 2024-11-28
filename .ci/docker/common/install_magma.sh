@@ -15,7 +15,7 @@ function do_install() {
         set -x
         tmp_dir=$(mktemp -d)
         pushd ${tmp_dir}
-        curl -OLs https://ossci-linux.s3.us-east-1.amazonaws.com/${magma_archive}
+        curl -OLs https://anaconda.org/pytorch/magma-cuda${cuda_version_nodot}/${MAGMA_VERSION}/download/linux-64/${magma_archive}
         tar -xvf "${magma_archive}"
         mkdir -p "${cuda_dir}/magma"
         mv include "${cuda_dir}/magma/include"
