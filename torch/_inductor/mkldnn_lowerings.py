@@ -66,14 +66,18 @@ def linear_silu_linear_mul(
         dtype = buf.get_dtype()
 
         def inner_fn(index):
+            # input = input_loader(index)
+            # input1 = input_loader1(index)
+            # if inp:
+            #     input = input + inp_loader(index)
+            # if inp1:
+            #     input1 = input1 + inp_loader1(index)
+            # input = ops.mul(ops.sigmoid(input), input)
+            # return ops.mul(input, input1)
             input = input_loader(index)
             input1 = input_loader1(index)
-            if inp:
-                input = input + inp_loader(index)
-            if inp1:
-                input1 = input1 + inp_loader1(index)
-            input = ops.mul(ops.sigmoid(input), input)
-            return ops.mul(input, input1)
+            # return input
+            return ops.to_dtype(input, torch.bfloat16)
 
         return ir.Pointwise(
             device=buf.get_device(),
