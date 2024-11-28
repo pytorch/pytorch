@@ -20,4 +20,4 @@ def f(a, b):
     return a
 
 
-f(torch.randn(2, device="cuda"), torch.randn(2, device="cuda"))
+f(torch.randn(2, device="cuda", requires_grad=True), torch.randn(2, device="cuda")).sum().backward()

@@ -68,12 +68,8 @@ class OutputCode(Protocol):
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        fx_kwargs: _CompileFxKwargs,
         cudagraphs: BoxedBool,
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-        static_input_idxs: Sequence[int],
-        inputs_to_check: Sequence[int],
+        gm: GraphModule,
     ) -> None:
         ...
 
@@ -124,6 +120,9 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tens
 
 
 def complex_memory_overlap(t: torch.Tensor) -> bool:
+    if config.always_complex_memory_overlap_TESTING_ONLY:
+        return True
+
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
     #
@@ -197,6 +196,12 @@ class CompiledFxGraph:
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
+        cudagraphs: BoxedBool,
+        example_inputs: Sequence[InputType],
+        static_input_idxs: Sequence[int],
+        fx_kwargs: _CompileFxKwargs,
+        inputs_to_check: Sequence[int],
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
     ) -> None:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -226,37 +231,6 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def clear_uncacheable(self) -> None:
-        self.current_callable = None
-
-    def post_compile(
-        self,
-        # TODO: explain why we need these for post compile
-        example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        fx_kwargs: _CompileFxKwargs,
-        # These boxed value are mutable boxes which internal passes
-        # communicate information back to the top level.  They can't
-        # be serialized; instead, we want to install the fresh mutable
-        # box onto the compiled graph.  Though TBH, I'm not sure why
-        # we still need to be passing these around post compilation
-        cudagraphs: BoxedBool,
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-        # CUDAGraph specific stuff
-        # TODO: I'm not sure why we pass/fail CUDAGraphs in post compile,
-        # seems like you can just do it inside the compilation itself.
-        # Also not sure why the static inputs/inputs to check aren't just
-        # part of the serialized thing?
-        static_input_idxs: Sequence[int],
-        inputs_to_check: Sequence[int],
-    ) -> None:
         cudagraph_info = None
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
@@ -326,6 +300,22 @@ class CompiledFxGraph:
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
+    def clear_uncacheable(self) -> None:
+        self.current_callable = None
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        assert self.current_callable is not None
+        try:
+            return self.current_callable(inputs)
+        finally:
+            AutotuneCacheBundler.end_compile()
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        cudagraphs: BoxedBool,
+        gm: GraphModule,
+    ) -> None:
         # TODO: maybe move this here?  Not sure.
         from torch._inductor.codecache import FxGraphCache
 
@@ -389,12 +379,8 @@ class CompiledAOTI:
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        fx_kwargs: _CompileFxKwargs,
         cudagraphs: BoxedBool,
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-        static_input_idxs: Sequence[int],
-        inputs_to_check: Sequence[int],
+        gm: GraphModule,
     ) -> None:
         # TODO: use compile id for model name
         # NB: Pretty sure we don't need the pytree stuff, Dynamo to Inductor

@@ -503,18 +503,15 @@ class _CompileFxKwargs(TypedDict, total=False):
     is_inference: bool
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
-
-
-class _CompileFxKwargsEx(_CompileFxKwargs, total=False):
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
 
-class _CompileFxCallableEx(Protocol):
+class _CompileFxCallable(Protocol):
     def __call__(
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
-        **kwargs: Unpack[_CompileFxKwargsEx],
+        **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
         ...
 
@@ -522,7 +519,7 @@ class _CompileFxCallableEx(Protocol):
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    **kwargs: Unpack[_CompileFxKwargsEx],
+    **kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
@@ -575,7 +572,6 @@ def compile_fx_inner(
 def _compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
     """
@@ -596,6 +592,7 @@ def _compile_fx_inner(
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
+    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
@@ -607,27 +604,14 @@ def _compile_fx_inner(
         save_args_for_compile_fx_inner(
             gm,
             example_inputs,
-            boxed_forward_device_index=boxed_forward_device_index,
             **graph_kwargs,
         )
+
+    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
 
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
-
-    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
-
-    def codegen_and_compile(
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        # Just fx_codegen_and_compile, but this is only called when we
-        # ACTUALLY do compilation (so the fx_codegen_and_compile counter also
-        # includes cache activity)
-        with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
-            return fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
         use_cache = (
@@ -683,8 +667,8 @@ def _compile_fx_inner(
         # determined the input is uncacheable)
         if cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
-            mb_compiled_graph = codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
+            mb_compiled_graph = fx_codegen_and_compile(
+                gm, example_inputs, inputs_to_check, **graph_kwargs
             )
 
         # CACHE MISS: Compile the graph and save to cache
@@ -693,8 +677,8 @@ def _compile_fx_inner(
             assert key_info is not None
             TritonBundler.begin_compile()
             try:
-                mb_compiled_graph = codegen_and_compile(
-                    gm, example_inputs, inputs_to_check, graph_kwargs
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
                 )
                 assert mb_compiled_graph is not None
                 mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
@@ -774,15 +758,7 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
 
-        compiled_graph.post_compile(
-            example_inputs,
-            gm,
-            graph_kwargs,
-            cudagraphs,
-            boxed_forward_device_index,
-            static_input_idxs,
-            inputs_to_check,
-        )
+        compiled_graph.post_compile(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -798,23 +774,42 @@ def _compile_fx_inner(
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    cudagraphs: Optional[BoxedBool] = None,
-    static_input_idxs: Optional[Sequence[int]] = None,
-    is_backward: bool = False,
-    graph_id: Optional[int] = None,
-    cpp_wrapper: bool = False,
-    aot_mode: bool = False,
-    is_inference: bool = False,
-    layout_opt: Optional[bool] = None,
-    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
+    # This is derivable from the other inputs to this function, but we pass it
+    # in explicitly because it's nontrivial to compute
+    inputs_to_check: Sequence[int],
+    **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
-    if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
-        import time
+    # Sorry about the mess, we need graph_kwargs to continue to be able
+    # to propagate it further on
+    # TODO: _CompileFxKwargs actually has stronger types than in the
+    # signature, need to tighten it up
+    assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
+    cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+    static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
+    is_backward: bool = graph_kwargs.get("is_backward", False)
+    graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
+    cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
+    aot_mode: bool = graph_kwargs.get("aot_mode", False)
+    is_inference: bool = graph_kwargs.get("is_inference", False)
+    layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
+    extern_node_serializer: Optional[
+        Callable[[List[ExternKernelNode]], Any]
+    ] = graph_kwargs.get("extern_node_serializer", None)
+    boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
+        "boxed_forward_device_index", None
+    )
 
-        log.warning("Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec)
-        time.sleep(sleep_sec)
+    with _WaitCounter(
+        "pytorch.wait_counter.actual_codegen_and_compile"
+    ).guard(), dynamo_utils.preserve_rng_state():
+        if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+            import time
 
-    with dynamo_utils.preserve_rng_state():
+            log.warning(
+                "Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec
+            )
+            time.sleep(sleep_sec)
+
         if is_tf32_warning_applicable(gm):
             _warn_tf32_disabled()
 
@@ -1097,6 +1092,12 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
                     counters["inductor"] - inductor_counters,
+                    cudagraphs,
+                    example_inputs,
+                    static_input_idxs,
+                    graph_kwargs,
+                    inputs_to_check,
+                    boxed_forward_device_index,
                 )
 
 
@@ -1295,7 +1296,7 @@ def cudagraphify_impl(
 def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: List[InputType],
-    inner_compile: _CompileFxCallableEx = compile_fx_inner,
+    inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
     config_patches: Dict[str, Any] = (
