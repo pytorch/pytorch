@@ -11,7 +11,10 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    _guard_sizes_oblivious,
+    statically_known_true,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from ...utils._ordered_set import OrderedSet
@@ -209,7 +212,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 self.symint_nodes[n.meta["val"]] = n
 
@@ -243,7 +246,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
             else:
@@ -570,9 +573,48 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if size == arg_size:
+    if _guard_sizes_oblivious(size, arg_size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.view.default,
+        CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
+        KeywordArg("size2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_view_pair(match: Match, arg, size1, size2):
+    """
+    Remove a pair of views that are pointless.
+    """
+    node = match.output_node()
+    arg_size = list(arg.meta["val"].shape)
+    if _guard_sizes_oblivious(arg_size, size2):
+        node.replace_all_uses_with(arg)
+        match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.permute.default,
+        CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
+        KeywordArg("perm2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_permute_pair(match: Match, arg, perm1, perm2):
+    rank = len(perm1)
+    assert len(perm2) == rank
+
+    for i in range(rank):
+        if perm1[perm2[i]] != i:
+            return  # bail out
+    node = match.output_node()
+    node.replace_all_uses_with(arg)
+    match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern

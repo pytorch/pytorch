@@ -48,6 +48,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+log = logging.getLogger(__name__)
 
 
 def data_type_logger(msg):
@@ -134,6 +135,8 @@ class WorkspaceArg:
     def get_device(self):
         return self.device
 
+    get_device_or_error = get_device
+
     def get_dtype(self):
         return self.dtype
 
@@ -150,6 +153,10 @@ class WorkspaceArg:
     @property
     def layout(self):
         return self.get_layout()
+
+    get_output_spec = get_layout
+    maybe_get_output_spec = get_layout
+    maybe_get_layout = get_layout
 
     def get_size(self):
         return [self.count]
@@ -169,7 +176,7 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    offset: sympy.Expr = sympy.S.Zero  # c++ only
     alias_of: Optional[str] = None  # halide only
 
 
@@ -301,7 +308,9 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str]):
+def get_backend_features(device: Union[torch.device, str, None]):
+    if device is None:
+        return {}
     init_backend_registration()
     if isinstance(device, torch.device):
         device_type = device.type
@@ -1692,7 +1701,7 @@ class CSE:
     ):
         self.prefix = prefix
         self.suffix = suffix
-        self.cache = {}
+        self._cache = {}
         self.name_prefix = name_prefix
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
@@ -1705,11 +1714,11 @@ class CSE:
             if tmp not in keep_vars:
                 del self.store_cache[name]
                 self.invalidated_stores.add(name)
-        self.cache = {k: v for k, v in self.cache.items() if v in keep_vars}
+        self._cache = {k: v for k, v in self._cache.items() if v in keep_vars}
 
     def clone(self):
         # Note(fdrocha): reduction_cache is not being cloned, not sure if this is intentional
-        return CSE(
+        return type(self)(
             prefix=self.prefix,
             suffix=self.suffix,
             name_prefix=self.name_prefix,
@@ -1718,10 +1727,26 @@ class CSE:
             varname_map=self.varname_map,
         )
 
+    def augment_key(self, cache_key: object) -> object:
+        "Override this method to augment cache key with backend specifics"
+        return cache_key
+
+    def put(self, cache_key: object, val: CSEVariable) -> None:
+        self._cache[self.augment_key(cache_key)] = val
+
+    def contains(self, cache_key) -> bool:
+        return self.augment_key(cache_key) in self._cache
+
+    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+        return self._cache.get(self.augment_key(cache_key), None)
+
+    def get(self, cache_key: object) -> CSEVariable:
+        return self._cache[self.augment_key(cache_key)]
+
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
@@ -1731,7 +1756,6 @@ class CSE:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        assert isinstance(expr, (str, CSEVariable, IndentedBuffer)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
@@ -1740,11 +1764,17 @@ class CSE:
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
             return expr
-        cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
-        var = self.cache.get(cache_key, None)
+        elif isinstance(expr, IndentedBuffer):
+            cache_key = expr.getvalue()
+        elif isinstance(expr, DeferredLineBase):
+            cache_key = expr.line
+        else:
+            assert isinstance(expr, str)
+            cache_key = expr
+        var = self.try_get(cache_key)
         if not var:
             var = self.newvar(bounds, dtype)
-            self.cache[cache_key] = var
+            self.put(cache_key, var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -1755,6 +1785,11 @@ class CSE:
                         buffer.writeline(f"{self.prefix}{var} =")
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
+                elif isinstance(expr, DeferredLineBase):
+                    assert assignment
+                    buffer.writeline(
+                        expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
+                    )
                 else:
                     if assignment:
                         line = f"{self.prefix}{var} = {expr}{self.suffix}"
@@ -1784,8 +1819,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
         if isinstance(inp, torch._prims_common.Number):
             return inp
         else:
-            assert hasattr(inp, "dtype")
-
             # construct a tmp tensor to use dtype promotion util function
             return torch.empty([1], dtype=inp.dtype)
 
@@ -2067,7 +2100,7 @@ class Kernel(CodeGen):
     def swap_buffers(self, lb, cb=None, sb=None):
         def scope_cse(cse):
             new_cse = cse.clone()
-            new_cse.cache = ScopedDict(cse.cache)
+            new_cse._cache = ScopedDict(cse._cache)
             new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
             new_cse.store_cache = ScopedDict(cse.store_cache)
             return new_cse
@@ -2498,13 +2531,61 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def remove_kernel_local_buffers(self) -> None:
         """
+        Any buffers that are both created and have a last use in the
+        same kernel can be removed.
+
         Note that V.graph.scheduler can be None when codegening triton template
         kernels.
         """
-        if V.graph.scheduler:
-            V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
+        scheduler = V.graph.scheduler
+        if not scheduler:
+            return
+        fused_node_names = OrderedSet(
+            scheduler.name_to_buf[buf].defining_op.get_name()
+            for buf in self.store_buffer_names
+            if buf in scheduler.name_to_buf
+        )
+        names_to_remove: OrderedSet[str] = OrderedSet()
+        for name in self.store_buffer_names:
+            if (
+                name not in self.must_keep_buffers
+                and name not in self.args.input_buffers
+                and scheduler.can_buffer_be_removed_through_fusion(
+                    name, fused_node_names
+                )
+            ):
+                names_to_remove.add(name)
+
+        for name in names_to_remove:
+            if name in self.args.inplace_buffers:
+                buf = self.args.inplace_buffers[name]
+                if isinstance(buf, str) and buf.startswith("REMOVED"):
+                    continue
+                remove = all(n in names_to_remove for n in buf.other_names)
+                if remove:
+                    self.remove_inplace_buffer(name)
+                self.inplaced_to_remove.add(name)
+            else:
+                self.remove_buffer(name)
+
+    def remove_buffer(self, name: str) -> None:
+        # Assign a special value instead of deleting the entry
+        # because we still rely on output_buffers's length to
+        # generate unique arg name.
+        log.debug("remove_buffer(%r)", name)
+        self.args.output_buffers[name] = "REMOVED"
+        self.removed_buffers.add(name)
+
+    def remove_inplace_buffer(self, name: str) -> None:
+        log.debug("removing_inplace_buffer(%r)", name)
+        inner_name = self.args.inplace_buffers[name].inner_name
+        self.args.inplace_buffers[name] = inner_name.replace("in_out_ptr", "REMOVED")
+        self.removed_buffers.add(name)
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
@@ -2628,6 +2709,7 @@ class KernelTemplate:
     def maybe_append_choice(self, choices, **kwargs):
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
+        Returns None if success, otherwise returns the error.
 
         choices: A list of ChoiceCallers.
         kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
@@ -2635,8 +2717,9 @@ class KernelTemplate:
 
         try:
             choices.append(self.generate(**kwargs))
+            return None
         except NotImplementedError as e:
-            pass
+            return e
 
     def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """

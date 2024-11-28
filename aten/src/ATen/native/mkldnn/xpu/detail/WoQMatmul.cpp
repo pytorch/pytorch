@@ -63,16 +63,18 @@ sycl::event woq_matmul_int4(
   dnnl::memory::dims m1_usr_dims, m2_usr_dims, scale_usr_dims, zp_usr_dims, dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides, zp_usr_strides, dst_usr_strides;
   const uint64_t compressed_k = (uint64_t)(k / 8);
+  const uint64_t compressed_n = (uint64_t)(n / 8);
   const uint64_t num_groups = (uint64_t)(k / group_size); 
     //wei: {compressed_k, n}:   shape:{n/8, 32, xxx , innerKTiles/2}
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
+  // m2_usr_dims = {compressed_k, n};
   m2_usr_dims = {compressed_k, n};
   m2_usr_strides = {1, compressed_k}; // k dim contiguous, 4bit pack into s32
   scale_usr_dims = {num_groups, n}; 
   scale_usr_strides = {scale_.stride(1), scale_.stride(0)};//why? 
-  zp_usr_dims = {1};
-  zp_usr_strides = {1};
+  zp_usr_dims = {num_groups, n};
+  zp_usr_strides = {zp.stride(0), zp.stride(1)};
   dst_usr_dims = {m, n};
   dst_usr_strides = {dst.stride(0), dst.stride(1)};
 
@@ -97,9 +99,9 @@ sycl::event woq_matmul_int4(
   // library needs infer how to unpack u4 data based on the m2_usr_md (s32).
   auto m2_dt = dnnl::memory::data_type::u4; 
   auto scale_dt = scale_usr_dt; //bf16
-  // Tell oneDNN the zp dtype we want manipulate is u4,
-  // library needs infer how to unpack u4 data based on the m2_usr_md (s32).
-  auto zp_dt = dnnl::memory::data_type::u4;
+  // Tell oneDNN the zp dtype we want manipulate is s8
+  // library needs infer how to unpack s8 data based on the m2_usr_md.
+  auto zp_dt = dnnl::memory::data_type::s8;
   auto dst_dt = dst_usr_dt;
 
   dnnl::memory::desc m1_md, m2_md, scale_md, zp_md, dst_md;
@@ -112,9 +114,10 @@ sycl::event woq_matmul_int4(
   m2_strides = {n, 1};
   scale_dims = scale_usr_dims; // {k//group_size, n}
   scale_strides = scale_usr_strides; 
-  zp_dims = {1};
-  zp_usr_dims = {1}; //{compressed_k, n};
-  zp_strides = {1};
+  // zp_dims = {1};
+  zp_dims ={num_groups, n};
+  // zp_strides = {1};
+  zp_strides = {zp.stride(0), zp.stride(1)};
   dst_dims = dst_usr_dims;
   dst_strides = dst_usr_strides;
 
@@ -123,7 +126,7 @@ sycl::event woq_matmul_int4(
   scale_md = dnnl::memory::desc(scale_dims, scale_dt, scale_strides);
   zp_md = dnnl::memory::desc(zp_dims, zp_dt, zp_strides);
   dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
-  
+
   std::unordered_map<int, dnnl::memory> args;
   dnnl::post_ops po = attr.extract_post_ops(dst);
 
@@ -151,14 +154,18 @@ sycl::event woq_matmul_int4(
      {group_size, 1},
      scale_dt);
   // Set a single zero point with s8 data type.
-   pattr.set_zero_points(
-       DNNL_ARG_WEIGHTS,
-       /* mask */ 0, //(1 << 0) + (1 << 1),
-       {}, //{group_size, 1},
-       dnnl::memory::data_type::s8);
-  // Set fpmath mode with `apply_to_int=true` to apply fpmath mode behavior to
-  // integral primitives (in this example, matmul).
-  pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
+  pattr.set_zero_points(
+    DNNL_ARG_WEIGHTS,
+    (1<<0) + (1<<1),
+    {group_size, 1},
+    dnnl::memory::data_type::s8
+  );
+
+  if(m1_dt == dnnl::memory::data_type::f16)
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
+  else if(m1_dt == dnnl::memory::data_type::bf16)
+    pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
+
 
   matmul_pd = dnnl::matmul::primitive_desc(
         engine, m1_md, m2_u4_m.get_desc(), dst_md, pattr);

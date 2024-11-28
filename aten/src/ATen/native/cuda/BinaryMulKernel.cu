@@ -43,6 +43,6 @@ void mul_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda);
+REGISTER_DISPATCH(mul_stub, &mul_kernel_cuda)
 
 } // namespace at::native

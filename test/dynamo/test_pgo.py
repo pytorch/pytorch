@@ -1,24 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
-import importlib
 import os
-import sys
 
 import torch._dynamo.config
 import torch._dynamo.test_case
+import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
+import torch.nested
 from torch._dynamo.testing import CompileCounter
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
-
-
-# LOL.  https://github.com/pytorch/pytorch/issues/139252
-spec = importlib.util.spec_from_file_location(
-    "mock_cache", os.path.join(os.path.dirname(__file__), "../inductor/mock_cache.py")
-)
-mock_cache = importlib.util.module_from_spec(spec)
-sys.modules["mock_cache"] = mock_cache
-spec.loader.exec_module(mock_cache)
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
@@ -59,6 +50,41 @@ class PgoTest(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(2, 5))
         f(torch.randn(2, 6))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_njt(self):
+        cnts = CompileCounter()
+
+        # NB: PGO doesn't do anything here, the point is to catch pickle
+        # problem with nested int
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def f(x):
+            return x * 2
+
+        x = torch.nested.nested_tensor_from_jagged(
+            torch.randn(10, 3), torch.tensor([0, 3, 7, 10]), torch.tensor([1, 2, 3])
+        )
+        y = torch.nested.nested_tensor_from_jagged(
+            torch.randn(13, 3), torch.tensor([0, 3, 7, 13]), torch.tensor([1, 2, 6])
+        )
+
+        f(x)
+        f(y)
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.reset()
+        cnts.clear()
+
+        a = torch.nested.nested_tensor_from_jagged(
+            torch.randn(14, 3), torch.tensor([0, 3, 7, 14]), torch.tensor([1, 2, 7])
+        )
+        b = torch.nested.nested_tensor_from_jagged(
+            torch.randn(15, 3), torch.tensor([0, 3, 7, 15]), torch.tensor([1, 2, 8])
+        )
+
+        f(a)
+        f(b)
         self.assertEqual(cnts.frame_count, 1)
 
     def test_distinct_compile_id(self):

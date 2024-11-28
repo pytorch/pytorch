@@ -15,7 +15,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     precisionOverride,
 )
-from torch.testing._internal.common_utils import iter_indices, run_tests, TestCase
+from torch.testing._internal.common_quantization import _group_quantize_tensor
+from torch.testing._internal.common_utils import iter_indices, run_tests, TestCase, parametrize
 
 
 class TestBasicGEMM(TestCase):
@@ -1140,6 +1141,51 @@ class TestBasicGEMM(TestCase):
 
         with torch.no_grad():
             torch.matmul(a, b, out=c)
+
+
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, device, m, k, n):
+
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a_bf16 = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int4pack(b):
+            # b_uint8 [n, k //2]
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            # b_int4pack [n, k//8]
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_uint8, inner_k_tiles
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_bf16)
+
+        for dtype in [torch.float16]:
+            a = a_bf16.to(dtype=dtype)
+            b = b_bf16.to(dtype=dtype)
+            b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
+            ref = torch.mm(a, b)
+
+            # A[M, K]  # B[N, K]
+            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+
+            mean_err = ((res - ref).abs() / ref).mean()
+            print("mean error:", mean_err)
+            self.assertTrue(mean_err < 0.05)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
