@@ -38,7 +38,7 @@ public:
   }
 
   constexpr void operator() (bool * self_data, bool * src_data) const {
-    *self_data = *self_data && *src_data;
+    *self_data = c10::load(self_data) && c10::load(src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
