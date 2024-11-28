@@ -76,6 +76,6 @@ static void cross_kernel_impl(const Tensor& result, const Tensor& a, const Tenso
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(cross_stub, &cross_kernel_impl);
+REGISTER_DISPATCH(cross_stub, &cross_kernel_impl)
 
 } // namespace at::native

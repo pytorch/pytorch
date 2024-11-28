@@ -128,10 +128,10 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
   #endif
 }
 
-REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
-REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
-REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
-REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda);
-REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda);
+REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda)
+REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda)
+REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda)
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel_cuda)
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel_cuda)
 
 } // namespace at::native

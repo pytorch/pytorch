@@ -22,6 +22,6 @@ using fused_adam_fn = void (*)(
     const float* grad_scale_ptr,
     const ADAM_MODE);
 
-DECLARE_DISPATCH(fused_adam_fn, fused_adam_stub);
+DECLARE_DISPATCH(fused_adam_fn, fused_adam_stub)
 
 } // namespace at::native

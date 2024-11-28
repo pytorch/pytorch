@@ -119,6 +119,7 @@ const int AOTI_TORCH_MAX_NUMEL_TO_PRINT = 64;
 
 AOTI_TORCH_DEVICE_TYPE_IMPL(cpu, CPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(cuda, CUDA)
+AOTI_TORCH_DEVICE_TYPE_IMPL(xpu, XPU)
 AOTI_TORCH_DEVICE_TYPE_IMPL(privateuse1, PrivateUse1)
 #undef AOTI_TORCH_DEVICE_TYPE_IMPL
 
@@ -1000,6 +1001,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
+    // NOLINTNEXTLINE(misc-misplaced-const)
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -1135,6 +1137,13 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    if (!proxy_executor) {
+      throw std::runtime_error(
+          "Unable to find a proxy executor to run custom ops. Please check if "
+          "there is a json file generated in the same directory as the so, or use "
+          "torch._inductor.aoti_compile_and_package to package everything into a "
+          "PT2 artifact.");
+    }
     ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
     executor->call_function(
         extern_node_index,

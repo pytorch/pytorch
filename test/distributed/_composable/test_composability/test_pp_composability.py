@@ -1,14 +1,21 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import os
+from typing import TYPE_CHECKING
 
 import torch
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed._composable.fsdp.fully_shard import (
     fully_shard,
     MixedPrecisionPolicy,
 )
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint import FileSystemReader
+from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
+from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
@@ -32,6 +39,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
 # MLP Layer
@@ -252,6 +264,98 @@ class ComposabilityTest(MultiProcessTestCase):
                     torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
 
         torch.distributed.destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    def test_pp_and_dcp(self):
+        """
+        Test that pipeline parallelism and distributed checkpointing can be used together and
+        with saved correct FQNs
+        """
+
+        class AppState(Stateful):
+            def __init__(self, model, optimizer):
+                self.model = model
+                self.optimizer = optimizer
+
+            def state_dict(self):
+                # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
+                model_state_dict, optimizer_state_dict = get_state_dict(
+                    self.model, self.optimizer
+                )
+                return {"model": model_state_dict, "optim": optimizer_state_dict}
+
+            def load_state_dict(self, state_dict):
+                # sets our state dicts on the model and optimizer, now that we've loaded
+                set_state_dict(
+                    self.model,
+                    self.optimizer,
+                    model_state_dict=state_dict["model"],
+                    optim_state_dict=state_dict["optim"],
+                )
+
+        class PPModelChunk(nn.Module):
+            def __init__(self, layers: nn.ModuleDict, start_index: int, end_index: int):
+                super().__init__()
+                # Filter layers based on start_index and end_index
+                self.layers = nn.ModuleDict(
+                    {str(i): layers[str(i)] for i in range(start_index, end_index)}
+                )
+
+            def forward(self, x):
+                for layer in self.layers.values():
+                    x = layer(x)
+                return x
+
+        device = torch.device("cuda", self.device)
+        torch.cuda.set_device(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            device_id=device,
+        )
+        # create "entire model"
+        total_layers = 8
+        dim = 10
+        full_model = nn.ModuleDict(
+            {f"{i}": MLPModule(dim) for i in range(total_layers)}
+        )
+        # Calculate start and end indices based on rank
+        start_index = self.rank * 2
+        end_index = start_index + 2
+        pp_model = PPModelChunk(full_model, start_index, end_index)
+
+        pp_model.to(self.device)
+        opt = torch.optim.Adam(pp_model.parameters(), lr=0.1)
+
+        # perform work in a temp dir that is cleaned up after the test
+        @with_temp_dir
+        def _dcp_test(self):
+            state_dict = {"app": AppState(pp_model, opt)}
+            dcp.save(state_dict, checkpoint_id=self.temp_dir)
+            # temp checkpoint
+            sd: STATE_DICT_TYPE = {}
+            _load_state_dict(
+                sd,
+                storage_reader=FileSystemReader(self.temp_dir),
+                planner=_EmptyStateDictLoadPlanner(),
+            )
+            # Check parameter names in sd and compare with pp_model
+            pp_model_param_names = set(pp_model.state_dict().keys())
+            sd_param_names = set(sd["app"]["model"].keys())
+            # Verify each parameter name in pp_model is contained in sd
+            for param_name in pp_model_param_names:
+                self.assertIn(
+                    param_name,
+                    sd_param_names,
+                    f"Parameter name '{param_name}' not found in state_dict.",
+                )
+
+        _dcp_test(self)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
