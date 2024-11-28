@@ -997,8 +997,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+      if (!self_schema->isSubtypeOf(schema, /*as_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"
