@@ -66,7 +66,6 @@ struct C10_API AutogradState {
   bool inference_mode_ : 1;
   bool fw_grad_mode_ : 1;
   bool multithreading_enabled_ : 1;
-  // NOLINTNEXTLINE(cppcoreguidelines-use-default-member-init)
   bool view_replay_enabled_ : 1;
 };
 

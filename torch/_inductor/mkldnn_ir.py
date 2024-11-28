@@ -45,8 +45,8 @@ def _prepare_convolution_fusion_create(
     This function is a helper function to prepare inputs, layout and constant args
     for convolution post-op fusion's create function, including deciding the output
     layout (channels first or channels last), realizing inputs and make them etc. The
-    function only supports the CPU/XPU device since conv post-op fusion kernel is only
-    supported on CPU/XPU right now.
+    function only supports the CPU device since conv post-op fusion kernel is only
+    supported on CPU right now.
     """
 
     # Port from aten/src/ATen/native/ConvUtils.h: _conv_input_size
@@ -164,8 +164,7 @@ def _prepare_convolution_fusion_create(
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
-    assert get_device_type(x) == get_device_type(weight)
-    assert get_device_type(x) in ["cpu", "xpu"]
+    assert get_device_type(x) == "cpu" and get_device_type(weight) == "cpu"
     inputs = [x]
 
     if quantize_args is not None:

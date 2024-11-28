@@ -27,6 +27,9 @@ from torch.onnx._internal.exporter import _schemas
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
+_DEFAULT_OPSET_VERSION = 18
+
+
 TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Callable]
 
 logger = logging.getLogger(__name__)
@@ -112,12 +115,20 @@ class ONNXRegistry:
 
     def __init__(self) -> None:
         """Initializes the registry"""
-        self._opset_version = onnxscript_apis.torchlib_opset_version()
+
+        # TODO: Design multi-opset version support
+        self._opset_version = _DEFAULT_OPSET_VERSION
+
         self.functions: dict[TorchOp | str, list[OnnxDecompMeta]] = {}
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target."""
+        """The ONNX opset version the exporter should target.
+
+        Defaults to the latest supported ONNX opset version: 18.
+        The default version will increment over time as ONNX continues to evolve.
+        """
+
         return self._opset_version
 
     @classmethod

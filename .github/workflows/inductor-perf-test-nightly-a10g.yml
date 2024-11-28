@@ -16,10 +16,10 @@ on:
         type: boolean
         default: true
       inference:
-        description: Run inference (on by default)?
+        description: Run inference (off by default)?
         required: false
         type: boolean
-        default: true
+        default: false
       default:
         description: Run inductor_default?
         required: false

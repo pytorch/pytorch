@@ -1353,7 +1353,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.quantizer.quantizer
 .. py:module:: torch.ao.quantization.quantizer.utils
 .. py:module:: torch.ao.quantization.quantizer.x86_inductor_quantizer
-.. py:module:: torch.ao.quantization.quantizer.xpu_inductor_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils
 .. py:module:: torch.ao.quantization.stubs

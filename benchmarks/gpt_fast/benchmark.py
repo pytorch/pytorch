@@ -265,16 +265,9 @@ DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
     # A list of GPT models: LlaMa, Mixtral, etc.
-    # waiting for A100-80G machine to be available in CI
-    # https://github.com/pytorch/pytorch/actions/runs/12018005803/job/33503683582?pr=140627
-    # before we can turn on autoquant
-    # or alterantively, we can save the model after autoquant and just load here to track
-    # the performance
-    # run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
-    # run_mixtral_8x7b_autoquant,
     # A list of micro-benchmarks.
     run_mlp_layer_norm_gelu,
     run_layer_norm,
@@ -293,7 +286,6 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
             # This happens when torch is compiled with CUDA turning off completely
             device = "cpu"
 
-        torch.compiler.cudagraph_mark_step_begin()
         lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))

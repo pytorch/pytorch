@@ -3,8 +3,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/string_view.h>
-
-#include <cstring>
 #include <optional>
 #include <ostream>
 #include <string>

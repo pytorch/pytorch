@@ -16,7 +16,6 @@ from .bytecode_transformation import (
     create_call_method,
     create_dup_top,
     create_instruction,
-    create_load_const,
     create_load_method,
     create_rot_n,
     Instruction,
@@ -254,7 +253,7 @@ class PyCodegen:
                 parts = parts[1:]
             else:
                 assert self.root is not None
-                output.append(self.create_load_const_unchecked(self.root))
+                output.append(self.create_load_output(self.root))
             for part in parts:
                 output.append(self.create_load_attr(part))
         else:
@@ -280,7 +279,7 @@ class PyCodegen:
     def load_graph_output(self, index):
         output = self._output
         output.append(self.create_load(self.graph_output_var))
-        output.append(self.create_load_const(index))
+        output.append(self._create_load_const(index))
         output.append(create_instruction("BINARY_SUBSCR"))
 
     def add_cache(self, value):
@@ -346,10 +345,13 @@ class PyCodegen:
         return create_instruction("LOAD_GLOBAL", argval=name)
 
     def create_load_const(self, value) -> Instruction:
-        return create_load_const(value)
+        assert is_safe_constant(value), f"unsafe constant {value}"
+        return self._create_load_const(value)
 
-    def create_load_const_unchecked(self, value) -> Instruction:
-        return create_load_const(value, checked=False)
+    def _create_load_const(self, value) -> Instruction:
+        return create_instruction("LOAD_CONST", argval=value)
+
+    create_load_output = _create_load_const
 
     def load_method(self, name):
         self.tx.output.update_co_names(name)
@@ -405,7 +407,7 @@ class PyCodegen:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
                 create_instruction("BUILD_TUPLE", arg=n),
-                self.create_load_const_unchecked(rot_n_helper(n)),
+                self._create_load_const(rot_n_helper(n)),
                 *create_rot_n(2),
                 create_instruction("CALL_FUNCTION_EX", arg=0),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
@@ -416,7 +418,7 @@ class PyCodegen:
         # nop function, calling it (which consumes the null), and popping the result.
         assert sys.version_info >= (3, 11)
         return [
-            self.create_load_const_unchecked(lambda: None),
+            self._create_load_const(lambda: None),
             # 3.13 swapped NULL and callable
             *(
                 (create_instruction("SWAP", arg=2),)

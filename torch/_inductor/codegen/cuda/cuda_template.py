@@ -93,7 +93,6 @@ class CUDATemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
-        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 
@@ -102,7 +101,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=size_args,
+            extra_args=extra_args,
             source_code=code,
         )
 

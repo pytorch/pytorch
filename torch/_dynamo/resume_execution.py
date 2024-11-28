@@ -10,7 +10,6 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
-    create_load_const,
     Instruction,
     overwrite_instruction,
     transform_code_object,
@@ -126,7 +125,10 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [create_load_const(val) for val in self.target_values]
+            load_args = [
+                create_instruction("LOAD_CONST", argval=val)
+                for val in self.target_values
+            ]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
@@ -166,7 +168,10 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [create_load_const(val) for val in self.target_values]
+            load_args = [
+                create_instruction("LOAD_CONST", argval=val)
+                for val in self.target_values
+            ]
 
         create_ctx: List[Instruction] = []
         _initial_push_null(create_ctx)
@@ -247,7 +252,7 @@ def _filter_iter(l1, l2, cond):
 def _load_tuple_and_call(tup):
     insts: List[Instruction] = []
     _initial_push_null(insts)
-    insts.extend(create_load_const(val) for val in tup)
+    insts.extend(create_instruction("LOAD_CONST", argval=val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
     return insts
 
@@ -451,7 +456,7 @@ class ContinueExecutionCache:
     def unreachable_codes(code_options) -> List[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
-            create_load_const(None),
+            create_instruction("LOAD_CONST", argval=None),
             create_instruction("RAISE_VARARGS", arg=1),
         ]
 

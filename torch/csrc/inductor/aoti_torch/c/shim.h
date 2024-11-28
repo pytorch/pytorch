@@ -40,12 +40,11 @@
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
 #ifdef _WIN32
-// PyTorch2 doesn't currently work on Windows. Exporting these APIs can lead
-// to symbol clashes at link time if libtorch is included in a DLL and binary
-// that depends on the DLL. As a short term fix, we don't export the symbols.
-// In the long term, this will need to be addressed when Windows is supported.
-// #define AOTI_TORCH_EXPORT __declspec(dllexport)
-#define AOTI_TORCH_EXPORT
+// PyTorch2 doesn't currently work on Windows. But, we still need to export aoti
+// functions. If we didn't export these functions, it will cause the inductor
+// failed, please issue: https://github.com/pytorch/pytorch/issues/139954
+// TODO: We can only show message when aoti runtime, but not compiling time.
+#define AOTI_TORCH_EXPORT __declspec(dllexport)
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -96,7 +95,6 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
-AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();

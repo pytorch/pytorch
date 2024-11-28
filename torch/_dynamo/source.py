@@ -602,7 +602,7 @@ class ODictGetItemSource(ChainedSource):
     def reconstruct(self, codegen):
         codegen.add_push_null(
             lambda: codegen.append_output(
-                codegen.create_load_const_unchecked(collections.OrderedDict.__getitem__)
+                codegen._create_load_const(collections.OrderedDict.__getitem__)
             )
         )
         reconstruct_getitem(self, codegen, index_is_slice=False)

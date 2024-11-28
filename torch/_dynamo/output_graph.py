@@ -47,7 +47,6 @@ from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
     create_instruction,
-    create_load_const,
     Instruction,
     unique_id,
 )
@@ -926,7 +925,7 @@ class OutputGraph:
                     alias_insts.extend(
                         [
                             create_instruction("LOAD_FAST", argval=list_name),
-                            create_load_const(list_idx),
+                            create_instruction("LOAD_CONST", argval=list_idx),
                             create_instruction("BINARY_SUBSCR"),
                             create_instruction("STORE_FAST", argval=alias_name),
                         ]
