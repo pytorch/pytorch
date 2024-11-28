@@ -52,7 +52,7 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor([3.0])
         with RewriteAddToMul():
             eager_res = fn(x)
-            compiled_res = torch._dynamo.optimize(cnt)(fn)(x)
+            compiled_res = torch.compile(fn, backend=cnt)(x)
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)

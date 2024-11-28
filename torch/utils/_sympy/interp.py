@@ -18,6 +18,8 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from .functions import (
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -104,6 +106,8 @@ def handlers():
         RoundDecimal: "round_decimal",
         # TODO: do the rest of the opaque unary functions...
         OpaqueUnaryFn_log2: "log2",
+        BitwiseFn_bitwise_and: "bitwise_and",
+        BitwiseFn_bitwise_or: "bitwise_or",
     }
     # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
     # for these functions, they should be Opaque instead

@@ -45,7 +45,6 @@ def main() -> None:
     platform_images = [
         generate_binary_build_matrix.WHEEL_CONTAINER_IMAGES,
         generate_binary_build_matrix.LIBTORCH_CONTAINER_IMAGES,
-        generate_binary_build_matrix.CONDA_CONTAINER_IMAGES,
     ]
     default_tag = generate_binary_build_matrix.DEFAULT_TAG
 
