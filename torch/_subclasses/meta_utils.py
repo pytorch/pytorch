@@ -331,7 +331,10 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.tensor_registry import _global_tensor_registry
+        from torch.nested._internal.tensor_registry import (
+            _global_tensor_registry,
+            try_get_int,
+        )
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -361,7 +364,7 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=_global_tensor_registry.try_get_int(t),
+            nested_int=try_get_int(t),
             custom_size_strides=self.describe_custom_size_strides(t),
             subclass_inner_attr=subclass_inner_attr,
             is_functional=is_functional,
@@ -747,13 +750,24 @@ class MetaConverter:
         self.arg_cnt += 1
 
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            inner_contexts = getattr(symbolic_context, "inner_contexts")
+            callback = functools.partial(callback_, device=t.device)
+
+            if (
+                inner_contexts := getattr(symbolic_context, "inner_contexts", None)
+            ) is not None:
+                inner_context = inner_contexts[t.subclass_inner_attr]
+            else:
+                # Run into this case in test_jagged_fake_to_fake_preserved
+                inner_context = all_dynamic_symbolic_context(
+                    t, src, shape_env, callback
+                )
+
             return self.meta_tensor(
                 t,
                 shape_env,
-                functools.partial(callback_, device=t.device),
+                callback,
                 source=src,
-                symbolic_context=inner_contexts[t.subclass_inner_attr],
+                symbolic_context=inner_context,
             )
 
         # When we make as_strided calls, we end up generating a guard

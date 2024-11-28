@@ -4255,15 +4255,30 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @onlyCUDA
     @dtypes(torch.float32)
     def test_record_stream(self, device, dtype):
+        def is_plain_cuda_tensor(t):
+            from torch.nested._internal.cached_tensor import CachedTensor
+            from torch.nested._internal.offload_tensor import OffloadTensor
+
+            return (
+                isinstance(t, torch.Tensor)
+                and not isinstance(t, (CachedTensor, OffloadTensor))
+                and "cuda" in str(t.device)
+            )
+
         def _create_nt():
             values = torch.ones(1024, 4 * 1024, device="cuda")
             offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
             lengths = offsets.diff()
             nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
+
+            flat_tensors = [
+                nt._values,
+                nt._non_contig_offsets,
+                nt._device_lengths.device_tensor,
+            ]
+            assert all(is_plain_cuda_tensor(x) for x in flat_tensors)
             data_ptrs = {
-                nt._values.data_ptr(),
-                nt._offsets.data_ptr(),
-                nt._lengths.data_ptr(),
+                x.data_ptr() for x in flat_tensors
             }
             return nt, data_ptrs
 
@@ -7991,9 +8006,12 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
-        a = torch.SymInt(NestedIntNode(1, 1))
-        b = torch.SymInt(NestedIntNode(1, 1))
-        c = torch.SymInt(NestedIntNode(2, 1))
+        cache = torch.tensor(1.)
+        cache2 = torch.tensor(1.)
+
+        a = torch.SymInt(NestedIntNode(cache, 1))
+        b = torch.SymInt(NestedIntNode(cache, 1))
+        c = torch.SymInt(NestedIntNode(cache2, 1))
         d = 3
 
         self.assertTrue(a == a)
@@ -8065,8 +8083,11 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a > 1)
 
     def test_with_factor(self):
-        a = torch.SymInt(NestedIntNode(1, 5))
-        b = torch.SymInt(NestedIntNode(1, 10))
+        cache = torch.tensor(1.)
+
+        a = torch.SymInt(NestedIntNode(cache, 5))
+        b = torch.SymInt(NestedIntNode(cache, 10))
+
         # eq
         self.assertFalse(a == b)
         self.assertFalse(a >= b)

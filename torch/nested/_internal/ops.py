@@ -2150,13 +2150,16 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
 def record_stream_default(func, *args, **kwargs):
+    from torch.nested._internal.utils import apply_func
     inp = args[0]
     stream = args[1]
     # ensure all components live until stream computation completes
-    func(inp._values, stream)
-    func(inp._offsets, stream)
-    if inp._lengths is not None:
-        func(inp._lengths, stream)
+    def apply(x):
+        if not x.is_cpu:
+            x.record_stream(stream)
+    apply_func(lambda x: apply(x), inp._metadata, only_source_fields=False)
+    inp._non_contig_offsets.record_stream(stream)
+    inp._values.record_stream(stream)
 
 
 @register_jagged_func(

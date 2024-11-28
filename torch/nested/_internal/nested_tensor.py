@@ -600,14 +600,16 @@ def normalize_min_max_seqlen(metadata):
             metadata["_max_seqlen_tensor"] = _store_val_in_tensor(max_seqlen)
         else:
             metadata["_max_seqlen_tensor"] = max_seqlen
-    torch._dynamo.mark_dynamic(metadata["_max_seqlen_tensor"], 0)
+    if metadata.get("_max_seqlen_tensor") is not None:
+        torch._dynamo.mark_dynamic(metadata["_max_seqlen_tensor"], 0)
     if (min_seqlen := metadata.get("min_seqlen")) is not None:
         del metadata["min_seqlen"]
         if isinstance(min_seqlen, (int, torch.SymInt)):
             metadata["_min_seqlen_tensor"] = _store_val_in_tensor(min_seqlen)
         else:
             metadata["_min_seqlen_tensor"] = min_seqlen
-    torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
+    if metadata.get("_min_seqlen_tensor") is not None:
+        torch._dynamo.mark_dynamic(metadata["_min_seqlen_tensor"], 0)
 
 
 def _make_ragged_tensors_compat(*, offsets, lengths, min_seqlen, max_seqlen):

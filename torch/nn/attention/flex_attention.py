@@ -931,7 +931,8 @@ def _nested_mod_func_adapter(
         seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
         return seq_idx
 
-    offsets = nt._offsets  # type: ignore[attr-defined]
+    # Can/should we automatically unwrap CachedTensor/OffloadTensor when hitting any HOP?
+    offsets = nt._metadata._device_offsets.device_tensor  # type: ignore[attr-defined]
     total_length = nt._values.shape[nt._ragged_idx - 1]  # type: ignore[attr-defined]
     seq_idx = _build_seq_idx(offsets, total_length)
 
