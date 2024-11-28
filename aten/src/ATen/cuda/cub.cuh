@@ -349,7 +349,7 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // Per-thread tile data
   T data[ITEMS_PER_THREAD];
 
-  int remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   for (int i=0; i<iters_per_cta; i++){
   // Load items into a blocked arrangement
     if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
@@ -436,7 +436,15 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
       }
       d_in += BLOCK_THREADS * ITEMS_PER_THREAD;
       remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
-      if (remaining <= 0) return;
+      if (remaining <= 0) {
+        // for nonzeros we need to write out last blocks
+        // accumulated value to be able to compute
+        // total number of nonzeros
+        if (nonzero && threadIdx.x == 0) {
+          agg[blockIdx.x] = agg_val;
+        }
+        return;
+      }
       __syncthreads();
 
     }
@@ -458,14 +466,9 @@ template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
 __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t input_nelem, int64_t output_nelem, int iters_per_cta) {
   if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= input_nelem) return;
   d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
-  d_out += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   int64_t start_idx = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
 
   using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
-
-  // Specialize BlockStore type for our thread block (uses warp-striped loads for coalescing, then transposes in shared
-  // memory to a blocked arrangement)
-  using BlockStoreT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockStore<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_STORE_WARP_TRANSPOSE>;
 
   // Specialize BlockScan type for our thread block
   using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
@@ -477,7 +480,6 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
   __shared__ union TempStorage
   {
     typename BlockLoadT::TempStorage load;
-    typename BlockStoreT::TempStorage store;
     typename BlockScanT::TempStorage scan;
     typename BlockReduceT::TempStorage reduce;
     typename BlockExchangeT::TempStorage exchange;
@@ -488,13 +490,16 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
   agg_data = threadIdx.x >= blockIdx.x ? 0 : agg[threadIdx.x];
   int64_t aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
   __syncthreads();
+  d_out += aggregate;
+ 
   TransformInputIteratorT t_input_itr(d_in, NonZeroOp<T>());
 
   // Per-thread tile data
   int data[ITEMS_PER_THREAD];
   int out_indices[ITEMS_PER_THREAD];
 
-  int remaining =  input_nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  int64_t remaining =  input_nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  int64_t out_remaining = output_nelem - aggregate;
   //CountingInputIteratorT counting_itr(BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x);
   for (int i=0; i<iters_per_cta; i++){
 
@@ -518,12 +523,13 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
 
     // Barrier for smem reuse
     __syncthreads();
-
+    // striped arrangement will provide a slightly better
+    // coalescing for writes (although it's still bad because it's indirect indexing)
     BlockExchangeT(temp_storage.exchange).BlockedToStriped(data);
     __syncthreads();
     BlockExchangeT(temp_storage.exchange).BlockedToStriped(out_indices);
     for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-      if (data[ii] != 0 && out_indices[ii] < output_nelem) {
+      if (data[ii] != 0 && out_indices[ii] < out_remaining) {
         int64_t inp_idx = start_idx + threadIdx.x + blockDim.x * ii;
         d_out[out_indices[ii]] = inp_idx; 
       }
@@ -531,9 +537,10 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
 
     t_input_itr += BLOCK_THREADS * ITEMS_PER_THREAD;
     d_out += aggregate;
+    out_remaining -= aggregate;
     remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
     start_idx += BLOCK_THREADS * ITEMS_PER_THREAD;
-    if (remaining <= 0) return;
+    if (remaining <= 0 || out_remaining <= 0) return;
     __syncthreads();
   }
 
