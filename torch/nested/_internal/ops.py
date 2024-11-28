@@ -923,9 +923,11 @@ def chunk_default(func, *args, **kwargs):
         split_sizes = [x.sum().item() for x in chunked_lengths]
         chunk_values = inp._values.split(split_sizes)
 
+        # Note that the actual number of chunks returned is not necessarily the same as
+        # the input number; it can be counter-intuitive, but it matches dense behavior.
         return [
             NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
-            for i in range(0, chunk_size)
+            for i in range(0, len(chunk_values))
         ]
     else:
         return [
@@ -1131,7 +1133,7 @@ def bmm_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.expand.default, "self: jt, size: any, implicit: any?"
+    torch.ops.aten.expand.default, "self: jt_all, size: any, implicit: any?"
 )
 def expand_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1145,7 +1147,7 @@ def expand_default(func, *args, **kwargs):
     if not raggedness_matches(inp, size):
         raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
-    expand_arg = [-1, *size[2:]]
+    expand_arg = [-1 if d == inp._ragged_idx else size[d] for d in range(1, inp.dim())]
     return NestedTensor(func(inp._values, expand_arg), **extract_kwargs(inp))
 
 
@@ -1161,7 +1163,59 @@ def expand_as_default(func, *args, **kwargs):
     return NestedTensor(func(inp, other._values), **extract_kwargs(other))
 
 
-@register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
+@register_jagged_func(torch.ops.aten.broadcast_to.default, "self: jt_all, size: any")
+def broadcast_to(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    size = new_kwargs.pop("size")
+
+    if len(size) <= inp.dim():
+        return inp.expand([*(1 for _ in range(inp.dim() - len(size))), *size])
+
+    raise ValueError(
+        "broadcast_to(): broadcasting to a higher-dim shape is currently not supported "
+        "for nested tensors with the jagged layout"
+    )
+
+
+@register_jagged_func(torch.ops.aten.broadcast_tensors.default, "tensors: any")
+def broadcast_tensors(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    tensors = new_kwargs.pop("tensors")
+    if len(tensors) == 0:
+        raise ValueError("broadcast_tensors(): expected at least one tensor input")
+    if len(tensors) == 1:
+        return tensors[0]
+
+    outs = []
+    broadcast_shape = torch.broadcast_shapes(*(t.shape for t in tensors))
+    # Pull out the first NJT. If broadcast_shapes() worked, the nested ints are compatible.
+    njt = next(t for t in tensors if isinstance(t, NestedTensor))
+    for t in tensors:
+        if t.is_nested:
+            outs.append(t.broadcast_to(broadcast_shape))
+        elif t.dim() < len(broadcast_shape):
+            outs.append(
+                NestedTensor(t.broadcast_to(njt._values.shape), **extract_kwargs(njt))
+            )
+        else:
+            raise ValueError(
+                "broadcast_tensors(): broadcasting nested tensors with dense tensors of equal "
+                "or higher dim is not currently supported"
+            )
+
+    return tuple(outs)
+
+
+@register_jagged_func(
+    torch.ops.aten.where.self, "condition: jt_all, self: any, other: any"
+)
 def where_self(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1171,7 +1225,8 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert condition._size == other._size == inp._size
+    # if the tensors aren't compatible, broadcast_tensors() will let us know
+    condition, inp, other = torch.broadcast_tensors(condition, inp, other)
 
     return NestedTensor(
         func(condition._values, inp._values, other._values, **new_kwargs),
@@ -1297,10 +1352,23 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
         # reduction cases: (non-batch), (non-batch, non-batch), etc.
         # apply sum directly on values
         out = func(inp._values, **new_kwargs)
+        out_kwargs = extract_kwargs(inp)
+        if not new_kwargs.get("keepdim", False):
+            # dims are reduced away -> ragged_idx of output needs to be reevaluated
+            dimlist = (
+                new_kwargs["dim"]
+                if isinstance(new_kwargs["dim"], (tuple, list))
+                else [new_kwargs["dim"]]
+            )
+            for d in dimlist:
+                # adjust for all dims reduced before the ragged dim
+                if d < inp._ragged_idx - 1:
+                    out_kwargs["_ragged_idx"] -= 1
+
         if isinstance(out, (tuple, list)):
             # some ops return multiple things; wrap each of them as an NJT
-            return type(out)(NestedTensor(o, **extract_kwargs(inp)) for o in out)
-        return NestedTensor(out, **extract_kwargs(inp))
+            return type(out)(NestedTensor(o, **out_kwargs) for o in out)
+        return NestedTensor(out, **out_kwargs)
 
 
 @register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
@@ -1595,7 +1663,12 @@ def select_int(func, *args, **kwargs):
             "select(): not yet supported on dim != 0 for non-contiguous nested tensor with holes"
         )
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    # if selecting before the ragged dim, adjust output ragged_idx
+    out_kwargs = extract_kwargs(inp)
+    if new_kwargs["dim"] < inp._ragged_idx - 1:
+        out_kwargs["_ragged_idx"] -= 1
+
+    return NestedTensor(func(inp._values, **new_kwargs), **out_kwargs)
 
 
 @register_jagged_func(
