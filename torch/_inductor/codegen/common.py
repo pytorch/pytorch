@@ -1289,6 +1289,7 @@ class KernelArgs:
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
+            print("outer is: {}".format(outer), flush=True)
             dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
@@ -2258,12 +2259,15 @@ class KernelTemplate:
             raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
-    def _fake_get_dtype(fake_out):
+    def _fake_get_dtype(fake_outs):
         _get_dtype_real = V.graph.get_dtype
 
         def get_dtype(name):
-            if name == fake_out.get_name():
-                return fake_out.get_dtype()
+            # if name == fake_out.get_name():
+            #     return fake_out.get_dtype()
+            for fake_out in fake_outs:
+                if name == fake_out.get_name():
+                    return fake_out.get_dtype()
             return _get_dtype_real(name)
 
         return get_dtype

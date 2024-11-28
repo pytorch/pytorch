@@ -75,7 +75,8 @@ if torch._C._has_mkldnn:
 
             from ..mkldnn_lowerings import linear_silu_linear_mul
 
-            return linear_silu_linear_mul(*computation_silu_mul_args), linear_silu_linear_mul(*computation_silu_mul_args)
+            # return linear_silu_linear_mul(*computation_silu_mul_args), linear_silu_linear_mul(*computation_silu_mul_args)
+            return linear_silu_linear_mul(*computation_silu_mul_args)
 
         toy_fn._inductor_lowering_function = True 
 

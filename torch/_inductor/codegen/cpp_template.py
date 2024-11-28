@@ -33,7 +33,10 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
+        self.output_nodes: List[ir.Buffer] = [
+            ir.Buffer(name="buf_out", layout=layout),
+            ir.Buffer(name="buf_out2", layout=layout),
+        ]
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
@@ -41,7 +44,7 @@ class CppTemplate(KernelTemplate):
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
         with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
+            V.graph, "get_dtype", self._fake_get_dtype(self.output_nodes)
         ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
             kernel_name=kernel_name, num_threads=self.num_threads
         ) as kernel:
@@ -57,7 +60,7 @@ class CppTemplate(KernelTemplate):
         expected_args = list(
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
-        expected_args.extend([self.output_node.get_name()])
+        expected_args.extend([self.output_nodes[0].get_name(), self.output_nodes[1].get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
             expected_args,
@@ -75,7 +78,7 @@ class CppTemplate(KernelTemplate):
         bmreq = CppBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
+            output_tensor_meta=TensorMeta.from_irnodes(self.output_nodes),
             extra_args=extra_args,
             source_code=code,
         )
@@ -102,7 +105,7 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            self.output_node.get_layout(),
+            self.output_nodes[0].get_layout(),
             make_kernel_render,
             bmreq,
             self,

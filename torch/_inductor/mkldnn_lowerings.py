@@ -112,7 +112,7 @@ def linear_silu_linear_mul(
     )
     if len(x_size) > 2:
         result = view(result, (*x_size[:-1], result.get_size()[-1]))
-    return result
+    return result, result
 
 
 def register_onednn_fusion_ops():

@@ -39,7 +39,7 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 extern "C" {{export_declaration}}
-{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
+{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y, "Y2": Y2}, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     {{ template.codegen_blocks(
@@ -333,7 +333,8 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1
             inp_list.append(inp)
-        Y = self.output_node
+        Y = self.output_nodes[0]
+        Y2 = self.output_nodes[1]
 
         if template_buffer_node is not None:
             W_list = template_buffer_node.inputs[
@@ -413,9 +414,13 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
             kernel_args["W" + str(w_idx)] = W_list[w_idx]
         for inp_idx in range(self.gemm_group_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
+        
+
+        # Y2 = ir.Buffer(name="Y2", layout=Y.layout)
 
         options = dict(
             Y=Y,
+            Y2=Y2,
             N=self.n,
             K=self.k,
             PADDED_N=self.padded_n,
