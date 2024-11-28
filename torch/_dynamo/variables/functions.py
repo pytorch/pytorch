@@ -343,11 +343,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         This is a wrapper around (Nested)UserFunctionVariable
     """
 
-    @classmethod
-    def create_with_source(cls, value, source):
-        vt = UserFunctionVariable.create_with_source(value, source)
-        return cls(vt)
-
     def __init__(self, vt: VariableTracker, **kwargs):
         self.vt = vt
         self.inline_tracer = None
@@ -395,6 +390,14 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         except exc.ObservedException as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
+        except Unsupported as e:
+            # fallback to eager
+            from torch._C._dynamo.eval_frame import skip_code
+
+            code = self.vt.get_code()
+            skip_code(code)
+            raise exc.SkipFrame from e
+            # raise exc.SkipCodeRecursiveException from e
 
     def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
         result = []
@@ -408,8 +411,8 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
 
     def call_method(
         self,
-        tx,
-        name,
+        tx: "InstructionTranslator",
+        name: str,
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":

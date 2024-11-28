@@ -19,7 +19,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from ..exc import (
     AttributeMutationError,
-    ObservedUserStopIteration,
     unimplemented,
     Unsupported,
     UserError,

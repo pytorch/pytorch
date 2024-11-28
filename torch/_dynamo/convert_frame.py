@@ -55,10 +55,9 @@ from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
-from .bytecode_transformation import (
+from .bytecode_transformation import (  # is_generator,
     check_inst_exn_tab_entries_valid,
     Instruction,
-    # is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
