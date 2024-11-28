@@ -1066,13 +1066,14 @@ def _apply_kernel_options(
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
 
-    # If forward kernel needs to return logsumexp is decided by this rule internally.
+    # If foward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
     kernel_options["OUTPUT_LOGSUMEXP"] = True
     if not return_lse:
-        # We used to check if q,k,v required grads but since captured buffers can require grad
-        # we always write unless in no_grad
-        output_logsumexp = torch.is_grad_enabled()
+        any_inputs_require_grad = (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        )
+        output_logsumexp = any_inputs_require_grad and torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
 
     return kernel_options
@@ -1239,7 +1240,9 @@ def flex_attention(
         block_mask = _create_empty_block_mask(query, key)
     elif (
         not query.is_nested
-        and (query.requires_grad or key.requires_grad or value.requires_grad)
+        and (
+            query.requires_grad or key.requires_grad or value.requires_grad
+        )  # skip adjust block if no grad
         and (
             query.size(-2)
             < block_mask.kv_num_blocks.size(-1) * block_mask.BLOCK_SIZE[0]

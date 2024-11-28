@@ -868,6 +868,7 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
+
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -1637,10 +1638,6 @@ class FxGraphCache:
         # with log_cache_bypass.
         chromium_log = get_chromium_event_logger()
         cache_state = cache_info["cache_state"]
-        # Here for grepping:
-        # fx_graph_cache_hit
-        # fx_graph_cache_miss
-        # fx_graph_cache_bypass
         chromium_log.log_instant_event(
             f"fx_graph_cache_{cache_state}",
             cache_info["cache_event_time"],

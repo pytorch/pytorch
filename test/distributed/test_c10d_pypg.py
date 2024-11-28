@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import weakref
 
 import test_c10d_common
@@ -10,8 +11,8 @@ import torch.nn as nn
 from torch._C._distributed_c10d import _create_work_from_future
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import MultiThreadedTestCase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 def create_work(result):
@@ -79,7 +80,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
         self._work.append(res)
         return res
 
-    def getSize(self):
+    def size(self):
         return self._world
 
     def getBackendName(self):
@@ -89,38 +90,22 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
         return f"PLG w:{self._world} r:{self._rank}"
 
 
-class DummyAttrProcessGroup(dist.ProcessGroup):
-    def getRank(self):
-        return 123
-
-    def getSize(self):
-        return 456
-
-    def getBackendName(self):
-        return "dummy-attr"
-
-    def setGroupName(self, name) -> None:
-        self._group_name = "py:" + name
-
-    def getGroupName(self) -> str:
-        return self._group_name
-
-    def setGroupDesc(self, group_desc) -> None:
-        self._group_desc = "py:" + group_desc
-
-    def getGroupDesc(self) -> str:
-        return self._group_desc
-
-
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
         super().setUp()
-        self._spawn_threads()
+        self._spawn_processes()
 
     @property
     def world_size(self):
         return 1
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
     def _get_process_group(self):
         return LonelyRankProcessGroup(self.rank, self.world_size, self.use_wrapper)
@@ -157,30 +142,16 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
         )
 
 
-class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):
+class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiProcessTestCase):
     @property
     def use_wrapper(self):
         return False
 
 
-class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiThreadedTestCase):
+class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiProcessTestCase):
     @property
     def use_wrapper(self):
         return True
-
-
-class TestPyProcessGroup(TestCase):
-    def test_attr_overrides(self):
-        pg = DummyAttrProcessGroup(0, 1)
-        self.assertEqual(pg.name(), "dummy-attr")
-        self.assertEqual(pg.rank(), 123)
-        self.assertEqual(pg.size(), 456)
-
-        pg._set_group_name("name")
-        self.assertEqual(pg.group_name, "py:name")
-
-        pg._set_group_desc("desc")
-        self.assertEqual(pg.group_desc, "py:desc")
 
 
 if __name__ == "__main__":

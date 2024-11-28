@@ -4,8 +4,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/interned_strings_class.h>
 
-#include <cstring>
-
 namespace c10 {
 
 namespace {

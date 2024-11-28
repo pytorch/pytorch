@@ -9,10 +9,9 @@
 //
 #include <cuda_runtime.h>
 
+#include <c10/cuda/CUDAStream.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/tunable/StreamTimer.h>
-#include <c10/cuda/CUDAStream.h>
-#include <cmath>
 
 namespace at::cuda::tunable {
 
@@ -21,7 +20,8 @@ StreamTimer::StreamTimer() {
   AT_CUDA_CHECK(cudaEventCreate(&end_));
 }
 
-StreamTimer::~StreamTimer() = default;
+StreamTimer::~StreamTimer() {
+}
 
 void StreamTimer::Start() {
   AT_CUDA_CHECK(cudaDeviceSynchronize());
@@ -34,7 +34,7 @@ void StreamTimer::End() {
 }
 
 float StreamTimer::Duration() {
-  auto time = std::numeric_limits<float>::quiet_NaN();
+  float time;
   // time is in ms with a resolution of 1 us
   AT_CUDA_CHECK(cudaEventElapsedTime(&time, start_, end_));
   return time;

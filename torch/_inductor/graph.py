@@ -74,7 +74,6 @@ from .exc import (
 )
 from .ir import (
     Constant,
-    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -104,7 +103,6 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
-    get_donated_idxs,
     get_sympy_Expr_dtype,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
@@ -487,11 +485,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
-
-        # track the current placeholder index that we are processing
-        self.placeholder_idx = -1
-
-        self.bw_donated_idxs = get_donated_idxs()
 
     def has_feature(
         self,
@@ -970,7 +963,6 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
-        self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
@@ -1001,27 +993,13 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
-
-        if (
-            self.is_backward
-            and self.bw_donated_idxs
-            and self.placeholder_idx in self.bw_donated_idxs
-        ):
-            tensor = TensorBox.create(
-                DonatedBuffer(
-                    name=target,
-                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
-                )
+        # TODO(jansel): handle input aliasing
+        tensor = TensorBox.create(
+            InputBuffer(
+                name=target,
+                layout=FixedLayout(example.device, example.dtype, sizes, strides),
             )
-        else:
-            # TODO(jansel): handle input aliasing
-            tensor = TensorBox.create(
-                InputBuffer(
-                    name=target,
-                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
-                )
-            )
-
+        )
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
@@ -2134,3 +2112,53 @@ class SubgraphLowering(GraphLowering):
             subgraph_name=self.name,
             parent_wrapper_code=self.parent.wrapper_code,
         )
+
+    def add_symbol_graph_inputs(self) -> None:
+        """
+        For subgraphs, it is possible that the aten graph does not have a symint
+        associated with the shape of the input tensors. To ensure that the
+        shape/stride symbol is available for the subgraph code (e.g. for
+        allocating intermediate tensor), we collect all the symbols from input
+        tensors of this subgraph (passed as inputs from the parent graph) and
+        add them as extra inputs to the subgraph.
+
+        The parent wrapper `codegen_subgraph` then ensures to pass on the
+        corresponding symints from the parent function to the lifted subgraph
+        function.
+        """
+
+        def get_free_symbols(expr: sympy.Expr) -> OrderedSet[sympy.Symbol]:
+            # expr can be s0 + s1, recurse to get s0 and s1
+            symbols: OrderedSet[
+                sympy.Symbol
+            ] = OrderedSet()  # Use a set to avoid duplicates
+            if isinstance(expr, sympy.Symbol):
+                symbols.add(expr)
+            elif isinstance(expr, sympy.Expr):
+                symbols.update(expr.free_symbols)
+            return symbols
+
+        subgraph_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+
+        graph_inputs_tensors = list(
+            filter(
+                lambda x: not isinstance(x[1], sympy.Expr), self.graph_inputs.items()
+            )
+        )
+
+        for name_value in graph_inputs_tensors:
+            _, value = name_value
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                subgraph_symbols.update(get_free_symbols(shape))
+
+            strides = value.get_stride()
+            for dim, shape in enumerate(strides):
+                subgraph_symbols.update(get_free_symbols(shape))
+
+        # Add the extra symints in the subgraph
+        for symbol in subgraph_symbols:
+            if symbol.name in self.graph_input_names:
+                continue
+            self.graph_inputs[symbol.name] = symbol
+            self.graph_input_names.append(symbol.name)

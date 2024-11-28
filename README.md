@@ -417,11 +417,9 @@ readthedocs theme.
 ```bash
 cd docs/
 pip install -r requirements.txt
-make html
-make serve
 ```
-
-Run `make` to get a list of all available output formats.
+You can then build the documentation by running `make <format>` from the
+`docs/` folder. Run `make` to get a list of all available output formats.
 
 If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
