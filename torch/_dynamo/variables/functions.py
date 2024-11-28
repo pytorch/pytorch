@@ -644,7 +644,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             lambda: codegen.load_import_from(__name__, "_create_nested_fn")
         )
         codegen(self.code)
-        codegen.extend_output([codegen._create_load_const(self.f_globals)])
+        codegen.extend_output([codegen.create_load_const_unchecked(self.f_globals)])
         codegen(ConstantVariable.create(self.code.value.co_name))
 
         if self.defaults:
@@ -665,7 +665,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.annotations:
             try:
                 annotations = self.annotations.as_python_constant()
-                codegen.extend_output([codegen._create_load_const(annotations)])
+                codegen.extend_output(
+                    [codegen.create_load_const_unchecked(annotations)]
+                )
             except NotImplementedError:
                 codegen(self.annotations)
         else:

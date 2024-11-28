@@ -1375,6 +1375,18 @@ def sample_inputs_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
         yield last_dim_sample
 
 
+def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in sample_inputs_elementwise_njt_binary(
+        op_info, device, dtype, requires_grad, **kwargs
+    ):
+        other = sample.args[0]
+        sample.args = ()
+        sample.kwargs["other"] = other
+        sample.kwargs["condition"] = sample.input > 0.0
+        sample.name = sample.name.replace("(", "(NT, ")
+        yield sample
+
+
 # === END OP-SPECIFIC SAMPLE INPUTS FUNCS / REFERENCES ===
 
 
@@ -1410,6 +1422,7 @@ njt_sample_inputs = {
     "squeeze": sample_inputs_squeeze,
     "unflatten": sample_inputs_unflatten,
     "unsqueeze": sample_inputs_unsqueeze,
+    "where": sample_inputs_where,
 }
 
 njt_references = {
