@@ -6,7 +6,6 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple, Union
 
 import torch._logging
 import torch.fx
-from torch._inductor.codecache import extract_tensor_metadata_for_cache_key, sha256_hash
 from torch._subclasses.fake_tensor import TensorMetadata
 from torch.utils._pytree import tree_flatten
 
@@ -26,6 +25,8 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 
 def get_metadata(node: Node) -> Optional[Union[str, TensorMetadata]]:
+    from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+
     if isinstance(node, torch.fx.Node):
         value = node.meta.get("example_value", None)
         if isinstance(value, torch.Tensor):
@@ -121,6 +122,8 @@ class GraphRegionTracker:
     def _get_key(
         filename: str, lineno: int, instruction_pointer: int, node: Node
     ) -> str:
+        from torch._inductor.codecache import sha256_hash
+
         return sha256_hash(
             pickle.dumps(
                 (
