@@ -1166,7 +1166,7 @@ class cuda:
     # enable generation of inline standalone runner in CUDA CPP generated code
     # which allows to compile the generated code into a standalone executable.
     generate_test_runner: bool = (
-        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern
@@ -1347,6 +1347,8 @@ _cache_config_ignore_prefix = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    # tests assume that changes here don't invalidate cache
+    "always_complex_memory_overlap_TESTING_ONLY",
 ]
 
 # External callable for matmul tuning candidates
@@ -1355,6 +1357,8 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class test_configs:
     force_extern_kernel_in_multi_template = False
+
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:
