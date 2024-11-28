@@ -146,7 +146,8 @@ class DynamoExporterTest(common_utils.TestCase):
             ),
             3,
         )
-        torch.onnx.export(VisionModel(), args, dynamo=True)
+        onnx_program = torch.onnx.export(VisionModel(), args, dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     # TODO(justinchuby): Test multi-output HOPs
 
