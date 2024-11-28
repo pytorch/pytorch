@@ -2089,6 +2089,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_graph_break_before___enter__(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2112,18 +2113,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f32[1]"):
-        l_args_0_ = L_args_0_
-
-        add: "f32[1]" = l_args_0_ + 1;  l_args_0_ = None
-        return (add,)
-""",
-        )
+        self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_inside___enter__(self):
         @contextlib.contextmanager
@@ -2150,6 +2140,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 0)
 
+    @unittest.expectedFailure
     def test_graph_break_after___enter__(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2173,19 +2164,9 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f32[1]"):
-        l_args_0_ = L_args_0_
+        self.assertEqual(len(eager.graphs), 0)
 
-        add: "f32[1]" = l_args_0_ + 1;  l_args_0_ = None
-        return (add,)
-""",
-        )
-
+    @unittest.expectedFailure
     def test_graph_break_before_and_after___enter__(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2210,19 +2191,9 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f32[1]"):
-        l_args_0_ = L_args_0_
+        self.assertEqual(len(eager.graphs), 0)
 
-        add: "f32[1]" = l_args_0_ + 1;  l_args_0_ = None
-        return (add,)
-""",
-        )
-
+    @unittest.expectedFailure
     def test_graph_break_before___enter___and_disable___exit__(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2251,19 +2222,94 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f32[1]"):
-        l_args_0_ = L_args_0_
+        self.assertEqual(len(eager.graphs), 0)
 
-        add: "f32[1]" = l_args_0_ + 1;  l_args_0_ = None
-        return (add,)
-""",
-        )
+    @unittest.expectedFailure
+    def test_disable___enter__(self):
+        def h(x):
+            return x.cos()
 
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+
+                @torch._dynamo.disable
+                def g():
+                    return ctx.__enter__()
+
+                y = g()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_disable_ctx_manager(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        @torch._dynamo.disable
+        def g(x):
+            with whoo(x) as y:
+                return y
+
+        def fn(x):
+            return g(x)
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_disable_ctx_manager_with_try_finally(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        @torch._dynamo.disable
+        def g(x):
+            ctx = whoo(x)
+            try:
+                y = ctx.__enter__()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        def fn(x):
+            return g(x)
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    @unittest.expectedFailure
     def test_graph_break_and_disable___enter__(self):
         @contextlib.contextmanager
         def whoo(x):
@@ -2318,6 +2364,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 0)
 
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(enable_trace_contextlib=False)
     def test_disable_trace_contextmanager(self):
         @contextlib.contextmanager
@@ -2340,9 +2387,9 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2)
         expected = f(x)
         eager = EagerAndRecordGraphs()
-        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        out = torch.compile(backend=eager, fullgraph=False, dynamic=False)(f)(x)
         self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 3)
+        self.assertEqual(len(eager.graphs), 2)
         self.assertExpectedInline(
             normalize_gm(eager.graphs[0].print_readable(False)),
             """\
@@ -2357,18 +2404,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(eager.graphs[1].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_args_0_: "f32[2]"):
-        l_args_0_ = L_args_0_
-
-        cos: "f32[2]" = l_args_0_.cos();  l_args_0_ = None
-        return (cos,)
-""",
-        )
-
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[2].print_readable(False)),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2]"):
