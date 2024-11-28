@@ -106,8 +106,7 @@ class GraphRegionTrackerTests(TestCase):
                 torch.ones(10, 20),
             ),
             """[[['y1', 'x1', 'sum_3', 'sum_2', 'z'], ['y1_1', 'x1_1', 'sum_5', 'sum_4', 'z_1'], \
-['y1_2', 'x1_2', 'sum_8', 'sum_7', 'z_2']], [['b', 'cos_1', 'x0', 'sum_1', 'a', 'c'], \
-['b_1', 'cos_2', 'x0', 'sum_6', 'a_1', 'c_1']]]""",
+['y1_2', 'x1_2', 'sum_8', 'sum_7', 'z_2']], [['b', 'cos_1', 'sum_1', 'a', 'c'], ['b_1', 'cos_2', 'sum_6', 'a_1', 'c_1']]]""",
         )
 
     def test_no_single_node_regions(self):
@@ -152,8 +151,8 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y1_1', 'sum_5'], ['y1_2', 'sum_8']], [['x1', 'sum_2', 'z'], ['x1_1', 'sum_4', 'z_1'], \
-['x1_2', 'sum_7', 'z_2']], [['b', 'cos_1', 'sum_1'], ['b_1', 'cos_2', 'sum_6']]]""",
+            """[[['y1_1', 'x1_1', 'sum_5', 'sum_4', 'z_1'], ['y1_2', 'x1_2', 'sum_8', 'sum_7', 'z_2']], \
+[['b', 'cos_1', 'sum_1'], ['b_1', 'cos_2', 'sum_6']]]""",
         )
 
     def test_mismatched_dtypes(self):
@@ -241,7 +240,7 @@ class GraphRegionTrackerTests(TestCase):
         ]:
             self.assertExpectedInline(
                 self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                """[[['y0', 'y1_2', 'x0', 'sum_3', 'x1_2', 'o0'], ['y0', 'y1_3', 'x0', 'sum_4', 'x1_3', 'o2']], \
+                """[[['y1_2', 'sum_3', 'x1_2', 'o0'], ['y1_3', 'sum_4', 'x1_3', 'o2']], \
 [['y1', 'sum_1', 'x1', 'o4'], ['y1_1', 'sum_2', 'x1_1', 'o5']]]""",
             )
 
