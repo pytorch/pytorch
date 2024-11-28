@@ -1,9 +1,12 @@
 import functools
 import math
+import pickle
 from collections import defaultdict, deque
-from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple, Union
 
 import torch.fx
+from torch._inductor.codecache import extract_tensor_metadata_for_cache_key, sha256_hash
+from torch._subclasses.fake_tensor import TensorMetadata
 from torch.utils._pytree import tree_flatten
 
 
@@ -11,25 +14,28 @@ Node = torch.fx.Node
 Region = List[Node]
 IdenticalNodes = List[Node]
 GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool]
-NodeKey = Tuple[GlobalStateKey, str, int]
 
 
-def _get_tensor_props(node: Node) -> Optional[Tuple[torch.Size, torch.dtype]]:
+def get_metadata(node: Node) -> Optional[Union[str, TensorMetadata]]:
     if isinstance(node, torch.fx.Node):
         value = node.meta.get("example_value", None)
         if isinstance(value, torch.Tensor):
-            return value.shape, value.dtype
+            return extract_tensor_metadata_for_cache_key(value)
+        elif isinstance(value, torch.SymInt):
+            return str(value)
     return None
 
 
 @functools.lru_cache(128)
-def _hash_node_inputs(node: Node) -> int:
+def _extract_node_metadata(
+    node: Node,
+) -> Tuple[Tuple[str, ...], Tuple[Optional[Union[str, TensorMetadata]], ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return hash((sorted_keys, tuple(_get_tensor_props(arg) for arg in all_args)))
+    return (sorted_keys, tuple(get_metadata(arg) for arg in all_args))
 
 
 def get_global_state_key() -> GlobalStateKey:
@@ -94,7 +100,7 @@ class BfsRegionIter:
 
 class GraphRegionTracker:
     def __init__(self) -> None:
-        self.loc_to_duplicates: Dict[NodeKey, IdenticalNodes] = defaultdict(list)
+        self.loc_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
         self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
         self.node_to_global_state_hash: Dict[Node, int] = {}
 
@@ -105,11 +111,17 @@ class GraphRegionTracker:
     @staticmethod
     def _get_key(
         filename: str, lineno: int, instruction_pointer: int, node: Node
-    ) -> NodeKey:
-        return (
-            get_global_state_key(),
-            GraphRegionTracker._get_loc_str(filename, lineno, instruction_pointer),
-            _hash_node_inputs(node),
+    ) -> str:
+        return sha256_hash(
+            pickle.dumps(
+                (
+                    get_global_state_key(),
+                    GraphRegionTracker._get_loc_str(
+                        filename, lineno, instruction_pointer
+                    ),
+                    _extract_node_metadata(node),
+                )
+            )
         )
 
     def track_node(
