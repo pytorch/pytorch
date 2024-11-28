@@ -915,62 +915,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 tx, [self] + list(args), kwargs
             )
 
-    def trace_supported_methods(
-        self, tx: "InstructionTranslator", method, name, args, kwargs
-    ):
-        def get_kwargs(*names):
-            fn = getattr(self.value, name)
-            bound_args = inspect.signature(fn).bind(
-                *([x.as_python_constant() for x in args]),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            bound_args.apply_defaults()
-            bound_args = bound_args.arguments
-            return {k: bound_args[k] for k in names}
-
-        def get_current_parameters(module_var):
-            params_dict = module_var.var_getattr(tx, "_parameters").realize().items
-            assert isinstance(params_dict, dict)
-            params_list = list(params_dict.values())
-            params_list = [param.realize() for param in params_list]
-            # Account for mod.param = None
-            params_list = [
-                param
-                for param in params_list
-                if isinstance(param, variables.TensorVariable)
-            ]
-            return params_list
-
-        def collect_parameters(module_var, recurse):
-            params_list = []
-            assert isinstance(module_var, UnspecializedNNModuleVariable)
-            params_list = get_current_parameters(module_var)
-            modules_dict = module_var.var_getattr(tx, "_modules").realize()
-            if recurse:
-                for submodule_var in modules_dict.items.values():
-                    assert isinstance(submodule_var, UnspecializedNNModuleVariable)
-                    params_list.extend(collect_parameters(submodule_var, recurse))
-            return params_list
-
-        if method is torch.nn.Module.parameters:
-            if self.source:
-                tx.output.guard_on_key_order.add(
-                    AttrSource(self.source, "_parameters").name()
-                )
-            recurse = get_kwargs("recurse")["recurse"]
-            params_list = collect_parameters(self, recurse=recurse)
-
-            # Account for duplicated params
-            deduplicated_params = list(dict.fromkeys(params_list).keys())
-
-            return variables.ListIteratorVariable(
-                deduplicated_params, mutation_type=ValueMutationNew()
-            )
-        else:
-            raise AssertionError(
-                "Discrepancy between is_supported_nn_module_method and trace_supported_methods"
-            )
-
     def call_method(
         self,
         tx,
@@ -994,9 +938,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
-
-            if self.is_supported_nn_module_method(method):
-                return self.trace_supported_methods(tx, method, name, args, kwargs)
 
             if isinstance(method, staticmethod):
                 source = AttrSource(
