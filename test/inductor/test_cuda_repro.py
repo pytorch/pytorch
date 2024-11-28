@@ -429,6 +429,7 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
+                    reset_to_zero_arg_names=[],
                     optimize_mem=True,
                     heuristic_type=HeuristicType.POINTWISE,
                 )
@@ -1242,6 +1243,73 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention_backward(self):
+        from torch import nn, Tensor
+
+        class SelfAttention(nn.Module):
+            def __init__(
+                self,
+                num_attention_heads: int = 12,
+                hidden_size: int = 768,
+                attention_probs_dropout_prob: float = 0.1,
+            ):
+                super().__init__()
+
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = hidden_size // num_attention_heads
+
+                self.query = nn.Linear(hidden_size, hidden_size)
+                self.key = nn.Linear(hidden_size, hidden_size)
+                self.value = nn.Linear(hidden_size, hidden_size)
+
+                self.dropout_prob = attention_probs_dropout_prob
+
+            def transpose_for_scores(self, x: Tensor) -> Tensor:
+                new_x_shape = x.size()[:-1] + (
+                    self.num_attention_heads,
+                    self.attention_head_size,
+                )
+                return x.view(new_x_shape).permute(0, 2, 1, 3)
+
+            def forward(self, hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
+                query_layer = self.transpose_for_scores(self.query(hidden_states))
+                key_layer = self.transpose_for_scores(self.key(hidden_states))
+                value_layer = self.transpose_for_scores(self.value(hidden_states))
+
+                attn_output = torch.nn.functional.scaled_dot_product_attention(
+                    query_layer,
+                    key_layer,
+                    value_layer,
+                    attn_mask=attention_mask,
+                    dropout_p=self.dropout_prob if self.training else 0.0,
+                    is_causal=False,
+                )
+                return attn_output
+
+        device = torch.device("cuda")
+        num_attention_heads = 8
+        hidden_size = 512
+        attention_probs_dropout_prob = 0.0
+        model = SelfAttention(
+            num_attention_heads=num_attention_heads,
+            hidden_size=hidden_size,
+            attention_probs_dropout_prob=attention_probs_dropout_prob,
+        ).to(device)
+
+        model = torch.compile(model)
+
+        # runs without failure
+        batch_size = 8
+        length = 1
+        inputs_embeds = torch.randn(batch_size, length, hidden_size, device=device)
+        attention_mask = torch.ones(batch_size, 1, length, length, device=device)
+        attn_output = model(hidden_states=inputs_embeds, attention_mask=attention_mask)[
+            0
+        ]
+        loss = attn_output.mean()
+        loss.backward()
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 
@@ -1315,6 +1383,23 @@ class CudaReproTests(TestCase):
         self.assertEqual(graph.disable_cudagraphs_reason, None)
         self.assertEqual(graph.device_types, {"cuda"})
 
+    def test_triton_interpret(self):
+        import subprocess
+
+        script = """
+import os
+os.environ["TRITON_INTERPRET"] = "1"
+import torch
+
+@torch.compile()
+def foo(x):
+    return x + 1
+
+# somehow gives different results.. still, check that it doesnt error
+foo(torch.rand([256], device="cuda"))
+"""
+        subprocess.run([sys.executable, "-c", script], check=True)
+
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
             a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
@@ -1341,12 +1426,12 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
-    x0 = xindex % 20
-    x1 = (xindex // 20) % 20
-    x2 = (xindex // 400)
+    x0 = (xindex % 20)
+    x1 = ((xindex // 20) % 20)
+    x2 = xindex // 400
     x3 = xindex
-    tmp0 = tl.load(in_ptr0 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
-    tmp1 = tl.load(in_ptr1 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp0 = tl.load(in_ptr0 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
+    tmp1 = tl.load(in_ptr1 + (99 + ((-1)*tl_math.abs((-9) + tl_math.abs((-5) + x0))) + ((-10)*tl_math.abs((-9) + tl_math.abs((-5) + x1))) + 100*x2), xmask, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
     tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
         )
@@ -1409,6 +1494,32 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertTrue(
             device_stats2["active.all.peak"] <= device_stats["active.all.peak"]
         )
+
+    def test_repeated_masked_load(self):
+        target_size = (8, 2)
+        mem_eff_temporal_upsampling_interp_chunks = 2
+        from functorch.einops import rearrange
+
+        x = torch.randn(1, 8, 12, 12, 4, dtype=torch.float16, device="cuda")
+        x = x.permute(0, 1, 4, 2, 3)  # make non-contiguous
+        x = rearrange(x, "b c t h w -> b c t (h w)")
+
+        def interpolate_chunked(x):
+            # chunk along c
+            chunks = x.chunk(chunks=mem_eff_temporal_upsampling_interp_chunks, dim=1)
+            r = []
+            for t in chunks:
+                r.append(
+                    torch.nn.functional.interpolate(
+                        t.float(), size=target_size, mode="nearest"
+                    ).to(t.dtype)
+                )
+            out_chunked = torch.cat(r, dim=1)
+            return out_chunked
+
+        out_eager = interpolate_chunked(x)
+        out_compiled = torch.compile(interpolate_chunked)(x)
+        self.assertEqual(out_eager, out_compiled)
 
 
 if __name__ == "__main__":

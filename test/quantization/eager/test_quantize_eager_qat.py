@@ -854,7 +854,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         else:
             ref_op = compose([conv_op, bn_op, relu_op])
 
-        input_clone = input.clone().detach().requires_grad_()
+        input_clone = input.detach().clone().requires_grad_()
         for i in range(2):
             result_ref = ref_op(input)
             result_actual = qat_op(input_clone)
@@ -991,7 +991,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             qat_ref_op_optim.zero_grad()
 
             input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
-            input_clone = input.clone().detach().requires_grad_()
+            input_clone = input.detach().clone().requires_grad_()
 
             if i > 2:
                 qat_op.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)

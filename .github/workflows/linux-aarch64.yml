@@ -2,8 +2,12 @@ name: linux-aarch64
 
 on:
   push:
+    branches:
+      - main
+      - release/*
     tags:
       - ciflow/linux-aarch64/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:

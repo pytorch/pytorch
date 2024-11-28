@@ -142,7 +142,7 @@ jiterator_also_stringify_as(jiterator_code(
 
     return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / std::sqrt(x);
   }),
-  i0e_string); // i0e_string
+  i0e_string) // i0e_string
 }
 
 #define CENTRAL_RANGE 0.7
@@ -254,7 +254,6 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
       -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
   };
 
-  int i = 0;
   acc_t a, b, k, s, t, w;
   if (x == one) {
     return std::numeric_limits<scalar_t>::infinity();
@@ -275,7 +274,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
 
   s = std::pow(q, -x);
   a = q;
-  i = 0;
+  int i = 0;
   b = zero;
   while ((i < 9) || (a <= acc_t{9.0})) {
     i += 1;
@@ -292,7 +291,7 @@ C10_HOST_DEVICE inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_floa
   s -= half * b;
   a = one;
   k = zero;
-  for (int i = 0; i < 12; i++) {
+  for (i = 0; i < 12; i++) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
@@ -1342,7 +1341,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
       -9.49010970480476444210E-2,  1.71620901522208775349E-1,
       -3.04682672343198398683E-1,  6.76795274409476084995E-1};
   return std::make_tuple(coeff, 30);
-};
+}
 
 template <typename T>
 inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
@@ -1367,7 +1366,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
       8.04490411014108831608E-1};
 
   return std::make_tuple(coeff, 25);
-};
+}
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
@@ -1394,7 +1393,7 @@ chebyshev_coefficients_i1e_A() {
       1.02643658689847095384E-1,  -1.76416518357834055153E-1,
       2.52587186443633654823E-1};
   return std::make_tuple(coeff, 29);
-};
+}
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
@@ -1423,7 +1422,7 @@ chebyshev_coefficients_i1e_A() {
       -1.76416518357834055153E-1f,
       2.52587186443633654823E-1f};
   return std::make_tuple(coeff, 17);
-};
+}
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
@@ -1449,7 +1448,7 @@ chebyshev_coefficients_i1e_B() {
       7.78576235018280120474E-1};
 
   return std::make_tuple(coeff, 25);
-};
+}
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
@@ -1469,7 +1468,7 @@ chebyshev_coefficients_i1e_B() {
       7.78576235018280120474E-1f};
 
   return std::make_tuple(coeff, 7);
-};
+}
 
 template <typename T>
 inline typename std::enable_if_t<std::is_floating_point_v<T>, T>

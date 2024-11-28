@@ -127,9 +127,7 @@ def _snr(x, x_hat):
     """
     if isinstance(x, (list, tuple)):
         assert len(x) == len(x_hat)
-        res = []
-        for idx in range(len(x)):
-            res.append(_snr(x[idx], x_hat[idx]))
+        res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
         return res
     if x_hat.is_quantized:
         x_hat = x_hat.dequantize()
@@ -222,5 +220,5 @@ def to_tensor(X, device):
     if not isinstance(X, torch.Tensor):
         X = torch.tensor(X)
     else:
-        X = X.clone().detach()
+        X = X.detach().clone()
     return X.to(device=torch.device(device), dtype=torch.float32)

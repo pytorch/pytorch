@@ -33,7 +33,9 @@
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
 // The constants are NOT readonly because they may be mutated.
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_start[];
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
@@ -122,6 +124,7 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
@@ -488,6 +491,7 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+    // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
 #else
     if (self_mmap) {
