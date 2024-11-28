@@ -21,6 +21,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -1439,7 +1440,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
           "ensure that any pending NCCL operations have finished in this process. "
           "In rare cases this process can exit before this point and block the progress of "
           "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.4");
+          "but this warning has only been added since PyTorch 2.4");
     }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so

@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import torch
@@ -235,6 +236,20 @@ print(torch.xpu.device_count())
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+        start_event = torch.xpu.Event(enable_timing=True)
+        end_event = torch.xpu.Event(enable_timing=True)
+        stream.record_event(start_event)
+        time.sleep(0.1)
+        stream.record_event(end_event)
+        torch.xpu.synchronize()
+        if int(torch.version.xpu) >= 20250000:
+            start_event.elapsed_time(end_event)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsed_time of XPUEvent requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                start_event.elapsed_time(end_event)
 
     def test_generic_stream_event(self):
         stream = torch.Stream("xpu")
@@ -250,8 +265,8 @@ print(torch.xpu.device_count())
         self.assertEqual(stream.stream_id, xpu_stream.stream_id)
         self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
 
-        event1 = torch.Event("xpu")
-        event2 = torch.Event("xpu")
+        event1 = torch.Event("xpu", enable_timing=True)
+        event2 = torch.Event("xpu", enable_timing=True)
         self.assertEqual(event1.event_id, 0)
         a = torch.randn(1000)
         b = torch.randn(1000)
@@ -263,15 +278,20 @@ print(torch.xpu.device_count())
         event1.synchronize()
         self.assertTrue(event1.query())
         c_xpu = a_xpu + b_xpu
+        # Here intendionly records another stream.
         event2.record()
         event2.synchronize()
         self.assertTrue(event2.query())
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
-        with self.assertRaisesRegex(
-            NotImplementedError, "elapsedTime is not supported by XPU backend."
-        ):
+        if int(torch.version.xpu) >= 20250000:
             event1.elapsed_time(event2)
+        else:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "elapsedTime requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.",
+            ):
+                event1.elapsed_time(event2)
         xpu_event = torch.xpu.Event()
         self.assertIsInstance(xpu_event, torch.Event)
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
