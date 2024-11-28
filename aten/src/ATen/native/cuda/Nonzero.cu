@@ -189,11 +189,33 @@ void nonzero_static_cuda_out_impl(
     int64_t size,
     int64_t fill_value,
     Tensor& out) {
-      Tensor self_ = self.contiguous();
+  Tensor self_ = self.contiguous();
+  // see comment in nonzero_cuda_out_impl on reqs for out
+  bool out_correct_size =
+      out.dim() == 2 && out.sizes()[0] == size && out.sizes()[1] == self.dim();
+  bool need_to_copy = out_correct_size && !out.t().is_contiguous();
+  if (!out_correct_size) {
+    out.resize_({self.dim(), size}).t();
+  }
+  // we need to allocate temporary out to then copy to user provided out
+  at::Tensor out_temp;
+  if (need_to_copy) {
+    out_temp =
+        Tensor(at::detail::empty_cuda({self.dim(), size}, out.options())).t();
+  }
+  int64_t* out_data_ptr = need_to_copy ? out_temp.mutable_data_ptr<int64_t>()
+                                       : out.mutable_data_ptr<int64_t>();
 
-      cuda::cub::static_nonzero(self_.const_data_ptr<scalar_t>(), fill_value, 
-      out.mutable_data_ptr<int64_t>(), self.numel(), out.numel());
-    }
+  cuda::cub::static_nonzero(
+      self_.const_data_ptr<scalar_t>(),
+      fill_value,
+      out_data_ptr,
+      self.numel(),
+      out.numel());
+  if (need_to_copy) {
+    out.copy_(out_temp);
+  }
+}
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {
   TORCH_CHECK(
