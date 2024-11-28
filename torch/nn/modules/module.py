@@ -19,9 +19,11 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    TYPE_CHECKING,
+    Generic,
+    TypeVar
 )
-from typing_extensions import Self
-from typing import TYPE_CHECKING, Generic, ParamSpec, TypeVar
+from typing_extensions import Self, ParamSpec
 
 import torch
 from torch import device, dtype, Tensor
