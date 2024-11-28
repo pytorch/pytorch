@@ -132,15 +132,15 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     if torch.compiler.is_dynamo_compiling():
         return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
-    def _validate_input(cond_fn, body_fn, carried_inputs):
+    def _validate_input(cond_fn, body_fn, flat_inputs):
         from torch._higher_order_ops.utils import validate_subgraph_args_types
 
         if not callable(cond_fn) or not callable(body_fn):
             raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
-        validate_subgraph_args_types(carried_inputs)
+        validate_subgraph_args_types(flat_inputs)
 
-    _validate_input(cond_fn, body_fn, carried_inputs)
+    _validate_input(cond_fn, body_fn, flat_inputs)
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.

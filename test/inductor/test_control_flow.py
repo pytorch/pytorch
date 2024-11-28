@@ -717,6 +717,69 @@ class WhileLoopModels:
                 cond_fn, body_fn, (it, pytree_input)
             )
 
+    class IntCarryWithCompute(torch.nn.Module):
+        def forward(self, it, x):
+            i = 0
+            s = x.shape[0]
+
+            def cond_fn(i, s, x):
+                return i < s
+
+            def body_fn(i, s, x):
+                return i + 1, s, x.sin() + i
+
+            last_i, last_s, last_x = torch._higher_order_ops.while_loop(
+                cond_fn, body_fn, (i, s, x)
+            )
+            torch._check(last_i > 0)
+            return (
+                last_i + 1,
+                last_i + last_x,
+                last_i == last_s,
+                torch.tensor(last_i, device=x.device),
+                torch.tensor(last_i, device=x.device).item(),
+                torch.ones(last_i * 2, last_i, device=x.device),
+            )
+
+    class IntCarryNestedWithCompute(torch.nn.Module):
+        def forward(self, it, x):
+            # Basically implements this:
+            # for i in range(x.shape[0]):
+            #     for j in range(i):
+            #         x = x + 1
+            i = 0
+            j = 0
+
+            def cond_fn(i, x):
+                return i < x.shape[0]
+
+            def body_fn(i, x):
+                def inner_cond_fn(j, x):
+                    # i is a closure inner_cond_fn
+                    return j < i
+
+                def inner_body_fn(j, x):
+                    return j + 1, x + 1
+
+                # j is a closure of body_fn
+                _, new_x = torch._higher_order_ops.while_loop(
+                    inner_cond_fn, inner_body_fn, (j, x)
+                )
+                return i + 1, new_x
+
+            last_i, last_x = torch._higher_order_ops.while_loop(
+                cond_fn, body_fn, (i, x)
+            )
+            torch._check(last_i > 0)
+            return (
+                last_i + 1,
+                last_i + last_x,
+                last_i == last_x.shape[0],
+                torch.tensor(last_i, device=x.device),
+                torch.tensor(last_i, device=x.device).item(),
+                torch.ones(last_i * 2, last_i, device=x.device),
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -865,6 +928,32 @@ class WhileLoopTests(TestCase):
                     {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
                 ),
             ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work due to we haven't handle lifted symbols
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_int_carry(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.IntCarryWithCompute(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work due to we haven't handle lifted symbols
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_int_carry_nested(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.IntCarryNestedWithCompute(),
+            inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
         )
