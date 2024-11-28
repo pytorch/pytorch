@@ -762,7 +762,7 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
 
-        compiled_graph.post_compile2(example_inputs, cudagraphs, gm)
+        compiled_graph.post_compile(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -772,8 +772,6 @@ def _compile_fx_inner(
         f"{'BACKWARDS' if graph_kwargs['is_backward'] else 'FORWARDS'} "
         f"graph {graph_kwargs['graph_id']}",
     )
-    # aot autograd needs to know to pass in inputs as a list
-    compiled_graph._boxed_call = True
     return compiled_graph
 
 
@@ -1033,7 +1031,6 @@ def fx_codegen_and_compile(
                         check_lowering_disable_cudagraph(V.graph.device_node_mapping)
                     )
 
-                # TODO: Just do all of this construction all in one go
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
                     graph,
@@ -1042,11 +1039,8 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
                     counters["inductor"] - inductor_counters,
-                )
-                compiled_graph.post_compile1(
                     cudagraphs,
                     example_inputs,
-                    gm,
                     static_input_idxs,
                     graph_kwargs,
                     inputs_to_check,
