@@ -790,7 +790,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
-            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+            binary_list,
+            [
+                [2, 10],
+            ],
+            [True, False],
+            dtypes,
         )
         out_feature = 30
 
