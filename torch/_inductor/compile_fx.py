@@ -643,12 +643,18 @@ def _compile_fx_inner(
             return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+        use_cache = (
+            not config.force_disable_caches
+            and (config.fx_graph_cache or fx_graph_remote_cache)
+            and not aot_mode
+        )
+        set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", use_cache)
+
         if (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -656,8 +662,7 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-            compile_fx_fn = codegen_and_compile
-            fx_kwargs = graph_kwargs
+
             local = config.fx_graph_cache
             remote = fx_graph_remote_cache
 
@@ -665,7 +670,7 @@ def _compile_fx_inner(
             mb_compiled_graph: Optional[CompiledFxGraph] = None
             remote_cache = None
             (key_info, cache_info) = FxGraphCache.prepare_key(
-                gm, example_inputs, fx_kwargs, inputs_to_check, remote
+                gm, example_inputs, graph_kwargs, inputs_to_check, remote
             )
             if key_info is not None:
                 key, debug_lines = key_info
@@ -677,7 +682,7 @@ def _compile_fx_inner(
                     example_inputs,
                     local,
                     remote_cache,
-                    is_backward=fx_kwargs.get("is_backward", False),
+                    is_backward=graph_kwargs.get("is_backward", False),
                     gm=gm,
                 )
 
@@ -685,8 +690,8 @@ def _compile_fx_inner(
             if cache_info["cache_state"] == "bypass":
                 assert mb_compiled_graph is None
                 # NB: This definitely doesn't return str, due to aot test
-                mb_compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
+                mb_compiled_graph = codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, graph_kwargs
                 )  # type: ignore[assignment]
 
             # CACHE MISS: Compile the graph and save to cache
@@ -697,8 +702,8 @@ def _compile_fx_inner(
                 TritonBundler.begin_compile()
                 try:
                     # NB: This definitely doesn't return str, due to aot test
-                    mb_compiled_graph = compile_fx_fn(
-                        gm, example_inputs, inputs_to_check, fx_kwargs
+                    mb_compiled_graph = codegen_and_compile(
+                        gm, example_inputs, inputs_to_check, graph_kwargs
                     )  # type: ignore[assignment]
                     assert mb_compiled_graph is not None
                     mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
@@ -769,11 +774,10 @@ def _compile_fx_inner(
             )
             # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
             FxGraphCache.post_compile(
-                compiled_graph, example_inputs, fx_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
+                compiled_graph, example_inputs, graph_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
             )
 
         else:
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
             # TODO: This suppress can be removed when we unify OutputCode
             # protocol
             compiled_graph = codegen_and_compile(
