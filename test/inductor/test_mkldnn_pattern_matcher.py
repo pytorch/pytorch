@@ -21,6 +21,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     IS_LINUX,
     parametrize,
     skipIfRocm,
@@ -2962,6 +2963,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    # TODO: investigate options of torch.compile in fbcode
+    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     @parametrize("has_bias", [True, False])
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("per_channel_quant", [True, False])
