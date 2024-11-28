@@ -52,15 +52,13 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, FxGraphCache
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    get_placeholder_info,
-    log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
-)
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.output_code import CompiledFxGraph
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    get_expanded_dims,
+    index_expanded_dims,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
@@ -91,6 +89,7 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -140,41 +139,6 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
-
-# copy_ fails when trying to write to tensors with memory overlap,
-# for expanded dimensions (a dimension which used to have size 1 -> ?)
-# we can select one element from that dimension and write to it
-# to achieve writing to all values of that dimension of the input tensor
-def get_expanded_dims(t: torch.Tensor) -> List[int]:
-    if not isinstance(t, torch.Tensor):
-        return None
-    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
-
-
-def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tensor:
-    for expanded_dim in expanded_dims:
-        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
-    return t
-
-
-def complex_memory_overlap(t: torch.Tensor) -> bool:
-    # if torch._debug_has_internal_overlap thinks this tensor potentially has
-    # memory overlap internally, let's dig deeper to find out whether it's true.
-    #
-    # Call squeeze() so that dimension with size 1 does not cause false positive.
-    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
-    if torch._debug_has_internal_overlap(t) != 0:
-        strides = t.stride()
-        sizes = t.shape
-        indices = list(range(len(strides)))
-        indices = [x for _, x in sorted(zip(strides, indices))]
-        for i in range(len(strides)):
-            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
-            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
-            if strides[indices[i]] < prev_stride * prev_size:
-                return True
-    return False
 
 
 def get_static_input_idxs(num_fixed: int) -> List[int]:
@@ -665,78 +629,15 @@ def _compile_fx_inner(
                 # need to do any post-compilation steps: we just return the string,
                 # which is the filename of the compiled code.
                 return compiled_graph
-            cudagraph_info = None
-            if cudagraphs:
-                # check cudagraph disabling reasons from inductor lowering
-                if compiled_graph.disabled_cudagraphs_reason:
-                    if "cuda" in compiled_graph.device_types:
-                        log_cudagraph_skip_and_bump_counter(
-                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
-                    BoxedBool.disable(cudagraphs)
-                else:
-                    complex_memory_overlap_inputs = any(
-                        complex_memory_overlap(t)
-                        for t in example_inputs
-                        if isinstance(t, torch.Tensor)
-                    )
-
-                    if not config.triton.cudagraph_support_input_mutation:
-                        # Skip supports for cudagraph-managed tensors
-                        from torch._inductor.cudagraph_utils import (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor,
-                        )
-
-                        has_mutation_str = (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor(
-                                gm,
-                                compiled_graph,
-                                static_input_idxs,
-                            )
-                        )
-                        has_mutation = has_mutation_str is not None
-
-                        if has_mutation:
-                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-                    else:
-                        # Check mutation later to support cudagraph-managed tensors
-                        has_mutation = None
-
-                    cudagraph_tests = [
-                        (not has_mutation, "mutated inputs"),
-                        (not complex_memory_overlap_inputs, "complex memory overlap"),
-                        (
-                            all(
-                                isinstance(t, (torch.Tensor, torch.SymInt))
-                                for t in example_inputs
-                            ),
-                            "non-Tensor inputs",
-                        ),
-                    ]
-                    output = output_node(gm)
-                    # output args are tuple of first argument
-                    assert len(output.args) == 1
-                    stack_traces = [
-                        (
-                            arg.stack_trace
-                            if isinstance(arg, torch.fx.node.Node)
-                            else None
-                        )
-                        for arg in output.args[0]
-                    ]
-                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                    placeholders = tuple(get_placeholder_info(gm.graph))
-                    cudagraph_info = CudagraphCachedInfo(
-                        placeholders, stack_traces, cudagraph_fail_reasons
-                    )
-
-            compiled_graph.cudagraph_info = cudagraph_info
-            compiled_graph.inputs_to_check = inputs_to_check
-            compiled_graph.fx_kwargs = fx_kwargs
-            # TODO: should this be part of fx_kwargs
-            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
+            compiled_graph.post_compile1(
+                cudagraphs,
+                example_inputs,
+                gm,
+                static_input_idxs,
+                fx_kwargs,
+                inputs_to_check,
+                boxed_forward_device_index,
+            )
             return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
@@ -772,9 +673,7 @@ def _compile_fx_inner(
                 # In that case, we don't need to run all post compilation steps, we just need
                 # to return the string directly.
                 return compiled_graph
-            compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs, gm
-            )
+            compiled_graph.post_compile2(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
