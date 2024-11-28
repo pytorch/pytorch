@@ -45,24 +45,38 @@ if torch._C._has_mkldnn:
         print("graph before group gemm pass is: {}".format(graph), flush=True)
         computation_op = mkldnn._linear_pointwise.default
         def toy_fn(*args, **kwargs):
-            computation_args = [
+            # computation_args = [
+            #     args[0],
+            #     args[1],
+            #     None,
+            #     "none",
+            #     [],
+            #     "",
+            # ]
+            # computation2_args = [
+            #     args[0],
+            #     args[2],
+            #     None,
+            #     "none",
+            #     [],
+            #     "",
+            # ]
+
+            # return L[computation_op](*computation_args), L[computation_op](*computation2_args)
+
+            computation_silu_mul_args = [
                 args[0],
-                args[1],
-                None,
+                [args[1], args[2]],
+                [None, None],
                 "none",
                 [],
                 "",
             ]
-            computation2_args = [
-                args[0],
-                args[2],
-                None,
-                "none",
-                [],
-                "",
-            ]
-            return L[computation_op](*computation_args), L[computation_op](*computation2_args)
-    
+
+            from ..mkldnn_lowerings import linear_silu_linear_mul
+
+            return linear_silu_linear_mul(*computation_silu_mul_args), linear_silu_linear_mul(*computation_silu_mul_args)
+
         toy_fn._inductor_lowering_function = True 
 
         for node in graph.nodes:
