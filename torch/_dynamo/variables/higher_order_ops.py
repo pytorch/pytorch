@@ -1071,15 +1071,16 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_supported_callable_arg(tx, body_fn, "body_fn")
 
         # operands input check
-        operands_seq = operands.unpack_var_sequence(tx)
-        subgraph_carries = self._unspecialize_int_carry(tx, operands_seq)
         if mismatched_vars := find_mismatched_vars(
-            operands, (TensorVariable, ConstantVariable)
+            operands, (TensorVariable, SymNodeVariable, ConstantVariable)
         ):
             unimplemented(
-                f"Expect operands to be a tuple of pytrees that only consists of tensor leaves. "
+                f"Expect operands to be a tuple of pytrees that only consists "
+                f"of tensor, int or symint (e.g a dimension that's marked as dynamic) leaves. "
                 f"Got {[var.python_type() for var in mismatched_vars]}"
             )
+        operands_seq = operands.unpack_var_sequence(tx)
+        subgraph_carries = self._unspecialize_int_carry(tx, operands_seq)
 
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
