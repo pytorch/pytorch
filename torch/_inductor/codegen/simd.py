@@ -577,7 +577,7 @@ class SIMDKernel(Kernel):
         groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         # Special case: if a node's sizes are ([], []), there's nothing to split.
-        if all(list(length) == [] for length in lengths):
+        if all(len(length) == 0 for length in lengths):
             return [[] for group in groups], []
 
         sv = V.graph.sizevars
