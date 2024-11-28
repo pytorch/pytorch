@@ -782,6 +782,7 @@ class PythonWrapperCodegen(CodeGen):
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
             """
         )
 
@@ -2119,7 +2120,11 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
-        if name in V.graph.removed_buffers or name in self.allocated:
+        if (
+            name in V.graph.removed_buffers
+            or name in self.allocated
+            or isinstance(buffer, ir.DonatedBuffer)
+        ):
             return
         self.allocated.add(name)
         if isinstance(
@@ -2173,7 +2178,12 @@ class PythonWrapperCodegen(CodeGen):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
-            or name in V.graph.graph_inputs
+            or (
+                name in V.graph.graph_inputs
+                and not isinstance(
+                    V.graph.graph_inputs_original[name], ir.DonatedBuffer
+                )
+            )
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
@@ -2251,19 +2261,15 @@ class PythonWrapperCodegen(CodeGen):
             self.pop_codegened_graph()
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        subgraph.graph.add_symbol_graph_inputs()
-        # NB: Because of symints, the len of graph_inputs might be larger than
-        # outer_inputs
-        explicit_graph_inputs = subgraph.graph.graph_input_names[: len(outer_inputs)]
-        for inner_input, outer_input in zip(explicit_graph_inputs, outer_inputs):
-            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
-
-    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
-        assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
-        for inner_output, outer_output in zip(
-            subgraph.graph.get_output_names(), outer_outputs
+        # All inputs of hops must be explicitly passed in.
+        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        assert len(outer_inputs) == len(
+            subgraph.graph.graph_input_names
+        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
+        for inner_input, outer_input in zip(
+            subgraph.graph.graph_input_names, outer_inputs
         ):
-            self.writeline(f"{outer_output} = {inner_output}{self.ending}")
+            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
@@ -2272,10 +2278,9 @@ class PythonWrapperCodegen(CodeGen):
         if len(input_names) == 1:
             inner_inputs += ","
 
-        output_names = subgraph.graph.get_output_names()
-        inner_outputs = ", ".join(output_names)
-        if len(output_names) == 1:
-            inner_outputs += ","
+        outer_output_names = ", ".join(outer_outputs) + (
+            "," if len(outer_outputs) == 1 else ""
+        )
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
@@ -2284,7 +2289,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Call the subgraph launcher function
         self.writeline(
-            f"({inner_outputs}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
+            f"({outer_output_names}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
@@ -2311,8 +2316,6 @@ class PythonWrapperCodegen(CodeGen):
             self.define_subgraph_launcher_fn(subgraph_code)
 
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
-
-        self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         name = invoke_subgraph.get_name()

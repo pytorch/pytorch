@@ -51,12 +51,7 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import (
-    _StrideExprStr,
-    code_hash,
-    CompiledFxGraph,
-    FxGraphCache,
-)
+from torch._inductor.codecache import code_hash, FxGraphCache
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -65,6 +60,7 @@ from torch._inductor.cudagraph_utils import (
     PlaceholderInfo,
 )
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.output_code import CompiledFxGraph
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
@@ -110,6 +106,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
 
     from .ir import ExternKernelNode
@@ -1445,85 +1442,112 @@ def compile_fx(
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
+    """
+    Main entry point for compiling given FX graph.  Despite the fact that this
+    lives in :mod:`torch._inductor`, this function is responsible for calling
+    into AOT Autograd (and we will eventually get a callback to
+    ``inner_compile`` to perform actual compilation.  In other words, this
+    function orchestrates end-to-end compilation for the inductor backend when
+    you use :func:`torch.compile`.
+
+    NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
+    mutate it!  Make a copy if you need to preserve the original GraphModule.
+    """
+
+    # Some arguments trigger a recursive call to compile_fx.  Handle these
+    # short circuits first, before anything else
+
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
+            )
+
+    # TODO: This probably shouldn't be a recursive call
+    if config.cpp_wrapper:
+        with config.patch(
+            {
+                "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                **get_cpp_wrapper_config(),
+            }
+        ), V.set_real_inputs(example_inputs_):
+            inputs_: Sequence[InputType] = example_inputs_
+
+            if isinstance(model_, GraphModule):
+                fake_inputs = [
+                    node.meta.get("val")
+                    for node in model_.graph.nodes
+                    if node.op == "placeholder"
+                ]
+                # Replace non-tensor (constant) inputs with Nones, since these are not being
+                # used anyways by the graph
+                fake_inputs = [
+                    inp if isinstance(inp, torch.Tensor) else None
+                    for inp in fake_inputs
+                ]
+
+                if any(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi is not None:
+                            assert isinstance(i, torch.Tensor)
+                            if fi.device != i.device:
+                                raise ValueError(
+                                    f"Device mismatch between fake input and example input at position #{idx}: "
+                                    f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                    "make sure torch.export() and torch.aot_compile() run on the same device."
+                                )
+                    inputs_ = fake_inputs  # type: ignore[assignment]
+            return compile_fx(
+                model_,
+                inputs_,
+                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                decompositions=decompositions,
+            )
+
+    recursive_compile_fx = functools.partial(
+        compile_fx,
+        inner_compile=inner_compile,
+        decompositions=decompositions,
+    )
+
+    if not graph_returns_tuple(model_):
+        return make_graph_return_tuple(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    if isinstance(model_, GraphModule) and isinstance(
+        model_.graph._codegen, _PyTreeCodeGen
+    ):
+        # this graph is the result of dynamo.export()
+        return handle_dynamo_export_graph(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    # Do the actual work
+
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
     ), enable_python_dispatcher():
-        """Main entrypoint to a compile given FX graph"""
-        if config_patches:
-            with config.patch(config_patches):
-                return compile_fx(
-                    model_,
-                    example_inputs_,
-                    # need extra layer of patching as backwards is compiled out of scope
-                    inner_compile=config.patch(config_patches)(inner_compile),
-                    decompositions=decompositions,
-                )
-
-        if config.cpp_wrapper:
-            with config.patch(
-                {
-                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
-                    **get_cpp_wrapper_config(),
-                }
-            ), V.set_real_inputs(example_inputs_):
-                inputs_: Sequence[InputType] = example_inputs_
-
-                if isinstance(model_, GraphModule):
-                    fake_inputs = [
-                        node.meta.get("val")
-                        for node in model_.graph.nodes
-                        if node.op == "placeholder"
-                    ]
-                    # Replace non-tensor (constant) inputs with Nones, since these are not being
-                    # used anyways by the graph
-                    fake_inputs = [
-                        inp if isinstance(inp, torch.Tensor) else None
-                        for inp in fake_inputs
-                    ]
-
-                    if any(v is not None for v in fake_inputs):
-                        # Validate devices before switching to fake tensors.
-                        for idx, fi, i in zip(count(), fake_inputs, inputs_):
-                            if fi is not None:
-                                assert isinstance(i, torch.Tensor)
-                                if fi.device != i.device:
-                                    raise ValueError(
-                                        f"Device mismatch between fake input and example input at position #{idx}: "
-                                        f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
-                                        "make sure torch.export() and torch.aot_compile() run on the same device."
-                                    )
-                        inputs_ = fake_inputs  # type: ignore[assignment]
-                return compile_fx(
-                    model_,
-                    inputs_,
-                    inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
-                    decompositions=decompositions,
-                )
-
-        recursive_compile_fx = functools.partial(
-            compile_fx,
-            inner_compile=inner_compile,
-            decompositions=decompositions,
-        )
-
-        if not graph_returns_tuple(model_):
-            return make_graph_return_tuple(
-                model_,
-                example_inputs_,
-                recursive_compile_fx,
-            )
-
+        # Pre-grad passes cannot be run if we weren't given a GraphModule.
+        # Dynamo will always produce a GraphModule, but this handles cases
+        # where a user directly passes a plain Module with the intention of
+        # having AOTAutograd trace it.
+        # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
-            if isinstance(model_.graph._codegen, _PyTreeCodeGen):
-                # this graph is the result of dynamo.export()
-                return handle_dynamo_export_graph(
-                    model_,
-                    example_inputs_,
-                    recursive_compile_fx,
-                )
-
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
+        # TODO: Move this before recursive pre-grad passes
+        # NB: This short circuit never occurs for Dynamo produced graphs
+        # (which are pre-flattened)
         if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
             return flatten_graph_inputs(
                 model_,
@@ -1532,10 +1556,22 @@ def compile_fx(
             )
 
         assert not config._raise_error_for_testing
+
         num_example_inputs = len(example_inputs_)
+
+        # Although cudagraphs may have been enabled via config, various
+        # conditions (which are tested within the bowels of Inductor) may
+        # force cudagraphs to be disabled.  This mutable box lets us retrieve
+        # the final determination if cudagraphs actually can be used or not.
         cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+        # See [Backward Generation Handling]
         forward_device = BoxedDeviceIndex(None)
 
+        # TODO: The modern style is to use CompileId from TracingContext to
+        # identify Inductor compilation.  However, this CompileId cannot
+        # uniquely identify multiple Inductor compilations that arise from
+        # DDPOptimizer
         graph_id = next(_graph_counter)
 
         decompositions = (
@@ -1548,84 +1584,79 @@ def compile_fx(
             is_inference: bool,
         ) -> CompiledFxGraph:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
-                return _fw_compiler_base(model, example_inputs, is_inference)
+                if is_inference:
+                    # partition_fn won't be called
+                    _recursive_joint_graph_passes(model)
 
-        def _fw_compiler_base(
-            model: GraphModule,
-            example_inputs: List[InputType],
-            is_inference: bool,
-        ) -> CompiledFxGraph:
-            if is_inference:
-                # partition_fn won't be called
-                _recursive_joint_graph_passes(model)
-
-            fixed = torch._inductor.utils.num_fw_fixed_arguments(
-                num_example_inputs, len(example_inputs)
-            )
-
-            model_outputs_node = output_node(model)
-            if config.keep_output_stride:
-                model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                num_model_outputs = len(model_outputs)
-
-                context = torch._guards.TracingContext.try_get()
-                # See Note [User Outputs in the inductor graph]
-                if context is not None and context.fw_metadata and not is_inference:
-                    original_output_start_index = (
-                        context.fw_metadata.num_mutated_inp_runtime_indices
-                    )
-                else:
-                    original_output_start_index = 0
-
-                if isinstance(model_, GraphModule):
-                    *_, orig_model_outputs_node = model_.graph.nodes
-                    assert orig_model_outputs_node.op == "output"
-                    orig_model_outputs, _ = pytree.tree_flatten(
-                        orig_model_outputs_node.args
-                    )
-                    num_orig_model_outputs = len(orig_model_outputs)
-                else:
-                    num_orig_model_outputs = num_model_outputs
-
-                assert num_orig_model_outputs <= num_model_outputs
-
-                # Note [User Outputs in the inductor graph]
-                # We makes the following assumption
-                # For inference
-                #   len(orig_model_outputs) == len(model_outputs)
-                # For training
-                #   len(orig_model_outputs) <= len(model_outputs)
-                # During training, most of the time the model_outputs starts with
-                # original module's outputs followed by saved activations.
-                # But this can be not true if the model have inplace updated tensors.
-                # AOTAutograd will make those tensors being returned before the original
-                # module's output.
-                # To make things safe, we'll use original_output_start_index field
-                # set by AOTAutograd to decide where the original module outputs start.
-                orig_output_end_idx = (
-                    original_output_start_index + num_orig_model_outputs
+                fixed = torch._inductor.utils.num_fw_fixed_arguments(
+                    num_example_inputs, len(example_inputs)
                 )
-                # Sanity chec: we are about to splice out the "user" outputs from the full set
-                # of "graph" outputs. Make sure we're within bounds.
-                assert orig_output_end_idx <= num_model_outputs
 
-                model_outputs_node.meta["user_visible_output_idxs"] = [
-                    idx
-                    for idx in range(original_output_start_index, orig_output_end_idx)
-                    if isinstance(model_outputs[idx], torch.fx.Node)
-                ]
-            else:
-                model_outputs_node.meta["user_visible_output_idxs"] = []
+                model_outputs_node = output_node(model)
+                if config.keep_output_stride:
+                    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+                    num_model_outputs = len(model_outputs)
 
-            return inner_compile(
-                model,
-                example_inputs,
-                static_input_idxs=get_static_input_idxs(fixed),
-                cudagraphs=cudagraphs,
-                graph_id=graph_id,
-                is_inference=is_inference,
-                boxed_forward_device_index=forward_device,
-            )
+                    context = torch._guards.TracingContext.try_get()
+                    # See Note [User Outputs in the inductor graph]
+                    if context is not None and context.fw_metadata and not is_inference:
+                        original_output_start_index = (
+                            context.fw_metadata.num_mutated_inp_runtime_indices
+                        )
+                    else:
+                        original_output_start_index = 0
+
+                    if isinstance(model_, GraphModule):
+                        *_, orig_model_outputs_node = model_.graph.nodes
+                        assert orig_model_outputs_node.op == "output"
+                        orig_model_outputs, _ = pytree.tree_flatten(
+                            orig_model_outputs_node.args
+                        )
+                        num_orig_model_outputs = len(orig_model_outputs)
+                    else:
+                        num_orig_model_outputs = num_model_outputs
+
+                    assert num_orig_model_outputs <= num_model_outputs
+
+                    # Note [User Outputs in the inductor graph]
+                    # We makes the following assumption
+                    # For inference
+                    #   len(orig_model_outputs) == len(model_outputs)
+                    # For training
+                    #   len(orig_model_outputs) <= len(model_outputs)
+                    # During training, most of the time the model_outputs starts with
+                    # original module's outputs followed by saved activations.
+                    # But this can be not true if the model have inplace updated tensors.
+                    # AOTAutograd will make those tensors being returned before the original
+                    # module's output.
+                    # To make things safe, we'll use original_output_start_index field
+                    # set by AOTAutograd to decide where the original module outputs start.
+                    orig_output_end_idx = (
+                        original_output_start_index + num_orig_model_outputs
+                    )
+                    # Sanity check: we are about to splice out the "user" outputs from the full set
+                    # of "graph" outputs. Make sure we're within bounds.
+                    assert orig_output_end_idx <= num_model_outputs
+
+                    model_outputs_node.meta["user_visible_output_idxs"] = [
+                        idx
+                        for idx in range(
+                            original_output_start_index, orig_output_end_idx
+                        )
+                        if isinstance(model_outputs[idx], torch.fx.Node)
+                    ]
+                else:
+                    model_outputs_node.meta["user_visible_output_idxs"] = []
+
+                return inner_compile(
+                    model,
+                    example_inputs,
+                    static_input_idxs=get_static_input_idxs(fixed),
+                    cudagraphs=cudagraphs,
+                    graph_id=graph_id,
+                    is_inference=is_inference,
+                    boxed_forward_device_index=forward_device,
+                )
 
         fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
@@ -1687,10 +1718,6 @@ def compile_fx(
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
                     )
-
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-        # once torchdynamo is merged into pytorch
 
         fake_mode = detect_fake_mode(
             example_inputs_
