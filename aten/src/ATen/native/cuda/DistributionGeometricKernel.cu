@@ -10,6 +10,6 @@ void geometric_kernel(TensorIteratorBase& iter, double p_, std::optional<Generat
   at::native::templates::cuda::geometric_kernel(iter, p_, generator);
 }
 
-REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel)
 
 } // namespace at::native

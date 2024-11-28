@@ -241,5 +241,5 @@ static void multinomial_with_replacement_kernel_impl(
 
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
-    &multinomial_with_replacement_kernel_impl);
+    &multinomial_with_replacement_kernel_impl)
 } // namespace at::native

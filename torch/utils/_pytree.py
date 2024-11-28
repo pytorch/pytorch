@@ -994,7 +994,7 @@ def tree_map_(
     """
     leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    tuple(map(func, *flat_args))  # consume and exhaust the iterable
+    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
 
 
@@ -1412,9 +1412,9 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     else:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
-    children_specs = []
-    for child_string in json_schema["children_spec"]:
-        children_specs.append(_json_to_treespec(child_string))
+    children_specs = [
+        _json_to_treespec(child_string) for child_string in json_schema["children_spec"]
+    ]
 
     return TreeSpec(typ, context, children_specs)
 

@@ -22,6 +22,7 @@ def _is_supported_device(tensor: torch.Tensor) -> bool:
         "cpu",
         "hpu",
         "mtia",
+        "xpu",
         torch._C._get_privateuse1_backend_name(),
     )
 

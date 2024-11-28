@@ -562,12 +562,12 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
 }
 
 
-REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel);
-REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel);
-REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel);
-REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel);
-REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel);
-REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel);
-REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel);
+REGISTER_DISPATCH(gather_stub, &gather_cuda_kernel)
+REGISTER_DISPATCH(scatter_stub, &scatter_cuda_kernel)
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cuda_kernel)
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cuda_kernel)
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cuda_kernel)
+REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cuda_kernel)
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cuda_kernel)
 
 } // namespace at::native

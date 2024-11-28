@@ -135,7 +135,7 @@ using backward_fn = void (*)(
     Tensor* /* dgamma */,
     Tensor* /* dbeta */);
 
-DECLARE_DISPATCH(forward_fn, LayerNormKernel);
-DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel);
+DECLARE_DISPATCH(forward_fn, LayerNormKernel)
+DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel)
 
 } // namespace at::native

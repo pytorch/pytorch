@@ -196,10 +196,27 @@ static void reduction_out_mps(const Tensor& input_t,
   NSArray<NSNumber*>* wrappedAxes = getTensorAxes(input_shape, opt_dim);
 
   if (output_t.numel() == 0 || input_t.numel() == 0) {
-    if (reduction_type == MPSReductionType::PROD) {
-      output_t.fill_(1);
-    } else if (reduction_type == MPSReductionType::SUM) {
-      output_t.zero_();
+    switch (reduction_type) {
+      case MPSReductionType::PROD:
+        output_t.fill_(1);
+        break;
+      case MPSReductionType::MEAN:
+        output_t.fill_(std::numeric_limits<float>::quiet_NaN());
+        break;
+      case MPSReductionType::SUM:
+      case MPSReductionType::NANSUM:
+      case MPSReductionType::COUNT_NONZERO:
+        output_t.zero_();
+        break;
+      case MPSReductionType::AMAX:
+      case MPSReductionType::AMIN:
+      case MPSReductionType::MAX:
+      case MPSReductionType::MIN:
+        TORCH_CHECK(opt_dim.has_value(), "Expected reduction dim to be specified for input.numel() == 0");
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unexpected reduction type ", reduction_type);
+        break;
     }
     return;
   }
