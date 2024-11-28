@@ -239,7 +239,7 @@ NestedTensorImpl::NestedTensorImpl(
 std::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
   if (C10_UNLIKELY(!opt_sizes_.has_value())) {
     // Cache the metadata to avoid recomputing it each time.
-    opt_sizes_ = std::make_optional(construct_opt_sizes(nested_sizes_));
+    opt_sizes_ = construct_opt_sizes(nested_sizes_);
   }
   d = at::maybe_wrap_dim(d, dim(), false);
   if ((*opt_sizes_)[d] == -1) {
