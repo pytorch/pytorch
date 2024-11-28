@@ -34,26 +34,26 @@ namespace detail {
 template <typename T>
 inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
-  constexpr c10::string_view fun_sig = __FUNCSIG__;
+  constexpr std::string_view fun_sig = __FUNCSIG__;
 #if defined(__NVCC__)
-  constexpr c10::string_view prefix =
+  constexpr std::string_view prefix =
       "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">()";
+  constexpr std::string_view suffix = ">()";
 #else
-  constexpr c10::string_view prefix =
+  constexpr std::string_view prefix =
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr c10::string_view suffix = ">(void)";
+  constexpr std::string_view suffix = ">(void)";
 #endif
 #elif defined(__clang__)
-  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr c10::string_view prefix =
+  constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr std::string_view prefix =
       "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
-  constexpr c10::string_view suffix = "]";
+  constexpr std::string_view suffix = "]";
 #elif defined(__GNUC__)
-  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
-  constexpr c10::string_view prefix =
+  constexpr std::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr std::string_view prefix =
       "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ";
-  constexpr c10::string_view suffix =
+  constexpr std::string_view suffix =
       "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
 #if !defined(__CUDA_ARCH__)
