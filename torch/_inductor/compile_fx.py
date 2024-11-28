@@ -4,6 +4,7 @@ import contextlib
 import functools
 import io
 import itertools
+import json
 import logging
 import sys
 import time
@@ -90,6 +91,7 @@ from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -654,20 +656,129 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-            compiled_graph = FxGraphCache.load(
-                codegen_and_compile,
-                gm,
-                example_inputs,
-                graph_kwargs,
-                inputs_to_check,
-                local=config.fx_graph_cache,
-                remote=fx_graph_remote_cache,
+            compile_fx_fn = codegen_and_compile
+            fx_kwargs = graph_kwargs
+            local = config.fx_graph_cache
+            remote = fx_graph_remote_cache
+
+            assert local or remote, "at least one of them needs to be enabled"
+            mb_compiled_graph: Optional[CompiledFxGraph] = None
+            remote_cache = None
+            (key_info, cache_info) = FxGraphCache.prepare_key(
+                gm, example_inputs, fx_kwargs, inputs_to_check, remote
             )
+            if key_info is not None:
+                key, debug_lines = key_info
+                if remote:
+                    remote_cache = FxGraphCache.get_remote_cache()
+                mb_compiled_graph, cache_info = FxGraphCache.load_with_key(
+                    key,
+                    debug_lines,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                    is_backward=fx_kwargs.get("is_backward", False),
+                    gm=gm,
+                )
+
+            # CACHE BYPASS: Compile the graph, don't save it to the cache
+            if cache_info["cache_state"] == "bypass":
+                assert mb_compiled_graph is None
+                # NB: This definitely doesn't return str, due to aot test
+                mb_compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )  # type: ignore[assignment]
+
+            # CACHE MISS: Compile the graph and save to cache
+            elif cache_info["cache_state"] == "miss":
+                assert mb_compiled_graph is None
+                assert key_info is not None
+                start_time = cache_info["cache_event_time"]
+                TritonBundler.begin_compile()
+                try:
+                    # NB: This definitely doesn't return str, due to aot test
+                    mb_compiled_graph = compile_fx_fn(
+                        gm, example_inputs, inputs_to_check, fx_kwargs
+                    )  # type: ignore[assignment]
+                    assert mb_compiled_graph is not None
+                    mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
+                    cache_key = key_info[0]
+                    mb_compiled_graph._fx_graph_cache_key = cache_key
+                    (
+                        mb_compiled_graph._triton_bundle,
+                        triton_bundler_meta,
+                    ) = TritonBundler.collect()
+                finally:
+                    TritonBundler.end_compile()
+                if triton_bundler_meta is not None:
+                    cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
+                cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+                FxGraphCache._save_graph(
+                    cache_key,
+                    mb_compiled_graph,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                )
+            # CACHE HIT: not much to really do, just make sure the cache key
+            # is recorded on the graph
+            else:
+                assert cache_info["cache_state"] == "hit"
+                assert mb_compiled_graph is not None
+                assert key_info is not None
+                cache_key = key_info[0]
+                mb_compiled_graph._fx_graph_cache_key = cache_key
+
+            assert mb_compiled_graph is not None
+            compiled_graph = mb_compiled_graph
+
+            # Logging and observability: we log a single chromium event
+            # and a tlparse log for every cache action.
+            # In the event of a bypass, we also logged to the remote table earlier
+            # with log_cache_bypass.
+            chromium_log = get_chromium_event_logger()
+            cache_state = cache_info["cache_state"]
+            # Here for grepping:
+            # fx_graph_cache_hit
+            # fx_graph_cache_miss
+            # fx_graph_cache_bypass
+            chromium_log.log_instant_event(
+                f"fx_graph_cache_{cache_state}",
+                cache_info["cache_event_time"],
+                metadata=cache_info,
+            )
+            # Add event data about cache hits/miss
+            # TODO: add remote cache get/put timings here too
+            chromium_log.add_event_data(
+                "inductor_compile",
+                cache_state=cache_state,
+                cache_event_time=cache_info["cache_event_time"],
+                key=cache_info.get("key"),
+                components=cache_info.get("components"),
+                cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+                remote_cache_enabled=remote,
+                local_cache_enabled=local,
+            )
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": f"fx_graph_cache_{cache_state}",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(cache_info),
+            )
+            # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+            FxGraphCache.post_compile(
+                compiled_graph, example_inputs, fx_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
+            )
+
         else:
             set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
+            # TODO: This suppress can be removed when we unify OutputCode
+            # protocol
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
-            )
+            )  # type: ignore[assignment]
             if aot_mode:
                 # AOT mode is special because codegen_and_compile returns a string.
                 # In that case, we don't need to run all post compilation steps, we just need
