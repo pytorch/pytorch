@@ -155,7 +155,7 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
 // Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
 // the GIL. If you don't want to block the current thread or take the risk of a
 // GIL deadlock, you can use an asynchronous calling mechanism like std::async.
-std::string TraceBuffer::Entry::getTraceback() {
+std::string FlightRecorder::Entry::getTraceback() {
   torch::CapturedTraceback* traceback = traceback_.get();
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
   // We use 0 because we only have one traceback here.
@@ -178,7 +178,7 @@ std::string TraceBuffer::Entry::getTraceback() {
   return oss.str();
 }
 
-std::optional<size_t> TraceBuffer::record(
+std::optional<size_t> FlightRecorder::record(
     size_t pg_id,
     const std::tuple<std::string, std::string>& pg_name,
     size_t collective_seq_id,
@@ -252,7 +252,7 @@ std::optional<size_t> TraceBuffer::record(
   return id_++;
 }
 
-void TraceBuffer::record_pg_ranks(
+void FlightRecorder::record_pg_ranks(
     const std::tuple<std::string, std::string>& pg_name,
     std::vector<uint64_t> ranks) {
   if (!enabled_) {
@@ -262,7 +262,7 @@ void TraceBuffer::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
-void TraceBuffer::update_state(Entry& r) {
+void FlightRecorder::update_state(Entry& r) {
   if (r.start_ != nullptr) {
     bool started = r.start_->query();
     if (started && !r.time_discovered_started_) {
@@ -277,7 +277,7 @@ void TraceBuffer::update_state(Entry& r) {
   }
 }
 
-std::vector<TraceBuffer::Entry> TraceBuffer::dump_entries() {
+std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
@@ -299,7 +299,7 @@ std::vector<TraceBuffer::Entry> TraceBuffer::dump_entries() {
 
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
-std::optional<TraceBuffer::Entry> TraceBuffer::getEntry(
+std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
     std::optional<size_t> id) {
   if (!enabled_ || !id) {
     return std::nullopt;
@@ -314,7 +314,9 @@ std::optional<TraceBuffer::Entry> TraceBuffer::getEntry(
   }
 }
 
-void TraceBuffer::retire_id(std::optional<size_t> id, bool compute_duration) {
+void FlightRecorder::retire_id(
+    std::optional<size_t> id,
+    bool compute_duration) {
   if (!enabled_ || !id) {
     return;
   }
@@ -361,7 +363,7 @@ void TraceBuffer::retire_id(std::optional<size_t> id, bool compute_duration) {
   }
 }
 
-const c10::List<c10::IValue> TraceBuffer::getCollectiveTrace(
+const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
@@ -465,7 +467,7 @@ const c10::List<c10::IValue> TraceBuffer::getCollectiveTrace(
   return entries;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> TraceBuffer::getPgConfig() {
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgConfig() {
   auto pg_config = new_dict();
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
     auto pg_info = new_dict();
@@ -477,7 +479,7 @@ const c10::Dict<c10::IValue, c10::IValue> TraceBuffer::getPgConfig() {
   return pg_config;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> TraceBuffer::
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
     getPgConfigJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
@@ -490,7 +492,7 @@ const std::map<std::string, std::map<std::string, std::string>> TraceBuffer::
   return result;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> TraceBuffer::getPgStatus() {
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgStatus() {
   auto all_pg_status = new_dict();
   for (const auto& [pg_id, status] : all_pg_status_) {
     auto pg_status = new_dict();
@@ -502,7 +504,7 @@ const c10::Dict<c10::IValue, c10::IValue> TraceBuffer::getPgStatus() {
   return all_pg_status;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> TraceBuffer::
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
     getPgStatusJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_id, status] : all_pg_status_) {
@@ -518,7 +520,7 @@ const std::map<std::string, std::map<std::string, std::string>> TraceBuffer::
   return result;
 }
 
-std::string TraceBuffer::dump_json(
+std::string FlightRecorder::dump_json(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
@@ -609,14 +611,14 @@ std::string TraceBuffer::dump_json(
   return result.dump();
 }
 
-std::string TraceBuffer::dump(
+std::string FlightRecorder::dump(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TraceBuffer__dump);
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
   auto result = new_dict();
   // common values
   result.insert(version_key, version_val);

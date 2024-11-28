@@ -381,13 +381,13 @@ std::string dump_nccl_trace(
     bool includeStackTraces,
     bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return TraceBuffer::get()->dump(
+  return FlightRecorder::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return TraceBuffer::get()->dump_json(
+  return FlightRecorder::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
 }
 
@@ -647,8 +647,8 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
-  std::optional<TraceBuffer::Entry> entry =
-      TraceBuffer::get()->getEntry(trace_id_);
+  std::optional<FlightRecorder::Entry> entry =
+      FlightRecorder::get()->getEntry(trace_id_);
   if (entry.has_value()) {
     auto entryVal = entry.value();
     // Get stack trace from FR entry, in string format
@@ -2133,7 +2133,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        TraceBuffer::get()->retire_id(work.trace_id_, true);
+        FlightRecorder::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2516,7 +2516,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
-  TraceBuffer::get()->record_pg_ranks(
+  FlightRecorder::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
 
   RECORD_PARAM_COMMS(
@@ -2727,7 +2727,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   these objects to the Work becuase it has implications for keeping those
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
-    r->trace_id_ = TraceBuffer::get()->record(
+    r->trace_id_ = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3404,7 +3404,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
-    auto trace_id = TraceBuffer::get()->record(
+    auto trace_id = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3446,7 +3446,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
-    work->trace_id_ = TraceBuffer::get()->record(
+    work->trace_id_ = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
