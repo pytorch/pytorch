@@ -2654,7 +2654,12 @@ def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
         device_module_name = torch.device(device).type
     elif device is None:
         # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch.acc.current_accelerator()
+        # TODO: torch.accelerator.is_available will lead to a fork posion issue. We need to fix it.
+        device_module_name = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"
