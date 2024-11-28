@@ -131,6 +131,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.convert_element_type.no_fuse,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q

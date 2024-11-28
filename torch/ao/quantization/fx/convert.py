@@ -342,17 +342,15 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 ]
             graph.erase_node(node)
     elif dtype == torch.float16:
-        quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor.default
-        dequantize_op = torch.ops.quantized_decomposed.dequantize_per_tensor.default
+        # Insert to_fp16 -> to_fp32 node
+        dtype_convert_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
         with graph.inserting_before(node):
             input_node = node.args[0]
-            quant_args = (input_node, 1.0, 0, 0, 0, torch.float16)
             convert_fp16_node = graph.create_node(
-                "call_function", quantize_op, quant_args, {}
+                "call_function", dtype_convert_op, (input_node, torch.float16), {}
             )
-            dequant_args = (convert_fp16_node, 1.0, 0, 0, 0, torch.float16)
             convert_fp32_node = graph.create_node(
-                "call_function", dequantize_op, dequant_args, {}
+                "call_function", dtype_convert_op, (convert_fp16_node, torch.float), {}
             )
             node.replace_all_uses_with(convert_fp32_node)
             graph.erase_node(node)

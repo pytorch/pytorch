@@ -2998,10 +2998,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
                 )
                 # Matched nodes:
-                # (1) dequantize w, (2) permute w, (3) mm/addmm/bmm
+                # (1) w to fp16, (2) w to fp32, (3) permute w, (4) mm/addmm/bmm
                 # If x.ndim == 3 and x is contiguous, two view nodes are added.
                 # If x.ndim == 3 and x is not contiguous, two expand nodes and one add node are added.
-                nodes_count = 3
+                nodes_count = 4
                 if input_ndim > 2:
                     if x_contig:
                         nodes_count += 2

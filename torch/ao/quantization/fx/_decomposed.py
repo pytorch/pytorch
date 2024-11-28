@@ -71,8 +71,6 @@ def quantize_per_tensor(
        Tensor with requested dtype (e.g. torch.uint8), note the quantization parameters
        are not stored in the Tensor, we are storing them in function arguments instead
     """
-    if dtype == torch.float16:
-        return input.to(dtype)
     if input.dtype in [torch.float16, torch.bfloat16]:
         input = input.to(torch.float32)
     assert (
@@ -264,8 +262,6 @@ def dequantize_per_tensor(
     ), f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
     if out_dtype is None:
         out_dtype = torch.float32
-    if dtype == torch.float16:
-        return input.to(out_dtype)
     if dtype in _DTYPE_TO_QVALUE_BOUNDS:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale
@@ -1189,3 +1185,22 @@ def fake_quant_per_channel_meta(
     quant_max: int,
 ) -> torch.Tensor:
     return torch.empty_like(input)
+
+
+quantized_decomposed_lib.define(
+    "convert_element_type.no_fuse(Tensor input, ScalarType dtype) -> Tensor"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "convert_element_type.no_fuse",
+    "CompositeExplicitAutograd",
+)
+def convert_element_type(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return input.to(dtype)
+
+
+@impl(quantized_decomposed_lib, "convert_element_type.no_fuse", "Meta")
+def convert_element_type_meta(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.empty_like(input, dtype=dtype)

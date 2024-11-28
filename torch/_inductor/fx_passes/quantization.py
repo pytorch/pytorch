@@ -2606,7 +2606,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
     relu_fused=False,
 ):
     def _extra_check_fn(match: Match):
-        return match.kwargs["w_dtype"] == torch.float16
+        return match.kwargs["dtype_fp16"] == torch.float16
 
     @register_freezing_graph_pattern(
         pattern,
@@ -2618,9 +2618,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         Match the pattern:
         fp32 activation
           |
-        (reshape)
-          |
-        mm/addmm <- t <- dequant_per_tensor (fp32) <- fp16_weight
+        mm/addmm <- t <- to_fp32 <- to_fp16 <- weight
           |
         (reshape) <- (relu)
 
@@ -2630,19 +2628,19 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
           |
         expand
           |
-         bmm <- expand <- t <- dequant_per_tensor (fp32) <- fp16_weight
+         bmm <- expand <- t <- to_fp32 <- to_fp16 <- weight
           |
         (add) <- (relu)
 
         Insert weight prepack node and change the pattern to:
         fp32 activation
           |
-        onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- fp16_weight
+        onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- weight
         (or onednn.linear_relu_dynamic_fp16)
         """
         # find params
         x = kwargs["x"]
-        w = kwargs["q_weight"]
+        w = kwargs["w"]
         bias = kwargs["b"] if "b" in kwargs else None
 
         # find linear node
@@ -2689,11 +2687,17 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
             t_node = linear_node.args[weight_index]
         assert isinstance(t_node, torch.fx.node.Node)
 
-        # find dequant nodes of weight
-        dequant_w_node = t_node.args[0]
-        assert isinstance(dequant_w_node, torch.fx.node.Node)
+        w_to_fp32_node = t_node.args[0]
         assert (
-            dequant_w_node.target is quantized_decomposed.dequantize_per_tensor.default
+            isinstance(w_to_fp32_node, torch.fx.node.Node)
+            and w_to_fp32_node.target
+            is quantized_decomposed.convert_element_type.no_fuse
+        )
+        w_to_fp16_node = w_to_fp32_node.args[0]
+        assert (
+            isinstance(w_to_fp16_node, torch.fx.node.Node)
+            and w_to_fp16_node.target
+            is quantized_decomposed.convert_element_type.no_fuse
         )
 
         x_shape = x.meta.get("tensor_meta").shape
@@ -2746,7 +2750,8 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
                 assert isinstance(expand_w_node, torch.fx.node.Node)
                 graph.erase_node(expand_w_node)
             graph.erase_node(t_node)
-            graph.erase_node(dequant_w_node)
+            graph.erase_node(w_to_fp32_node)
+            graph.erase_node(w_to_fp16_node)
 
             counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
@@ -2755,14 +2760,15 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
 
 
 def _register_linear_dynamic_fp16_weight_prepack():
-    dequantize_per_tensor_weight_pattern = CallFunction(
-        quantized_decomposed.dequantize_per_tensor.default,
-        KeywordArg("q_weight"),
-        KeywordArg("w_scale"),
-        KeywordArg("w_zp"),
-        KeywordArg("w_quant_min"),
-        KeywordArg("w_quant_max"),
-        KeywordArg("w_dtype"),
+    to_dtype_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+    weight_pattern = CallFunction(
+        to_dtype_op,
+        CallFunction(
+            to_dtype_op,
+            KeywordArg("w"),
+            KeywordArg("dtype_fp16"),
+        ),
+        KeywordArg("dtype_fp32"),
     )
     cases = itertools.product(
         [False, True],  # input_dim_exceeds_two
@@ -2771,7 +2777,7 @@ def _register_linear_dynamic_fp16_weight_prepack():
     )
     for input_dim_exceeds_two, input_contiguous, relu_fused in cases:
         patterns = _generate_linear_dynamic_fp16_pattern(
-            dequantize_per_tensor_weight_pattern,
+            weight_pattern,
             input_dim_exceeds_two,
             input_contiguous,
             relu_fused,
