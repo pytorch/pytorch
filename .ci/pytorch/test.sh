@@ -48,7 +48,7 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
-if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
