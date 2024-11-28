@@ -1853,7 +1853,7 @@ def cooperative_reduction(
     # Cooperative reductions currently only support a single reduction dimension.
     assert (
         len(size_hints) == 2
-    ), "Cooperative reduction don't support tiling reduction dims"
+    ), "Cooperative reductions don't support tiling reduction dims"
     xnumel, rnumel = size_hints
 
     # TODO(jansel): we should base target on the SM count of the local GPU
