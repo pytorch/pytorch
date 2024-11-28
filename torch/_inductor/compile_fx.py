@@ -589,7 +589,6 @@ def _compile_fx_inner(
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
-    # TODO: this is recomputed on the inside too, turn it into a kwarg?
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
     assert isinstance(
@@ -633,7 +632,7 @@ def _compile_fx_inner(
 
         # TODO: Remove this short circuit once types are unified here
         if aot_mode:
-            return fx_codegen_and_compile(gm, example_inputs, **graph_kwargs)  # type: ignore[assignment]
+            return fx_codegen_and_compile(gm, example_inputs, inputs_to_check, **graph_kwargs)  # type: ignore[assignment]
 
         mb_compiled_graph: Optional[CompiledFxGraph] = None
         key_info = None
@@ -669,7 +668,9 @@ def _compile_fx_inner(
         # determined the input is uncacheable)
         if cache_info is None or cache_info["cache_state"] == "bypass":
             assert mb_compiled_graph is None
-            r = fx_codegen_and_compile(gm, example_inputs, **graph_kwargs)
+            r = fx_codegen_and_compile(
+                gm, example_inputs, inputs_to_check, **graph_kwargs
+            )
             assert not isinstance(r, str)  # due to aot test
             mb_compiled_graph = r
 
@@ -679,7 +680,9 @@ def _compile_fx_inner(
             assert key_info is not None
             TritonBundler.begin_compile()
             try:
-                r = fx_codegen_and_compile(gm, example_inputs, **graph_kwargs)
+                r = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
                 assert not isinstance(r, str)  # due to aot test
                 mb_compiled_graph = r
                 assert mb_compiled_graph is not None
@@ -777,6 +780,9 @@ def _compile_fx_inner(
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
+    # This is derivable from the other inputs to this function, but we pass it
+    # in explicitly because it's nontrivial to compute
+    inputs_to_check: Sequence[int],
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> Union[CompiledFxGraph, str]:
     # Sorry about the mess, we need graph_kwargs to continue to be able
@@ -1036,9 +1042,6 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
                     counters["inductor"] - inductor_counters,
-                )
-                inputs_to_check = get_input_idxs_to_check(
-                    example_inputs, static_input_idxs
                 )
                 compiled_graph.post_compile1(
                     cudagraphs,
