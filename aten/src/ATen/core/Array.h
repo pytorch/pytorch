@@ -30,8 +30,8 @@ struct Array {
   Array() = default;
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
-  Array(Array&&) = default;
-  Array& operator=(Array&&) = default;
+  Array(Array&&) noexcept = default;
+  Array& operator=(Array&&) noexcept = default;
   ~Array() = default;
 #endif
   static constexpr int size() {

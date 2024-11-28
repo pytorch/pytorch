@@ -10,7 +10,7 @@
 
 namespace at::mps {
 
-C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
+C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback)
 
 namespace HeapAllocator {
 

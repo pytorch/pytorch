@@ -79,29 +79,29 @@ using _upsampling_bilinear2d_aa = void(*)(const Tensor& output, const Tensor& in
 using upsampling_trilinear3d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 using upsampling_bicubic2d = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
 using _upsampling_bicubic2d_aa = void(*)(const Tensor& output, const Tensor& input, bool align_corners, scale_t scales_h, scale_t scales_w);
-DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel);
-DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel);
-DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel);
-DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel);
-DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel);
-DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel);
-DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel);
-DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel);
-DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel);
-DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel);
-DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel);
-DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel);
-DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel);
-DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel);
-DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
-DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
-DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_kernel)
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_kernel)
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_kernel)
+DECLARE_DISPATCH(upsampling_nearest1d, upsample_nearest1d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact1d, _upsample_nearest_exact1d_backward_kernel)
+DECLARE_DISPATCH(upsampling_nearest2d, upsample_nearest2d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact2d, _upsample_nearest_exact2d_backward_kernel)
+DECLARE_DISPATCH(upsampling_nearest3d, upsample_nearest3d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_nearest_exact3d, _upsample_nearest_exact3d_backward_kernel)
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_kernel)
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_kernel)
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_kernel)
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_kernel)
+DECLARE_DISPATCH(upsampling_linear1d, upsample_linear1d_backward_kernel)
+DECLARE_DISPATCH(upsampling_bilinear2d, upsample_bilinear2d_backward_kernel)
+DECLARE_DISPATCH(_upsampling_bilinear2d_aa, _upsample_bilinear2d_aa_backward_kernel)
+DECLARE_DISPATCH(upsampling_trilinear3d, upsample_trilinear3d_backward_kernel)
+DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel)
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel)
+DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel)
 
 [[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
     IntArrayRef input_size,

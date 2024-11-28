@@ -103,10 +103,21 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
-    cell_or_freevar: bool = False
+
+    # Whether this local is an input to the root frame.
+    is_input: bool = False
+
+    # Whether the item at this source is a that is native to the root frame,
+    # i.e., a part of its `co_cellvars` or `co_freevars`.
+    is_root_frame_cell: bool = False
 
     def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load(self.local_name))
+        if self.is_root_frame_cell:
+            # Although `LOAD_FAST` and `LOAD_CLOSURE` have the same semantics,
+            # Dynamo's bytecode transformation differentiates them slightly.
+            codegen.append_output(codegen.create_load_closure(self.local_name))
+        else:
+            codegen.append_output(codegen.create_load(self.local_name))
 
     def guard_source(self):
         return GuardSource.LOCAL
@@ -220,6 +231,51 @@ class AttrSource(ChainedSource):
         if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
+
+
+@dataclasses.dataclass(frozen=True)
+class AutoDerefLocalSource(ChainedSource):
+    """
+    In Python, reads and writes to local cell objects (variables captured by a
+    frame, or created in a frame by captured by a nested frame) are
+    automatically dereferenced.
+
+    At the language level, this means accessing the `cell_contents` attribute of
+    the cell object, rather than the object itself.
+
+    At the bytecode level, this means turning LOAD_FAST into LOAD_DEREF, and
+    STORE_FAST into STORE_DEREF.
+
+    This class represents the source to the _contents_ of such a cell object,
+    encapsulating the python and bytecode level idiosyncracies of what would
+    otherwise have been a simple `AttrSource(cell_source, "cell_contents")`
+    """
+
+    def __post_init__(self):
+        assert type(self.base) is LocalSource
+        assert self.base.is_root_frame_cell
+
+    def reconstruct(self, codegen):
+        # Emit more readable and performant bytecode.
+        assert isinstance(self.base, LocalSource)  # tame mypy
+        codegen.load_deref(self.base.local_name)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        # The requirements for `Source.name` are
+        # 1. with appropriate scope, `eval()` will turn it into the target
+        #    python value.
+        # 2. can be used for caching guard managers.
+        #
+        # (1) requires us to return `self.base.name()` here, in the scope given
+        # to `eval()`, cells are already dereferenced.
+        #
+        # What about name collision that can affect (2)? Well, auto-deferenced
+        # cells should never have any guards on them (only guards on the
+        # contents), so this name collision shouldn't matter.
+        return self.base.name()
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
@@ -546,7 +602,7 @@ class ODictGetItemSource(ChainedSource):
     def reconstruct(self, codegen):
         codegen.add_push_null(
             lambda: codegen.append_output(
-                codegen._create_load_const(collections.OrderedDict.__getitem__)
+                codegen.create_load_const_unchecked(collections.OrderedDict.__getitem__)
             )
         )
         reconstruct_getitem(self, codegen, index_is_slice=False)
@@ -722,14 +778,12 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
-def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
+def is_from_local_source(source: Source, *, only_allow_input=False):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(
-            source.base, allow_cell_or_freevar=allow_cell_or_freevar
-        )
+        return is_from_local_source(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
         return False
-    if not allow_cell_or_freevar and source.cell_or_freevar:
+    if only_allow_input and not source.is_input:
         return False
     return True
 

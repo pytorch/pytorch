@@ -83,7 +83,7 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
-};
+}
 
 #if defined(__aarch64__)
 inline bool mkldnn_bf16_device_check_arm() {
