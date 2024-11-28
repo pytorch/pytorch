@@ -437,7 +437,7 @@ print(torch.xpu.device_count())
             )
         )
 
-    @skipXPUif(
+    @skipXPUIf(
         int(torch.version.xpu) < 20250000,
         "Test requires SYCL compiler version 2025.0.0 or newer.",
     )
