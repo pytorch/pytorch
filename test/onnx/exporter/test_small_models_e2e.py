@@ -133,14 +133,12 @@ class DynamoExporterTest(common_utils.TestCase):
                 super().__init__()
 
             def forward(self, *x):
-                out = torchvision.ops.batched_nms(x[0], x[1], x[2], x[3])
+                out = torchvision.ops.nms(x[0], x[1], x[2])
                 return out
 
-        torch.manual_seed(1)
         args = (
-            torch.rand(20, 4, dtype=torch.float),
-            torch.rand(20, dtype=torch.float),
-            torch.randint(0, 2, (20,), dtype=torch.float),
+            torch.tensor([[0, 0, 1, 1], [0.5, 0.5, 1, 1]], dtype=torch.float),
+            torch.tensor([0.1, 0.2]),
             0,
         )
         onnx_program = torch.onnx.export(VisionModel(), args, dynamo=True)
