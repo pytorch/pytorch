@@ -647,10 +647,12 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
-  std::optional<TraceBuffer::Entry> entry =
+  std::optional<TraceBuffer::Entry*> entryPtr =
       TraceBuffer::get()->getEntry(trace_id_);
-  if (entry.has_value()) {
-    auto entryVal = entry.value();
+  if (entryPtr.has_value()) {
+    // Get the entry from FR; dereference it via value copy bc we are going to
+    // hand it to a std::async call
+    auto entryVal = *entryPtr.value();
     // Get stack trace from FR entry, in string format
     // Note: `getTraceback` call below invokes `torch::symbolize`, which may
     // need to acquire the GIL. In order for watchdog to be block-free, we make
@@ -2099,6 +2101,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Work status logging for desync debug
       desyncDebugger_.logWorkStart(work);
+      TraceBuffer::get()->markStart(work.trace_id_);
 
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
@@ -2115,6 +2118,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (work.isCompleted()) {
         // Work status logging for desync debug
         desyncDebugger_.logWorkEnd(work);
+        TraceBuffer::get()->markEnd(work.trace_id_, work.getDuration());
 
         if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
             !work.futureWorkResult_->completed()) {
@@ -2133,7 +2137,10 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        TraceBuffer::get()->retire_id(work.trace_id_, true);
+
+        // If the work is completed, we can retire the trace id.
+        TraceBuffer::get()->retire_id(work.trace_id_);
+
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2736,8 +2743,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
-        r->ncclStartEvent_.get(),
-        r->ncclEndEvent_.get(),
         options_->timeout,
         pgStatus_,
         isP2P);
@@ -3413,8 +3418,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         profilingTitle,
         {tensor},
         {tensor},
-        nullptr,
-        nullptr,
         options_->timeout,
         pgStatus_,
         /*isP2P=*/true);
@@ -3455,8 +3458,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         profilingTitle,
         {tensor},
         {tensor},
-        work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get(),
         options_->timeout,
         pgStatus_,
         /*isP2P=*/true);

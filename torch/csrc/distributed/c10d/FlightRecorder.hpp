@@ -104,7 +104,6 @@ struct TraceBuffer {
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
   }
-  using Event = at::cuda::CUDAEvent;
   struct Entry {
     size_t id_; // incremented id in the trace buffer
                 // used to figure out where in the circular entries
@@ -125,10 +124,6 @@ struct TraceBuffer {
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
-    // we borrow pointers to start_ and end_ so we can query the state
-    // on reporting. However, once the event is completed, the call
-    // to `complete` will clear these.
-    Event *start_, *end_;
 
     // timestamp when the entry was created, likely close to the time the work
     // was 'enqueued'- not necessarily started
@@ -186,8 +181,6 @@ struct TraceBuffer {
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
-      Event* start,
-      Event* end,
       std::chrono::milliseconds timeout_ms,
       std::shared_ptr<ProcessGroupStatus> pg_status,
       bool isP2P);
@@ -196,13 +189,16 @@ struct TraceBuffer {
       const std::tuple<std::string, std::string>& pg_name,
       std::vector<uint64_t> ranks);
 
-  void update_state(Entry& r);
+  void markStart(std::optional<size_t> id);
+  void markEnd(
+      std::optional<size_t> id,
+      std::optional<float> duration = std::nullopt);
 
   std::vector<Entry> dump_entries();
 
   // Returns the entry with the given id, if it exists. Otherwise, returns
   // std::nullopt.
-  std::optional<Entry> getEntry(std::optional<size_t> id);
+  std::optional<Entry*> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
@@ -214,7 +210,7 @@ struct TraceBuffer {
   never hang. (timing must also be enabled for compute_duration - see
   TORCH_NCCL_ENABLE_TIMING).
   */
-  void retire_id(std::optional<size_t> id, bool compute_duration = true);
+  void retire_id(std::optional<size_t> id);
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,

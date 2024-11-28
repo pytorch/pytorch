@@ -187,8 +187,6 @@ std::optional<size_t> TraceBuffer::record(
     std::string profiling_name,
     const std::vector<at::Tensor>& inputs,
     const std::vector<at::Tensor>& outputs,
-    Event* start,
-    Event* end,
     std::chrono::milliseconds timeout_ms,
     std::shared_ptr<ProcessGroupStatus> pg_status,
     bool isP2P) {
@@ -212,8 +210,6 @@ std::optional<size_t> TraceBuffer::record(
       op_id,
       std::move(profiling_name),
       std::move(traceback),
-      start,
-      end,
       c10::getTime(),
       timeout_ms.count(),
       isP2P,
@@ -262,19 +258,23 @@ void TraceBuffer::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
-void TraceBuffer::update_state(Entry& r) {
-  if (r.start_ != nullptr) {
-    bool started = r.start_->query();
-    if (started && !r.time_discovered_started_) {
-      r.time_discovered_started_ = c10::getTime();
-    }
-  }
-  if (r.end_ != nullptr) {
-    bool completed = r.end_->query();
-    if (completed && !r.time_discovered_completed_) {
-      r.time_discovered_completed_ = c10::getTime();
-    }
-  }
+void TraceBuffer::markStart(std::optional<size_t> id) {
+  auto entry = getEntry(id);
+  if (!entry)
+    return;
+  std::lock_guard<std::mutex> guard(mutex_);
+  (*entry)->time_discovered_started_ = c10::getTime();
+}
+
+void TraceBuffer::markEnd(
+    std::optional<size_t> id,
+    std::optional<float> duration) {
+  auto entry = getEntry(id);
+  if (!entry)
+    return;
+  std::lock_guard<std::mutex> guard(mutex_);
+  (*entry)->time_discovered_completed_ = c10::getTime();
+  (*entry)->duration_ = duration;
 }
 
 std::vector<TraceBuffer::Entry> TraceBuffer::dump_entries() {
@@ -289,76 +289,32 @@ std::vector<TraceBuffer::Entry> TraceBuffer::dump_entries() {
       result.end(),
       entries_.begin(),
       entries_.begin() + static_cast<std::ptrdiff_t>(next_));
-  // query any remaining events
-  for (auto& r : result) {
-    update_state(r);
-    r.start_ = r.end_ = nullptr;
-  }
   return result;
 }
 
-// Returns the entry with the given id, if it exists. Otherwise, returns
-// std::nullopt.
-std::optional<TraceBuffer::Entry> TraceBuffer::getEntry(
+// Returns the entry's pointer with the given id, if it exists. Otherwise,
+// returns std::nullopt.
+std::optional<TraceBuffer::Entry*> TraceBuffer::getEntry(
     std::optional<size_t> id) {
   if (!enabled_ || !id) {
     return std::nullopt;
   }
 
   std::unique_lock<std::mutex> guard(mutex_);
-  Entry entry = entries_.at(*id % max_entries_);
-  if (entry.id_ == *id) {
+  Entry* entry = &entries_.at(*id % max_entries_);
+  if (entry->id_ == *id) {
     return entry;
   } else {
     return std::nullopt;
   }
 }
 
-void TraceBuffer::retire_id(std::optional<size_t> id, bool compute_duration) {
-  if (!enabled_ || !id) {
+void TraceBuffer::retire_id(std::optional<size_t> id) {
+  auto entry = getEntry(id);
+  if (!entry)
     return;
-  }
-
-  bool can_compute_duration = false;
-  Event* startEvent = nullptr;
-  Event* endEvent = nullptr;
-  std::optional<float> duration = std::nullopt;
-
-  std::unique_lock<std::mutex> guard(mutex_);
-
-  Entry* entry = &entries_.at(*id % max_entries_);
-  if (entry->id_ == *id) {
-    update_state(*entry);
-
-    if (compute_duration) {
-      can_compute_duration = entry->time_discovered_completed_.has_value() &&
-          entry->start_ && entry->end_;
-      startEvent = entry->start_;
-      endEvent = entry->end_;
-    }
-    entry->retired_ = true;
-    entry->start_ = entry->end_ = nullptr;
-  }
-
-  if (can_compute_duration) {
-    // Compute duration without without holding the lock, because
-    // cudaEventDuration() can hang, and we need to acquire the lock before we
-    // can dump(), which we never want to block.
-    guard.unlock();
-    duration = getDurationFromEvent(*startEvent, *endEvent);
-    guard.lock();
-
-    // Refresh the entry pointer, see if the entry has been overwritten
-    entry = &entries_.at(*id % max_entries_);
-    if (entry->id_ != *id) {
-      LOG(INFO) << "retire_id abandoned for id " << *id
-                << ", event was overwritten while waiting to compute duration.";
-      return;
-    }
-    if (duration.has_value()) {
-      entry->duration_ = duration;
-    }
-  }
+  std::lock_guard<std::mutex> guard(mutex_);
+  (*entry)->retired_ = true;
 }
 
 const c10::List<c10::IValue> TraceBuffer::getCollectiveTrace(
