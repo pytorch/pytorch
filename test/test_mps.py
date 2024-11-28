@@ -1222,6 +1222,7 @@ class TestAutocastMPS(TestCase):
                          f"Autocast & non-autocast tensors did not match, \
                          got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/141774
     def test_scaled_dot_product_attention_autocast(self):
         # TODO(hvaara): Parameterize this.
         for dtype in [torch.bfloat16, torch.float16]:
