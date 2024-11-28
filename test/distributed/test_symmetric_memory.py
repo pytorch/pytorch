@@ -84,6 +84,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
+    def test_has_multicast_support(self) -> None:
+        # validate that has_multicast_support() returns "false" instead of throwing
+        self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
+        # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
+
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_cuda_nvlink_connectivity_detection(self) -> None:
