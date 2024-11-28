@@ -1420,8 +1420,10 @@ class OutputGraph:
         for pl in placeholders:
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
+            # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
             pl._dynamo_source = arg.source
 
+        # NOTE: can't move these into meta: https://github.com/pytorch/pytorch/issues/141640
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
