@@ -320,7 +320,7 @@ def generate_libtorch_matrix(
 
                     "container_image": (
                         LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)]
-                        if os not in ("windows", "windows-arm64") 
+                        if os not in ("windows", "windows-arm64")
                         else ""
                     ),
                     "package_type": "libtorch",

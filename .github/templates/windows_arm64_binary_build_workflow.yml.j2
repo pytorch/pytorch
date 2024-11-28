@@ -153,11 +153,11 @@ jobs:
         with:
           repository:  "ozanMSFT/builder"
           ref: "users/ozanMSFT/win-arm64"
-          path: "builder"    
+          path: "builder"
       - name: Bootstrap Git
         shell: cmd
         run: |
-          "builder/windows/arm64/bootstrap_git.bat"  
+          "builder/windows/arm64/bootstrap_git.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
