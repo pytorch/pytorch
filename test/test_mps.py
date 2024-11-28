@@ -1224,8 +1224,13 @@ class TestAutocastMPS(TestCase):
 
     # Regression test for https://github.com/pytorch/pytorch/issues/141774
     def test_scaled_dot_product_attention_autocast(self):
-        # TODO(hvaara): Parameterize this.
-        for dtype in [torch.bfloat16, torch.float16]:
+        #TODO(hvaara): Parameterize the dtypes for cleaner code and better failure debugability
+        dtypes = [torch.bfloat16, torch.float16]
+        # macOS < 14.0 does not support bf16
+        if MACOS_VERSION < 14.0:
+            dtypes = [torch.float16]
+
+        for dtype in dtypes:
             query = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
             key = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
             value = torch.rand(4, 1, 16, 8, dtype=dtype, device="mps")
