@@ -36,6 +36,55 @@ if torch._C._has_mkldnn:
     _linear_args = [Arg() for _ in range(6)]
     _conv_transpose_args = [Arg() for _ in range(11)]
 
+    def group_gemm_pass(graph: torch.fx.Graph):
+        """
+        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Use below way to connect the pattern to the lowering.
+        """
+
+        print("graph before group gemm pass is: {}".format(graph), flush=True)
+        computation_op = mkldnn._linear_pointwise.default
+        def toy_fn(*args, **kwargs):
+            computation_args = [
+                args[0],
+                args[1],
+                None,
+                "none",
+                [],
+                "",
+            ]
+            return L[computation_op](*computation_args)
+    
+        toy_fn._inductor_lowering_function = True 
+
+        for node in graph.nodes:
+            if node.target == torch.ops.mkldnn._linear_pointwise.default:
+                act = node.all_input_nodes[0]
+
+                users = act.users
+
+                print("---- hit -----", flush=True)
+
+                for args in node.all_input_nodes:
+                    print("args: {}".format(args), flush=True)
+                
+                lowering_linear_node = graph.create_node(
+                    "call_function", toy_fn, (node.all_input_nodes[0], node.all_input_nodes[1])  # no bias
+                )
+                lowering_linear_node.meta.update(node.meta)
+                node.replace_all_uses_with(lowering_linear_node)
+                graph.erase_node(node)
+
+
+
+
+                break
+
+
+        print("graph after group gemm pass is: {}".format(graph), flush=True)
+        return
+
+
     def _conv_call(users=1):
         return CallFunction(
             mkldnn._convolution_pointwise.default, *_conv_args, _users=users
@@ -1368,7 +1417,7 @@ if torch._C._has_mkldnn:
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
-            _register_linear_silu_linear_mul_fusion()
+            # _register_linear_silu_linear_mul_fusion()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
