@@ -728,7 +728,7 @@ TupleTypePtr TupleType::createNamed(
 
 TupleTypePtr TupleType::createNamed(
     const std::optional<c10::QualifiedName>& qualName,
-    const std::vector<c10::string_view>& field_names,
+    const std::vector<std::string_view>& field_names,
     const std::vector<TypePtr>& field_types) {
   std::vector<IValue> empty_defaults;
   return createWithSpec(qualName, field_names, field_types, empty_defaults);
@@ -784,11 +784,11 @@ TupleTypePtr TupleType::createWithSpec(const std::optional<c10::QualifiedName>& 
       field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
-std::optional<std::vector<c10::string_view>> TupleType::names() const {
+std::optional<std::vector<std::string_view>> TupleType::names() const {
   if (!schema_) {
     return {};
   }
-  std::vector<c10::string_view> ret;
+  std::vector<std::string_view> ret;
   for (const auto& arg : schema_->arguments()) {
     ret.emplace_back(arg.name());
   }
