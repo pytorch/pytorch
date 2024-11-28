@@ -1537,7 +1537,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx not in unsharded_stages
                             and stage_idx not in unshard_ops
                         ), f"Unsharding the same {stage_idx=} twice"
-                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)
+                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
                 elif comp_type == RESHARD:
                     if stage_uses_fsdp:
                         assert (
@@ -1546,7 +1546,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         assert (
                             stage_idx not in unshard_ops
                         ), f"Resharding {stage_idx=} before finishing unshard"
-                        stage.submod.reshard()
+                        stage.submod.reshard()  # type: ignore[operator]
                 elif comp_type == FORWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
