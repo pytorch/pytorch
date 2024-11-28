@@ -15,14 +15,10 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 
+# NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.4", "12.6"]
-
-
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
-
-
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
-
 
 ROCM_ARCHES = ["6.1", "6.2"]
 
@@ -30,12 +26,9 @@ XPU_ARCHES = ["xpu"]
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
-
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
-
 CPU_S390X_ARCH = ["cpu-s390x"]
-
 
 CUDA_AARCH64_ARCH = ["cuda-aarch64"]
 
@@ -156,16 +149,15 @@ def arch_type(arch_version: str) -> str:
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
-    **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
+    "11.8": f"pytorch/manylinux-builder:cuda11.8-{DEFAULT_TAG}",
+    "12.4": f"pytorch/manylinux-builder:cuda12.4-{DEFAULT_TAG}",
+    "12.6": f"pytorch/manylinux2_28-builder:cuda12.6-{DEFAULT_TAG}",
     **{
         gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
