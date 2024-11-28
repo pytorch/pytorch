@@ -489,7 +489,7 @@ Tensor _weight_int4pack_mm_xpu(
   //qscale:[K/qGroupSize, N]
   //qzp:[K/qGroupSize, N]
   auto qscale = qScaleAndZeros.select(2, 0).contiguous();
-  auto qzp = qScaleAndZeros.select(2, 1).contiguous();
+  auto qzp = qScaleAndZeros.select(2, 1).contiguous().to(kChar);
   woq_matmul_int4(C, A, B, qscale, qzp, qGroupSize, onednn::Attr());
 
   return C;
