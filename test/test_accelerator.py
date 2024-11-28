@@ -80,6 +80,28 @@ class TestAccelerator(TestCase):
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
 
+    def test_stream_context_manager(self):
+        s = torch.Stream()
+        prev_stream = torch.accelerator.current_stream()
+        with s:
+            self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_idx(src_device)
+        dst_stream = torch.Stream(dst_device)
+        src_prev_stream = torch.accelerator.current_stream()
+        dst_prev_stream = torch.accelerator.current_stream(dst_device)
+        with dst_stream:
+            self.assertEqual(torch.accelerator.current_device_idx(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_stream)
+            self.assertEqual(torch.accelerator.current_stream(src_device), src_prev_stream)
+        self.assertEqual(torch.accelerator.current_device_idx(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
+
 
 if __name__ == "__main__":
     run_tests()
