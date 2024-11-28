@@ -68,7 +68,9 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::max(*self_data, opmath_t(*src_data));
+    auto self_value = c10::load(self_data);
+    auto src_value = c10::load(src_data);
+    *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::max(self_value, opmath_t(src_value));
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -78,7 +80,9 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::min(*self_data, opmath_t(*src_data));
+    auto self_value = c10::load(self_data);
+    auto src_value = c10::load(src_data);
+    *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::min(self_value, opmath_t(src_value));
   }
 };
 static ReduceMinimum reduce_minimum;

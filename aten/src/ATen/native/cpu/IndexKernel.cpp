@@ -408,11 +408,11 @@ void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       } else {
         cpu_masked_select_serial_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       }
     });
