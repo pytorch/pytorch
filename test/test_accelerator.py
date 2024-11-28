@@ -17,6 +17,8 @@ if not torch.accelerator.is_available():
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
 
+TEST_MULTIACCELERATOR = torch.accelerator.device_count() > 1
+
 
 class TestAccelerator(TestCase):
     def test_current_accelerator(self):
@@ -33,6 +35,7 @@ class TestAccelerator(TestCase):
                 ):
                     torch.accelerator.set_device_idx("cpu")
 
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
         orig_device = torch.accelerator.current_device_idx()
         target_device = (orig_device + 1) % torch.accelerator.device_count()
