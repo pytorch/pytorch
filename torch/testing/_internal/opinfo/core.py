@@ -115,8 +115,7 @@ class DecorateInfo:
             self.active_if
             and (self.cls_name is None or self.cls_name == cls_name)
             and (self.test_name is None or self.test_name == test_name)
-            and (self.device_type is None or (device_type in self.device_type
-                 if isinstance(self.device_type, list) else self.device_type == device_type))
+            and (self.device_type is None or self.device_type == device_type)
             and (self.dtypes is None or dtype in self.dtypes)
             # Support callables over kwargs to determine if the decorator is active.
             and (

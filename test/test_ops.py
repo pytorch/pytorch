@@ -25,7 +25,6 @@ from torch.testing import make_tensor
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    any_common_cpu_device_one,
     deviceCountAtLeast,
     instantiate_device_type_tests,
     onlyCPU,
@@ -388,7 +387,7 @@ class TestCommon(TestCase):
     @onlyGPU
     @suppress_warnings
     @slowTest
-    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=any_common_cpu_device_one())
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_gpu_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):

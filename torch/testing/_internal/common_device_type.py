@@ -991,13 +991,10 @@ class OpDTypes(Enum):
     unsupported_backward = 3  # Test only unsupported backward dtypes
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
-    any_common_cpu_cuda_one = (
+    any_common_cpu_gpu_one = (
         6  # Test precisely one supported dtype that is common to both cuda and cpu
     )
-    any_common_cpu_xpu_one = (
-        7  # Test precisely one supported dtype that is common to both xpu and cpu
-    )
-
+    
 
 # Arbitrary order
 ANY_DTYPE_ORDER = (
@@ -1118,18 +1115,9 @@ class ops(_TestParametrizer):
                         break
                 else:
                     dtypes = {}
-            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
-                # Tries to pick a dtype that supports both CPU and CUDA
-                supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
-                if supported:
-                    dtypes = {
-                        next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)
-                    }
-                else:
-                    dtypes = {}
-            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_xpu_one:
-                # Tries to pick a dtype that supports both CPU and CUDA
-                supported = set(op.dtypes).intersection(op.dtypesIfXPU)
+            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_gpu_one:
+                # Tries to pick a dtype that supports both CPU and GPU
+                supported = set(op.dtypes).intersection(op.supported_dtypes(device_cls.device_type))
                 if supported:
                     dtypes = {
                         next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)
@@ -1997,15 +1985,6 @@ flex_attention_supported_platform = unittest.skipUnless(
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
 )
-
-
-def any_common_cpu_device_one():
-    return (
-        OpDTypes.any_common_cpu_xpu_one
-        if TEST_XPU
-        else OpDTypes.any_common_cpu_cuda_one
-    )
-
 
 def is_gpu_device(devices: List[str]):
     return "cuda" in devices or "xpu" in devices
