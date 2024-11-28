@@ -3705,7 +3705,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
             ):
-                torch.compile(f, backend="eager", nopython=True)(torch.zeros(1))
+                torch.compile(f, backend="eager", fullgraph=True)(torch.zeros(1))
 
     def test_hf_xsoftmax_inference(self):
         def fn(input, mask):
