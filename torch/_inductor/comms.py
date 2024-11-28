@@ -272,7 +272,7 @@ def node_summary(snode):
     if isinstance(snode.node, ir.ExternKernelOut):
         detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
-    layout = snode.node.maybe_get_layout()
+    layout = snode.node.get_output_spec()
     if isinstance(layout, ir.Layout):
         out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
     node_name = snode.node.maybe_get_name() or ""

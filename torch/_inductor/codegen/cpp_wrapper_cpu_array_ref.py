@@ -558,7 +558,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
             or (
                 config.use_minimal_arrayref_interface
