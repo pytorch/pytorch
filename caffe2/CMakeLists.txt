@@ -786,7 +786,7 @@ endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(Win32)
-  target_compile_options(torch_cpu PRIVATE "/Zc:static_assert")
+  target_compile_options(torch_cpu PRIVATE "/std:c++17")
 endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
