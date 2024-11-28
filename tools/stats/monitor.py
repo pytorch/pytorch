@@ -173,11 +173,9 @@ class UsageLogger:
             for gpu_handle in self._gpu_handles:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
-                gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
                 gpu_processes = self._get_per_process_gpu_info(gpu_handle)
                 gpu_data_list.append(
                     {
-                        "gpu_uuid": gpu_uuid,
                         "total_gpu_utilization": gpu_utilization.gpu,
                         "total_gpu_mem_utilization": gpu_utilization.memory,
                         "gpu_processes": gpu_processes,
@@ -189,12 +187,10 @@ class UsageLogger:
                 # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_processes = self._rocm_get_per_process_gpu_info(handle)
-                gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
                     {
-                        "gpu_uuid": gpu_uuid,
                         "total_gpu_utilization": gpu_utilization,
                         "total_gpu_mem_utilization": gpu_mem_utilization,
                         "gpu_processes": gpu_processes,
