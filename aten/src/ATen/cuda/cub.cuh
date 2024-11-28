@@ -582,30 +582,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template<typename scalar_t>
-inline void static_nonzero(const scalar_t * input, int64_t fill_value, int64_t * output, int64_t num_input_items, int64_t num_output_items) {
-  constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
-  constexpr int ITEMS_PER_THREAD = 16;
-  auto grid_size = (num_input_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
-  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-  const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
-  grid_size = std::min(num_sms, grid_size);
-  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-  auto agg = allocator.allocate(grid_size * sizeof(int));
-  calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, true>
-  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-    input, (int*)agg.get(), num_input_items, iters_per_cta);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
-  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-    input, output, (int*)agg.get(), num_input_items, num_output_items, iters_per_cta);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-}
-
-
-
 #endif
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>

@@ -206,12 +206,34 @@ void nonzero_static_cuda_out_impl(
   int64_t* out_data_ptr = need_to_copy ? out_temp.mutable_data_ptr<int64_t>()
                                        : out.mutable_data_ptr<int64_t>();
 
-  cuda::cub::static_nonzero(
-      self_.const_data_ptr<scalar_t>(),
-      fill_value,
-      out_data_ptr,
-      self.numel(),
-      out.numel());
+  const scalar_t * in_data_ptr = self_.const_data_ptr<scalar_t>();
+  constexpr int BLOCK_THREADS = 512; //block_threads<sizeof(scalar_t)>();
+  constexpr int ITEMS_PER_THREAD = 16;
+  auto grid_size = (self.numel() + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
+  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+  const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
+  grid_size = std::min(num_sms, grid_size);
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto agg = allocator.allocate(grid_size * sizeof(int));
+  at::cuda::cub::calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, true>
+  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+    in_data_ptr, (int*)agg.get(), self.numel(), iters_per_cta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  at::cuda::cub::flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
+  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+    in_data_ptr, out_data_ptr, (int*)agg.get(), self.numel(), size, iters_per_cta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+
+
+
+  // cuda::cub::static_nonzero(
+  //     self_.const_data_ptr<scalar_t>(),
+  //     fill_value,
+  //     out_data_ptr,
+  //     self.numel(),
+  //     out.numel());
   if (need_to_copy) {
     out.copy_(out_temp);
   }
