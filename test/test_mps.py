@@ -1222,6 +1222,20 @@ class TestAutocastMPS(TestCase):
                          f"Autocast & non-autocast tensors did not match, \
                          got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
 
+    def test_scaled_dot_product_attention_autocast(self):
+        # TODO(hvaara): Parameterize this.
+        for dtype in [torch.bfloat16, torch.float16]:
+            query = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+            key = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+            value = torch.rand(4, 1, 16, 8, dtype=dtype, device="mps")
+
+            with torch.amp.autocast(device_type="mps"):
+                y_autocast = F.scaled_dot_product_attention(query, key, value)
+
+            y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
+            self.assertEqual(y.to(y_autocast.dtype), y_autocast)
+
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
