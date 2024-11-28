@@ -36,6 +36,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
     Union,
     ValuesView,
@@ -46,6 +47,11 @@ from unittest import mock
 import sympy
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+
 from torch.utils._pytree import tree_map_only
 
 
@@ -317,11 +323,15 @@ def convert_shape_to_symint(
     from .virtualized import V
 
     return [
-        i
-        if isinstance(i, int)
-        else int(i)
-        if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        (
+            i
+            if isinstance(i, int)
+            else (
+                int(i)
+                if isinstance(i, sympy.Integer)
+                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+            )
+        )
         for i in lst
     ]
 
@@ -1444,8 +1454,8 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 
 
 def run_and_get_graph_lowering(fn, *args, **kwargs):
-    from torch._inductor.codecache import CompiledFxGraph
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.output_code import CompiledFxGraph
 
     real_init = CompiledFxGraph.__init__
     graph_lowerings = []
@@ -2187,6 +2197,45 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
     )
 
 
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "isinf",
+        "isnan",
+        "logical_not",
+        "logical_and",
+        "signbit",
+        "and_",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+        "or_",  # TODO should remove this op
+        "xor",
+    )
+
+
+@dataclasses.dataclass
+class OpDtypeRule:
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    override_return_dtype: Optional[torch.dtype]
+
+
+op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+
+
+def register_op_dtype_propagation_rules(
+    name,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    override_return_dtype: Optional[torch.dtype],
+):
+    op_dtype_propagation_rules[name] = OpDtypeRule(
+        type_promotion_kind, override_return_dtype
+    )
+
+
 @dataclass_transform(frozen_default=True)
 def ir_dataclass(cls=None, /, *, frozen: bool = True):
     def wrap(cls: _T) -> _T:
@@ -2200,3 +2249,10 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     if cls is None:
         return wrap
     return wrap(cls)
+
+
+def get_donated_idxs() -> Optional[List[int]]:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is not None and tracing_context.fw_metadata:
+        return tracing_context.fw_metadata.bw_donated_idxs
+    return None
