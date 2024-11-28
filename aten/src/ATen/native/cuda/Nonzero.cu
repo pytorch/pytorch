@@ -183,6 +183,18 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   }
 }
 
+template <typename scalar_t>
+void nonzero_static_cuda_out_impl(
+    const Tensor& self,
+    int64_t size,
+    int64_t fill_value,
+    Tensor& out) {
+      Tensor self_ = self.contiguous();
+
+      cuda::cub::static_nonzero(self_.const_data_ptr<scalar_t>(), fill_value, 
+      out.mutable_data_ptr<int64_t>(), self.numel(), out.numel());
+    }
+
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {
   TORCH_CHECK(
       out.dtype() == at::kLong,
@@ -216,4 +228,50 @@ Tensor nonzero_cuda(const Tensor& self) {
   Tensor out = at::detail::empty_cuda({0}, self.options().dtype(kLong));
   return at::native::nonzero_out_cuda(self, out);
 }
+
+Tensor& nonzero_static_out_cuda(
+    const Tensor& self,
+    int64_t size,
+    int64_t fill_value,
+    Tensor& out) {
+  TORCH_CHECK(
+      out.dtype() == at::kLong,
+      "Expected object of scalar type ",
+      at::kLong,
+      " as out, but got ",
+      out.dtype());
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "expected self and out to be on the same device, but got out on ",
+      out.device(),
+      " and self on ",
+      self.device());
+  TORCH_CHECK(
+      self.dim() <= MAX_DIMS,
+      "nonzero is not supported for tensor with more than ",
+      MAX_DIMS,
+      " dimensions");
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf,
+      at::ScalarType::Bool,
+      at::ScalarType::BFloat16,
+      at::ScalarType::Half,
+      self.scalar_type(),
+      "nonzero_cuda",
+      [&] {
+        nonzero_static_cuda_out_impl<scalar_t>(self, size, fill_value, out);
+      });
+  return out;
+}
+
+Tensor nonzero_static_cuda(
+    const Tensor& self,
+    int64_t size,
+    int64_t fill_value) {
+  Tensor out = Tensor(at::detail::empty_cuda(
+                          {self.dim(), size}, self.options().dtype(kLong)))
+                   .t();
+  return at::native::nonzero_static_out_cuda(self, size, fill_value, out);
+}
+
 } // namespace at::native
