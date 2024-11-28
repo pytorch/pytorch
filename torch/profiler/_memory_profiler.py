@@ -1202,3 +1202,40 @@ class MemoryProfileTimeline:
             with open(path, "w") as f:
                 f.write(html)
         remove(tmpfile.name)
+
+
+    def export_memory_timeline_json(self, path: str, device_str: str) -> None:
+        import numpy as np
+        import json
+        mt = self._coalesce_timeline(device)
+        times, sizes = np.array(mt[0]), np.array(mt[1])
+        if sizes.ndim == 1:
+            stacked = np.cumsum(sizes) / 1024**3 
+        else:
+            stacked = np.cumsum(sizes, axis=1) / 1024**3  
+        max_memory_allocated = torch.cuda.max_memory_allocated(device)
+        max_memory_reserved = torch.cuda.max_memory_reserved(device)
+        category_memory_timeline = {}
+        names = ["Unknown" if i is None else i.name for i in _CATEGORY_TO_COLORS]
+        num = 0
+        for category, color in _CATEGORY_TO_COLORS.items():
+            name = names[num]
+            num += 1
+            i = _CATEGORY_TO_INDEX.get(category)
+            
+            if i is None:
+                continue  
+            memory_usage = stacked[:, i] if stacked.ndim > 1 else stacked
+            category_memory_timeline[name] = [
+                {"time": t, "memory_GB": mem} for t, mem in zip(times / 1e3, memory_usage)  
+            ]
+
+        timeline_data = {
+            "device": device,
+            "max_memory_allocated": max_memory_allocated / 1024**3,  # GB
+            "max_memory_reserved": max_memory_reserved / 1024**3,  # GB
+            "category_memory_timeline": category_memory_timeline
+        }
+
+        with open(path, "w") as f:
+            json.dump(timeline_data, f, indent=4)
