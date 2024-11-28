@@ -721,6 +721,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_cached_forward_backward(self):
             counters.clear()
             AOTAutogradCache.clear()
