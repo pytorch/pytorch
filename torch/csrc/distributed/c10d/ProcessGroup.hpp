@@ -125,11 +125,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int size);
   ~ProcessGroup() override;
 
-  virtual int getRank() const {
+  int getRank() const {
     return rank_;
   }
 
-  virtual int getSize() const {
+  int getSize() const {
     return size_;
   }
 
@@ -863,10 +863,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
-  virtual const std::string& getGroupName() const;
-  virtual void setGroupName(const std::string& name);
-  virtual const std::string& getGroupDesc() const;
-  virtual void setGroupDesc(const std::string& name);
+  const std::string& getGroupName() const;
+  void setGroupName(const std::string& name);
+  const std::string& getGroupDesc() const;
+  void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
 
   void release_resources() override;

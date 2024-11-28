@@ -2,7 +2,8 @@
 
 #include <c10/util/Exception.h>
 
-#include <functional>
+#include <iostream>
+#include <optional>
 #include <queue>
 #include <unordered_map>
 #include <vector>

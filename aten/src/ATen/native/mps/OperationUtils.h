@@ -7,7 +7,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSStream.h>
-#include <ATen/native/mps/MetalShaderLibrary.h>
 #include <ATen/native/mps/TensorFactory.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
@@ -342,6 +341,46 @@ size_t compute_storage_numel_distance(const TensorBase& t);
 inline bool is_dense_in_storage(const TensorBase& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
+
+class MetalShaderLibrary {
+ public:
+  MetalShaderLibrary(const std::string& src) : shaderSource(src), nparams(0), compile_options(nullptr) {}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_)
+      : shaderSource(src), nparams(nparams_), compile_options(nullptr) {}
+  MetalShaderLibrary(const std::string& src, unsigned nparams_, MTLCompileOptions* compile_options_)
+      : shaderSource(src), nparams(nparams_), compile_options(compile_options_) {}
+  MetalShaderLibrary(const MetalShaderLibrary&) = delete;
+  inline id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).first;
+  }
+  id<MTLComputePipelineState> getPipelineStateForFunc(const std::string& fname,
+                                                      const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).first;
+  }
+  inline id<MTLFunction> getMTLFunction(const std::string& fname) {
+    return getLibraryPipelineState(getLibrary(), fname).second;
+  }
+  id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
+    return getLibraryPipelineState(getLibrary(params), fname).second;
+  }
+  static MetalShaderLibrary& getBundledLibrary();
+
+ protected:
+  virtual id<MTLLibrary> getLibrary();
+  virtual id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+  id<MTLLibrary> library = nil;
+
+ private:
+  std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib,
+                                                                                  const std::string& fname);
+
+  id<MTLLibrary> compileLibrary(const std::string& src);
+  std::string shaderSource;
+  unsigned nparams;
+  MTLCompileOptions* compile_options;
+  std::unordered_map<std::string, id<MTLLibrary>> libMap;
+  std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
+};
 
 namespace detail {
 template <typename T>

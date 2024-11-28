@@ -139,14 +139,13 @@ inline void _mul_reduce_max_fusion_kernel(
     tmp_max = std::max(tmp_max, tmp1);
     out[i] = tmp1;
   }
-  auto reduced_tmp_max = vec::vec_reduce_all<scalar_t>(
-      [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
-        return vec::maximum(x, y);
-      },
-      vec_tmp_max);
-  // Guard against Q*K^T being NaN
-  max = std::isnan(reduced_tmp_max) ? std::numeric_limits<scalar_t>::quiet_NaN()
-                                    : std::max(tmp_max, reduced_tmp_max);
+  max = std::max(
+      tmp_max,
+      vec::vec_reduce_all<scalar_t>(
+          [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
+            return vec::maximum(x, y);
+          },
+          vec_tmp_max));
 }
 
 template <typename scalar_t>

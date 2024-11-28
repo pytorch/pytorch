@@ -371,7 +371,7 @@ class DTensorTestBase(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
 
-TestFunc = Callable[[...], object]
+TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)

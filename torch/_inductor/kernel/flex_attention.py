@@ -3,8 +3,7 @@
 
 import logging
 import math
-from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -21,23 +20,11 @@ from ..ir import (
     get_fill_order,
     InputBuffer,
     IRNode,
-    MutationLayoutSHOULDREMOVE,
-    Scatter,
     StorageBox,
     Subgraph,
     TensorBox,
 )
-from ..lowering import (
-    _full,
-    check_and_broadcast_indices,
-    empty,
-    empty_strided,
-    expand,
-    index_output_size_and_inner_fn,
-    lowerings,
-    register_lowering,
-    to_dtype,
-)
+from ..lowering import empty, empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
 
 
@@ -106,54 +93,10 @@ def get_float32_precision():
         return "'tf32'"
 
 
-def zeros_and_scatter_lowering(shape: List[int], indices, values):
-    # Always accumulate into fp32 then cast
-    grad = _full(0, values.get_device(), torch.float32, shape)
-    assert isinstance(grad, TensorBox)
-    grad.realize()
-    x_size = grad.get_size()
-    values = to_dtype(values, grad.get_dtype())
-    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
-    indices, tensor_indices = check_and_broadcast_indices(indices, grad.get_device())
-    # We can use the first one since they are all required to be the same size
-    tensor_size = list(indices[tensor_indices[0]].get_size())
-    indexed_size = [x_size[i] for i in range(len(indices))]
-
-    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
-        x_size,
-        indices,
-        tensor_indices,
-        tensor_size,
-        indices_loaders,
-        indexed_size,
-        None,
-        check=True,
-    )
-
-    values = expand(values, expected_vals_size)
-    device = grad.get_device()
-    assert device is not None
-    scatter = Scatter(
-        device=device,
-        dtype=grad.get_dtype(),
-        inner_fn=values.make_loader(),
-        ranges=expected_vals_size,  # iter_ranges,
-        output_indexer=inner_fn,
-        scatter_mode="atomic_add",
-    )
-
-    buffer = ComputedBuffer(
-        name=grad.data.data.name,  # type: ignore[attr-defined]
-        layout=MutationLayoutSHOULDREMOVE(grad),
-        data=scatter,
-    )
-    return buffer
-
-
-SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
-
-
-def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(
+    args: List[TensorBox],
+    subgraph: Subgraph,
+):
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -164,30 +107,17 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
     from ..subgraph_lowering import PointwiseSubgraphLowering
 
     pw_subgraph = PointwiseSubgraphLowering(
-        subgraph.graph_module,
-        root_graph_lowering=V.graph,
-        allowed_mutations={torch.ops.flex_lib.zeros_and_scatter.default},
-        additional_lowerings={
-            torch.ops.flex_lib.zeros_and_scatter.default: zeros_and_scatter_lowering
-        },
+        subgraph.graph_module, root_graph_lowering=V.graph
     )
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    # Since we are allowing mutations/buffer creation, we need to register any fresh buffers
-    # creating during the pointwise subgraph lowering
-    if len(pw_subgraph.buffers) > 0:
-        for buffer in pw_subgraph.buffers:
-            V.graph.register_buffer(buffer)
-
-    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
-        if output_buffer is None:
+    def convert_output_node_to_buffer(output):
+        if output is None:
             return None
-        if isinstance(output_buffer, ComputedBuffer):
-            # These nodes are coming from the output of zeros_and_scatter
-            return output_buffer
+        output_buffer = output
         assert isinstance(output_buffer, TensorBox), (
-            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
+            "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
             type(output_buffer),
         )
         assert isinstance(output_buffer.data, StorageBox), (
@@ -205,6 +135,8 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
         )
         return subgraph_buffer
 
+    # node.args[0] is either a single element or a list of elements
+    # representing all outputs of the function.
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
@@ -429,9 +361,10 @@ compute_flex_attention = r"""
     idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
-
+    # TODO generalize and add proper mask support
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
+    # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
         off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
@@ -835,7 +768,6 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
-
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -848,7 +780,6 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
@@ -1723,26 +1654,6 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
-
-    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    idx_b = off_z
-    idx_h = off_hq
-    idx_m = m
-    idx_n = n
-    scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
-    {{ modification(
-        subgraph_number=3,
-        output_name=None,
-        mask="scatter_mask",
-        score="pre_mod_scores",
-        b="idx_b",
-        h="idx_h",
-        m="idx_m",
-        n="idx_n",
-        grad_score_mod="dsT"
-    ) | indent_except_first(1) }}
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
 
@@ -1760,82 +1671,6 @@ def bwd_dkdv_block_mn(
     + compute_next_offset_func
     + get_bounded_indices_func,
 )
-
-
-def validate_joint_graph(joint_graph: torch.fx.Graph):
-    """We do some pre lowering graph checks in order to raise nicer error messages"""
-    for node in joint_graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target == torch.ops.flex_lib.zeros_and_scatter.default
-        ):
-            for user in node.users:
-                if user.op != "output":
-                    raise NotImplementedError(
-                        "Using multiple indexing operations on the same tensor that requires gradients "
-                        "in a score_mod function is not currently supported. "
-                        "This typically happens when indexing the same tensor multiple times, like:\n\n"
-                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
-                        "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
-                        "A valid workaround is to clone() the tensors that will be indexed multiple times. For example:\n\n"
-                        "    bias1 = bias.clone()\n"
-                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
-                        "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
-                        "Note that this solution will use additional memory."
-                    )
-    return
-
-
-@dataclass(frozen=True)
-class JointOutputResult:
-    """Results from processing joint outputs."""
-
-    grad_input: ComputedBuffer
-    captured_grads_compute: List[ComputedBuffer]
-    captured_grads: List[Optional[TensorBox]]
-    mutated_grads: List[TensorBox]
-
-
-def process_joint_outputs(
-    all_joint_outputs: SubgraphResults, num_placeholders: int
-) -> JointOutputResult:
-    """Process joint outputs and extract various buffers needed for lowering
-
-    Args:
-        all_joint_outputs: List of all the outputs from build_subgraphs
-        num_placeholders: The number of placeholder inputs, used to skip over unused backward compute buffers
-
-    Returns:
-        JointOutputResult containing processed buffers and gradients
-    """
-    assert isinstance(all_joint_outputs, List)
-    assert (
-        all_joint_outputs[0] is not None
-    ), "joint_subgraph_buffer is None this is a bug!"
-
-    joint_buffer = all_joint_outputs[0]
-    other_grads = all_joint_outputs[num_placeholders - 1 :]
-
-    # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
-    # We only grab the buffers that require grad for inlining into kernel
-    grads_compute = [buf for buf in other_grads if buf is not None]
-
-    def get_out(buf):
-        if buf is None:
-            return None
-        assert isinstance(buf, ComputedBuffer)
-        assert buf.name is not None
-        return TensorBox.create(V.graph.get_buffer(buf.name))
-
-    grads_out = [get_out(x) for x in other_grads]
-    mutated_grads = [buf for buf in grads_out if buf is not None]
-
-    return JointOutputResult(
-        grad_input=joint_buffer,
-        captured_grads_compute=grads_compute,
-        captured_grads=grads_out,
-        mutated_grads=mutated_grads,
-    )
 
 
 # TODO: We probably also need a layout constraint?
@@ -1939,18 +1774,8 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
-
-    # It is hard to raise nice errors for some joint graphs during subgraph lowering
-    # This lets us do some checks before attempting to lower
-    validate_joint_graph(joint_graph.graph_module.graph)
-
-    all_joint_outputs = build_subgraph_buffer(
-        joint_placeholder_inps + list(score_mod_other_buffers),
-        joint_graph,
-    )
-
-    joint_outputs = process_joint_outputs(
-        all_joint_outputs, len(joint_placeholder_inps)
+    joint_subgraph_buffer, *_ = build_subgraph_buffer(
+        joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
 
     mask_graph_placeholder_inps = [
@@ -1965,8 +1790,6 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
-
-    mask_graph_buffer = mask_graph_buffer
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
@@ -2068,17 +1891,8 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_indices,
             ],
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[
-                fw_subgraph_buffer,
-                joint_outputs.grad_input,
-                mask_graph_buffer,
-                joint_outputs.captured_grads_compute,
-            ],
-            mutated_inputs=[
-                grad_query,
-                broadcasted_grad_value,
-                *joint_outputs.mutated_grads,
-            ],
+            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
+            mutated_inputs=[grad_query, broadcasted_grad_value],
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -2135,4 +1949,8 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+    return (
+        grad_query,
+        grad_key,
+        grad_value,
+    )

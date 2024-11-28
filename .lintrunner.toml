@@ -59,7 +59,6 @@ include_patterns = [
     'aten/src/ATen/mps/**/*.h',
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
-    'aten/src/ATen/core/boxing/**/*.h',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
@@ -264,7 +263,6 @@ exclude_patterns = [
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
-    'torch/csrc/inductor/aoti_runtime/sycl_runtime_wrappers.h',
 ]
 init_command = [
     'python3',
