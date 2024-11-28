@@ -45,10 +45,12 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
-        device: ["cuda", "rocm"]
+        device: ["cuda", "rocm", "xpu"]
         docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
         exclude:
           - device: "rocm"
+            docker-image: "pytorch/manylinux2_28-builder:cpu"
+          - device: "xpu"
             docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
@@ -131,7 +133,12 @@ jobs:
             docker exec -t "${container_name}" dnf install clang lld -y
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
-          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
+          if [[ "${BUILD_DEVICE}" == xpu ]]; then
+            docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
+            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+          else
+            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
+          fi
           if [[ "${{ matrix.device }}" == "cuda" ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
           else
