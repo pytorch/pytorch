@@ -452,7 +452,7 @@ dnnl::memory::format_tag conv_weight_fmt(
 
 void apply_tf32_if_allowed(dnnl::primitive_attr& pattr) {
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32oneDNN();
+  bool allow_tf32 = ctx.allowTF32OneDNN();
   if (allow_tf32) {
     pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
   }

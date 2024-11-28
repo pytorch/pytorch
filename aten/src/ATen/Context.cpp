@@ -122,11 +122,11 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
-bool Context::allowTF32oneDNN() const {
+bool Context::allowTF32OneDNN() const {
   return allow_tf32_onednn;
 }
 
-void Context::setAllowTF32oneDNN(bool b){
+void Context::setAllowTF32OneDNN(bool b){
   allow_tf32_onednn = b;
 }
 

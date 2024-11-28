@@ -320,8 +320,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
-  bool allowTF32oneDNN() const;
-  void setAllowTF32oneDNN(bool);
+  bool allowTF32OneDNN() const;
+  void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
