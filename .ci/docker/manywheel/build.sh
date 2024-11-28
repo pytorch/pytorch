@@ -91,8 +91,10 @@ case ${GPU_ARCH_TYPE} in
         TARGET=rocm_final
         DOCKER_TAG=rocm${GPU_ARCH_VERSION}
         GPU_IMAGE=rocm/dev-centos-7:${GPU_ARCH_VERSION}-complete
+        DEVTOOLSET_VERSION="9"
         if [ ${GPU_ARCH_TYPE} == "rocm-manylinux_2_28" ]; then
             MANY_LINUX_VERSION="2_28"
+            DEVTOOLSET_VERSION="11"
             GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
         fi
         PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100"
@@ -103,7 +105,7 @@ case ${GPU_ARCH_TYPE} in
             echo "ERROR: rocm regex failed"
             exit 1
         fi
-        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=9"
+        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
         ;;
     xpu)
         TARGET=xpu_final
