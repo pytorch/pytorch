@@ -446,7 +446,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
-          *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
+          *(scalar_t*)(dst + offset*result_stride) = c10::load((scalar_t*)src);
         });
       } else {
         cpu_masked_select_kernel<scalar_t, unsigned char>(iter, [result_stride](char* dst, char* src, int64_t offset) {
@@ -492,7 +492,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       offset = (offset >= n) ? n : offset;
       for (; i < offset; i++) {
         scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-        *out_ptr = *(scalar_t *)(data[1] + i * stride);
+        *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
       }
       // Empirically found that it is faster to process 3 data items together vs 2 or 4
       for (; i <= n - 3 * Vec::size(); i += 3 * Vec::size()) {
@@ -510,7 +510,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
       if (i < n) {
         for (; i < n; i++) {
           scalar_t* out_ptr = (scalar_t*)(data[0] - i * stride);
-          *out_ptr = *(scalar_t *)(data[1] + i * stride);
+          *out_ptr = c10::load((scalar_t *)(data[1] + i * stride));
         }
       }
 
