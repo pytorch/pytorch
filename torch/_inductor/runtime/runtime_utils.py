@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import contextlib
 import functools
 import operator
 
@@ -129,7 +130,18 @@ def get_first_attr(obj, *attrs):
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
 
 
-dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
+try:
+    dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
+except AttributeError:  # Compile workers only have a mock version of torch
+
+    @contextlib.contextmanager
+    def dynamo_timed(
+        key,
+        phase_name=None,
+        metadata=None,
+        dynamo_compile_column_us=None,
+    ):
+        yield
 
 
 def triton_hash_to_path_key(key):

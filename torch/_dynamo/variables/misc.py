@@ -145,7 +145,8 @@ class SuperVariable(VariableTracker):
             return GetAttrVariable(self, name)
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
-        return variables.ConstantVariable.create(value, source=source)
+            return variables.ConstantVariable.create(value, source=source)
+        return variables.ConstantVariable.create(value)
 
     def call_method(
         self,
@@ -1185,11 +1186,11 @@ class TypingVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        # Create a new typing variable, e.g., `List[int]`
         if name == "__getitem__" and len(args) == 1:
-            new_typing = self.value[args[0].as_python_constant()]
-            return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variablel")
+            return variables.ConstantVariable.create(
+                self.value[args[0].as_python_constant()],
+            )
+        unimplemented("typing")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder

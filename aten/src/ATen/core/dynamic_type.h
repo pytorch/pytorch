@@ -138,6 +138,7 @@ class DynamicType : public SharedType {
   struct Arguments {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
     Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };

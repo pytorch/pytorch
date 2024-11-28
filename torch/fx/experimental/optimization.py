@@ -14,23 +14,7 @@ import torch.nn.functional as F
 import torch.utils.mkldnn as th_mkldnn
 from torch.fx.node import Argument, Target
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_linear_bn_eval
-
-
-__all__ = [
-    "matches_module_pattern",
-    "replace_node_module",
-    "fuse",
-    "remove_dropout",
-    "extract_subgraph",
-    "modules_to_mkldnn",
-    "reset_modules",
-    "MklSubgraph",
-    "gen_mkl_autotuner",
-    "use_mkl_length",
-    "UnionFind",
-    "optimize_for_inference",
-]
+from torch.nn.utils.fusion import fuse_conv_bn_eval
 
 
 def _parent_name(target: str) -> Tuple[str, str]:
@@ -74,14 +58,13 @@ def replace_node_module(
 
 def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Module:
     """
-    Fuses convolution/BN and linear/BN layers for inference purposes.
-    Will deepcopy your model by default, but can modify the model inplace as well.
+    Fuses convolution/BN layers for inference purposes. Will deepcopy your
+    model by default, but can modify the model inplace as well.
     """
     patterns = [
         (nn.Conv1d, nn.BatchNorm1d),
         (nn.Conv2d, nn.BatchNorm2d),
         (nn.Conv3d, nn.BatchNorm3d),
-        (nn.Linear, nn.BatchNorm1d),
     ]
     if not inplace:
         model = copy.deepcopy(model)
@@ -95,18 +78,14 @@ def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Modu
     for pattern in patterns:
         for node in new_graph.nodes:
             if matches_module_pattern(pattern, node, modules):
-                if len(node.args[0].users) > 1:
-                    # Output of conv/linear is used by other nodes
+                if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
                     continue
-                first_layer = modules[node.args[0].target]
+                conv = modules[node.args[0].target]
                 bn = modules[node.target]
                 if not bn.track_running_stats:
                     continue
-                if pattern[0] in [nn.Conv1d, nn.Conv2d, nn.Conv3d]:
-                    fused_layer = fuse_conv_bn_eval(first_layer, bn)
-                else:  # nn.Linear
-                    fused_layer = fuse_linear_bn_eval(first_layer, bn)
-                replace_node_module(node.args[0], modules, fused_layer)
+                fused_conv = fuse_conv_bn_eval(conv, bn)
+                replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 new_graph.erase_node(node)
     return fx.GraphModule(fx_model, new_graph)

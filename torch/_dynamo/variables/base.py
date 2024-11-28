@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
-from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import istype
 
@@ -329,8 +328,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
-        if source:
-            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):

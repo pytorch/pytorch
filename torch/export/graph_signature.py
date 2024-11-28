@@ -457,11 +457,9 @@ class ExportGraphSignature:
                 if i.arg.name == old:
                     i.arg.name = new
 
-    def get_replace_hook(self, replace_inputs=False):
+    def get_replace_hook(self):
         def _(old, new, user):
-            if user.op == "output":
-                self.replace_all_uses(old.name, new)
-            if replace_inputs and old.op == "placeholder":
+            if user.op in ("output", "input"):
                 self.replace_all_uses(old.name, new)
 
         return _

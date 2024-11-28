@@ -17,8 +17,6 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
-from ...utils import is_dynamic
-from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
@@ -38,6 +36,9 @@ extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
+  int64_t M = {{kernel.size(X, -2)}};
+  int64_t K = {{kernel.size(X, -1)}};
+  int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -55,6 +56,10 @@ PT_EXPORT {{kernel_call_signature}} {
   }
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
+  {{kernel.check_not_null(X)}}
+  {{kernel.check_not_null(W)}}
+  {{kernel.check_not_null(Bias)}}
+  {{kernel.check_not_null(Y)}}
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -546,9 +551,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cuda_config.generate_test_runner and not is_dynamic(
-            *self.input_nodes, self.output_node
-        ):
+        if inductor_cuda_config.generate_test_runner:
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
         return res
 
@@ -568,9 +571,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
-        if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
+        if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
-        elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-2], 1):
+        elif torch_layout.stride[-2] == 1:
             return cutlass_lib.LayoutType.ColumnMajor
         else:
             return None
@@ -964,7 +967,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
+        if inductor_cuda_config.generate_test_runner:
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)
@@ -1076,8 +1079,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
-        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
+        A_size = [int(i) for i in A_layout.size]
+        B_size = [int(i) for i in B_layout.size]
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
