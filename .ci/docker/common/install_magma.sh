@@ -3,6 +3,8 @@
 
 set -eou pipefail
 
+MAGMA_VERSION="2.5.2"
+
 function do_install() {
     cuda_version=$1
     cuda_version_nodot=${1/./}
