@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from typing import Dict, Tuple
-from unittest import skip
+from unittest import expectedFailure, skip
 
 import torch
 import torch._export
@@ -1372,6 +1372,22 @@ class AOTInductorTestsTemplate:
             WhileLoopModels.PytreeCarry(),
             [inputs],
             dynamic_shapes=None,
+        )
+    
+    # TODO (yidi): support int input and unbacked output in while_loop cpp_wrapper_codegen."
+    @expectedFailure
+    def test_while_loop_with_int_carry(self):
+        inputs = (
+            torch.tensor(0, device=self.device),
+            torch.randn(10, 20)
+        )
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.IntCarryWithCompute(),
+            [inputs],
+            dynamic_shapes={
+                "it": {},
+                "x": {0: Dim("s", min=2, max=1024)},
+            }
         )
 
     @config.patch({"is_predispatch": True})
