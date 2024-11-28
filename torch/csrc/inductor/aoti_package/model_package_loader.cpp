@@ -10,13 +10,12 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
-
 #ifndef _WIN32
 #include <sys/stat.h>
-#else
+#endif
+
 #include <filesystem>
 namespace fs = std::filesystem;
-#endif
 
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
@@ -289,7 +288,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  std::string temp_dir = create_temp_dir();
+  temp_dir_ = create_temp_dir();
   std::string so_filename = "";
   std::string cpp_filename = "";
   std::string consts_filename = "";
@@ -315,7 +314,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
-      std::string output_path_str = temp_dir;
+      std::string output_path_str = temp_dir_;
       output_path_str += k_separator;
       output_path_str += filename_str;
 
@@ -389,10 +388,15 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  std::string cubin_dir = temp_dir + k_separator + model_directory;
+  std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+}
 
-  std::remove(temp_dir.c_str());
+AOTIModelPackageLoader::~AOTIModelPackageLoader() {
+  // Clean up the temporary directory
+  if (!temp_dir_.empty()) {
+    fs::remove_all(temp_dir_);
+  }
 }
 
 AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
