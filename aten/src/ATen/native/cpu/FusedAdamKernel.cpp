@@ -364,5 +364,5 @@ void fused_adam_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel);
+REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel)
 } // namespace at::native
