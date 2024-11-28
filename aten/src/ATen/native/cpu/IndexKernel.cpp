@@ -128,14 +128,14 @@ void put_kernel(
         // Unlike the non-accumulate case, this needs to be thread-safe.
         cpu_take_put_kernel<scalar_t>(iter, self, true,
             [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
-                indexed[idx] += iterated;
+                indexed[idx] += c10::load(&iterated);
               },
             /*serial_execution=*/true);
       }
     } else {
       cpu_take_put_kernel<scalar_t>(iter, self, true,
           [](scalar_t& iterated, scalar_t* indexed, const int64_t idx) {
-              indexed[idx] = iterated;
+              indexed[idx] = c10::load(&iterated);
             });
     }
   });
@@ -148,7 +148,7 @@ void take_kernel(
     iter.dtype(), "take_cpu", [&] {
       cpu_take_put_kernel<scalar_t>(iter, input, false,
           [](scalar_t& iterated, const scalar_t* indexed, const int64_t idx) {
-              iterated = indexed[idx];
+              iterated = c10::load(&(indexed[idx]));
             });
     });
 }
