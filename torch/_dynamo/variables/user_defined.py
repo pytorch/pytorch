@@ -771,6 +771,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     args[0].as_python_constant() in self.value
                 )
 
+            if method is set.__contains__ and len(args) == 1:
+                return ConstantVariable.create(
+                    args[0].as_python_constant() in self.value
+                )
+
             if method is collections.OrderedDict.items and isinstance(
                 self.value, collections.OrderedDict
             ):
