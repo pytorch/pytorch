@@ -37,59 +37,19 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
     else:
         return (xmin_bound + xmax_bound) / 2.0
 
+
 def _hager_zhang(
     obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
 ):
     """
-    Hager-Zhang line search algorithm that matches the interface of strong_wolfe.
-    
-    Parameters:
-    -----------
-    obj_func : callable
-        Function that returns (f_new, g_new) given (x, t, d)
-    x : tensor
-        Current point
-    t : float 
-        Initial step length
-    d : tensor
-        Search direction
-    f : float
-        Initial function value
-    g : tensor
-        Initial gradient
-    gtd : float
-        Initial directional derivative g·d
-    c1 : float
-        Sufficient decrease constant (default: 1e-4)
-    c2 : float
-        Curvature condition constant (default: 0.9) 
-    tolerance_change : float
-        Minimum change in t to continue search (default: 1e-9)
-    max_ls : int
-        Maximum number of line search steps (default: 25)
-        
-    Returns:
-    --------
-    f_new : float
-        Final function value
-    g_new : tensor 
-        Final gradient
-    t : float
-        Final step length
-    n_evals : int 
-        Number of function evaluations
+    Hager-Zhang line search algorithm for nonmonotone line search with strong Wolfe conditions.
     """
-    # Algorithm parameters from paper https://www.math.lsu.edu/~hozhang/papers/cg_descent.pdf
+    # Algorithm parameters
     delta = c1          # Use input c1 for sufficient decrease
-    sigma = c2          # Use input c2 for curvature condition
-    epsilon = 1e-6      # Error tolerance for approximate Wolfe
-    theta = 0.5         # Interval reduction factor
-    gamma = 0.66        # Interval width threshold
+    sigma = c2         # Use input c2 for curvature condition
+    epsilon = 1e-6     # Error tolerance for approximate Wolfe
     
-    # Get norm of search direction for tolerance checks
     d_norm = d.abs().max()
-    
-    # Make sure gradient is contiguous
     g = g.clone(memory_format=torch.contiguous_format)
     
     # Initial function and gradient evaluation
@@ -97,101 +57,145 @@ def _hager_zhang(
     ls_func_evals = 1
     gtd_new = g_new.dot(d)
     
-    # Previous point values
+    # Initialize bracketing phase
     t_prev, f_prev = 0.0, f
     g_prev = g
     gtd_prev = gtd
-
-    # Bracket phase: find interval containing step satisfying Wolfe conditions
-    bracket = []
+    done = False
     ls_iter = 0
     
     while ls_iter < max_ls:
-        # Check Wolfe conditions
+        # Check both standard and approximate Wolfe conditions
         wolfe1 = f_new <= f + delta * t * gtd
-        wolfe2 = abs(gtd_new) <= -c2 * gtd
-        
-        # Check approximate Wolfe conditions
-        approx_wolfe1 = (2*delta - 1) * gtd >= gtd_new 
+        wolfe2 = abs(gtd_new) <= -sigma * gtd
+        approx_wolfe1 = (2*delta - 1) * gtd >= gtd_new
         approx_wolfe2 = gtd_new >= sigma * gtd
         
-        # Termination checks
         if (wolfe1 and wolfe2) or (approx_wolfe1 and approx_wolfe2 and f_new <= f + epsilon):
-            return f_new, g_new, t, ls_func_evals
-            
-        # Update bracketing interval
-        if f_new > f + delta * t * gtd or (ls_iter > 0 and f_new >= f_prev):
-            bracket = [t_prev, t]
+            bracket = [t]
+            bracket_f = [f_new]
+            bracket_g = [g_new]
+            bracket_gtd = [gtd_new]
+            done = True
             break
             
-        if abs(gtd_new) <= -c2 * gtd:
-            return f_new, g_new, t, ls_func_evals
+        if f_new > f + delta * t * gtd or (ls_iter > 1 and f_new >= f_prev):
+            bracket = [t_prev, t]
+            bracket_f = [f_prev, f_new]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_gtd = [gtd_prev, gtd_new]
+            break
+            
+        if abs(gtd_new) <= -sigma * gtd:
+            bracket = [t]
+            bracket_f = [f_new]
+            bracket_g = [g_new]
+            bracket_gtd = [gtd_new]
+            done = True
+            break
             
         if gtd_new >= 0:
             bracket = [t_prev, t]
+            bracket_f = [f_prev, f_new]
+            bracket_g = [g_prev, g_new.clone(memory_format=torch.contiguous_format)]
+            bracket_gtd = [gtd_prev, gtd_new]
             break
 
-        # Interpolate new trial value using secant method
+        # Interpolate new trial value
         min_step = t + 0.01 * (t - t_prev)
         max_step = t * 10
-        t_new = _cubic_interpolate(
+        tmp = t
+        t = _cubic_interpolate(
             t_prev, f_prev, gtd_prev,
             t, f_new, gtd_new,
             bounds=(min_step, max_step)
         )
-        
+
         # Update previous point
-        t_prev = t
+        t_prev = tmp
         f_prev = f_new
         g_prev = g_new.clone(memory_format=torch.contiguous_format)
         gtd_prev = gtd_new
         
         # Evaluate at new point
-        t = t_new
         f_new, g_new = obj_func(x, t, d)
         ls_func_evals += 1
         gtd_new = g_new.dot(d)
         ls_iter += 1
 
-    # If we exceeded max iterations in bracket phase
+    # Check if bracketing phase failed
     if ls_iter == max_ls:
-        return f_new, g_new, t, ls_func_evals
+        bracket = [0, t]
+        bracket_f = [f, f_new]
+        bracket_g = [g, g_new]
+        bracket_gtd = [gtd, gtd_new]
 
-    # Zoom phase: refine bracketing interval
-    while ls_iter < max_ls:
-        # Check if interval is too small
-        if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
-            break
+    # Zoom phase with strong_wolfe safeguards
+    insuf_progress = False
+    if not done and ls_iter < max_ls:
+        # find high and low points in bracket
+        low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[-1] else (1, 0)
+        
+        while not done and ls_iter < max_ls:
+            # Check if bracket is too small
+            if abs(bracket[1] - bracket[0]) * d_norm < tolerance_change:
+                break
 
-        # Try secant interpolation for new trial point
-        t = _cubic_interpolate(
-            bracket[0], f_prev, gtd_prev,
-            bracket[1], f_new, gtd_new
-        )
+            # Compute new trial value
+            t = _cubic_interpolate(
+                bracket[0], bracket_f[0], bracket_gtd[0],
+                bracket[1], bracket_f[1], bracket_gtd[1]
+            )
 
-        # Evaluate new point
-        f_new, g_new = obj_func(x, t, d)
-        ls_func_evals += 1
-        gtd_new = g_new.dot(d)
-        ls_iter += 1
+            # Boundary case handling from strong_wolfe
+            eps = 0.1 * (max(bracket) - min(bracket))
+            if min(max(bracket) - t, t - min(bracket)) < eps:
+                if insuf_progress or t >= max(bracket) or t <= min(bracket):
+                    if abs(t - max(bracket)) < abs(t - min(bracket)):
+                        t = max(bracket) - eps
+                    else:
+                        t = min(bracket) + eps
+                    insuf_progress = False
+                else:
+                    insuf_progress = True
+            else:
+                insuf_progress = False
 
-        # Check Wolfe conditions
-        if f_new > f + delta * t * gtd or f_new >= f_prev:
-            bracket[1] = t
-        else:
-            if abs(gtd_new) <= -c2 * gtd:
-                return f_new, g_new, t, ls_func_evals
-                
-            if gtd_new * (bracket[1] - bracket[0]) >= 0:
-                bracket[1] = bracket[0]
-            bracket[0] = t
-            
-        # Update function value
-        f_prev = f_new
-        gtd_prev = gtd_new
+            # Evaluate new point
+            f_new, g_new = obj_func(x, t, d)
+            ls_func_evals += 1
+            gtd_new = g_new.dot(d)
+            ls_iter += 1
 
-    # Return best point found
+            if f_new > f + delta * t * gtd or f_new >= bracket_f[low_pos]:
+                # Update high point
+                bracket[high_pos] = t
+                bracket_f[high_pos] = f_new
+                bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)
+                bracket_gtd[high_pos] = gtd_new
+                low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
+            else:
+                if abs(gtd_new) <= -sigma * gtd:
+                    done = True
+                elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
+                    # Move high point to low point
+                    bracket[high_pos] = bracket[low_pos]
+                    bracket_f[high_pos] = bracket_f[low_pos]
+                    bracket_g[high_pos] = bracket_g[low_pos]
+                    bracket_gtd[high_pos] = bracket_gtd[low_pos]
+
+                # Update low point
+                bracket[low_pos] = t
+                bracket_f[low_pos] = f_new
+                bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)
+                bracket_gtd[low_pos] = gtd_new
+
+    # Return the best point found
+    t = bracket[low_pos if len(bracket) > 1 else 0]
+    f_new = bracket_f[low_pos if len(bracket) > 1 else 0]
+    g_new = bracket_g[low_pos if len(bracket) > 1 else 0]
     return f_new, g_new, t, ls_func_evals
+
 
 def _strong_wolfe(
     obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
