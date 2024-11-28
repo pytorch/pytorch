@@ -785,6 +785,10 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+if(Win32)
+  target_compile_options(torch_cpu PRIVATE "/Zc:static_assert")
+endif()
+
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
