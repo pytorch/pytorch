@@ -19,7 +19,6 @@ import datetime
 import json
 import signal
 import time
-from datetime import timezone
 from typing import Any, Dict
 
 import psutil  # type: ignore[import]
@@ -106,7 +105,7 @@ class UsageLogger:
         including the start time, end time, and the interval of the log.
         """
 
-        self._summary_info["start_time"] = datetime.datetime.now().timestamp(),
+        self._summary_info["start_time"] = datetime.datetime.now().timestamp()
         self.log_json(self._summary_info)
 
         # start data collection
