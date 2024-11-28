@@ -24,9 +24,9 @@ std::string get_mkl_version() {
     {
       // Magic buffer number is from MKL documentation
       // https://software.intel.com/en-us/mkl-developer-reference-c-mkl-get-version-string
-      char buf[198];
-      mkl_get_version_string(buf, 198);
-      version = buf;
+      version.resize(198,'\0');
+      mkl_get_version_string(version.data(), 198);
+      version.resize(strlen(version.c_str()));
     }
   #else
     version = "MKL not found";

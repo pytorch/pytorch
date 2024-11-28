@@ -26,7 +26,7 @@ jobs:
   get-test-label-type:
     name: get-test-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    if: github.repository_owner == 'pytorch'
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}

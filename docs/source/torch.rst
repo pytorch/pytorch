@@ -303,6 +303,14 @@ Examples::
 Math operations
 ---------------
 
+Constants
+~~~~~~~~~~~~~~~~~~~~~~
+
+======================================= ===========================================
+``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
+``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+======================================= ===========================================
+
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 

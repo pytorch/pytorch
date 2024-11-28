@@ -1,0 +1,74 @@
+name: Build MAGMA for Windows
+
+on:
+  push:
+    branches:
+      main
+    paths:
+      - .github/scripts/windows/*
+      - .github/workflows/build-magma-windows.yml
+  pull_request:
+    paths:
+      - .github/scripts/windows/*
+      - .github/workflows/build-magma-windows.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-magma:
+    if: github.repository_owner == 'pytorch'
+    runs-on: windows-2019
+    strategy:
+      matrix:
+        cuda_version: ["126", "124", "118"]
+        config: ["Release", "Debug"]
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+      CONFIG: ${{ matrix.config }}
+    steps:
+      - name: Checkout pytorch/builder
+        uses: actions/checkout@v4
+      - name: Enable MSVC dev commands to enable cl.exe  # FYI incompatible with shell: bash
+        uses: ilammy/msvc-dev-cmd@dd5e2fa0a7de1e7929605d9ecc020e749d9856a3
+      - name: Install CUDA Toolkit
+        run: .github/scripts/windows/cuda_install.bat
+      - name: Build MAGMA and push to S3
+        run: .github/scripts/windows/build_magma.bat
+      - name: Save as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: magma_*_cuda*_*.7z
+          name: artifact_${{ matrix.cuda_version }}_${{ matrix.config }}
+  push-windows-magma:
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write
+    needs: build-windows-magma
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+      - name: Configure AWS credentials(PyTorch account)
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_ossci_linux_windows_read_write
+          aws-region: us-east-1
+      - name: Set DRY_RUN
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+      - name: Upload binaries
+        shell: bash
+        env:
+            PKG_DIR: "."
+            TARGET_OS: "windows"
+            PKG_INCLUDE: "magma_*_cuda*_*.7z"
+        run: |
+            set -ex
+            bash .github/scripts/upload_aws_ossci.sh
