@@ -34,7 +34,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data *= opmath_t(*src_data);
+    *self_data *= opmath_t(c10::load(src_data));
   }
 
   constexpr void operator() (bool * self_data, bool * src_data) const {
@@ -48,7 +48,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data += opmath_t(*src_data);
+    *self_data += opmath_t(c10::load(src_data));
   }
 };
 static ReduceAdd reduce_add;
@@ -58,7 +58,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data += opmath_t(*src_data);
+    *self_data += opmath_t(c10::load(src_data));
   }
 };
 static ReduceMean reduce_mean;
@@ -92,7 +92,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = opmath_t(*src_data);
+    *self_data = opmath_t(c10::load(src_data));
   }
 };
 static TensorAssign tensor_assign;
