@@ -99,7 +99,12 @@ def prepare_pt2e(
     model = quantizer.transform_for_annotation(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    model = prepare(model, node_name_to_scope, is_qat=False)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=False,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model
@@ -172,7 +177,12 @@ def prepare_qat_pt2e(
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
-    model = prepare(model, node_name_to_scope, is_qat=True)
+    model = prepare(
+        model,
+        node_name_to_scope,
+        is_qat=True,
+        obs_or_fq_callback=quantizer.prepare_obs_or_fq_callback,
+    )
     model.meta.update(original_graph_meta)
     model = _disallow_eval_train(model)
     return model

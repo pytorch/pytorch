@@ -1360,6 +1360,7 @@ struct TORCH_API IValue final {
     Payload(Payload&&) = delete;
     Payload& operator=(const Payload&) = delete;
     Payload& operator=(Payload&&) = delete;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~Payload() {}
   };
 

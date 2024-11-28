@@ -447,6 +447,8 @@ def _produce_aten_artifact(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
 
+    # script objects are always stored in constants no matter whether they're initial inputs or
+    # they're lifted in aot" before rewrite_script_object_meta
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
@@ -1311,7 +1313,14 @@ def _strict_export_lower_to_aten_ir(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
+    # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
+    # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
+    # TODO: Fix recompile() in  _LazyGraphModule. T207713214
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
     assert out_spec is not None
@@ -1496,7 +1505,21 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
-            gm.graph.eliminate_dead_code()
+            # In export, we ignore any op that is related to
+            # eager mode profiling call. The expectation is
+            # that either runtimes provide their own profiling
+            # OR user wrap the compiled region on a profiling in
+            # later stage.
+            def _is_impure(node):
+                if node.op == "call_function" and node.target in (
+                    torch.ops.profiler._record_function_enter.default,
+                    torch.ops.profiler._record_function_enter_new.default,
+                    torch.ops.profiler._record_function_exit.default,
+                ):
+                    return False
+                return True
+
+            gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
         input_names = _graph_input_names(gm)
@@ -1540,6 +1563,21 @@ def _export_to_aten_ir_make_fx(
             trace_joint=False,
             kwargs=fake_kwargs,
         )
+
+        # [NOTE] In training IR, we don't run
+        # any DCE as a result we preserve constant
+        # nodes in the graph. make_fx invariant is that
+        # they don't guarantee every node gets a meta['val']
+        # field. Since the actual value is already hardcoded in
+        # graph, the node.meta here actually doesn't matter. But
+        # we do this to make spec verifier happy.
+        for node in gm.graph.nodes:
+            if (
+                node.op == "call_function"
+                and len(node.users) == 0
+                and "val" not in node.meta
+            ):
+                node.meta["val"] = None
 
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
@@ -1756,7 +1794,6 @@ def _non_strict_export(
     )
 
 
-# TODO (tmanlaibaatar) We need to preserve aten.to here somehow
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export_for_training(
@@ -1908,16 +1945,6 @@ def _export(
 
     from torch._utils_internal import export_training_ir_rollout_check
 
-    if export_training_ir_rollout_check():
-        return _export_for_training(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
-
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
@@ -1927,6 +1954,23 @@ def _export(
     _EXPORT_FLAGS = flags
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
+
+    # NOTE Export training IR rollout
+    # Old export calls export._trace(pre_dispatch=True)
+    # and there are still lot of internal/OSS callsites that
+    # use export._trace(pre_dispatch=True) directly. Therefore,
+    # it makes more sense to do the switch here.
+    # export_training_ir_rollout_check returns True in OSS
+    # while internally it returns False UNLESS otherwise specified.
+    if pre_dispatch and export_training_ir_rollout_check():
+        return _export_for_training(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
     (
         args,
