@@ -529,10 +529,7 @@ bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isStarted() {
-  if (!ncclComm_->isAborted()) {
-    checkAndSetException();
-  }
-  return exception() || startedGPUExecutionInternal();
+  return startedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
@@ -2099,19 +2096,20 @@ void ProcessGroupNCCL::watchdogHandler() {
         work.handleException(asyncErrorHandling_);
       }
 
-      // Work status logging for desync debug
-      desyncDebugger_.logWorkStart(work);
-      FlightRecorder::get()->markStart(work.trace_id_);
+      if (work.isStarted()) {
+        FlightRecorder::get()->markStart(work.trace_id_);
+        // Work status logging for desync debug
+        desyncDebugger_.logWorkStart(work);
 
-      // a work could be started but not completed, so we should not update
-      // lastStartedSeq and lastStartedOpName if the work state is checked
-      // multiple times after the start
-      if (pgStatus_->lastStartedSeq < static_cast<int64_t>(work.seq_) &&
-          work.isStarted()) {
-        pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
-        pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
-        pgStatus_->lastStartedNumelIn = work.numelIn_;
-        pgStatus_->lastStartedNumelOut = work.numelOut_;
+        // a work could be started but not completed, so we should not update
+        // lastStartedSeq and lastStartedOpName if the work state is checked
+        // multiple times after the start
+        if (pgStatus_->lastStartedSeq < static_cast<int64_t>(work.seq_)) {
+          pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
+          pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
+          pgStatus_->lastStartedNumelIn = work.numelIn_;
+          pgStatus_->lastStartedNumelOut = work.numelOut_;
+        }
       }
 
       // Clean up completed work
