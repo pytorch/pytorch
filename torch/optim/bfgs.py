@@ -42,9 +42,49 @@ def _hager_zhang(
     obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_change=1e-9, max_ls=25
 ):
     """
-    Hager-Zhang line search algorithm for nonmonotone line search with strong Wolfe conditions.
+    Hager-Zhang line search algorithm for nonmonotone line search with strong Wolfe conditions
+
+    Algorithm parameters from paper https://www.math.lsu.edu/~hozhang/papers/cg_descent.pdf
+
+    Inspired by the _strong_wolfe function.
+
+    Parameters:
+    -----------
+    obj_func : callable
+        Function that returns (f_new, g_new) given (x, t, d)
+    x : tensor
+        Current point
+    t : float 
+        Initial step length
+    d : tensor
+        Search direction
+    f : float
+        Initial function value
+    g : tensor
+        Initial gradient
+    gtd : float
+        Initial directional derivative g·d
+    c1 : float
+        Sufficient decrease constant (default: 1e-4)
+    c2 : float
+        Curvature condition constant (default: 0.9) 
+    tolerance_change : float
+        Minimum change in t to continue search (default: 1e-9)
+    max_ls : int
+        Maximum number of line search steps (default: 25)
+        
+    Returns:
+    --------
+    f_new : float
+        Final function value
+    g_new : tensor 
+        Final gradient
+    t : float
+        Final step length
+    n_evals : int 
+        Number of function evaluations
     """
-    # Algorithm parameters
+
     delta = c1          # Use input c1 for sufficient decrease
     sigma = c2         # Use input c2 for curvature condition
     epsilon = 1e-6     # Error tolerance for approximate Wolfe
