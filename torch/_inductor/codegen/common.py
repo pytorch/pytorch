@@ -1805,12 +1805,17 @@ class Kernel(CodeGen):
                     output_idx = 0
 
                     def do_cse(v):
-                        device_str = V.graph.get_current_device_or_throw().type
-                        triton_backend = (
-                            config.cpu_backend == "triton"
-                            if device_str == "cpu"
-                            else config.cuda_backend == "triton"
-                        )
+                        # cpp backend doesnt set current device - TODO: fix
+                        if V.graph.current_device is not None:
+                            device_str = V.graph.get_current_device_or_throw().type
+                            triton_backend = (
+                                config.cpu_backend == "triton"
+                                if device_str == "cpu"
+                                else config.cuda_backend == "triton"
+                            )
+                        else:
+                            triton_backend = False
+
                         # only triton backend tracks dtype currently
                         if triton_backend:
                             if name == "masked":
