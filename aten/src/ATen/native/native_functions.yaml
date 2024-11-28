@@ -6239,33 +6239,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
-- func: _nested_get_offsets(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
 - func: _nested_get_non_contig_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-# returns undefined Tensor if no lengths present
-- func: _nested_get_lengths(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
 - func: _nested_get_ragged_idx(Tensor self) -> int
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_min_seqlen(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_max_seqlen(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}

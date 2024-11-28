@@ -2042,14 +2042,92 @@ def to_padded_tensor_default(func, *args, **kwargs):
     return padded_out
 
 
-@register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
-def _nested_get_offsets(func, *args, **kwargs):
+from torch.nested._internal.cached_tensor import register_cached_tensor_func
+
+
+# When we use [ CacheTensor open registry ], we cannot rely on NestedTensor's
+# torch function anymore to enable maybe_enable_thunkify. All functions
+# registered to register_cached_tensor_func must be first wrapped with this
+# decorator.
+def maybe_enable_thunkify(f):
+    import functools
+
+    from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
+
+    @functools.wraps(f)
+    def fn(*args, **kwargs):
+        with maybe_enable_thunkify():
+            return f(*args, **kwargs)
+
+    return fn
+
+
+# See Note: [ CacheTensor open registry ]
+@register_cached_tensor_func(torch.ops.aten._nested_from_padded_tensor.default)
+@maybe_enable_thunkify
+def _nested_from_padded_tensor_default(func, *args, **kwargs):
+    # padded: t, metadata: t, ragged_idx: any?, sum_S: any?
+    from torch.nested._internal.nested_tensor import NestedTensor
+
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
-    return inp._offsets
+    if new_kwargs["ragged_idx"] != 1:
+        raise RuntimeError(
+            "_nested_from_padded_tensor(): only ragged_idx=1 supported for jagged layout"
+        )
+
+    padded = new_kwargs["padded"]
+    prefix = "host" if padded.is_cpu else "device"
+    offsets = new_kwargs["metadata"].metadata[f"_{prefix}_offsets"]
+
+    # non-3D padded is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    padded_shape = padded.shape
+    if padded.dim() > 3:
+        padded = padded.flatten(start_dim=2)
+    elif padded.dim() < 3:
+        padded = padded.unsqueeze(-1)
+
+    # NB: The CUDA kernel for padded dense -> jagged conversion does not support
+    # integer / bool types; work around this by casting to half.
+    is_bool = padded.dtype is torch.bool
+    if is_bool and padded.is_cuda:
+        padded = padded.to(torch.half)
+    values = torch.ops.aten._padded_dense_to_jagged_forward(
+        padded, [offsets], new_kwargs["sum_S"]
+    )
+    if is_bool and values.is_cuda:
+        values = values.to(torch.bool)
+
+    # shape gymnastics part 2
+    if len(padded_shape) > 3:
+        values = values.unflatten(-1, padded_shape[2:])
+    elif len(padded_shape) < 3:
+        values = values.squeeze(-1)
+
+    return NestedTensor(
+        values,
+        new_kwargs["metadata"],
+        _ragged_idx=new_kwargs["ragged_idx"],
+    )
+
+
+@register_cached_tensor_func(torch.ops.aten._nested_view_from_jagged.default)
+@maybe_enable_thunkify
+def _nested_view_from_jagged_default(func, *args, **kwargs):
+    # values: t, metadata: t, ragged_idx: any?
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    return NestedTensor(
+        new_kwargs["input"],
+        new_kwargs["metadata"],
+        new_kwargs.get("non_contig_offsets"),
+        _ragged_idx=new_kwargs["ragged_idx"],
+    )
 
 
 @register_jagged_func(
@@ -2064,16 +2142,6 @@ def _nested_get_non_contig_offsets(func, *args, **kwargs):
     return inp._non_contig_offsets
 
 
-@register_jagged_func(torch.ops.aten._nested_get_lengths.default, "self: jt_all")
-def _nested_get_lengths(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    return inp._lengths
-
-
 @register_jagged_func(torch.ops.aten._nested_get_ragged_idx.default, "self: jt_all")
 def _nested_get_ragged_idx(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2082,26 +2150,6 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     return inp._ragged_idx
-
-
-@register_jagged_func(torch.ops.aten._nested_get_min_seqlen.default, "self: jt_all")
-def _nested_get_min_seqlen(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    return inp._metadata_cache.get("min_seqlen", None)
-
-
-@register_jagged_func(torch.ops.aten._nested_get_max_seqlen.default, "self: jt_all")
-def _nested_get_max_seqlen(func, *args, **kwargs):
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    inp = new_kwargs.pop("input")
-    return inp._metadata_cache.get("max_seqlen", None)
 
 
 # If a section of the Nested Tensor is fully masked out we still retain the section with a length of 0
@@ -2304,94 +2352,6 @@ def flex_njt_backward(
     ).transpose(1, 2)
 
     return (njt_q_grad, njt_k_grad, njt_v_grad, score_mod_other_buffer_grads)
-
-
-from torch.nested._internal.cached_tensor import register_cached_tensor_func
-
-
-# When we use [ CacheTensor open registry ], we cannot rely on NestedTensor's
-# torch function anymore to enable maybe_enable_thunkify. All functions
-# registered to register_cached_tensor_func must be first wrapped with this
-# decorator.
-def maybe_enable_thunkify(f):
-    import functools
-
-    from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
-
-    @functools.wraps(f)
-    def fn(*args, **kwargs):
-        with maybe_enable_thunkify():
-            return f(*args, **kwargs)
-
-    return fn
-
-
-# See Note: [ CacheTensor open registry ]
-@register_cached_tensor_func(torch.ops.aten._nested_from_padded_tensor.default)
-@maybe_enable_thunkify
-def _nested_from_padded_tensor_default(func, *args, **kwargs):
-    # padded: t, metadata: t, ragged_idx: any?, sum_S: any?
-    from torch.nested._internal.nested_tensor import NestedTensor
-
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-
-    if new_kwargs["ragged_idx"] != 1:
-        raise RuntimeError(
-            "_nested_from_padded_tensor(): only ragged_idx=1 supported for jagged layout"
-        )
-
-    padded = new_kwargs["padded"]
-    prefix = "host" if padded.is_cpu else "device"
-    offsets = new_kwargs["metadata"].metadata[f"_{prefix}_offsets"]
-
-    # non-3D padded is not supported by the underlying FBGEMM kernel so do shape gymnastics
-    padded_shape = padded.shape
-    if padded.dim() > 3:
-        padded = padded.flatten(start_dim=2)
-    elif padded.dim() < 3:
-        padded = padded.unsqueeze(-1)
-
-    # NB: The CUDA kernel for padded dense -> jagged conversion does not support
-    # integer / bool types; work around this by casting to half.
-    is_bool = padded.dtype is torch.bool
-    if is_bool and padded.is_cuda:
-        padded = padded.to(torch.half)
-    values = torch.ops.aten._padded_dense_to_jagged_forward(
-        padded, [offsets], new_kwargs["sum_S"]
-    )
-    if is_bool and values.is_cuda:
-        values = values.to(torch.bool)
-
-    # shape gymnastics part 2
-    if len(padded_shape) > 3:
-        values = values.unflatten(-1, padded_shape[2:])
-    elif len(padded_shape) < 3:
-        values = values.squeeze(-1)
-
-    return NestedTensor(
-        values,
-        new_kwargs["metadata"],
-        _ragged_idx=new_kwargs["ragged_idx"],
-    )
-
-
-@register_cached_tensor_func(torch.ops.aten._nested_view_from_jagged.default)
-@maybe_enable_thunkify
-def _nested_view_from_jagged_default(func, *args, **kwargs):
-    # values: t, metadata: t, ragged_idx: any?
-    from torch.nested._internal.nested_tensor import NestedTensor
-
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    return NestedTensor(
-        new_kwargs["input"],
-        new_kwargs["metadata"],
-        new_kwargs.get("non_contig_offsets"),
-        _ragged_idx=new_kwargs["ragged_idx"],
-    )
 
 
 # Make the dummy available on the C++ side.
