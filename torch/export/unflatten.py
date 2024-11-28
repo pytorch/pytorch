@@ -23,7 +23,6 @@ from torch.export.exported_program import (
     InputKind,
     ModuleCallSignature,
     SymBoolArgument,
-    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
 )
@@ -1024,13 +1023,7 @@ class _ModuleFrame:
                         input_nodes.append(None)
                     else:
                         assert isinstance(
-                            input,
-                            (
-                                TensorArgument,
-                                SymIntArgument,
-                                SymBoolArgument,
-                                SymFloatArgument,
-                            ),
+                            input, (TensorArgument, SymIntArgument, SymBoolArgument)
                         )
                         input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
@@ -1140,8 +1133,7 @@ class _ModuleFrame:
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(
-                    output,
-                    (TensorArgument, SymIntArgument, SymBoolArgument, SymFloatArgument),
+                    output, (TensorArgument, SymIntArgument, SymBoolArgument)
                 ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])
@@ -1551,7 +1543,7 @@ def _sink_params(
     module: torch.nn.Module,
     inputs_to_state: Dict[str, List[str]],
     scope: List[str],
-    module_id_to_inputs_removed: Optional[Dict[int, Set[str]]] = None,
+    module_id_to_inputs_removed: Optional[Dict[int, List[str]]] = None,
 ):
     """Sink params, buffers, and constants from graph inputs into get_attr nodes.
 
@@ -1569,8 +1561,9 @@ def _sink_params(
         the module object id to the list of placeholder node names in the child module
         that were removed.
     """
+
     if module_id_to_inputs_removed is None:
-        module_id_to_inputs_removed = defaultdict(set)
+        module_id_to_inputs_removed = defaultdict(list)
 
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
@@ -1582,7 +1575,7 @@ def _sink_params(
             module_id_to_inputs_removed,
         )
         for k, v in submod_id_to_inputs_removed.items():
-            module_id_to_inputs_removed[k].update(v)
+            module_id_to_inputs_removed[k].extend(v)
 
     graph = getattr(module, "graph", None)
     if graph is None or len(graph.nodes) == 0:
@@ -1634,7 +1627,7 @@ def _sink_params(
         inputs_to_state_of_scope[node] = state_name
 
     # Record name of remove inputs for return purpose.
-    inputs_removed: Set[str] = set()
+    inputs_removed: List[str] = []
 
     for node, state_name in inputs_to_state_of_scope.items():
         if len(node.users) > 0:
@@ -1649,7 +1642,7 @@ def _sink_params(
             node.replace_all_uses_with(new_node, propagate_meta=True)
 
         graph.erase_node(node)  # type: ignore[union-attr, operator]
-        inputs_removed.add(node.name)
+        inputs_removed.append(node.name)
 
     if isinstance(module, InterpreterModule):
         module.finalize()
