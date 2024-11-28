@@ -397,8 +397,8 @@ static PyObject* reduceopmeta___instancecheck__(
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
-      std::string_view::npos) {
+  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
+      c10::string_view::npos) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;

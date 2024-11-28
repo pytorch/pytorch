@@ -31,13 +31,13 @@ class TORCH_API TypeParser {
   void lex();
 
   std::string next();
-  std::string_view nextView();
+  c10::string_view nextView();
   void advance();
-  [[nodiscard]] std::string_view cur() const;
+  [[nodiscard]] c10::string_view cur() const;
 
   std::string pythonStr_;
   size_t start_;
-  std::string_view next_token_;
+  c10::string_view next_token_;
 
   // Used for parsing string list
   std::vector<std::string> pythonStrs_;
