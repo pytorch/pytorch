@@ -121,6 +121,7 @@ class IterationRanges:
 
     @property
     @cache_on_self
+    @no_type_check  # https://github.com/python/mypy/issues/17184
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
 
