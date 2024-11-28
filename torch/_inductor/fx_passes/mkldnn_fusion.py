@@ -53,32 +53,61 @@ if torch._C._has_mkldnn:
                 [],
                 "",
             ]
-            return L[computation_op](*computation_args)
+            computation2_args = [
+                args[0],
+                args[2],
+                None,
+                "none",
+                [],
+                "",
+            ]
+            return L[computation_op](*computation_args), L[computation_op](*computation2_args)
     
         toy_fn._inductor_lowering_function = True 
 
         for node in graph.nodes:
             if node.target == torch.ops.mkldnn._linear_pointwise.default:
                 act = node.all_input_nodes[0]
+                users = list(act.users)
+                if all([user.target == torch.ops.mkldnn._linear_pointwise.default for user in users]):
+                    # TODO: Check all linear have same m,n,k                    
+                    lowering_linear_node = graph.create_node(
+                        "call_function",
+                        toy_fn,
+                        (
+                            node.all_input_nodes[0],
+                            node.all_input_nodes[1],
+                            users[1].all_input_nodes[1])  # no bias
+                    )
 
-                users = act.users
+                    get_item0 = graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        (
+                            lowering_linear_node,
+                            0,
+                        )
+                    )
+                    get_item1 = graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        (
+                            lowering_linear_node,
+                            1,
+                        )
+                    )
 
-                print("---- hit -----", flush=True)
+                    # Replace users
+                    node.replace_all_uses_with(get_item0)
+                    users[1].replace_all_uses_with(get_item1)
 
-                for args in node.all_input_nodes:
-                    print("args: {}".format(args), flush=True)
-                
-                lowering_linear_node = graph.create_node(
-                    "call_function", toy_fn, (node.all_input_nodes[0], node.all_input_nodes[1])  # no bias
-                )
-                lowering_linear_node.meta.update(node.meta)
-                node.replace_all_uses_with(lowering_linear_node)
-                graph.erase_node(node)
+                    # Update Meta
+                    # lowering_linear_node.meta.update(node.meta)
+                    lowering_linear_node.meta["val"] = (node.meta["val"], users[1].meta["val"])
 
-
-
-
-                break
+                    graph.erase_node(node)
+                    graph.erase_node(users[1])
+                    break
 
 
         print("graph after group gemm pass is: {}".format(graph), flush=True)
