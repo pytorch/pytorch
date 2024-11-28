@@ -3947,6 +3947,25 @@ class TestCudaMallocAsync(TestCase):
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_device_memory_used(self):
+        """
+        Verify used device memory in bytes
+        """
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+        a = torch.cuda.device_memory_used()
+        num_bytes = 512 * 1024**2
+        _ = torch.empty(num_bytes, dtype=torch.int8, device="cuda")
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        b = torch.cuda.device_memory_used()
+        mem_bytes = b - a
+        # test the order of magnitude
+        self.assertTrue(num_bytes // 32 <= mem_bytes <= num_bytes * 32)
+
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
@@ -4544,10 +4563,14 @@ class TestMemPool(TestCase):
         # holds a reference
         self.assertEqual(pool.use_count(), 1)
 
-        # no allocations happened yet, so called_dummy_alloc should be 0
+        # no allocations happened yet, so called_dummy_alloc and
+        # called_dummy_free should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
         self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
         nelem_1mb = 1024 * 1024 // 4
 
         with torch.cuda.use_mem_pool(pool):
@@ -4581,6 +4604,15 @@ class TestMemPool(TestCase):
             # pool now should have 2 segments since the CUDACachingAllocator had
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
+
+        del out_0, out_1, out_2
+
+        # pool's destructor calls emptyCache()
+        del pool
+
+        # called_dummy_free should be 321 if dummy_free was used to deallocate
+        # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
@@ -4659,9 +4691,11 @@ class TestCudaOptims(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # lr as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
+            # lr and betas as a Tensor is not supported when capturable=False and foreach=True for torch.optim.adam
             # and torch.optim.adamw
             kwargs["lr"] = 0.1
+            if optim_cls in (torch.optim.Adam, torch.optim.AdamW):
+                kwargs["betas"] = (0.9, 0.99)
 
             for actually_do_graphs in (True, False):
                 params = [

@@ -126,7 +126,7 @@ struct ListLenRefiner {
     }
     active_refinements_.pop_back();
     return block_refinements;
-  };
+  }
 
   std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {

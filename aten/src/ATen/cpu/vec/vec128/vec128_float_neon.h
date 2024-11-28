@@ -212,18 +212,8 @@ public:
     return mask;
   }
   Vectorized<float> isnan() const {
-    __at_align__ float tmp[size()];
-    __at_align__ float res[size()];
-    store(tmp);
-    for (const auto i : c10::irange(size())) {
-      if (_isnan(tmp[i])) {
-        std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
-      } else {
-        std::memset(static_cast<void*>(&res[i]), 0, sizeof(float));
-      }
-    }
-    return loadu(res);
-  };
+    return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));
+  }
   bool has_inf_nan() const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -313,8 +303,8 @@ public:
   Vectorized<float> exp_u20() const {
     return exp();
   }
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(fmod, Sleef_fmodf4);
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(hypot, Sleef_hypotf4_u05);
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(fmod, Sleef_fmodf4)
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(hypot, Sleef_hypotf4_u05)
   Vectorized<float> i0() const {
     return map(calc_i0);
   }

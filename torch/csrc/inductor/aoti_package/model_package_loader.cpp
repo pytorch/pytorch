@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
+#include <c10/util/error.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -49,11 +50,18 @@ std::string create_temp_dir() {
   if (mkdtemp(temp_dir.data()) == nullptr) {
     throw std::runtime_error(
         std::string("Failed to create temporary directory: ") +
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
   return temp_dir;
 #endif
 }
+
+#ifdef _WIN32
+const std::string k_separator = "\\";
+#else
+const std::string k_separator = "/";
+#endif
+
 } // namespace
 
 namespace torch::inductor {
@@ -286,6 +294,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string cpp_filename = "";
   std::string consts_filename = "";
   std::string found_filenames = ""; // Saving for bookkeeping
+  std::string model_directory =
+      "data" + k_separator + "aotinductor" + k_separator + model_name;
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
@@ -303,11 +313,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += " ";
 
     // Only compile files in the specified model directory
-    std::string model_directory = "data/aotinductor/" + model_name;
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
       std::string output_path_str = temp_dir;
-      output_path_str += "/";
+      output_path_str += k_separator;
       output_path_str += filename_str;
 
       // Create the parent directory if it doesn't exist
@@ -319,7 +328,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path.c_str())) {
         throw std::runtime_error(fmt::format(
-            "Failed to create directory {}: {}", parent_path, strerror(errno)));
+            "Failed to create directory {}: {}",
+            parent_path,
+            c10::utils::str_error(errno)));
       }
 
       // Extracts file to the temp directory
@@ -378,7 +389,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  runner_ = registered_aoti_runner[device](so_path, 1, device, "");
+  std::string cubin_dir = temp_dir + k_separator + model_directory;
+  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
 
   std::remove(temp_dir.c_str());
 }
@@ -388,7 +400,7 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    std::vector<at::Tensor>& inputs) {
+    const std::vector<at::Tensor>& inputs) {
   return runner_->run(inputs);
 }
 
