@@ -120,7 +120,7 @@ class TestInductorConfig(TestCase):
     def test_get_compiler_config(self):
         from torch._inductor import config as inductor_default_config
 
-        default_cudagraphs = inductor_default_config._default["triton.cudagraphs"]
+        default_cudagraphs = inductor_default_config.triton.cudagraphs
 
         # nn.Module: should update default config with a new value
         model = DummyModule()

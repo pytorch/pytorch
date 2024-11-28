@@ -97,7 +97,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       default:
         TORCH_CHECK(false, "THis should never happen!");
     }
-  };
+  }
 
   static BackendType strToBackendType(const std::string& backend) {
     if (backend == "undefined") {
@@ -113,7 +113,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     } else {
       return BackendType::CUSTOM;
     }
-  };
+  }
 
   // Not used, set for backwards compatibility and only used for TypeDef in
   // Ops.cpp
@@ -125,11 +125,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int size);
   ~ProcessGroup() override;
 
-  int getRank() const {
+  virtual int getRank() const {
     return rank_;
   }
 
-  int getSize() const {
+  virtual int getSize() const {
     return size_;
   }
 
@@ -146,11 +146,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual const std::string getBackendName() const {
     return backendTypeToString(backendType_);
-  };
+  }
 
   BackendType getBackendType() const {
     return backendType_;
-  };
+  }
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
@@ -863,10 +863,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
-  const std::string& getGroupName() const;
-  void setGroupName(const std::string& name);
-  const std::string& getGroupDesc() const;
-  void setGroupDesc(const std::string& name);
+  virtual const std::string& getGroupName() const;
+  virtual void setGroupName(const std::string& name);
+  virtual const std::string& getGroupDesc() const;
+  virtual void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
 
   void release_resources() override;
