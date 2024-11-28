@@ -92,14 +92,14 @@ float getDurationFromEvent(
     at::cuda::CUDAEvent& ncclStartEvent,
     at::cuda::CUDAEvent& ncclEndEvent);
 
-struct TraceBuffer {
-  static TraceBuffer* get() {
+struct FlightRecorder {
+  static FlightRecorder* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
-    static TraceBuffer* instance = new TraceBuffer();
+    static FlightRecorder* instance = new FlightRecorder();
     return instance;
   }
-  TraceBuffer() {
+  FlightRecorder() {
     max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
