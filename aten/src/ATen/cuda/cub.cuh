@@ -463,7 +463,7 @@ struct NonZeroOp {
 
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
-__global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t input_nelem, int64_t output_nelem, int iters_per_cta) {
+__global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64_t input_nelem, int64_t output_nelem, int iters_per_cta) {
   if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= input_nelem) return;
   d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   int64_t start_idx = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
@@ -472,7 +472,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
 
   // Specialize BlockScan type for our thread block
   using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
-  using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<int64_t, BLOCK_THREADS>;
+  //using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<int, BLOCK_THREADS>;
   using TransformInputIteratorT = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<int, NonZeroOp<T>, const T*>;
   using BlockExchangeT =  ROCM_HIPCUB(at_cuda_detail::cub)::BlockExchange<int, BLOCK_THREADS, ITEMS_PER_THREAD>;
 
@@ -481,15 +481,24 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
   {
     typename BlockLoadT::TempStorage load;
     typename BlockScanT::TempStorage scan;
-    typename BlockReduceT::TempStorage reduce;
+    //typename BlockReduceT::TempStorage reduce;
     typename BlockExchangeT::TempStorage exchange;
   } temp_storage;
 
   // load agg and reduce my starting value
-  int agg_data;
-  agg_data = threadIdx.x >= blockIdx.x ? 0 : agg[threadIdx.x];
-  int64_t aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
-  __syncthreads();
+  // int agg_data;
+  // agg_data = threadIdx.x >= blockIdx.x ? 0 : agg[threadIdx.x];
+  // int aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
+  // int __shared__ aggregate_sh;
+  // if (threadIdx.x == 0){
+  //   aggregate_sh = aggregate;
+  //   // write out full sum 
+  //   if (blockIdx.x == gridDim.x - 1) {
+  //     agg[blockIdx.x] = agg[blockIdx.x] + aggregate;
+  //   }
+  // }
+  // __syncthreads();
+  int64_t aggregate = blockIdx.x == 0 ? 0 : agg[blockIdx.x - 1];
   d_out += aggregate;
  
   TransformInputIteratorT t_input_itr(d_in, NonZeroOp<T>());
@@ -519,7 +528,14 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
 
     // Compute inclusive prefix sum
     int aggregate;
+    __shared__ int aggregate_sh;
     BlockScanT(temp_storage.scan).ExclusiveSum(data, out_indices, aggregate);
+    
+    if (threadIdx.x == 0){
+      aggregate_sh = aggregate;
+    }
+
+
 
     // Barrier for smem reuse
     __syncthreads();
@@ -536,8 +552,8 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int * agg, int64_t i
     }
 
     t_input_itr += BLOCK_THREADS * ITEMS_PER_THREAD;
-    d_out += aggregate;
-    out_remaining -= aggregate;
+    d_out += aggregate_sh;
+    out_remaining -= aggregate_sh;
     remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
     start_idx += BLOCK_THREADS * ITEMS_PER_THREAD;
     if (remaining <= 0 || out_remaining <= 0) return;

@@ -37,9 +37,12 @@ __global__ void write_indices(
     int64_t* inp,
     TensorDims<index_t> dims,
     int ndim,
-    index_t n) {
+    index_t n,
+    int * total = nullptr,
+    int64_t fill_value = -1) {
   auto index = threadIdx.x + blockIdx.x * blockDim.x;
-  if (index < n) {
+  bool cond = total == nullptr ? true : index < (uint)*total;
+  if (index < n && cond) {
     index_t div = 1;
     int64_t idx_flat = inp[index];
 #pragma unroll
@@ -50,6 +53,32 @@ __global__ void write_indices(
       inp[index + dim * n] = (idx_flat / div) % dim_size;
       div *= dim_size;
     }
+  } else if (index < n) {
+    for (int dim = ndim - 1; dim >= 0; dim--) {
+      inp[index + dim *n] = fill_value;
+    }
+  }
+}
+
+__global__ void write_fill_value(int64_t * inp, int64_t * total, int64_t fill_value, int64_t n){
+  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t total_val = *total;
+  if (idx >= total_val && idx < n) {
+    inp[idx] = fill_value;
+  }
+}
+
+template <int BLOCK_THREADS>
+__global__ void compute_agg(int * agg, int64_t * agg_cum, uint n_blocks) {
+
+  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int64_t, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
+  __shared__ typename BlockScanT::TempStorage temp_storage;
+  int agg_data;
+  int64_t agg_cum_data;
+  agg_data = threadIdx.x < n_blocks ? agg[threadIdx.x] : 0;
+  BlockScanT(temp_storage).InclusiveSum(agg_data, agg_cum_data);
+  if (threadIdx.x < n_blocks) {
+    agg_cum[threadIdx.x] = agg_cum_data;
   }
 }
 
@@ -213,16 +242,22 @@ void nonzero_static_cuda_out_impl(
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
-  grid_size = std::min(num_sms, grid_size);
+  grid_size = (self.numel() + iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD);
+  //grid_size = std::min(num_sms, grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(int));
   at::cuda::cub::calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, true>
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, (int*)agg.get(), self.numel(), iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  auto agg_cum = allocator.allocate(grid_size * sizeof(int64_t));
+
+  compute_agg<BLOCK_THREADS><<<1, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+   (int*)agg.get(), (int64_t*)agg_cum.get(), grid_size
+  );
   at::cuda::cub::flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-    in_data_ptr, out_data_ptr, (int*)agg.get(), self.numel(), size, iters_per_cta);
+    in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 
