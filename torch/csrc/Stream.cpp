@@ -280,6 +280,7 @@ static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
       c10::Stream::unpack3(self->stream_id, dst_device_idx, dst_device_type));
   auto src_prev_stream_object = THPStream_Wrap(src_prev_stream);
   auto dst_prev_stream_object = THPStream_Wrap(dst_prev_stream);
+  // Push [src, dst] streams onto the stack.
   at::impl::PythonTorchFunctionTLS::push_onto_stack(
       std::make_shared<c10::SafePyObject>(
           src_prev_stream_object, getPyInterpreter()));
@@ -297,14 +298,13 @@ static PyObject* THPStream_exit(THPStream* self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
+  // Pop streams from the stack [src, dst].
   THPStream* dst_prev_stream =
-      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()
-                       .get()
-                       ->release());
+      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(
+          getPyInterpreter()));
   THPStream* src_prev_stream =
-      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()
-                       .get()
-                       ->release());
+      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(
+          getPyInterpreter()));
   c10::DeviceIndex src_device_idx =
       static_cast<c10::DeviceIndex>(src_prev_stream->device_index);
   // Reset the current device to the device of original stream.
