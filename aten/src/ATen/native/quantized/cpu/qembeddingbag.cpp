@@ -100,9 +100,8 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (per_sample_weights_.has_value()) {
         weight_val = per_sample_weights_data[current];
       }
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      float scale, bias;
-      if (BIT_RATE == 8) {
+      float scale = 0, bias = 0;
+      if constexpr (BIT_RATE == 8) {
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
         uint32_t scale_val_int32 = 0;
@@ -1077,6 +1076,8 @@ class QEmbedding final {
     const auto offsets_size = indices.numel();
     at::Tensor offsets = at::arange(0, offsets_size, indices.scalar_type());
     at::Tensor output;
+    static_assert(bit_rate==4 || bit_rate ==8,
+          "Currently only support 8-bit embedding quantization");
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices,
@@ -1095,10 +1096,6 @@ class QEmbedding final {
           std::nullopt,
           false,
           true);
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Currently only support 8-bit embedding quantization");
     }
     return output;
   }

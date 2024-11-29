@@ -67,8 +67,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
           std::to_string(K));
 
   // Calculate statistics for quantization of the input Tensor
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min, x_max;
+  float x_min = 0, x_max = 0;
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
@@ -274,10 +273,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  float x_min = 0;
+  float x_max = 0;
   if (input.numel() > 0) {
     x_min = input_contig.min().item<float>();
     x_max = input_contig.max().item<float>();
