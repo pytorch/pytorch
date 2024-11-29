@@ -129,7 +129,7 @@ def gen_custom_ops_registration(
         static_init_dispatch_registrations += f"""
 TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
 {dispatch_registrations_body}
-}};"""
+}}"""
     anonymous_definition = "\n".join(
         list(
             concatMap(

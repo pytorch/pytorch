@@ -619,7 +619,7 @@ class TestIndexing(TestCase):
             self.assertEqual(pyt, numt)
 
         def assert_backward_eq(tensor, indexer):
-            cpu = tensor.float().clone().detach().requires_grad_(True)
+            cpu = tensor.float().detach().clone().requires_grad_(True)
             outcpu = cpu[indexer]
             gOcpu = torch.rand_like(outcpu)
             outcpu.backward(gOcpu)
