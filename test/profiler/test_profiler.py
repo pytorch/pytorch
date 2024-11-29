@@ -65,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
-    TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
@@ -95,7 +94,6 @@ except ModuleNotFoundError:
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
-@unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
@@ -1687,7 +1685,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" in args)
                         self.assertTrue("grid" in args)
@@ -1715,7 +1713,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" not in args)
                         self.assertTrue("grid" not in args)
@@ -2080,6 +2078,48 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             os._exit(0)
         else:
             os.waitpid(pid, 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_skip_first_wait(self):
+        # Other tests test when skip_first_wait is false (default) so just test the true case
+        test_schedule = torch.profiler.schedule(
+            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=1
+        )
+        test_schedule_expected_outputs = [
+            # repeat No. 1 begin
+            # skip first 3
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
+            ProfilerAction.WARMUP,
+            # active 1 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            # active 1 end
+            # repeat No. 1 end
+            # ---
+            # repeat No. 2 begin
+            # wait 5
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
+            ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 2 end
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+        ]
+        for step in range(len(test_schedule_expected_outputs)):
+            self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
 
 class SimpleNet(nn.Module):

@@ -802,9 +802,7 @@ def _register_logging_hooks_on_whole_graph(
         log_str = f"Executing: {node} with grad_outputs: {grad_outputs_str}"
         log.debug(log_str)
 
-    handles = []
-    for node in iter_graph(grad_fns):
-        handles.append(node.register_prehook(prehook))
+    handles = [node.register_prehook(prehook) for node in iter_graph(grad_fns)]
 
     def unregister_hooks() -> None:
         for handle in handles:
