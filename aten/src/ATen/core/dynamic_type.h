@@ -60,15 +60,15 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(Await, DYNAMIC_TYPE_BIT(23), 0)                                          \
   _(Any, 0xffffffff, 1)
 
-#define FORALL_DYNAMIC_TYPES_FAKE(_) \
-  _(ScalarType, kDynamicIntTypeBit, 1)                                \
-  _(Layout, kDynamicIntTypeBit, 1)                                        \
-  _(SymInt, kDynamicIntTypeBit, 1)                                        \
+#define FORALL_DYNAMIC_TYPES_FAKE(_)   \
+  _(ScalarType, kDynamicIntTypeBit, 1) \
+  _(Layout, kDynamicIntTypeBit, 1)     \
+  _(SymInt, kDynamicIntTypeBit, 1)     \
   _(MemoryFormat, kDynamicIntTypeBit, 1)
 
-#define FORWARD_DECL_TYPE(NAME, _, __) struct NAME ## Type;
-  FORALL_DYNAMIC_TYPES(FORWARD_DECL_TYPE)
-  FORALL_DYNAMIC_TYPES_FAKE(FORWARD_DECL_TYPE)
+#define FORWARD_DECL_TYPE(NAME, _, __) struct NAME##Type;
+FORALL_DYNAMIC_TYPES(FORWARD_DECL_TYPE)
+FORALL_DYNAMIC_TYPES_FAKE(FORWARD_DECL_TYPE)
 #undef FORWARD_DECL_TYPE
 
 class DynamicType;
@@ -138,14 +138,14 @@ class DynamicType : public SharedType {
   struct Arguments {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
-    Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
   enum class Tag : DynamicTypeBits {
 #define DYNAMIC_TYPE_ITEM(NAME, VAL, _) NAME = VAL,
     FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_ITEM)
-    FORALL_DYNAMIC_TYPES_FAKE(DYNAMIC_TYPE_ITEM)
+        FORALL_DYNAMIC_TYPES_FAKE(DYNAMIC_TYPE_ITEM)
 #undef DYNAMIC_TYPE_ITEM
   };
 
@@ -156,7 +156,7 @@ class DynamicType : public SharedType {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
-  explicit DynamicType(Tag, std::string_view, Arguments);
+  explicit DynamicType(Tag, c10::string_view, Arguments);
 
   DynamicType(DynamicType&& other) = delete;
   DynamicType(const DynamicType&) = delete;
