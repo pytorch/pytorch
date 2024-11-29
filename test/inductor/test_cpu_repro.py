@@ -4728,6 +4728,54 @@ class CPUReproTests(TestCase):
             code
         )
 
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = torch.nn.Linear(768, 768)
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        model = Model()
+        example_batch = {
+            "context_layer": torch.rand(1, 197, 768),
+            "hidden_states": torch.rand(1, 197, 768),
+        }
+        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+        from torch._export import capture_pre_autograd_graph
+        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+        from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
+            X86InductorQuantizer,
+        )
+
+        with torch.no_grad():
+            exported_model = capture_pre_autograd_graph(
+                model,
+                (),
+                kwargs=example_batch,
+            )
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+            prepared_model = prepare_pt2e(exported_model, quantizer)
+            prepared_model(**example_batch)
+            converted_model = convert_pt2e(prepared_model)
+            torch.ao.quantization.move_exported_model_to_eval(converted_model)
+            model = torch.compile(converted_model)
+            _, code = run_and_get_cpp_code(
+                torch.compile(converted_model), **example_batch
+            )
+            FileCheck().check_count(
+                "Welford<float> tmp_acc0 = Welford<float>()",
+                1,
+                exactly=True,
+            ).run(code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
