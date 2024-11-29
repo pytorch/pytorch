@@ -16,6 +16,7 @@ from tools.stats.upload_stats_lib import (
     _get_request_headers,
     download_s3_artifacts,
     get_job_id,
+    get_s3_resource,
     unzip,
     upload_workflow_stats_to_s3,
 )
@@ -157,6 +158,23 @@ def get_invoking_file_summary(grouped_tests: dict[str, Any]) -> dict[str, Any]:
                             ]["time"] += i["time"]
 
     return invoking_file_summary
+
+
+def get_all_run_attempts(workflow_run_id: int) -> list[int]:
+    # Returns all run attempts for a given workflow run id that have test
+    # artifacts
+    bucket = get_s3_resource().Bucket("gha-artifacts")
+    prefix = f"pytorch/pytorch/{workflow_run_id}/"
+    objs = bucket.objects.filter(Prefix=prefix)
+    run_attempts = set()
+    for obj in objs:
+        no_prefix = obj.key[len(prefix) :]
+        try:
+            run_attempt = int(no_prefix.split("/")[0])
+            run_attempts.add(run_attempt)
+        except ValueError:
+            continue
+    return sorted(run_attempts)
 
 
 def upload_additional_info(

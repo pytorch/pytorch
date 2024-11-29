@@ -28,7 +28,7 @@ bool cudnn_is_available() {
 void manual_seed(uint64_t seed) {
   if (is_available()) {
     auto index = at::detail::getCUDAHooks().getCurrentDevice();
-    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(index);
+    auto gen = at::detail::getCUDAHooks().getDefaultGenerator(index);
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());
@@ -41,8 +41,7 @@ void manual_seed(uint64_t seed) {
 void manual_seed_all(uint64_t seed) {
   auto num_gpu = device_count();
   for (const auto i : c10::irange(num_gpu)) {
-    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(
-        static_cast<c10::DeviceIndex>(i));
+    auto gen = at::detail::getCUDAHooks().getDefaultGenerator(i);
     {
       // See Note [Acquire lock when using random generators]
       std::lock_guard<std::mutex> lock(gen.mutex());
