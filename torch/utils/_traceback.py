@@ -237,8 +237,8 @@ class CapturedTraceback:
                 rs.append(None)
                 delayed_idxs.append(i)
 
-        stbs = torch._C._profiler.symbolize_tracebacks([tbs[i].tb for i in delayed_idxs])
-        for i, stb in zip(delayed_idxs, stbs):
+        torch._C._profiler.symbolize_tracebacks([tbs[i].tb for i in delayed_idxs])
+        for i in delayed_idxs:
             rs[i] = traceback.format_list(tbs[i].summary())
 
         return rs

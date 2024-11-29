@@ -269,7 +269,7 @@ inline double _get_epsilon(const ScalarType& sc_type) {
     case at::ScalarType::Double:
       return std::numeric_limits<double>::epsilon();
     default:
-      AT_ERROR("This function doesn't handle types other than float and double");
+      TORCH_CHECK(false, "This function doesn't handle types other than float and double");
   }
 }
 

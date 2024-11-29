@@ -63,7 +63,8 @@ class AnyValue {
     if (auto* maybe_value = try_get<T>()) {
       return *maybe_value;
     }
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Attempted to cast AnyValue to ",
         c10::demangle(typeid(T).name()),
         ", but its actual type is ",

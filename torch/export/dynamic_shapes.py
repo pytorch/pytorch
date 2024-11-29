@@ -374,7 +374,24 @@ class _DerivedConstraint(_ConstraintTarget):
         }
 
 
-Constraint = Union[_Constraint, _DerivedConstraint]
+@dataclasses.dataclass
+class _RelaxedConstraint(_ConstraintTarget):
+    """
+    This represents a dim marked with Dim.AUTO/DYNAMIC (i.e. mark_dynamic() or maybe_mark_dynamic()),
+    which leaves relations & min/max ranges for inference, instead of requiring explicit specification.
+    The intention is for constraint violations to not be raised if produce_guards() finds equalities or
+    relations between a _RelaxedConstraint and another type of _Constraint.
+    """
+
+    @property
+    def serializable_spec(self):
+        return {
+            "t_id": self.t_id,
+            "dim": self.dim,
+        }
+
+
+Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
 def _process_equalities(
@@ -385,6 +402,7 @@ def _process_equalities(
     source_pairs: List[Tuple["Source", "Source"]],
     derived_equalities: List[Tuple["Source", Union["Source", "Symbol"], Callable]],
     phantom_symbols: Dict[str, "Symbol"],
+    relaxed_sources: Set["Source"],
 ):
     """
     Updates `source_pairs`, `derived_equalities`, and `phantom_symbols` (which become
@@ -399,7 +417,7 @@ def _process_equalities(
     # When t.size()[dim] maps to src0, src1, ..., srcN, we add
     # constraints that make src0 "equal" to src1, ..., srcN.
     source_pairs.extend((source, other_source) for other_source in other_sources)
-    if not isinstance(constraint, _DerivedConstraint):
+    if isinstance(constraint, _Constraint):
         if constraint.name in names:
             shared_t_id, shared_dim = names[constraint.name]
             other_sources = get_sources(shared_t_id, shared_dim)
@@ -408,7 +426,7 @@ def _process_equalities(
             )
         else:
             names[constraint.name] = (constraint.t_id, constraint.dim)
-    else:
+    elif isinstance(constraint, _DerivedConstraint):
         # branch based on the root of the _DerivedConstraint
         if not isinstance(constraint.root, _PhantomRoot):
             # either root points to an input source
@@ -431,6 +449,8 @@ def _process_equalities(
         # A derived equality (source, root, fn) informally corresponds to source = fn(root).
         # Here source describes an input and root might describe another input or a phantom symbol.
         derived_equalities.append((source, root, fn))
+    elif isinstance(constraint, _RelaxedConstraint):
+        relaxed_sources.add(source)
 
 
 def _tree_map_with_path(
@@ -662,7 +682,6 @@ def _check_dynamic_shapes(
     using combined args + kwargs as reference for inputs structure.
     """
     from torch._dynamo.exc import UserError, UserErrorType
-    from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return
@@ -767,24 +786,6 @@ def _check_dynamic_shapes(
                 )
 
     _tree_map_with_path(check_shape, combined_args, dynamic_shapes, tree_name="inputs")
-
-    # raise user warning if both Dim.AUTO & Dims are specified in dynamic_shapes
-    flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
-    flatter_dynamic_shapes, _ = tree_flatten(flat_dynamic_shapes)
-    if any(isinstance(s, _Dim) for s in flatter_dynamic_shapes) and any(
-        s == _DimHint.AUTO for s in flatter_dynamic_shapes
-    ):
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "Specifying both `Dim.AUTO/Dim.DYNAMIC` and `Dim/DerivedDim` in `dynamic_shapes` is not "
-            "well supported at the moment, and can easily lead to constraint violation errors or obscure errors "
-            "in torch.export. Dim/DerivedDims expect all equal or related dimensions to be specified, "
-            "and do not yet compose well with `Dim.AUTO`. We suggest using `Dim.AUTO/Dim.DYNAMIC` mixed with "
-            "`Dim.STATIC` for auto-dynamic + static shapes, plus torch._check(dim >= min), torch._check(dim <= max) "
-            "calls in your program to specify min/max ranges, or `Dim`/`DerivedDim` mixed with `Dim.STATIC` "
-            "if you want to assert on the exact specification of your program's dynamic shapes behavior.",
-            case_name="dynamic_shapes_validation",
-        )
 
 
 def _process_dynamic_shapes(
@@ -919,6 +920,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
         elif isinstance(shape, (tuple, list)):
@@ -935,6 +937,7 @@ def _process_dynamic_shapes(
                         torch._dynamo.mark_static(tensor, i)
                     elif dim == _DimHint.DYNAMIC:
                         torch._dynamo.mark_dynamic(tensor, i)
+                    constraints.append(_RelaxedConstraint(id(tensor), i))
                 elif dim is None:
                     torch._dynamo.mark_static(tensor, i)
         elif shape is None:

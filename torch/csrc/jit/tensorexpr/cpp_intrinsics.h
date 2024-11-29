@@ -1,8 +1,6 @@
 #pragma once
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 constexpr auto cpp_intrinsics_definition = R"(
 namespace std {
@@ -31,6 +29,4 @@ To bitcast(const From& v) {
 } // namespace std
 )";
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

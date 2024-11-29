@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -16,7 +16,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
+from ..utils import use_aten_gemm_kernels, use_ck_gemm_template, use_triton_template
 from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
 
@@ -194,7 +194,7 @@ aten__fp8_mm = ExternKernelChoice(
 )
 
 
-def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
+def are_compatible_scales(size_a: Sequence[int], size_b: Sequence[int]) -> bool:
     # Same sized scales are compatable
     if len(size_a) == len(size_b):
         return True
@@ -294,7 +294,7 @@ def tuned_scaled_mm(
                 **kwargs,
             )
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
     if (

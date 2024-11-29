@@ -85,24 +85,19 @@ struct VecReduceAllSIMD<float, Op> {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
 
-    // 128-bit shuffle: [a1, a2, a3, a4, a5, a6, a7, a8] -> [a5, a6, a7, a8, a1, a2, a3, a4]
-    Vec v1 = {v.get_high(), v.get_low()};
-    // [a1+a5, a2+a6, a3+a7, a4+a8, -, -, -, -] ('+' stands for the reduction function. Note that the last 4 elements are not required)
-    v = vec_fun(v, v1);
-
     // 64-bit shuffle: [a1+a5, a2+a6, a3+a7, a4+a8, -, -, -, -] -> [a3+a7, a4+a8, a1+a5, a2+a6, -, -, -, -]
-    float32x4_t v1_1 = vextq_f32(v.get_low(), v.get_low(), 2);
-    v1 = {v1_1, v1_1};
+    float32x4_t v1_1 = vextq_f32(v, v, 2);
+    Vec v1 = v1_1;
     // [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -, -, -, -]
     v = vec_fun(v, v1);
 
     // 32-bit shuffle: [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -, -, -, -] -> [a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, -, -, -, -]
-    v1_1 = vrev64q_f32(v.get_low());
-    v1 = {v1_1, v1_1};
+    v1_1 = vrev64q_f32(v);
+    v1 = v1_1;
     // [a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, -, -, -, -]
     v = vec_fun(v, v1);
 
-    return v.get_low()[0];
+    return v[0];
   }
 };
 #endif // defined(__aarch64__)

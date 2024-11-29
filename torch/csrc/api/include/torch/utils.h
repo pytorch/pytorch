@@ -5,8 +5,8 @@
 #include <torch/csrc/api/include/torch/types.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <cstdint>
 
+// NOLINTBEGIN(misc-unused-using-decls)
 namespace torch {
 
 /// A RAII, thread-local guard that disabled gradient calculation.
@@ -114,3 +114,4 @@ using at::RecordFunctionGuard;
 using at::removeCallback;
 
 } // namespace torch
+// NOLINTEND(misc-unused-using-decls)
