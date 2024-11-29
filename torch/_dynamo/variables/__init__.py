@@ -33,6 +33,7 @@ from .functions import (
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,

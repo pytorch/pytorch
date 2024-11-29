@@ -85,6 +85,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -3149,6 +3150,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 GeneratorFunctionVariable,
                 NestedUserFunctionVariable,
                 GeneratorFunctionVariable,
+                # I'm not so sure if Dynamo can inline an object.
+                GeneratorObjectVariable,
             ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
@@ -3219,6 +3222,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
+            # need the line below to make MyPy happy
+            assert not isinstance(func, GeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,

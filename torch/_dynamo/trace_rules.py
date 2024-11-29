@@ -47,6 +47,7 @@ from .variables import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -3518,6 +3519,7 @@ def check_verbose(obj, is_inlined_call=False):
             UserMethodVariable,
             NestedUserFunctionVariable,
             GeneratorFunctionVariable,
+            GeneratorObjectVariable,
         ),
     ):
         try:

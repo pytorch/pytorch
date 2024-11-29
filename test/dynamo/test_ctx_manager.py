@@ -2911,6 +2911,36 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_generator_as_argument(self):
+        def whoo(x):
+            yield x.sin()
+            yield x.cos()
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn(t, ctx):
+            return next(ctx)
+
+        t = torch.randn(2)
+        ctx = whoo(t)
+        next(ctx)
+        y = fn(t, ctx)
+        self.assertEqual(y, t.cos())
+        self.assertEqual(len(eager.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_stack0_0_: "f32[2]", L_stack0_1_: "f32[2]"):
+        l_stack0_0_ = L_stack0_0_
+        l_stack0_1_ = L_stack0_1_
+
+        add: "f32[2]" = l_stack0_0_ + l_stack0_1_;  l_stack0_0_ = l_stack0_1_ = None
+        return (add,)
+""",
+        )
+
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)

@@ -835,6 +835,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     (self.value is args[0].value) is (method is object.__eq__)
                 )
 
+            if isinstance(self.value, types.GeneratorType):
+                return variables.GeneratorObjectVariable(
+                    self.value, None, source=self.source
+                ).call_method(tx, name, args, kwargs)
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
