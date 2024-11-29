@@ -410,6 +410,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -435,6 +436,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
@@ -497,6 +499,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm6_1
@@ -520,6 +523,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -545,6 +549,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
@@ -607,6 +612,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm6_2_4
@@ -1096,6 +1102,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1121,6 +1128,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
@@ -1183,6 +1191,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm6_1
@@ -1206,6 +1215,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1231,6 +1241,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
@@ -1293,6 +1304,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm6_2_4
@@ -1852,6 +1864,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1877,6 +1890,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
@@ -1939,6 +1953,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm6_1
@@ -1962,6 +1977,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1987,6 +2003,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
@@ -2049,6 +2066,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm6_2_4
@@ -2538,6 +2556,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2563,6 +2582,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
@@ -2625,6 +2645,7 @@ jobs:
       GPU_ARCH_VERSION: 6.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.1-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-rocm6_1
@@ -2648,6 +2669,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2673,6 +2695,7 @@ jobs:
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
@@ -2735,6 +2758,7 @@ jobs:
       GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-rocm6_2_4
