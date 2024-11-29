@@ -50,7 +50,7 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
     from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.utils import InputType
 
@@ -67,9 +67,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallable",
+    unconfigured_compiler_fn: "_CompileFxCallableEx",
     compiler_name: str,
-) -> "_CompileFxCallable":
+) -> "_CompileFxCallableEx":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -82,7 +82,7 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargs"],
+        **kwargs: Unpack["_CompileFxKwargsEx"],
     ) -> Union["CompiledFxGraph", str]:
         from torch._subclasses import FakeTensorMode
 
