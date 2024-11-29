@@ -1620,10 +1620,15 @@ static bool can_use_expanded_index_path(
   // and strides on other dims to be 0 or 1, e.g.
   //   shape [108365, 16]; strides [1, 0]
   //   shape [13264, 1, 7]; strides [1, 1, 0]
+  // Note: the size should not > 1 when the stride == 1
+  // See https://github.com/pytorch/pytorch/issues/129093
   auto index_strides = index.strides().vec();
+  auto index_sizes = index.sizes().vec();
   bool is_index_expanded = index_strides[0] == 1;
   for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1) { is_index_expanded = false; }
+    if (index_strides[dim] > 1 || (index_strides[dim] == 1 && index_sizes[dim] > 1)) {
+      is_index_expanded = false;
+    }
   }
 
   // index is expanded
@@ -1897,8 +1902,8 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {

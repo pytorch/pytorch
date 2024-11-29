@@ -3,7 +3,7 @@
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
@@ -154,14 +154,14 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map() {
       {"gelu", attr_func_gelu},
   };
   return fusion_attr_map;
-};
+}
 
 const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map() {
   static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
       {"relu", {ideep::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
-};
+}
 
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
   static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
@@ -171,7 +171,7 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
       {"div", {ideep::algorithm::binary_div}},
   };
   return fusion_attr_map;
-};
+}
 
 #endif // AT_MKLDNN_ENABLED()
-}}
+}

@@ -5,40 +5,39 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-Tensor& quantize_tensor_per_tensor_affine(
+TORCH_API Tensor& quantize_tensor_per_tensor_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     double scale,
     int64_t zero_point);
-Tensor& quantize_tensor_per_channel_affine(
+TORCH_API Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
     const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 
-Tensor& quantize_tensor_per_channel_float_qparams(
+TORCH_API Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis);
 
-Tensor& dequantize_tensor_per_tensor_affine(
+TORCH_API Tensor& dequantize_tensor_per_tensor_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     double scale,
     int64_t zero_point);
-Tensor& dequantize_tensor_per_channel_affine(
+TORCH_API Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
     const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
-Tensor& dequantize_tensor_per_channel_float_qparams(
+TORCH_API Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
     const Tensor& scales,
@@ -126,5 +125,4 @@ TORCH_API Tensor dequantize_tensor(
     double scale,
     int64_t zero_point);
 
-} // namespace native
 } // namespace at

@@ -197,15 +197,15 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmOp<T>>());
 
 #ifdef USE_ROCM
-    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (!env_rocblas.has_value() || env_rocblas.value()) {
+    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
       for (auto&& [name, op] : GetRocBlasGemmTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
+    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -230,8 +230,8 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmAndBiasOp<T>>());
 
 #ifdef USE_ROCM
-    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
+    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -256,15 +256,15 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
     this->RegisterOp(std::string("Default"), std::make_unique<DefaultGemmStridedBatchedOp<T>>());
 
 #ifdef USE_ROCM
-    static const auto env_rocblas = c10::utils::check_env("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
-    if (!env_rocblas.has_value() || env_rocblas.value()) {
+    static const char *env_rocblas = std::getenv("PYTORCH_TUNABLEOP_ROCBLAS_ENABLED");
+    if (env_rocblas == nullptr || strcmp(env_rocblas, "1") == 0) {
       for (auto&& [name, op] : GetRocBlasGemmStridedBatchedTypeStringAndOps<T>()) {
         this->RegisterOp(std::move(name), std::move(op));
       }
     }
 
-    static const auto env_hipblaslt = c10::utils::check_env("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (!env_hipblaslt.has_value() || env_hipblaslt.value()) {
+    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
