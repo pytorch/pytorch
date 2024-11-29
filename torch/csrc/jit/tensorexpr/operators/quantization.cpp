@@ -667,7 +667,7 @@ Tensor computeUpsampleNearest2d(
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
     at::Device) {
-  auto A = std::get<BufHandle>(inputs[0]);
+  const auto& A = std::get<BufHandle>(inputs[0]);
   const auto& output_height = outputShape[2];
   const auto& output_width = outputShape[3];
   auto input_height = ExprHandle(A.dim(2));
