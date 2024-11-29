@@ -390,7 +390,6 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
     """
 
     def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
-        assert all(isinstance(t, torch.Tensor) for t in [base_tensor, comp_tensor])
         return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
             is_same_tensor(base_tensor, comp_tensor)
             or is_same_mkldnn_tensor(base_tensor, comp_tensor)
