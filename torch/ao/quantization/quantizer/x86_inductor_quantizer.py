@@ -474,7 +474,16 @@ class X86InductorQuantizer(Quantizer):
         ):
             warnings.warn("Mixed QAT and Non-QAT quantization config is not supported.")
             need_skip = True
-
+        if current_mode.dynamic_state is not None:
+            input_activation_spec = quantization_config.input_activation
+            if (
+                input_activation_spec is not None
+                and current_mode.dynamic_state != input_activation_spec.is_dynamic
+            ):
+                warnings.warn(
+                    "Mixed dynamic and static quantization config is not supported."
+                )
+                need_skip = True
         return need_skip
 
     def set_global(self, quantization_config: QuantizationConfig):
