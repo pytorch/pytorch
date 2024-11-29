@@ -38,10 +38,10 @@ __global__ void write_indices(
     TensorDims<index_t> dims,
     int ndim,
     index_t n,
-    int * total = nullptr,
+    int64_t * total = nullptr,
     int64_t fill_value = -1) {
   auto index = threadIdx.x + blockIdx.x * blockDim.x;
-  bool cond = total == nullptr ? true : index < (uint)*total;
+  bool cond = (total == nullptr || index < (uint)*total);
   if (index < n && cond) {
     index_t div = 1;
     int64_t idx_flat = inp[index];
@@ -61,10 +61,10 @@ __global__ void write_indices(
 }
 
 __global__ void write_fill_value(int64_t * inp, int64_t * total, int64_t fill_value, int64_t n){
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t total_val = *total;
-  if (idx >= total_val && idx < n) {
-    inp[idx] = fill_value;
+  // not aiming for vectorized stores
+  for (int64_t idx = total_val + blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
+      inp[idx] = fill_value;
   }
 }
 
@@ -226,6 +226,7 @@ void nonzero_static_cuda_out_impl(
   if (!out_correct_size) {
     out.resize_({self.dim(), size}).t();
   }
+  if (size == 0) return;
   // we need to allocate temporary out to then copy to user provided out
   at::Tensor out_temp;
   if (need_to_copy) {
@@ -255,20 +256,29 @@ void nonzero_static_cuda_out_impl(
   compute_agg<BLOCK_THREADS><<<1, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
    (int*)agg.get(), (int64_t*)agg_cum.get(), grid_size
   );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   at::cuda::cub::flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-
-
-
-  // cuda::cub::static_nonzero(
-  //     self_.const_data_ptr<scalar_t>(),
-  //     fill_value,
-  //     out_data_ptr,
-  //     self.numel(),
-  //     out.numel());
+  int64_t out_grid = (size + BLOCK_THREADS - 1) / BLOCK_THREADS;
+  write_fill_value<<<num_sms, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(out_data_ptr, (int64_t *)agg_cum.get() + grid_size - 1, fill_value, size);
+  if (self.dim() > 1) {
+    TensorDims<int64_t> dims;
+    for (int i = 0; i < self.dim(); i++) {
+      dims.sizes[i] = self.sizes()[i];
+    }
+    const int nthreads = 256;
+    const int nblocks = (size + nthreads - 1) / nthreads;
+    write_indices<<<nblocks, nthreads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        out_temp.mutable_data_ptr<int64_t>(),
+        dims,
+        self.dim(),
+        size, 
+        (int64_t *)agg_cum.get() + grid_size - 1,
+        fill_value);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
   if (need_to_copy) {
     out.copy_(out_temp);
   }
