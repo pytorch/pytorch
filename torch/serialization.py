@@ -63,9 +63,9 @@ __all__ = [
     "get_safe_globals",
     "add_safe_globals",
     "safe_globals",
+    "get_unsafe_globals_in_checkpoint",
     "skip_data",
 ]
-
 
 DEFAULT_PROTOCOL = 2
 
@@ -89,6 +89,11 @@ if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
     MAP_SHARED, MAP_PRIVATE = None, None  # type: ignore[assignment]
+
+
+def _default_to_weights_only(pickle_module):
+    is_fbcode = not hasattr(torch.version, "git_version")
+    return pickle_module is None and not is_fbcode
 
 
 # _serialization_tls is used to store thread local state specific to serialization
@@ -314,6 +319,48 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
+
+
+def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
+    """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
+
+    For a given function or class ``f``, the corresponding string will be of the form
+    ``{f.__module__}.{f.__name__}``.
+
+    This function will return any GLOBALs in the checkpoint that are not in the set marked safe
+    for ``weights_only`` (either via :func:`add_safe_globals` or :class:`safe_globals` context or
+    allowlisted by ``torch`` by default).
+
+    .. note::
+        This function will statically disassemble the pickle file in the checkpoint.
+        The implication is any classes dynamically pushed onto the stack during unpickling
+        will not be included in the output.
+
+    Args:
+        f: File-like object or string containing the checkpoint object saved via ``torch.save``
+
+    Returns:
+        A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
+    """
+    default_safe_globals_strings = set(
+        _weights_only_unpickler._get_allowed_globals().keys()
+    )
+    user_safe_global_strings = set(
+        _weights_only_unpickler._get_user_allowed_globals().keys()
+    )
+    safe_global_strings = default_safe_globals_strings.union(user_safe_global_strings)
+
+    with _open_file_like(f, "rb") as opened_file:
+        if not _is_zipfile(opened_file):
+            raise ValueError("Expected input to be a checkpoint returned by torch.save")
+        with _open_zipfile_reader(opened_file) as zip_file:
+            if _is_torchscript_zip(zip_file):
+                raise ValueError(
+                    "Expected input to be a checkpoint returned by torch.save but got a torchscript checkpoint"
+                )
+            data_file = io.BytesIO(zip_file.get_record("data.pkl"))
+            all_globals = _weights_only_unpickler.get_globals_in_pkl(data_file)
+            return list(all_globals.difference(safe_global_strings))
 
 
 class skip_data:
@@ -1168,7 +1215,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1211,6 +1258,7 @@ def load(
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
+            See :ref:`weights-only` for more details.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
@@ -1283,6 +1331,8 @@ def load(
         has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
         blocklist_pattern = r"whose module (\S+) is blocked"
         has_blocklist = re.search(blocklist_pattern, message) is not None
+        import_pattern = r"(\S+) must be (\S+) to load"
+        has_import = re.search(import_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
                 "Weights only load failed. This file can still be loaded, to do so you have two options, "
@@ -1292,12 +1342,15 @@ def load(
                 + message
             )
         else:
-            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
-            if not has_blocklist:
-                updated_message += (
-                    "Please file an issue with the following so that we can make "
-                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
-                )
+            if has_import:
+                return f"Weights only load failed. {message}"
+            else:
+                updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+                if not has_blocklist:
+                    updated_message += (
+                        "Please file an issue with the following so that we can make "
+                        "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                    )
             updated_message += message
         return updated_message + DOCS_MESSAGE
 
@@ -1308,6 +1361,11 @@ def load(
             "`torch.load` called within a torch.serialization.skip_data context manager "
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
+
+    weights_only_not_set = weights_only is None
+
+    if weights_only_not_set:
+        weights_only = _default_to_weights_only(pickle_module)
 
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
@@ -1326,7 +1384,8 @@ def load(
     elif force_weights_only_load:
         weights_only = True
     elif force_no_weights_only_load:
-        if weights_only is None:
+        # TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD can only override if callsite did not explicitly set weights_only
+        if weights_only_not_set:
             warnings.warn(
                 "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
                 "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
@@ -1335,11 +1394,6 @@ def load(
             )
             weights_only = False
 
-    if weights_only is None:
-        weights_only, warn_weights_only = False, True
-    else:
-        warn_weights_only = False
-
     if weights_only:
         if pickle_module is not None:
             raise RuntimeError(
@@ -1347,21 +1401,6 @@ def load(
             )
     else:
         if pickle_module is None:
-            if warn_weights_only:
-                warnings.warn(
-                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
-                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
-                    "which will execute arbitrary code during unpickling (See "
-                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
-                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
-                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
-                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
-                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
-                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
-                    "Please open an issue on GitHub for any issues related to this experimental feature.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
             pickle_module = pickle
 
     # make flipping default BC-compatible

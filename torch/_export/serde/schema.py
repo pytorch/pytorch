@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (7, 4)
+SCHEMA_VERSION = (8, 1)
 TREESPEC_VERSION = 1
 
 
@@ -27,6 +27,8 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
+    FLOAT8_E5M2 = 23
+    FLOAT8_E4M3FN = 24
     UINT16 = 28
 
 
@@ -226,7 +228,7 @@ class ConstantValue(_Union):
 
 
 @dataclass
-class ConstantInputSpec:
+class InputToConstantInputSpec:
     name: str
     value: ConstantValue
 
@@ -270,7 +272,7 @@ class InputSpec(_Union):
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
     token: InputTokenSpec
-    constant_input: ConstantInputSpec
+    constant_input: InputToConstantInputSpec
 
 
 @dataclass
@@ -331,8 +333,8 @@ class GraphSignature:
 
 @dataclass
 class RangeConstraint:
-    min_val: int
-    max_val: int
+    min_val: Optional[int]
+    max_val: Optional[int]
 
 
 @dataclass

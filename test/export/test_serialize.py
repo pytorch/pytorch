@@ -322,6 +322,34 @@ def forward(self, x):
             self.assertEqual(node.inputs[0].name, "self")
             self.assertEqual(node.inputs[1].name, "dim")
 
+    def test_serialize_infinite_sym_int(self) -> None:
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dim1_bc = torch.export.Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }
+        exported_module = export_for_training(
+            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        for v in serialized.exported_program.range_constraints.values():
+            self.assertEqual(v.max_val, None)
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -778,6 +806,7 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):

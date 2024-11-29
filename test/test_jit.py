@@ -8237,6 +8237,42 @@ dedent """
         with self.assertRaises(RuntimeError):
             parse_ir(g, parse_tensor_constants=False)
 
+    def test_parse_scalar_tensor_constants(self):
+        for dtype_str, dtype, value in [
+            ("Float", torch.float32, 1234.5),
+            ("Double", torch.float64, 1234.5),
+            ("BFloat16", torch.bfloat16, 123.5),
+            ("Int", torch.int32, 12345),
+            ("Long", torch.int64, 12345),
+            ("Short", torch.int16, 12345),
+        ]:
+            g_str = f"""
+                graph():
+                  %1 : {dtype_str}(requires_grad=0, device=cpu) = prim::Constant[value={{{value}}}]()
+                  return (%1)
+            """
+
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
+            node = next(
+                n
+                for n in jit_graph.nodes()
+                if isinstance(n.output().type(), torch.TensorType)
+            )
+            assert isinstance(node.output().type(), torch.TensorType)
+            t = node.t("value")
+            assert isinstance(t, torch.Tensor)
+            self.assertEqual(t.dtype, dtype)
+            self.assertEqual(t.item(), value)
+
+        with self.assertRaises(RuntimeError):
+            g_str = """
+                graph():
+                  %1 : Long(requires_grad=0, device=cpu) = prim::Constant[value={invalid}]()
+                  return (%1)
+            """
+            jit_graph = parse_ir(g_str, parse_tensor_constants=True)
+
     def test_parse_nested_names(self):
         g_str = """
     graph(%x.1 : Tensor):
@@ -14147,6 +14183,43 @@ dedent """
             self.assertEqual(script_out, eager_out)
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
+    def test_parse_generator(self):
+        def _test_parse_generator(seed):
+            jit_graph = parse_ir(
+                f"""
+                graph():
+                  %0 : float = prim::Constant[value=-0.31622776601683789]()
+                  %1 : float = prim::Constant[value=0.31622776601683789]()
+                  %2 : Generator = prim::Constant[value=torch.Generator(device="cpu", seed={seed})]()
+                  %3 : NoneType = prim::Constant()
+                  %4 : int[] = prim::Constant[value=[]]()
+                  %5 : int = prim::Constant[value=6]()
+                  %6 : Device = prim::Constant[value="cpu"]()
+                  %7 : Tensor = aten::empty(%4, %5, %3, %6, %3, %3)
+                  %8 : Float() = aten::uniform(%7, %0, %1, %2)
+                  return (%8)
+                """,
+            )
+
+            node = next(
+                n
+                for n in jit_graph.nodes()
+                if isinstance(n.output().type(), torch._C._GeneratorType)
+            )
+            assert isinstance(node.output().type(), torch._C._GeneratorType)
+            g = node.ival("value")
+            assert isinstance(g, torch.Generator)
+            self.assertEqual(g.initial_seed(), seed)
+
+        _test_parse_generator(2024)
+        _test_parse_generator(2**63 - 1)
+
+        with self.assertRaisesRegex(RuntimeError, "Seed must be a non-negative integer"):
+            _test_parse_generator(-2024)
+
+        with self.assertRaisesRegex(RuntimeError, "Number is too big"):
+            _test_parse_generator(2**63)
 
     def test_early_return_rewrite(self):
         def test_foo(x: bool):
