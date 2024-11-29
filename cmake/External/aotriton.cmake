@@ -1,3 +1,15 @@
+macro(get_target_gpus_from_pytorch target_gpus)
+   set(gfx90a_key MI200)
+   set(gfx942_key MI300X)
+
+   foreach(X IN LISTS PYTORCH_ROCM_ARCH)
+       set(key ${X})
+       string(APPEND key "_key")
+       string(APPEND target_gpus ${${key}})
+       string(APPEND target_gpus "|")
+   endforeach()
+endmacro()
+
 if(NOT __AOTRITON_INCLUDED)
   set(__AOTRITON_INCLUDED TRUE)
 
@@ -15,12 +27,16 @@ if(NOT __AOTRITON_INCLUDED)
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
     file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.ci/docker/aotriton_version.txt" __AOTRITON_CI_INFO)
     list(GET __AOTRITON_CI_INFO 3 __AOTRITON_CI_COMMIT)
+    set(target_gpus "")
+    get_target_gpus_from_pytorch(target_gpus)
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_TAG ${__AOTRITON_CI_COMMIT}
       PREFIX ${__AOTRITON_EXTERN_PREFIX}
       INSTALL_DIR ${__AOTRITON_INSTALL_DIR}
+      LIST_SEPARATOR |
       CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${__AOTRITON_INSTALL_DIR}
+      -DTARGET_GPUS:STRING=${target_gpus}
       -DAOTRITON_COMPRESS_KERNEL=ON
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       -DAOTRITON_NO_PYTHON=ON

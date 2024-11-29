@@ -4,7 +4,6 @@
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 #include <torch/csrc/utils/pybind.h>
 
-#include <array>
 #include <tuple>
 
 namespace {
@@ -22,7 +21,7 @@ version_tuple getCompileVersion() {
 
 version_tuple getRuntimeVersion() {
 #ifndef USE_STATIC_CUDNN
-  int major, minor, patch;
+  int major = 0, minor = 0, patch = 0;
   cudnnGetProperty(MAJOR_VERSION, &major);
   cudnnGetProperty(MINOR_VERSION, &minor);
   cudnnGetProperty(PATCH_LEVEL, &patch);

@@ -163,6 +163,18 @@ bool IntraNodeComm::rendezvous() {
     rankToDeviceIdx.emplace_back(info.deviceIdx);
   }
 
+  {
+    std::unordered_set uniqueDeviceIdxs(
+        rankToDeviceIdx.begin(), rankToDeviceIdx.end());
+    if (uniqueDeviceIdxs.size() != worldSize_) {
+      LOG(WARNING)
+          << "Skipping IntraNodeComm::rendezvous() because participants have "
+             "overlapping devices. To resolve this, call torch.cuda.set_device() "
+             "before init_process_group().";
+      return false;
+    }
+  }
+
   // Query nvlink connection
   auto nvlMesh = getNvlMesh(rankToDeviceIdx);
 
@@ -177,7 +189,7 @@ bool IntraNodeComm::rendezvous() {
       groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
   symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
-  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);
+  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
 #endif

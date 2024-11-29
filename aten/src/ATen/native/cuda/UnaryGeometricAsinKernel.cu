@@ -50,6 +50,6 @@ void asin_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
+REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda)
 
 } // namespace at::native
