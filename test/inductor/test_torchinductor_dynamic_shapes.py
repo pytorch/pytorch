@@ -1031,7 +1031,7 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
         self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
         self.assertEqual(fn(x, 4.0), fn_opt(x, 4.0))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_symint_specialization(self):
