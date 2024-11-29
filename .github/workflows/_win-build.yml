@@ -16,6 +16,10 @@ on:
         type: boolean
         default: false
         description: If set, build with XPU support.
+      xpu-version:
+        required: false
+        type: string
+        description: The version of XPU support package.
       vc-year:
         required: false
         type: string
@@ -161,6 +165,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: "8.6"
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           USE_XPU: ${{ inputs.use-xpu == true && '1' || '0' }}
+          XPU_VERSION: "${{ inputs.xpu-version }}"
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           .ci/pytorch/win-build.sh

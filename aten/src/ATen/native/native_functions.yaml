@@ -10179,7 +10179,7 @@
 - func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: unfold_backward
+    CPU, CUDA, MPS: unfold_backward
   autogen: unfold_backward.out
 
 - func: equal(Tensor self, Tensor other) -> bool

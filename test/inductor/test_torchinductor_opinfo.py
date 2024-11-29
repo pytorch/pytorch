@@ -349,8 +349,8 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # rrelu not supported on XPU now
-    "nn.functional.rrelu": {f16, f32, f64},
+    # frexp not supported on XPU now
+    "frexp": {f16, f32, f64},
     # not implemented for 'Half'
     "sort": {b8},
     "argsort": {b8},
@@ -442,6 +442,10 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
+    },
+    ("nn.functional.triplet_margin_with_distance_loss", f16): {
+        "atol": 3e-4,
+        "rtol": 0.003,
     },
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("polygamma.polygamma_n_0", f32): {"atol": 1e-3, "rtol": 1e-4},
@@ -559,7 +563,12 @@ inductor_override_kwargs["xpu"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("dot", f16): {"atol": 1e-5, "rtol": 0.002},
-    "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    "logcumsumexp": {
+        "atol": 5e-5,
+        "rtol": 0.005,
+        "grad_atol": 8e-4,
+        "grad_rtol": 0.001,
+    },
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},

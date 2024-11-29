@@ -42,6 +42,16 @@ py::object CacheEntry::next() {
   return py::cast(*it, py::return_value_policy::reference);
 }
 
+void CacheEntry::invalidate(py::object deleted_guard_manager) {
+  // Keep the current pointer alive but make the fields as if no-op
+  this->guard_manager.attr("cache_entry") = py::none();
+  this->guard_manager.attr("extra_state") = py::none();
+  this->code = py::none();
+  this->guard_manager = std::move(deleted_guard_manager);
+  this->root_mgr = nullptr;
+  this->trace_annotation = "Invalidated";
+}
+
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
   return (PyCodeObject*)e->code.ptr();
 }

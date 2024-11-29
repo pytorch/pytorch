@@ -40,6 +40,7 @@ typedef struct ExtraState ExtraState;
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
     "-Wdeprecated-copy-with-user-provided-dtor")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 typedef struct VISIBILITY_HIDDEN CacheEntry {
   // check the guards: lambda: <locals of user function>: bool
   py::object guard_manager;
@@ -59,10 +60,16 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   std::string trace_annotation;
 
   CacheEntry(const py::handle& guarded_code, PyObject* backend);
+  CacheEntry(const CacheEntry&) = default;
+  CacheEntry(CacheEntry&&) = default;
+  CacheEntry& operator=(const CacheEntry&) = default;
+  CacheEntry& operator=(CacheEntry&&) = default;
   ~CacheEntry();
 
   // Warning: returns a reference whose lifetime is controlled by C++
   py::object next();
+
+  void invalidate(py::object deleted_guard_manager);
 } CacheEntry;
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()

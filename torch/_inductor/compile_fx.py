@@ -5,7 +5,6 @@ import functools
 import io
 import itertools
 import logging
-import os
 import sys
 import time
 import warnings
@@ -325,7 +324,11 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed(
+        "_recursive_pre_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="pre_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -335,14 +338,23 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> None:
-    for subgraph_name in _get_subgraph_names(gm):
-        subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph)
-    joint_graph_passes(gm)
+    with dynamo_timed(
+        "_recursive_joint_graph_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="joint_graph_pass_time_us",
+    ):
+        for subgraph_name in _get_subgraph_names(gm):
+            subgraph = getattr(gm, subgraph_name)
+            _recursive_joint_graph_passes(subgraph)
+        joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed(
+        "_recursive_post_grad_passes",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="post_grad_pass_time_us",
+    ):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -567,7 +579,7 @@ def compile_fx_inner(
                 "compile_fx_inner",
                 phase_name="inductor_compile",
                 log_pt2_compile_event=True,
-                fwd_only=False,
+                dynamo_compile_column_us="inductor_cumulative_compile_time_us",
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -649,7 +661,7 @@ def _compile_fx_inner(
         """
         with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
             compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-            if isinstance(compiled_graph, str):
+            if isinstance(compiled_graph, str) or fx_kwargs["aot_mode"]:
                 # We only return a string in aot mode, in which case we don't
                 # need to do any post-compilation steps: we just return the string,
                 # which is the filename of the compiled code.
@@ -1222,17 +1234,25 @@ def compile_fx_aot(
     example_inputs_: List[InputType],
     inner_compile: _CompileFxCallableEx = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
-) -> str:
+) -> Union[List[str], str]:
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
 
-    if (
-        "aot_inductor.output_path" not in config_patches
-        and not config.aot_inductor.output_path
-    ):
+    output_path = config_patches.get(
+        "aot_inductor.output_path", config.aot_inductor.output_path
+    )
+
+    if output_path:
+        assert not output_path.endswith(".pt2"), (
+            "The output path for aot_compile should not have an extension with .pt2 "
+            "this is for specifying the output path for the .so in AOTInductor. "
+            "If you would like to package the AOTInductor generated files "
+            "into a pt2, please call `torch._inductor.aoti_compile_and_package`."
+        )
+    else:
         config_patches = {
             **config_patches,
             "aot_inductor.output_path": code_hash(model_.code),
@@ -1244,7 +1264,7 @@ def compile_fx_aot(
     with V.set_aot_compilation(True), torch._guards.compile_context(
         saved_compile_context
     ):
-        compiled_lib_path = compile_fx(
+        compiled_artifacts = compile_fx(
             model_,
             example_inputs_,
             inner_compile=functools.partial(
@@ -1254,11 +1274,12 @@ def compile_fx_aot(
             ),
             config_patches=config_patches,
         )
-        assert isinstance(compiled_lib_path, str)
-        assert os.path.exists(
-            compiled_lib_path
-        ), f"AOTInductor compiled library does not exist at {compiled_lib_path}"
-        return compiled_lib_path
+
+        assert isinstance(compiled_artifacts, str) or (
+            isinstance(compiled_artifacts, list)
+            and isinstance(compiled_artifacts[0], str)
+        )
+        return compiled_artifacts
 
 
 _graph_counter = count(0)
@@ -1418,7 +1439,7 @@ def compile_fx(
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
-) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str]:
+) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
     ), enable_python_dispatcher():
@@ -1632,7 +1653,11 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            from torch._dynamo.convert_frame import compile_lock
+
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler"
+            ), compile_lock:
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)

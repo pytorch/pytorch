@@ -2196,7 +2196,11 @@ def record_stream_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.new_empty.default,
+    [
+        torch.ops.aten.new_empty.default,
+        torch.ops.aten.new_zeros.default,
+        torch.ops.aten.new_ones.default,
+    ],
     "self: jt_all, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
 )
 def new_empty_default(func, *args, **kwargs):

@@ -1313,7 +1313,14 @@ def _strict_export_lower_to_aten_ir(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
+    # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
+    # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
+    # TODO: Fix recompile() in  _LazyGraphModule. T207713214
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
     assert out_spec is not None
@@ -1497,6 +1504,22 @@ def _export_to_aten_ir_make_fx(
                         new_node.meta = name_node.meta
 
                 hook.remove()  # type: ignore[possibly-undefined]
+
+            # In export, we ignore any op that is related to
+            # eager mode profiling call. The expectation is
+            # that either runtimes provide their own profiling
+            # OR user wrap the compiled region on a profiling in
+            # later stage.
+            def _is_impure(node):
+                if node.op == "call_function" and node.target in (
+                    torch.ops.profiler._record_function_enter.default,
+                    torch.ops.profiler._record_function_enter_new.default,
+                    torch.ops.profiler._record_function_exit.default,
+                ):
+                    return False
+                return True
+
+            gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
         input_names = _graph_input_names(gm)

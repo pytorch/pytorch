@@ -1528,6 +1528,54 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
 
     @supported_platform
+    def test_multiple_mask_calls(self):
+        if TEST_WITH_ROCM:
+            self.skipTest(
+                "ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855"
+            )
+        # Create inputs
+        query = torch.randn(
+            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        key = torch.randn(
+            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        value = torch.randn(
+            (1, 4, 512, 64), dtype=torch.float32, device="cuda", requires_grad=True
+        )
+
+        window_size = 32
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def causal_mask_slidewindow_mod(b, h, q_idx, kv_idx):
+            return (q_idx >= kv_idx) & (q_idx <= kv_idx + window_size)
+
+        mask1 = create_block_mask(causal_mask, 1, None, 512, 512, _compile=False)
+        mask2 = create_block_mask(
+            causal_mask_slidewindow_mod, 1, None, 512, 512, _compile=False
+        )
+
+        def f(q, k, v):
+            out1 = flex_attention(q, k, v, block_mask=mask1)
+            out2 = flex_attention(q, k, v, block_mask=mask2)
+            return out1 + out2
+
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        out = f(query, key, value)
+        out_compiled = f_compiled(query, key, value)
+
+        grads = torch.autograd.grad((out,), (query, key, value), torch.ones_like(out))
+        grads_compile = torch.autograd.grad(
+            (out_compiled,), (query, key, value), torch.ones_like(out_compiled)
+        )
+
+        for grad, grad_compiled in zip(grads, grads_compile):
+            torch.testing.assert_close(grad, grad_compiled, atol=3e-2, rtol=3e-2)
+
+    @supported_platform
     def test_multiple_score_mod_calls2(self):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device="cuda")
         keys = [
@@ -2922,6 +2970,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention(query, key, value)
 
     @supported_platform
+    def test_captured_wrong_device_error_message(self):
+        means = torch.randn(64, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8)
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_cant_lower_error_message(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(64, 256).cuda()
+        length_scales = torch.logspace(0.001, 0.1, 8).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        expected_error_message = "Buffers cannot be created"
+
+        q, k, v = (torch.randn(1, 8, 64, 64, device="cuda") for _ in range(3))
+        with self.assertRaisesRegex(RuntimeError, expected_error_message):
+            torch.compile(flex_attention)(q, k, v, score_mod=euclidean_dist_pos_embed)
+
+    @supported_platform
+    def test_reduction_unrolled(self):
+        # We can't lower a 256-element reduction inside a pointwise reduction
+        means = torch.randn(S, 3).cuda()
+        length_scales = torch.logspace(0.001, 0.1, H).cuda()
+
+        def euclidean_dist_pos_embed(score, b, h, q_idx, k_idx):
+            q_pos = means[q_idx]
+            k_pos = means[k_idx]
+            dist = (q_pos - k_pos).pow(2).sum(-1).sqrt()
+            scale = length_scales[h]
+            inv_dist = torch.exp(-dist / scale)
+            return inv_dist * score
+
+        self.run_test(euclidean_dist_pos_embed, torch.bfloat16)
+
+    @supported_platform
     def test_invalid_block_size(self):
         # Create tensors on different devices
         q, k, v = (torch.randn(1, 8, 128, 64, device="cuda") for _ in range(3))
@@ -3184,21 +3287,21 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
         full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
-        fw_graph = self.fw_graph
-        joint_graph = self.joint_graph
-        mask_graph = self.mask_graph
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph, joint_graph, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph = joint_graph = full = full_default = convert_element_type = convert_element_type_1 = mask_graph = None
+        fw_graph0 = self.fw_graph0
+        joint_graph0 = self.joint_graph0
+        mask_graph0 = self.mask_graph0
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
         return (getitem_4, getitem_5, getitem_6)
 
-    class fw_graph(torch.nn.Module):
+    class fw_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
             return mul
 
-    class joint_graph(torch.nn.Module):
+    class joint_graph0(torch.nn.Module):
         def forward(self, arg0_1: "f64[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]", arg4_1: "i32[]", arg5_1: "f64[]"):
             mul: "f64[]" = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  mul = None
             mul_1: "f64[]" = torch.ops.aten.mul.Tensor(arg5_1, arg0_1)
@@ -3206,7 +3309,7 @@ class GraphModule(torch.nn.Module):
             add: "f64[]" = torch.ops.aten.add.Tensor(mul_2, mul_1);  mul_2 = mul_1 = None
             return [add, None, None, None, None]
 
-    class mask_graph(torch.nn.Module):
+    class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
             full: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full

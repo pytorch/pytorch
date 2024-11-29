@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at::native {
-namespace mps {
+namespace at::native::mps {
 
 static const char* FUSED_ADAM_OPS = R"METAL(
 #include <metal_stdlib>
@@ -436,10 +435,4 @@ REGISTER_FUSED_SGD_MOMENTUM_OP(half);
 
 )METAL";
 
-static std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
-  static MetalShaderLibrary lib(FUSED_ADAM_OPS, 0);
-  return std::make_pair(lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname));
-}
-
-} //namespace mps
-} // namespace at::native
+} // namespace at::native::mps

@@ -10,6 +10,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/llvmMathExtras.h>
@@ -486,7 +487,7 @@ struct ExpandableSegment {
         pidfd != -1 || errno != ENOSYS,
         "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
         "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-    TORCH_CHECK(pidfd != -1, "pidfd_open:", std::strerror(errno));
+    TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
     for (auto i : c10::irange(header.num_handles)) {
       (void)i;
       int fd = 0;
@@ -504,7 +505,7 @@ struct ExpandableSegment {
             err != ENOSYS,
             "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
             "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-        TORCH_CHECK(false, "pidfd_getfd: ", std::strerror(err));
+        TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
       }
       CUmemGenericAllocationHandle handle = 0;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(

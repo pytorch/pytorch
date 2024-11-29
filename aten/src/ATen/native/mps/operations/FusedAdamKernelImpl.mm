@@ -68,4 +68,10 @@ void _fused_adam_mps_impl_(TensorList params,
                                                  eps,
                                                  maximize);
 }
+
+std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getFusedAdamCPLState(const std::string& fname) {
+  static MetalShaderLibrary lib(FUSED_ADAM_OPS, 0);
+  return {lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname)};
+}
+
 } // namespace at::native::mps

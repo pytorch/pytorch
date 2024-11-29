@@ -10592,6 +10592,9 @@ Args:
 Keyword args:
     {dtype}
 
+.. note:: Use the `dtype` argument if you need the result in a specific tensor type.
+          Otherwise, the result type may be automatically promoted (e.g., from `torch.int32` to `torch.int64`).
+
 Example::
 
     >>> a = torch.randn(1, 3)

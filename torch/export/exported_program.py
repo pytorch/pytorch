@@ -25,6 +25,11 @@ from typing import (
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._subclasses.fake_impls import (
+    _deregister_op_impl,
+    _is_op_registered_to_fake_rule,
+    register_op_impl,
+)
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -224,6 +229,31 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
                 decomp_callable
             )
 
+        # [NOTE] Directly registering fake tensor rule to CIA ops
+        # The problem we are facing here is if your CIA custom rule
+        # says we want to preserve the op, we will return NotImplemented.
+        # Unfortunately, this will invoke meta device tracing in fake tensor
+        # resulting in divergent behaviour for CIA kernels that has device based
+        # branching (one case is torch.ops.aten.scaled_dot_product.attention)
+        # To get around this issue, we register direct fake impl so that we
+        # run the kernel before we actually try to decompose the op in FakeTensorMode.
+        # Note that is a no-op in most cases, because:
+        #   1) In post dispatch tracing, CIA would have already decomposed
+        #   2) Most CIA impl are device agnostic.
+        def _force_dispatch_to_orig_cia_callable(fake_tensor_mode, op, *args, **kwargs):
+            orig_cia_callable = kwargs["original_callable"]
+            del kwargs["original_callable"]
+            with fake_tensor_mode:
+                return orig_cia_callable(*args, **kwargs)
+
+        if not _is_op_registered_to_fake_rule(op_overload):
+            register_op_impl(op_overload)(
+                functools.partial(
+                    _force_dispatch_to_orig_cia_callable,
+                    original_callable=orig_cia_callable,
+                )
+            )
+
         for key in _BACKEND_KEYS_TO_OVERRIDE:
             if key not in op_overload.py_kernels:
                 # [NOTE] Registering old CIA to Backend kernel
@@ -250,6 +280,7 @@ def _override_composite_implicit_decomp(cia_ops_to_callable, safe=True):
             op.py_kernels.clear()
             op.py_kernels.update(saved_tables[op])
             op._dispatch_cache.clear()
+            _deregister_op_impl(op)
 
 
 @contextmanager
@@ -781,20 +812,40 @@ class ExportedProgram:
     def graph_module(self):
         return self._graph_module
 
+    @graph_module.setter
+    @compatibility(is_backward_compatible=False)
+    def graph_module(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_module attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def graph(self):
         return self.graph_module.graph
+
+    @graph.setter
+    @compatibility(is_backward_compatible=False)
+    def graph(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def graph_signature(self):
         return self._graph_signature
 
+    @graph_signature.setter
+    @compatibility(is_backward_compatible=False)
+    def graph_signature(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's graph_signature attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def state_dict(self):
         return self._state_dict
+
+    @state_dict.setter
+    @compatibility(is_backward_compatible=False)
+    def state_dict(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's state_dict attribute.")
 
     @compatibility(is_backward_compatible=False)
     def parameters(self) -> Iterator[torch.nn.Parameter]:
@@ -839,15 +890,51 @@ class ExportedProgram:
     def range_constraints(self):
         return self._range_constraints
 
+    @range_constraints.setter
+    @compatibility(is_backward_compatible=False)
+    def range_constraints(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's range_constraints attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def module_call_graph(self):
         return self._module_call_graph
 
+    @module_call_graph.setter
+    @compatibility(is_backward_compatible=False)
+    def module_call_graph(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's module_call_graph attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def example_inputs(self):
         return self._example_inputs
+
+    @example_inputs.setter
+    @compatibility(is_backward_compatible=False)
+    def example_inputs(self, value):
+        # This is allowed
+        if not (
+            isinstance(value, tuple)
+            and len(value) == 2
+            and isinstance(value[0], tuple)
+            and isinstance(value[1], dict)
+        ):
+            raise ValueError(
+                "Example inputs should be a tuple containing example arguments (as "
+                "a tuple), and example kwargs (as a dictionary)."
+            )
+
+        args, kwargs = value
+        from ._unlift import _check_inputs_match
+
+        _check_inputs_match(args, kwargs, self.call_spec.in_spec)
+
+        self._example_inputs = value
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -862,10 +949,20 @@ class ExportedProgram:
             out_spec=self.module_call_graph[0].signature.out_spec,
         )
 
+    @call_spec.setter
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's call_spec attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifier(self) -> Any:
         return self._verifiers[0]
+
+    @verifier.setter
+    @compatibility(is_backward_compatible=False)
+    def verifier(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifier attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -873,20 +970,42 @@ class ExportedProgram:
         assert self._verifiers is not None
         return self._verifiers[0].dialect
 
+    @dialect.setter
+    @compatibility(is_backward_compatible=False)
+    def dialect(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's dialect attribute.")
+
     @property
     @compatibility(is_backward_compatible=False)
     def verifiers(self):
         return self._verifiers
+
+    @verifiers.setter
+    @compatibility(is_backward_compatible=False)
+    def verifiers(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's verifiers attribute.")
 
     @property
     @compatibility(is_backward_compatible=False)
     def tensor_constants(self):
         return self._constants
 
+    @tensor_constants.setter
+    @compatibility(is_backward_compatible=False)
+    def tensor_constants(self, value):
+        raise RuntimeError(
+            "Unable to set ExportedProgram's tensor_constants attribute."
+        )
+
     @property
     @compatibility(is_backward_compatible=False)
     def constants(self):
         return self._constants
+
+    @constants.setter
+    @compatibility(is_backward_compatible=False)
+    def constants(self, value):
+        raise RuntimeError("Unable to set ExportedProgram's constants attribute.")
 
     def _get_flat_args_with_check(self, args, kwargs):
         """Flatten args, kwargs using pytree, then, check specs.

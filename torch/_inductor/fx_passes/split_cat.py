@@ -629,6 +629,10 @@ def merge_splits(
                 next_split_num_to_user = {
                     user.args[1]: user for user in node.users.keys()
                 }
+                split_getitem_indices = list(next_split_num_to_user.keys())
+                # check if it is consecutive and starts from index 0
+                if split_getitem_indices[0] != 0 or not is_sorted_and_consecutive(split_getitem_indices):  # type: ignore[arg-type]
+                    return
                 # It is not necessary all getitems from the split node are used.
                 # We use the num of users to check the getitems to be merged.
                 for next_split_num in range(len(node.users.keys())):

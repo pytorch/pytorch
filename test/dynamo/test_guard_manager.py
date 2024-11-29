@@ -743,6 +743,45 @@ num_guards_executed=0)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
 
+    def test_clone(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals):
+            root = guard_wrapper.root
+
+            # Check full cloning works as expected
+            cloned_root = root.clone_manager(lambda x: True)
+            self.assertTrue(cloned_root.check(f_locals))
+            f_locals["foo"] = [3, 4]
+            self.assertFalse(cloned_root.check(f_locals))
+            f_locals["foo"] = [2, 3]
+
+            # Skip guarding on foo
+            cloned_root = root.clone_manager(lambda x: "foo" not in x.get_source())
+            f_locals["foo"] = [3, 4]
+            # Original root should fail, but new root should pass because of
+            # absence of guards on foo.
+            self.assertFalse(root.check(f_locals))
+            self.assertTrue(cloned_root.check(f_locals))
+
+        class Bar:
+            x = 4
+            y = torch.randn(4)
+
+        foo = [2, 3]
+        bar = Bar()
+
+        def fn(x, foo, bar):
+            return x + foo[0] + bar.x * bar.y
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x, foo, bar)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

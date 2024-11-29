@@ -621,7 +621,7 @@ class TestDistBackend(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         self._barrier()
 
-        self.run_test(test_name, pipe)
+        self.run_test(test_name, pipe, destroy_process_group=False)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
