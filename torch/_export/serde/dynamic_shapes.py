@@ -165,10 +165,9 @@ def _dump_dynamic_shapes(
         # track root dim
         root = val.root if isinstance(val, _DerivedDim) else val  # type: ignore[attr-defined]
         if root.__name__ not in dims:
-            assert isinstance(root, RootDim)
             dims[root.__name__] = {
-                "min": root.min,
-                "max": root.max,
+                "min": root.min,  # type: ignore[attr-defined]
+                "max": root.max,  # type: ignore[attr-defined]
                 "derived": set(),
             }
 
