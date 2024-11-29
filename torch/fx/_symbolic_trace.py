@@ -872,7 +872,7 @@ class Tracer(TracerBase):
                 nonlocal cnt
                 cnt += 1
                 param = sig.parameters[name]
-                default = (
+                default: Tuple[Any, ...] = (
                     () if param.default is inspect.Parameter.empty else (param.default,)
                 )
                 out = self.create_proxy(

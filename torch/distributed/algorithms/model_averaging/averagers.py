@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
+from torch.utils._typing_utils import not_none as _not_none
 
 
 __all__ = ["ModelAverager", "PeriodicModelAverager"]
@@ -23,7 +24,7 @@ class ModelAverager(ABC):
 
     def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
         self.process_group = (
-            process_group if process_group is not None else dist.group.WORLD
+            process_group if process_group is not None else _not_none(dist.group.WORLD)
         )
         self.step = 0
 

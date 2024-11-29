@@ -161,7 +161,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
             out_channels,
             kernel_size_,
             stride=stride_,
-            padding=padding_,
+            padding=padding_,  # type: ignore[arg-type]
             dilation=dilation_,
             transposed=False,
             output_padding=_single(0),
@@ -222,7 +222,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
             out_channels,
             kernel_size_,
             stride=stride_,
-            padding=padding_,
+            padding=padding_,  # type: ignore[arg-type]
             dilation=dilation_,
             transposed=False,
             output_padding=_pair(0),
@@ -286,7 +286,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
             out_channels,
             kernel_size_,
             stride=stride_,
-            padding=padding_,
+            padding=padding_,  # type: ignore[arg-type]
             dilation=dilation_,
             transposed=False,
             output_padding=_triple(0),
