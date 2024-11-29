@@ -184,7 +184,7 @@ void pushPyOutToStack(
 namespace {
 
 c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
-    c10::string_view arg) {
+    std::string_view arg) {
   if (arg == "strides") {
     return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
   }
@@ -344,7 +344,7 @@ bool isResurrectable(THPVariable* self) {
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
-      std::make_optional((PyObject*)self)) {
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -452,7 +452,7 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            std::make_optional((PyObject*)self)) {
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py

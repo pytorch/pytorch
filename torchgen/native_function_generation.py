@@ -53,6 +53,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_assert_tensor_metadata",  # no return
     "_cslt_sparse_mm_search",  # returns an int
     "_assert_scalar",  # no return
     "_dimI",  # returns an int

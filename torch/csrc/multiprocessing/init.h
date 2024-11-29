@@ -4,6 +4,6 @@
 
 namespace torch::multiprocessing {
 
-PyMethodDef* python_functions();
+const PyMethodDef* python_functions();
 
 } // namespace torch::multiprocessing

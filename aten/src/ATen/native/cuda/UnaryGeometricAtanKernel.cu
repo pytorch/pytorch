@@ -53,6 +53,6 @@ void atan_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda);
+REGISTER_DISPATCH(atan_stub, &atan_kernel_cuda)
 
 } // namespace at::native

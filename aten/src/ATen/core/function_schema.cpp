@@ -485,7 +485,7 @@ bool FunctionSchema::isForwardCompatibleWith(
       return false;
     }
 
-    auto default_val = arguments().at(i).default_value().value();
+    auto const &default_val = arguments().at(i).default_value().value();
     if (default_val.isList() || default_val.isGenericDict()) {
       if (why_not) {
         why_not

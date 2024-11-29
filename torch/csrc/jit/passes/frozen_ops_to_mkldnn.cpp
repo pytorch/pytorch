@@ -303,7 +303,7 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
       at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);
-};
+}
 
 Operation BroadOp(const Node* node) {
   return [](Stack& stack) {

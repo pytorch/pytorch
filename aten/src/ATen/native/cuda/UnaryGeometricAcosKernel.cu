@@ -53,6 +53,6 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
+REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda)
 
 } // namespace at::native

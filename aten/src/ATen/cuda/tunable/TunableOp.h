@@ -26,8 +26,6 @@ namespace at::cuda::tunable {
 template <typename ParamsT>
 class Callable {
   public:
-    Callable() = default;
-    Callable(Callable&&) = default;
     virtual ~Callable() = default;
     virtual TuningStatus Call(const ParamsT*) {
       return FAIL;
@@ -40,8 +38,6 @@ class Callable {
 template <typename ParamsT, typename TimerT>
 class TunableOp {
   public:
-    TunableOp() = default;
-    TunableOp(TunableOp&&) = default;
     virtual ~TunableOp() = default;
 
     TuningStatus operator()(const ParamsT* params) {
@@ -284,7 +280,6 @@ class TunableOp {
 };
 
 struct OpParams {
-  OpParams() = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
 };
