@@ -38,10 +38,10 @@ Tensor computeSum(
       axes.resize(rank);
       std::iota(axes.begin(), axes.end(), 0);
     } else if (rank > 0) {
-      auto nodeAxes = std::get<IntList>(inputs[1]);
+      auto const& nodeAxes = std::get<IntList>(inputs[1]);
       // Canonicalize axes: wrap around, sort and make unique.
       for (auto axis : nodeAxes) {
-        axes.push_back(at::maybe_wrap_dim(axis, rank));
+        axes.push_back(at::maybe_wrap_dim(axis, static_cast<int64_t>(rank)));
       }
       std::sort(axes.begin(), axes.end());
       axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
@@ -89,7 +89,8 @@ Tensor computeSum(
         }
         for (auto axis : axes) {
           indices_exprs.insert(
-              indices_exprs.begin() + axis, indices_squeezed[i]);
+              indices_exprs.begin() + static_cast<std::ptrdiff_t>(axis),
+              indices_squeezed[i]);
           ++i;
         }
         auto indexed = tensorOrConstant(inputs[0], indices_exprs);
@@ -114,7 +115,7 @@ Tensor computeMean(
   }
   bool keepdim = false;
   BufHandle ResultBuf("mean", outputShape, dtype);
-  BufHandle InputBuf = std::get<BufHandle>(inputs[0]);
+  auto const& InputBuf = std::get<BufHandle>(inputs[0]);
   std::vector<ExprHandle> extra_args;
   if (inputs.size() > 2) {
     keepdim = std::get<bool>(inputs[2]);
@@ -145,7 +146,7 @@ Tensor computeMax(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("max", outputShape, dtype);
-  BufHandle InputBuf = std::get<BufHandle>(inputs[0]);
+  auto const& InputBuf = std::get<BufHandle>(inputs[0]);
   auto max_dim = std::get<int64_t>(inputs[1]);
   auto keep_dim = std::get<bool>(inputs[2]);
   return Tensor(
@@ -168,8 +169,7 @@ Tensor computeAdaptiveAvgPool2d(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto out_size_param = std::get<IntList>(inputs[1]);
+  auto const& out_size_param = std::get<IntList>(inputs[1]);
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(
