@@ -87,6 +87,6 @@ void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_
   }
 }
 
-REGISTER_DISPATCH(cross_stub, &cross_impl);
+REGISTER_DISPATCH(cross_stub, &cross_impl)
 
 } // namespace at::native

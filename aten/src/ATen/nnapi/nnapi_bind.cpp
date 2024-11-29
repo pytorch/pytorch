@@ -7,9 +7,7 @@
 #include <ATen/nnapi/nnapi_model_loader.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace nnapi {
-namespace bind {
+namespace torch::nnapi::bind {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* nnapi;
@@ -208,6 +206,4 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   CAFFE_THROW("Bad dtype: " + std::to_string(static_cast<int8_t>(t.scalar_type())));
 }
 
-} // namespace bind
-} // namespace nnapi
 } // namespace torch

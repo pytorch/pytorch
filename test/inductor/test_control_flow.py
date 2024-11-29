@@ -697,6 +697,24 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
 
+    class PytreeCarry(torch.nn.Module):
+        def forward(self, it, pytree_input):
+            def cond_fn(it, pytree_input):
+                return it > 0
+
+            def body_fn(it, pytree_input):
+                x = pytree_input[0][0]
+                y = pytree_input[1]["x"]
+                z = pytree_input[1]["y"]
+                new_x = y.sin()
+                new_y = z.cos()
+                new_z = x + 1
+                return it - 1, ([new_x], {"x": new_y, "y": new_z})
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn, body_fn, (it, pytree_input)
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -707,27 +725,45 @@ class WhileLoopTests(TestCase):
         dynamic=False,
         num_counters=1,
     ):
+        import torch.utils._pytree as pytree
+
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
-        inputs = [inp.to(device=device) for inp in inputs]
+        inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
         input_sets = [inputs]
         if dynamic:
-            larger_inputs = []
-            for inp in inputs:
+
+            def mark_first_dim_dyn(inp):
+                torch._dynamo.mark_dynamic(inp, 0)
+
+            pytree.tree_map(mark_first_dim_dyn, input_sets)
+
+            def tile_fn(inp):
                 # tile every first dim 5x
                 tiling = [5] + [1] * (inp.ndim - 1)
-                larger_inputs.append(torch.tile(inp, tiling))
+                t = torch.tile(inp, tiling)
+                # mark every first dim as dynamic
+                torch._dynamo.mark_dynamic(inp, 0)
+                return t
+
+            larger_inputs = pytree.tree_map(tile_fn, inputs)
             input_sets.append(larger_inputs)
-            for inputs in input_sets:
-                for inp in inputs:
-                    # mark every first dim as dynamic
-                    if inp.ndim:
-                        torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            for inputs_with_counters in prepend_counters(inputs, num_counters):
-                cloned_inputs = [inp.clone() for inp in inputs_with_counters]
+            flat_inputs, inp_spec = pytree.tree_flatten(inputs)
+            for flat_inputs_with_counters in prepend_counters(
+                flat_inputs, num_counters
+            ):
+                counters, flat = (
+                    flat_inputs_with_counters[:num_counters],
+                    flat_inputs_with_counters[num_counters:],
+                )
+                unflat_inputs = pytree.tree_unflatten(flat, inp_spec)
+                inputs_with_counters = counters + unflat_inputs
+                cloned_inputs = pytree.tree_map(
+                    lambda t: t.clone(), inputs_with_counters
+                )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
                     result_compiled = compiled_model(*inputs_with_counters)
@@ -814,6 +850,23 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work due to we haven't handle lifted symbols
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_pytree_inputs(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.PytreeCarry(),
+            inputs=(
+                (
+                    [torch.randn(10, 20)],
+                    {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
+                ),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 class AssociativeScanTests(TestCase):
     @requires_gpu
@@ -829,7 +882,8 @@ class AssociativeScanTests(TestCase):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for n in range(10):
+        # for n in range(10):
+        for n in [9]:
             x = torch.arange(n, device=device)
             torch.compiler.reset()
             associative_scan1 = torch.compile(

@@ -20,6 +20,9 @@ The resulting FX Graph is then polished before it is finally translated into an 
 The main advantage of this approach is that the `FX graph <https://pytorch.org/docs/stable/fx.html>`_ is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
+In addition, during the export process, memory usage is significantly reduced compared to the TorchScript-enabled exporter.
+See the :doc:`documentation <onnx_dynamo_memory_usage>` for more information.
+
 The exporter is designed to be modular and extensible. It is composed of the following components:
 
   - **ONNX Exporter**: :class:`Exporter` main class that orchestrates the export process.
@@ -148,6 +151,11 @@ The main advantages are:
    :glob:
 
    generated/onnx_dynamo_diagnostics_rules/*
+
+.. toctree::
+    :hidden:
+
+    onnx_dynamo_memory_usage
 
 API Reference
 -------------

@@ -1179,7 +1179,7 @@ inline void setStridedUnchecked(
     ArrayRef<T> stride,
     T&& storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_sizes_and_strides(size, stride, std::make_optional(std::forward<T>(storage_offset)));
+  self_->set_sizes_and_strides(size, stride, std::forward<T>(storage_offset));
 }
 
 Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, std::optional<c10::SymInt> sym_storage_offset_) {
@@ -3792,6 +3792,7 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
   int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size >= 0, "size is ", size, " but must be >= 0");
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
