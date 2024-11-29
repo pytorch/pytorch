@@ -390,6 +390,7 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
     """
 
     def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
+        assert all(isinstance(t, torch.Tensor) for t in [base_tensor, comp_tensor])
         return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
             is_same_tensor(base_tensor, comp_tensor)
             or is_same_mkldnn_tensor(base_tensor, comp_tensor)
@@ -435,7 +436,9 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
                 V.graph.module, node.name
             ):  # candidate tensor might already be deleted
                 comp_tensor = getattr(V.graph.module, node.name)
-                if share_storage(candidate_tensor, comp_tensor):
+                if isinstance(comp_tensor, torch.Tensor) and share_storage(
+                    candidate_tensor, comp_tensor
+                ):
                     candidate_tensor_users += 1
 
         for node in reversed(V.graph.graph.nodes):
