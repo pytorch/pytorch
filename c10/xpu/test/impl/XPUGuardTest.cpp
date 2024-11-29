@@ -113,6 +113,6 @@ TEST(XPUGuardTest, EventBehavior) {
   event2.synchronize();
   EXPECT_TRUE(event2.query());
   EXPECT_NE(event1.eventId(), event2.eventId());
-  ASSERT_THROW(event1.elapsedTime(event2), c10::Error);
+  EXPECT_GT(event1.elapsedTime(event2));
   sycl::free(deviceData2, c10::xpu::get_device_context());
 }
