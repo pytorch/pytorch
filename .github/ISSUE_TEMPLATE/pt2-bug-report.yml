@@ -14,7 +14,7 @@ body:
 
         - Ensure rtol/atol are at default tolerances
 
-        - Dont compare indices of max/min etc, because that avoids the above requirement
+        - Don't compare indices of max/min etc, because that avoids the above requirement
 
         - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
 
@@ -25,6 +25,14 @@ body:
       label: 🐛 Describe the bug
       description: |
         Please provide a clear and concise description of what the bug is.
+
+        See https://pytorch.org/docs/main/torch.compiler_troubleshooting.html#reporting-issues
+        for guidance on what to additionally include. In particular, consider including:
+
+        - The `tlparse` for your program
+        - Ablation - which `torch.compile` backend/mode/settings cause the bug
+        - A minimal reproducer
+
       placeholder: |
         A clear and concise description of what the bug is.
     validations:
@@ -39,25 +47,7 @@ body:
         Error...
     validations:
       required: false
-  - type: textarea
-    attributes:
-      label: Minified repro
-      description: |
-        Please run the minifier on your example and paste the minified code below
-        Learn more here https://pytorch.org/docs/main/torch.compiler_troubleshooting.html
-      placeholder: |
-        env TORCHDYNAMO_REPRO_AFTER="aot" python your_model.py
-        or
-        env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py
 
-        import torch
-        ...
-
-        # torch version: 2.0.....
-
-        class Repro(torch.nn.Module)
-    validations:
-      required: false
   - type: textarea
     attributes:
       label: Versions

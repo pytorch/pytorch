@@ -25,7 +25,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
     std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
             const Tensor& input_r, TensorList weight, int64_t weight_stride0,
@@ -46,7 +46,7 @@ namespace at { namespace native {
         TORCH_CHECK(false, "miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
-}} //namespace at::native
+} //namespace at::native
 
 #else // AT_ROCM_ENABLED()
 
@@ -876,8 +876,8 @@ void NAME##_packed_miopen(Tensor& output, Tensor& hy,                          \
       has_biases, MODE, num_layers, dropout_p, train, bidirectional);          \
 }                                                                              \
                                                                                \
-REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen);                    \
-REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen);
+REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen)                    \
+REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen)
 
 ONE_HIDDEN_RNN(gru, miopenGRU)
 ONE_HIDDEN_RNN(rnn_tanh, miopenRNNTANH)
@@ -905,8 +905,8 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
     cy = std::get<1>(result.second);
 }
 
-REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
-REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
+REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
+REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
 }} //namespace native.

@@ -3750,6 +3750,39 @@ class TestDynamicQuantizedOps(TestCase):
             return  # TODO: fix MakeDeConvOutputShape overflowing for convT3d with qnnpack
         self._test_qconv_op_impl(q_mod, dq_op, dim, dtype)
 
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16_onednn(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+            (True, False),  # use_bias
+            (True, False),  # use_relu
+        )
+        for batch_size, input_channels, output_channels, use_bias, use_relu in options:
+            qlinear_prepack = torch.ops.onednn.linear_prepack_fp16
+            if use_relu:
+                qlinear_dynamic = torch.ops.onednn.linear_relu_dynamic_fp16
+            else:
+                qlinear_dynamic = torch.ops.onednn.linear_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels) if use_bias else None
+
+            w_packed = qlinear_prepack(w, x.shape)
+            out = qlinear_dynamic(x, w_packed, bias)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+            if use_relu:
+                ref.relu_()
+
+            self.assertEqual(out, ref)
+
 
 class TestQuantizedLinear(TestCase):
     def _test_qlinear_impl(self, batch_size, input_channels, output_channels, use_bias,

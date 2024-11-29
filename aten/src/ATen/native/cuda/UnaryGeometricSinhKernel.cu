@@ -53,6 +53,6 @@ void sinh_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda)
 
 } // namespace at::native
