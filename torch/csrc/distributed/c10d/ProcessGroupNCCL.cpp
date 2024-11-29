@@ -1413,6 +1413,8 @@ void ProcessGroupNCCL::abort() {
 
 // Destroy (shutdown) this backend -- normal exit.
 void ProcessGroupNCCL::shutdown() {
+  LOG(INFO) << logPrefix()
+            << "Starting to destroy process group, flushing operations.";
   // Flush all collectives
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1429,9 +1431,21 @@ void ProcessGroupNCCL::shutdown() {
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
+  LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+  }
+  if (onCompletionHookThread_.joinable()) {
+    onCompletionHookThread_.join();
+  }
+  // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
+  // false alarm
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
   // Destroy the communicator, reclaim resources
+  LOG(INFO) << logPrefix() << "Watchdog joined, destroying NCCL communicators.";
   {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& it : devNCCLCommMap_) {
@@ -1439,6 +1453,7 @@ void ProcessGroupNCCL::shutdown() {
       ncclComm->destroy();
     }
   }
+  LOG(INFO) << logPrefix() << "Destroy complete.";
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -2199,10 +2214,6 @@ void ProcessGroupNCCL::watchdogHandler() {
     }
     done = workMetaList_.empty();
   }
-  // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
-  // false alarm
-  terminateHeartbeatMonitorThread_.store(true);
-  monitorWakeUpCV_.notify_one();
 }
 
 void ProcessGroupNCCL::runHookLoop() {
