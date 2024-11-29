@@ -136,7 +136,7 @@ std::vector<at::Tensor> constructTensors(
             qd->scale,
             qd->zero,
             qd->scalarType);
-        tensors.emplace_back(tensor);
+        tensors.emplace_back(std::move(tensor));
       } else {
         auto tensor = at::from_blob(
             buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
