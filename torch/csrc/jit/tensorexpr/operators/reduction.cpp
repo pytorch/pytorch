@@ -168,7 +168,6 @@ Tensor computeAdaptiveAvgPool2d(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto out_size_param = std::get<IntList>(inputs[1]);
   return Tensor(
       ResultBuf.node(),
