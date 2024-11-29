@@ -774,7 +774,7 @@ class TestCuda(TestCase):
         with stream:
             self.assertEqual(stream, torch.cuda.current_stream())
         self.assertEqual(prev_stream, torch.cuda.current_stream())
-    
+
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_device_stream_context_manager(self):
         src_device = 0

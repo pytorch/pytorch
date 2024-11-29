@@ -101,7 +101,9 @@ class TestAccelerator(TestCase):
         with dst_stream:
             self.assertEqual(torch.accelerator.current_device_idx(), dst_device)
             self.assertEqual(torch.accelerator.current_stream(), dst_stream)
-            self.assertEqual(torch.accelerator.current_stream(src_device), src_prev_stream)
+            self.assertEqual(
+                torch.accelerator.current_stream(src_device), src_prev_stream
+            )
         self.assertEqual(torch.accelerator.current_device_idx(), src_device)
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)

@@ -283,7 +283,7 @@ print(torch.xpu.device_count())
         with stream:
             self.assertEqual(stream, torch.xpu.current_stream())
         self.assertEqual(prev_stream, torch.xpu.current_stream())
-    
+
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_multi_device_stream_context_manager(self):
         src_device = 0
