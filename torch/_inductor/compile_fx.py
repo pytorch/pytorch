@@ -4,6 +4,7 @@ import contextlib
 import functools
 import io
 import itertools
+import json
 import logging
 import sys
 import time
@@ -52,15 +53,13 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, FxGraphCache
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    get_placeholder_info,
-    log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
-)
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.output_code import CompiledFxGraph
+from torch._inductor.output_code import (
+    CompiledFxGraph,
+    get_expanded_dims,
+    index_expanded_dims,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
@@ -91,6 +90,8 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -140,41 +141,6 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
-
-# copy_ fails when trying to write to tensors with memory overlap,
-# for expanded dimensions (a dimension which used to have size 1 -> ?)
-# we can select one element from that dimension and write to it
-# to achieve writing to all values of that dimension of the input tensor
-def get_expanded_dims(t: torch.Tensor) -> List[int]:
-    if not isinstance(t, torch.Tensor):
-        return None
-    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
-
-
-def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tensor:
-    for expanded_dim in expanded_dims:
-        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
-    return t
-
-
-def complex_memory_overlap(t: torch.Tensor) -> bool:
-    # if torch._debug_has_internal_overlap thinks this tensor potentially has
-    # memory overlap internally, let's dig deeper to find out whether it's true.
-    #
-    # Call squeeze() so that dimension with size 1 does not cause false positive.
-    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
-    if torch._debug_has_internal_overlap(t) != 0:
-        strides = t.stride()
-        sizes = t.shape
-        indices = list(range(len(strides)))
-        indices = [x for _, x in sorted(zip(strides, indices))]
-        for i in range(len(strides)):
-            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
-            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
-            if strides[indices[i]] < prev_stride * prev_size:
-                return True
-    return False
 
 
 def get_static_input_idxs(num_fixed: int) -> List[int]:
@@ -665,87 +631,30 @@ def _compile_fx_inner(
                 # need to do any post-compilation steps: we just return the string,
                 # which is the filename of the compiled code.
                 return compiled_graph
-            cudagraph_info = None
-            if cudagraphs:
-                # check cudagraph disabling reasons from inductor lowering
-                if compiled_graph.disabled_cudagraphs_reason:
-                    if "cuda" in compiled_graph.device_types:
-                        log_cudagraph_skip_and_bump_counter(
-                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
-                    BoxedBool.disable(cudagraphs)
-                else:
-                    complex_memory_overlap_inputs = any(
-                        complex_memory_overlap(t)
-                        for t in example_inputs
-                        if isinstance(t, torch.Tensor)
-                    )
-
-                    if not config.triton.cudagraph_support_input_mutation:
-                        # Skip supports for cudagraph-managed tensors
-                        from torch._inductor.cudagraph_utils import (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor,
-                        )
-
-                        has_mutation_str = (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor(
-                                gm,
-                                compiled_graph,
-                                static_input_idxs,
-                            )
-                        )
-                        has_mutation = has_mutation_str is not None
-
-                        if has_mutation:
-                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-                    else:
-                        # Check mutation later to support cudagraph-managed tensors
-                        has_mutation = None
-
-                    cudagraph_tests = [
-                        (not has_mutation, "mutated inputs"),
-                        (not complex_memory_overlap_inputs, "complex memory overlap"),
-                        (
-                            all(
-                                isinstance(t, (torch.Tensor, torch.SymInt))
-                                for t in example_inputs
-                            ),
-                            "non-Tensor inputs",
-                        ),
-                    ]
-                    output = output_node(gm)
-                    # output args are tuple of first argument
-                    assert len(output.args) == 1
-                    stack_traces = [
-                        (
-                            arg.stack_trace
-                            if isinstance(arg, torch.fx.node.Node)
-                            else None
-                        )
-                        for arg in output.args[0]
-                    ]
-                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                    placeholders = tuple(get_placeholder_info(gm.graph))
-                    cudagraph_info = CudagraphCachedInfo(
-                        placeholders, stack_traces, cudagraph_fail_reasons
-                    )
-
-            compiled_graph.cudagraph_info = cudagraph_info
-            compiled_graph.inputs_to_check = inputs_to_check
-            compiled_graph.fx_kwargs = fx_kwargs
-            # TODO: should this be part of fx_kwargs
-            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
+            compiled_graph.post_compile1(
+                cudagraphs,
+                example_inputs,
+                gm,
+                static_input_idxs,
+                fx_kwargs,
+                inputs_to_check,
+                boxed_forward_device_index,
+            )
             return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
+        use_cache = (
+            not config.force_disable_caches
+            and (config.fx_graph_cache or fx_graph_remote_cache)
+            and not aot_mode
+        )
+        set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", use_cache)
+
         if (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
         ):
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
             for i, input in enumerate(example_inputs):
                 if (
                     isinstance(input, torch.Tensor)
@@ -753,28 +662,133 @@ def _compile_fx_inner(
                     and i in static_input_idxs
                 ):
                     input._is_inductor_static = True  # type: ignore[attr-defined]
-            compiled_graph = FxGraphCache.load(
-                codegen_and_compile,
-                gm,
-                example_inputs,
-                graph_kwargs,
-                inputs_to_check,
-                local=config.fx_graph_cache,
-                remote=fx_graph_remote_cache,
+
+            local = config.fx_graph_cache
+            remote = fx_graph_remote_cache
+
+            assert local or remote, "at least one of them needs to be enabled"
+            mb_compiled_graph: Optional[CompiledFxGraph] = None
+            remote_cache = None
+            (key_info, cache_info) = FxGraphCache.prepare_key(
+                gm, example_inputs, graph_kwargs, inputs_to_check, remote
             )
+            if key_info is not None:
+                key, debug_lines = key_info
+                if remote:
+                    remote_cache = FxGraphCache.get_remote_cache()
+                mb_compiled_graph, cache_info = FxGraphCache.load_with_key(
+                    key,
+                    debug_lines,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                    is_backward=graph_kwargs.get("is_backward", False),
+                    gm=gm,
+                )
+
+            # CACHE BYPASS: Compile the graph, don't save it to the cache
+            if cache_info["cache_state"] == "bypass":
+                assert mb_compiled_graph is None
+                # NB: This definitely doesn't return str, due to aot test
+                mb_compiled_graph = codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, graph_kwargs
+                )  # type: ignore[assignment]
+
+            # CACHE MISS: Compile the graph and save to cache
+            elif cache_info["cache_state"] == "miss":
+                assert mb_compiled_graph is None
+                assert key_info is not None
+                start_time = cache_info["cache_event_time"]
+                TritonBundler.begin_compile()
+                try:
+                    # NB: This definitely doesn't return str, due to aot test
+                    mb_compiled_graph = codegen_and_compile(
+                        gm, example_inputs, inputs_to_check, graph_kwargs
+                    )  # type: ignore[assignment]
+                    assert mb_compiled_graph is not None
+                    mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
+                    cache_key = key_info[0]
+                    mb_compiled_graph._fx_graph_cache_key = cache_key
+                    (
+                        mb_compiled_graph._triton_bundle,
+                        triton_bundler_meta,
+                    ) = TritonBundler.collect()
+                finally:
+                    TritonBundler.end_compile()
+                if triton_bundler_meta is not None:
+                    cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
+                cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+                FxGraphCache._save_graph(
+                    cache_key,
+                    mb_compiled_graph,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                )
+            # CACHE HIT: not much to really do, just make sure the cache key
+            # is recorded on the graph
+            else:
+                assert cache_info["cache_state"] == "hit"
+                assert mb_compiled_graph is not None
+                assert key_info is not None
+                cache_key = key_info[0]
+                mb_compiled_graph._fx_graph_cache_key = cache_key
+
+            assert mb_compiled_graph is not None
+            compiled_graph = mb_compiled_graph
+
+            # Logging and observability: we log a single chromium event
+            # and a tlparse log for every cache action.
+            # In the event of a bypass, we also logged to the remote table earlier
+            # with log_cache_bypass.
+            chromium_log = get_chromium_event_logger()
+            cache_state = cache_info["cache_state"]
+            # Here for grepping:
+            # fx_graph_cache_hit
+            # fx_graph_cache_miss
+            # fx_graph_cache_bypass
+            chromium_log.log_instant_event(
+                f"fx_graph_cache_{cache_state}",
+                cache_info["cache_event_time"],
+                metadata=cache_info,
+            )
+            # Add event data about cache hits/miss
+            # TODO: add remote cache get/put timings here too
+            chromium_log.add_event_data(
+                "inductor_compile",
+                cache_state=cache_state,
+                cache_event_time=cache_info["cache_event_time"],
+                key=cache_info.get("key"),
+                components=cache_info.get("components"),
+                cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+                remote_cache_enabled=remote,
+                local_cache_enabled=local,
+            )
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": f"fx_graph_cache_{cache_state}",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(cache_info),
+            )
+            # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
+            FxGraphCache.post_compile(
+                compiled_graph, example_inputs, graph_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
+            )
+
         else:
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
+            # TODO: This suppress can be removed when we unify OutputCode
+            # protocol
             compiled_graph = codegen_and_compile(
                 gm, example_inputs, inputs_to_check, graph_kwargs
-            )
+            )  # type: ignore[assignment]
             if aot_mode:
                 # AOT mode is special because codegen_and_compile returns a string.
                 # In that case, we don't need to run all post compilation steps, we just need
                 # to return the string directly.
                 return compiled_graph
-            compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs, gm
-            )
+            compiled_graph.post_compile2(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
