@@ -53,6 +53,6 @@ void cosh_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel_cuda)
 
 } // namespace at::native

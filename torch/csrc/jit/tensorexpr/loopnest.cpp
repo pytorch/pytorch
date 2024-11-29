@@ -1753,7 +1753,7 @@ std::vector<ForPtr> LoopNest::distributeLoopAndParentsOverInnerLoops(
 static bool areEqual(const ExprPtr& expr1, const ExprPtr& expr2) {
   auto diff = IRSimplifier::simplify(alloc<Sub>(expr1, expr2));
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
-};
+}
 
 static bool doesExprContainAnyVar(
     const ExprPtr& expr,

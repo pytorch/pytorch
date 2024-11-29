@@ -10,16 +10,16 @@
 C10_DEFINE_bool(
     caffe2_threadpool_force_inline,
     false,
-    "Force to always run jobs on the calling thread");
+    "Force to always run jobs on the calling thread")
 
 // Whether or not threadpool caps apply to Android
-C10_DEFINE_int(caffe2_threadpool_android_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_android_cap, true, "")
 
 // Whether or not threadpool caps apply to iOS and MacOS
-C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
-C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "");
+C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "")
+C10_DEFINE_int(caffe2_threadpool_macos_cap, true, "")
 
-C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.");
+C10_DEFINE_int(pthreadpool_size, 0, "Override the default thread pool size.")
 
 namespace caffe2 {
 
