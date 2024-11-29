@@ -1204,7 +1204,7 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
-  std::optional<std::vector<c10::string_view>> names() const;
+  std::optional<std::vector<std::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 

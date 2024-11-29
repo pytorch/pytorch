@@ -65,22 +65,7 @@ class OutputCode(Protocol):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         ...
 
-    # TODO: Not sure why we need two post_compile functions.  They're called
-    # in this order
-
-    def post_compile1(
-        self,
-        cudagraphs: BoxedBool,
-        example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        static_input_idxs: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-    ) -> None:
-        ...
-
-    def post_compile2(
+    def post_compile(
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
@@ -189,6 +174,12 @@ class CompiledFxGraph:
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
+        cudagraphs: BoxedBool,
+        example_inputs: Sequence[InputType],
+        static_input_idxs: Sequence[int],
+        fx_kwargs: _CompileFxKwargs,
+        inputs_to_check: Sequence[int],
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
     ) -> None:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -218,23 +209,6 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def post_compile1(
-        self,
-        cudagraphs: BoxedBool,
-        example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        static_input_idxs: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-    ) -> None:
         cudagraph_info = None
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
@@ -304,7 +278,14 @@ class CompiledFxGraph:
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
-    def post_compile2(
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        assert self.current_callable is not None
+        try:
+            return self.current_callable(inputs)
+        finally:
+            AutotuneCacheBundler.end_compile()
+
+    def post_compile(
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
@@ -314,6 +295,10 @@ class CompiledFxGraph:
         from torch._inductor.codecache import FxGraphCache
 
         FxGraphCache.post_compile(self, example_inputs, cudagraphs, gm)
+
+        # aot autograd needs to know to pass in inputs as a list
+        # TODO: Not sure why this isn't just set by default on CompiledFxGraph
+        self._boxed_call = True
 
     def get_constants(
         self, gm: Optional[torch.fx.GraphModule]
