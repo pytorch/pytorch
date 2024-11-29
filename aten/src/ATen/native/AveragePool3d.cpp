@@ -180,15 +180,15 @@ static void avg_pool3d_out_frame(
       /* local pointers. */
       const scalar_t *ip = input_p + k * itime * iwidth * iheight;
       scalar_t *op = output_p + k * otime * owidth * oheight;
-      for (int i = 0; i < otime * oheight * owidth; ++i)
+      for (int64_t i = 0; i < otime * oheight * owidth; ++i)
         *(op + i) = 0;
 
       /* loop over output */
-      for (int ti = 0; ti < otime; ti++)
+      for (int64_t ti = 0; ti < otime; ti++)
       {
-        for (int i = 0; i < oheight; i++)
+        for (int64_t i = 0; i < oheight; i++)
         {
-          for (int j = 0; j < owidth; j++)
+          for (int64_t j = 0; j < owidth; j++)
           {
             /* compute pool range. */
             int64_t tstart = ti * dT - padT;
