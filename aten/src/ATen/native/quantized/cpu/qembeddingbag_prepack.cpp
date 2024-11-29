@@ -435,7 +435,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       const float* input_row = weight_data + row * embedding_cols;
       std::uint8_t* output_row = output_data + row * output_columns;
 
-      float Xmin = 0, Xmax = 0;
+      float Xmin = std::numeric_limits<float>::quiet_NaN(), Xmax = std::numeric_limits<float>::quiet_NaN();
       if (optimized_qparams) {
         auto [xmax_tensor, xmin_tensor] = at::choose_qparams_optimized(
             float_weight[row], embedding_cols, nbins, ratio, bit_width);

@@ -100,7 +100,7 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (per_sample_weights_.has_value()) {
         weight_val = per_sample_weights_data[current];
       }
-      float scale = 0, bias = 0;
+      float scale = std::numeric_limits<float>::quiet_NaN(), bias = std::numeric_limits<float>::quiet_NaN();
       if constexpr (BIT_RATE == 8) {
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
