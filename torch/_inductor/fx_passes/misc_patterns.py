@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict, Tuple
+from typing import Dict, Set, Tuple
 
 import torch
 from torch._dynamo.utils import counters
 from torch._ops import OpOverload, OpOverloadPacket
-from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import fwd_only, register_replacement
 
@@ -78,7 +77,7 @@ class NumpyCompatNormalization:
         "other": ("x2",),
     }
     inverse_mapping: Dict[str, str]
-    cache: Dict["torch.fx.graph.Target", OrderedSet[str]]
+    cache: Dict["torch.fx.graph.Target", Set[str]]
 
     def __init__(self) -> None:
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
@@ -104,7 +103,7 @@ class NumpyCompatNormalization:
                     node.target
                 )
                 signatures = () if signatures is None else signatures
-                replaceable_kwargs = OrderedSet()
+                replaceable_kwargs = set()
                 for sig in signatures:
                     for param_name in sig.parameters.keys():
                         if param_name in self.numpy_compat:

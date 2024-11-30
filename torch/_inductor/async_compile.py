@@ -10,7 +10,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -38,7 +38,6 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -100,7 +99,7 @@ log = logging.getLogger(__name__)
 
 
 # Used to keep track of all process pools invoked so far.
-_pool_set: OrderedSet[AnyPool] = OrderedSet()
+_pool_set: Set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
@@ -213,6 +212,11 @@ class AsyncCompile:
         _compile_start()
         _set_triton_ptxas_path()
 
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return getattr(
+                torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
+            )
+
         kernel = TritonCodeCache.load(kernel_name, source_code)
         if self._use_process_pool():
             # We want to support changing these env vars after (and while) the
@@ -267,12 +271,19 @@ class AsyncCompile:
 
         return self.submit(task)
 
-    def rocm(self, source_code, dst_file_ext, aot_compile=False):
+    def rocm(
+        self,
+        source_code,
+        dst_file_ext,
+        aot_compile=False,
+    ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
         def task():
             if aot_compile:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+            if config.rocm.generate_test_runner:
+                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
@@ -288,9 +299,7 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        with dynamo_timed(
-            "async_compile.wait", log_pt2_compile_event=True, fwd_only=False
-        ):
+        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True):
             num_kernels = len(
                 [
                     value

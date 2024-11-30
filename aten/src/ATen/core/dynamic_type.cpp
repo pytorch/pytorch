@@ -69,16 +69,6 @@ DynamicType::Arguments::Arguments(
   }
 }
 
-DynamicType::Arguments::Arguments(
-    const std::vector<c10::string_view>& names,
-    c10::ArrayRef<TypePtr> args)
-    : Arguments(args) {
-  TORCH_INTERNAL_ASSERT(names.size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    elems[i].label = std::string{names[i]};
-  }
-}
-
 DynamicType::~DynamicType() {
   if (tag_ == Tag::Class) {
     class_.~ClassTypePtr();

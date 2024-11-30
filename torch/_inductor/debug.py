@@ -21,7 +21,6 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -236,7 +235,7 @@ def get_node_name_to_buf_meta(
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
-            buf_name_to_n_node[buf_name] = OrderedSet([node_name])
+            buf_name_to_n_node[buf_name] = {node_name}
         else:
             buf_name_to_n_node[buf_name].add(node_name)
 
@@ -566,7 +565,7 @@ class DebugFormatter:
                 "type": type(node).__name__,
             }
             try:
-                layout = node.get_layout()
+                layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
                     offset = 0
                     try:
@@ -581,13 +580,13 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(V.graph.sizevars.size_hints(layout.size)),
-                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        size=[*V.graph.sizevars.size_hints(layout.size)],
+                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
                 else:
-                    node_info["layout"] = str(node.get_layout())
+                    node_info["layout"] = str(layout)
             except Exception as e:
                 pass
             try:

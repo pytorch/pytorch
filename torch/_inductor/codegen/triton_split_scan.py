@@ -6,7 +6,6 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch._prims_common import prod
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
 
 
@@ -30,9 +29,11 @@ class TritonSplitScanKernel(TritonKernel):
         self,
         *groups,
         pid_cache=None,
+        fixed_config=None,
         **kwargs,
     ) -> None:
         assert pid_cache is None, "not supported"
+        assert fixed_config is None, "not supported"
         super().__init__(
             *groups,
             **kwargs,
@@ -109,7 +110,7 @@ class TritonSplitScanKernel(TritonKernel):
             f"{scratch_elems_per_block} * {runtime_rblocks}"
         )
 
-        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
 

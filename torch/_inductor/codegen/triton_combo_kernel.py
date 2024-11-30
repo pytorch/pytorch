@@ -18,8 +18,6 @@ from typing import (
 
 from sympy import Integer, Symbol
 
-from torch.utils._ordered_set import OrderedSet
-
 from .. import config, metrics
 from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
@@ -78,7 +76,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     tilings = [node_info_map[n][1] for n in nodes]
 
     max_dims = max(len(t) for t in tilings)
-    nodes_per_ndim = []
+    nodes_per_ndim: List[List[BaseSchedulerNode]] = []
     for i in range(2, max_dims + 1):
         group_per_dim = [n for n, t in zip(nodes, tilings) if len(t) == i]
         reduction = [
@@ -113,12 +111,11 @@ def _default_custom_combo_kernel_horizontal_partition(
                 len(large_pointwise),
             )
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
-            for node in large_pointwise:
-                nodes_per_ndim.append([node])
+            nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        for g in (not_reduction, short_reduction, long_reduction):
-            if g:
-                nodes_per_ndim.append(g)
+        nodes_per_ndim.extend(
+            g for g in (not_reduction, short_reduction, long_reduction) if g
+        )
 
     assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
     return nodes_per_ndim
@@ -617,7 +614,7 @@ class ComboKernel(Kernel):
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
 
     def get_mutated_args_sub_kernels(self) -> List[str]:
-        mutated_args = OrderedSet[str]()
+        mutated_args = set()
         for sub_kernel in self.sub_kernels:
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:

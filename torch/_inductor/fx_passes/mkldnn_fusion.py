@@ -6,7 +6,6 @@ from typing import Any, Tuple
 
 import torch
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
-from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -368,8 +367,14 @@ if torch._C._has_mkldnn:
             for n in binary_nodes
         ):
             return False
+
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
+            or not all(
+                get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
+                for i in range(get_meta_value(n.args[0]).dim())
+            )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -411,7 +416,7 @@ if torch._C._has_mkldnn:
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
-            _visited_nodes = OrderedSet[torch.fx.Node]()
+            _visited_nodes = set()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
                 if _current_node not in _visited_nodes:
@@ -539,7 +544,9 @@ if torch._C._has_mkldnn:
                     computation_args += [1.0, None, [], None]
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other):
+            if not _can_be_inplace(other) or other.data.shape != list(
+                match.nodes[0].meta["val"].size()
+            ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -730,6 +737,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
+        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_numer=1) -> _recover_linear(pass_number=2)
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -749,7 +757,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
-            pass_number=1,
+            pass_number=2,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             def get_val(val):
@@ -822,7 +830,7 @@ if torch._C._has_mkldnn:
                 CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
                 Arg(),
             ),
-            pass_number=1,
+            pass_number=2,
             extra_check=is_linear_add_bias,
         )
         def linear_bias_pattern(match, *args):
@@ -931,6 +939,14 @@ if torch._C._has_mkldnn:
         """
         Check if the node is supported for MKLDNN linear.
         """
+
+        def is_const_or_cat_by_const(weight):
+            if weight.op == "get_attr":
+                return True
+            if weight.target != aten.cat.default:
+                return False
+            return all(arg.op == "get_attr" for arg in weight.args[0])
+
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
         if linear_node.target == aten.addmm.default:
@@ -940,7 +956,7 @@ if torch._C._has_mkldnn:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
-        if linear_node.args[weight_idx].op != "get_attr":
+        if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
@@ -1129,10 +1145,12 @@ if torch._C._has_mkldnn:
                 alpha=KeywordArg("alpha"),
             ),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         @register_freezing_graph_pattern(
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         def linear(match, *args, **kwargs):
             graph = match.graph

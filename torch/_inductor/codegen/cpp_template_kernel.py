@@ -6,7 +6,6 @@ import sympy
 from sympy.parsing.sympy_parser import parse_expr
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
@@ -70,25 +69,21 @@ class CppTemplateKernel(CppKernel):
                 if orig in self.args.output_buffers:
                     self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
-        unique_sizevars = OrderedSet(
-            [
-                s
-                for input in inputs.values()
-                if input is not None
-                for sym in itertools.chain(input.get_size(), input.get_stride())
-                if isinstance(sym, sympy.Expr)
-                for s in sym.free_symbols
-            ]
-        )
-        unique_sizevars |= OrderedSet(
-            [
-                s
-                for output in outputs.values()
-                for sym in itertools.chain(output.get_size(), output.get_stride())
-                if isinstance(sym, sympy.Expr)
-                for s in sym.free_symbols
-            ]
-        )
+        unique_sizevars = {
+            s
+            for input in inputs.values()
+            if input is not None
+            for sym in itertools.chain(input.get_size(), input.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        }
+        unique_sizevars |= {
+            s
+            for output in outputs.values()
+            for sym in itertools.chain(output.get_size(), output.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        }
         sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
             self.args.sizevars[sizevar] = f"k{sizevar}"
@@ -132,7 +127,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.layout.as_fixed().make_indexer()
+        indexer = node.get_layout().as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -225,7 +220,7 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()(var_ranges.keys())
+        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)

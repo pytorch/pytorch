@@ -762,44 +762,6 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
-id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder,
-                                        const TensorIteratorBase& iter,
-                                        bool use_64bit_index) {
-  constexpr uint32_t nOffsets = 3;
-  uint32_t numThreads = iter.numel();
-  const uint32_t nDim = iter.ndim();
-  const IntArrayRef& iterShape = iter.shape();
-  std::vector<uint32_t> iterShapeData(iterShape.size());
-  std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= nOffsets);
-  TORCH_CHECK(use_64bit_index || iter.can_use_32bit_indexing(), "Can't be indexed using 32-bit iterator");
-
-  for (const auto i : c10::irange(iterShape.size())) {
-    iterShapeData[i] = static_cast<uint32_t>(iterShape[i]);
-  }
-
-  for (const auto i : c10::irange(nDim)) {
-    for (const auto offset : c10::irange(nOffsets)) {
-      strides[i][offset] = static_cast<uint32_t>(iter.strides(offset)[i]);
-    }
-  }
-
-  id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingPSO(
-      use_64bit_index ? "kernel_index_offsets_64" : "kernel_index_offsets_32");
-  const auto elementSize = use_64bit_index ? sizeof(simd_ulong3) : sizeof(simd_uint3);
-  id<MTLBuffer> kernelDataOffsets = (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * elementSize).get();
-
-  [commandEncoder setComputePipelineState:kernelDataOffsetsPSO];
-  [commandEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-  [commandEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-  [commandEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-  [commandEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-
-  mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
-
-  return kernelDataOffsets;
-}
-
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   if (C10_UNLIKELY(!library)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
@@ -889,6 +851,21 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 
   cplMap[key] = std::make_pair(cpl, func);
   return cplMap[key];
+}
+
+std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  if (C10_UNLIKELY(!library && nparams > 0)) {
+    throw std::runtime_error("Library must be initialized first");
+  }
+  std::vector<std::string> rc;
+  @autoreleasepool {
+    NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
+    for (auto idx : c10::irange([names count])) {
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
+    }
+  }
+  return rc;
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {

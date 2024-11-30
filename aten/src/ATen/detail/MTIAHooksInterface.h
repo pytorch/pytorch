@@ -109,11 +109,16 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
+
+  virtual void emptyCache() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
 };
 
 struct TORCH_API MTIAHooksArgs {};
 
-C10_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
+TORCH_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
 #define REGISTER_MTIA_HOOKS(clsname) \
   C10_REGISTER_CLASS(MTIAHooksRegistry, clsname, clsname)
 

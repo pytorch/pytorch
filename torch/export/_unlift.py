@@ -11,6 +11,7 @@ from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
+from ._tree_utils import reorder_kwargs
 from .exported_program import (
     ExportedProgram,
     ExportGraphSignature,
@@ -19,20 +20,31 @@ from .exported_program import (
 )
 
 
+def _check_inputs_match(args, kwargs, in_spec: pytree.TreeSpec) -> List:
+    reordered_kwargs = reorder_kwargs(kwargs, in_spec)
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, reordered_kwargs)
+    )
+
+    if received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}.\n"
+            "Please check that the inputs have the same number of args "
+            "and kwargs as the ones you used when tracing."
+        )
+
+    return flat_args_with_path
+
+
 @torch._dynamo.disable
-def _check_input_constraints_pre_hook(self, *args, **kwargs):
+def _check_input_constraints_pre_hook(self, args, kwargs):
     if not self.validate_inputs:
         return
 
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(args)
-
-    if received_spec != self._in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{self._in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
+    flat_args_with_path = _check_inputs_match(args, kwargs, self._in_spec)
 
     _check_input_constraints_for_graph(
         [node for node in self.graph.nodes if node.op == "placeholder"],

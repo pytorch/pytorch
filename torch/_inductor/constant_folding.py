@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -35,9 +34,9 @@ def replace_node_with_constant(
             qualname = f"_frozen_param{i}"
             if not hasattr(gm, qualname):
                 break
-            i += 1
+            i += 1  # type: ignore[assignment, operator]
 
-        gm._frozen_param_count = i + 1
+        gm._frozen_param_count = i + 1  # type: ignore[assignment, operator]
 
     with g.inserting_before(node):
         if constant is not None:
@@ -48,6 +47,7 @@ def replace_node_with_constant(
         node.replace_all_uses_with(new_input_node)
         new_input_node.meta.update(node.meta)
         g.erase_node(node)
+        new_input_node.name = node.name
 
     if constant is not None:
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
@@ -141,10 +141,10 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
         last_non_output_use = collections.defaultdict(list)
-        seen_uses = OrderedSet[torch.fx.Node]()
-        output_node = next(iter(reversed(self.module.graph.nodes)))
+        seen_uses = set()
+        output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
-        for node in reversed(self.module.graph.nodes):
+        for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if node.target == "output":
                 continue
 
@@ -262,11 +262,11 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run(initial_env=env)
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             env[n] = self.unknown_value  # type: ignore[assignment]
         if self.lifted_constant_names is None:
             return
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if n.name in (self.lifted_constant_names or ()):
                 env[n] = self.deferred_value
 
