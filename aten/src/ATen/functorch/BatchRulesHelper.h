@@ -220,8 +220,7 @@ inline void find_and_unpack_tensors(
       continue;
     }
     auto unpacked = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
-    const auto& tensor_value = std::get<0>(unpacked);
-    const auto tensor_bdim = std::get<1>(unpacked);
+    const auto& [tensor_value, tensor_bdim] = unpacked;
     if (tensor_bdim.has_value()) {
       auto candidate_batch_size = tensor_value.size(*tensor_bdim);
       if (computed_batch_size == -1) {
