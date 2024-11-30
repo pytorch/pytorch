@@ -4595,9 +4595,9 @@ def monitored_barrier(
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(
+    return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
         timeout, wait_all_ranks=wait_all_ranks
-    )  # type:ignore[attr-defined]
+    )
 
 
 def _create_process_group_wrapper(

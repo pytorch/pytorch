@@ -913,10 +913,10 @@ class Tracer(TracerBase):
 
             return pytree.tree_map(replace_ph, concrete_args[name])
         if name[0] == "*":
-            default = ()
+            default: Tuple[Any, ...] = ()
         else:
             param = sig.parameters[name]
-            default = (  # type: ignore[assignment]
+            default: Tuple[Any, ...] = (  # type: ignore[assignment]
                 () if param.default is inspect.Parameter.empty else (param.default,)
             )
         return self.create_proxy(
