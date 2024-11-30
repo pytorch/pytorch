@@ -7,6 +7,7 @@ from ctypes import byref, c_int, c_size_t, c_void_p
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 import torch
+from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
     GPUDeviceBenchmarkMixin,
@@ -45,6 +46,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
         ROCmCodeCache.compile(self.source_code, "so")
+        if config.rocm.generate_test_runner:
+            ROCmCodeCache.compile(self.source_code, "exe")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -91,9 +94,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
-        unique_input_count = len(
-            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
-        )
+        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 

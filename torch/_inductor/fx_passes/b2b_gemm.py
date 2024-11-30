@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
@@ -532,9 +531,9 @@ def tuned_b2b_gemm(
     A.realize()
     B.realize()
     C.realize()
-    layout = FixedLayout(A.get_device(), A.get_dtype(), [A.shape[0], C.shape[1]])  # type: ignore[index]
+    layout = FixedLayout(A.get_device_or_error(), A.get_dtype(), [A.shape[0], C.shape[1]])  # type: ignore[index]
     subgraph_buffer = build_subgraph_buffer(
-        [create_placeholder("inner_mm", A.get_dtype(), A.get_device())],
+        [create_placeholder("inner_mm", A.get_dtype(), A.get_device_or_error())],
         subgraph,
     )
     choices: list[TritonTemplateCaller] = []
@@ -612,7 +611,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> Tuple[bool, OrderedSet[torch.fx.Node]]:
+    ) -> Tuple[bool, Set[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
         with no other input nodes for the intermediates and dst;
@@ -620,7 +619,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         (1) the Boolean value
         (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
-        visited: OrderedSet[torch.fx.Node] = OrderedSet()
+        visited: Set[torch.fx.Node] = set()
         input_counter: Dict[torch.fx.Node, int] = {}
 
         all_reachable = True

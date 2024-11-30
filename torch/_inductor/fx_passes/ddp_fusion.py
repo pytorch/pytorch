@@ -6,14 +6,24 @@ import math
 import operator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Dict, Generator, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from ..fx_utils import get_fake_args_kwargs
@@ -66,7 +76,7 @@ class CommBlock:
     inputs: List[fx.Node]
     wait_nodes: List[fx.Node]
     comm_node: fx.Node
-    outputs: OrderedSet[fx.Node]
+    outputs: Set[fx.Node]
 
 
 def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
@@ -115,7 +125,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
         return None
 
     # Identify all the outputs of this collective block.
-    outputs: OrderedSet[fx.Node] = OrderedSet()
+    outputs: Set[fx.Node] = set()
     nodes = collections.deque(wait_nodes)
     while nodes:
         node = nodes.popleft()
@@ -223,7 +233,7 @@ def _fuse_allreduce_by_concat(
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
         inputs=[div_node],
-        outputs=OrderedSet([fused_wait_node]),
+        outputs={fused_wait_node},
     )
 
 
@@ -285,7 +295,7 @@ def _fuse_with_coalesced_op(
         wait_nodes=wait_nodes,
         comm_node=fused_comm_node,
         inputs=[input_node],
-        outputs=OrderedSet(wait_nodes),
+        outputs=set(wait_nodes),
     )
 
 
@@ -363,7 +373,7 @@ def _scatter_fused_allreduce_waits(
         orig_wait.replace_all_uses_with(fused_output)
 
     last_fused_result = fused_outputs[0]
-    fused_outputs_set = OrderedSet(fused_outputs)
+    fused_outputs_set = set(fused_outputs)
     for node in graph.nodes:
         if node in fused_outputs_set:
             last_fused_result = node
@@ -537,7 +547,7 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
         return
 
     # Find all the end users.
-    allreduce_users: OrderedSet[fx.Node] = OrderedSet()
+    allreduce_users: Set[fx.Node] = set()
     for allreduce in comm_blocks:
         for output in allreduce.outputs:
             allreduce_users.update(output.users)
@@ -578,9 +588,9 @@ def fuse_ddp_communication(
                 func = globals()[pa]
             else:
                 func = pa
-            if "bucket_size_mb" in OrderedSet(
-                [v.name for v in inspect.signature(func).parameters.values()]
-            ):
+            if "bucket_size_mb" in {
+                v.name for v in inspect.signature(func).parameters.values()
+            }:
                 func(graph, bucket_size_mb=bucket_size_mb)
             else:
                 func(graph)

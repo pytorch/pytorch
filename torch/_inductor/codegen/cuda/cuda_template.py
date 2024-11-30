@@ -93,6 +93,7 @@ class CUDATemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
+        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 
@@ -101,7 +102,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=extra_args,
+            extra_args=size_args,
             source_code=code,
         )
 
@@ -221,7 +222,7 @@ class CUTLASSTemplate(CUDATemplate):
 
     def cute_int(self, int_str: str, var_name: str) -> str:
         res = ""
-        if int_str in ("1", "1L"):
+        if int_str in {"1", "1L"}:
             res = "cute::Int<1>{}"
         else:
             res = int_str

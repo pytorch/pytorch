@@ -51,8 +51,8 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
-    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.utils import InputType
 
 
@@ -68,9 +68,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallableEx",
+    unconfigured_compiler_fn: "_CompileFxCallable",
     compiler_name: str,
-) -> "_CompileFxCallableEx":
+) -> "_CompileFxCallable":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -83,7 +83,7 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargsEx"],
+        **kwargs: Unpack["_CompileFxKwargs"],
     ) -> Union["CompiledFxGraph", str]:
         from torch._subclasses import FakeTensorMode
 
@@ -305,7 +305,9 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+            # It's better to produce a slightly wrong repro string than none
+            # at all
+            writer.unsupported(placeholder, arg)
 
     model_str += "\n".join(writer.lines()) + "\n"
 
