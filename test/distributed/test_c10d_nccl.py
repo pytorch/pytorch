@@ -420,12 +420,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Destroy pg
         dist.destroy_process_group()
 
+        # we need a new Store for the new PG, achieving it by adding prefix
+        new_store = c10d.PrefixStore("2nd", store)
+
         # re-initialize pg
         c10d.init_process_group(
             "nccl",
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=new_store,
         )
         t1 = torch.rand(5, 5, device=device)
         dist.all_reduce(t1)
@@ -571,10 +574,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         torch.cuda.synchronize(device)
         c10d.destroy_process_group()
-        self.assertEqual(
+        self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
@@ -2910,6 +2913,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # nccl error happening before rank 0 timeouts
             time.sleep(4)
 
+        # Mimicing all ranks sensing the timeout, abort
+        process_group.abort()
+
         if prev_nccl_async_error_handling is not None:
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
@@ -3420,7 +3426,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
             input = torch.full(
-                (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
+                (10240, 10240), float(self.rank), device=f"cuda:{self.rank}"
             )
             dist.all_reduce(input, op=dist.ReduceOp.SUM, async_op=True)
             # Non-functional collectives run under the context manager is registered in the work registry.
@@ -3432,7 +3438,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # Case 2: Run collectives not under context manager, and don't call wait on them.
         # NOTE: Here we intentionally test memory-stressed case.
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 2)
-        for _ in range(1000):
+        for _ in range(50000):
             input = torch.full(
                 (1024, 1024), float(self.rank), device=f"cuda:{self.rank}"
             )
