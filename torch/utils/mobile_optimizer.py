@@ -49,10 +49,7 @@ def optimize_for_mobile(
     if all(hasattr(script_module, method) for method in bundled_inputs_attributes):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
-    non_exist_methods = []
-    for method in preserved_methods_str:
-        if not hasattr(script_module, method):
-            non_exist_methods.append(method)
+    non_exist_methods = [method for method in preserved_methods_str if not hasattr(script_module, method)]
     if non_exist_methods:
         raise AttributeError(
             f"The following methods to preserve do not exist in script_module: {', '.join(non_exist_methods)}")

@@ -25,6 +25,7 @@ from ..source import (
     AttrSource,
     DefaultsSource,
     GetItemSource,
+    LocalSource,
     ODictGetItemSource,
     TypeSource,
     WeakRefCallSource,
@@ -144,8 +145,7 @@ class SuperVariable(VariableTracker):
             return GetAttrVariable(self, name)
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
-            return variables.ConstantVariable.create(value, source=source)
-        return variables.ConstantVariable.create(value)
+        return variables.ConstantVariable.create(value, source=source)
 
     def call_method(
         self,
@@ -330,20 +330,6 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class ClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     # If the cell existed before Dynamo tracing started, this will be the
     # VariableTracker that represents the cell content.
@@ -358,6 +344,18 @@ class NewCellVariable(VariableTracker):
     ) -> None:
         super().__init__(**kwargs)
         self.pre_existing_contents = pre_existing_contents
+
+    def is_root_frame_cell(self):
+        """
+        Return true if this variable models a cell that is native to the root
+        frame, i.e., a part of its `co_cellvars` or `co_freevars`.
+        """
+        source = self.source
+        return (
+            source is not None
+            and isinstance(source, LocalSource)
+            and source.is_root_frame_cell
+        )
 
 
 class NewGlobalVariable(VariableTracker):
@@ -1187,11 +1185,11 @@ class TypingVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Create a new typing variable, e.g., `List[int]`
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable.create(
-                self.value[args[0].as_python_constant()],
-            )
-        unimplemented("typing")
+            new_typing = self.value[args[0].as_python_constant()]
+            return TypingVariable(new_typing)
+        unimplemented("unsupported method call on typing variablel")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder

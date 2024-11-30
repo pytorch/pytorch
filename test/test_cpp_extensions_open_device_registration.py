@@ -644,6 +644,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                     with torch.serialization.skip_data():
                         torch.save(sd, f)
 
+    def test_open_device_dlpack(self):
+        t = torch.randn(2, 3).to("foo")
+        capsule = torch.utils.dlpack.to_dlpack(t)
+        t1 = torch.from_dlpack(capsule)
+        self.assertTrue(t1.device == t.device)
+        t = t.to("cpu")
+        t1 = t1.to("cpu")
+        self.assertEqual(t, t1)
+
 
 if __name__ == "__main__":
     common.run_tests()

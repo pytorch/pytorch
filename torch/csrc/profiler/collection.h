@@ -449,7 +449,7 @@ struct KinetoObserverContext : public at::ObserverContext {
 
     bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
-    extra_meta_t* extra_meta_{};
+    extra_meta_t* extra_nccl_meta_{};
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
