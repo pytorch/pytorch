@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import sympy
 

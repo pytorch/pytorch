@@ -8,7 +8,6 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
-from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir
 from ..utils import sympy_product

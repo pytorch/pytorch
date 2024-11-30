@@ -5,17 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
