@@ -11,13 +11,15 @@ from tools.linter.adapters.annotations_linter import (
     AnnotationsLinter,
     FROM_FUTURE,
 )
+
+
 _PARENT = Path(__file__).parent.absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
 
-if _PARENT not in _PATH:
-    from .linter_test_case import LinterTestCase
-else:
+if _PARENT in _PATH:
     from linter_test_case import LinterTestCase
+else:
+    from .linter_test_case import LinterTestCase
 
 
 TEST_FILE = Path("tools/test/annotations_linter_testdata/python_code.py.txt")
