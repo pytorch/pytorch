@@ -7116,8 +7116,7 @@ mkldnn_rnn_layer_differentiable_backward(
     int64_t x_index = reverse ? seq_length - seq - 1 : seq;
     const auto& [i, f, g, o] = layer_gates[x_index];
     const auto& cy = std::get<1>(layer_states[seq + 1]);
-    const auto& hx = std::get<0>(layer_states[seq]);
-    const auto& cx = std::get<1>(layer_states[seq]);
+    const auto& [hx, cx] = layer_states[seq];
     new_grad_hy = grad_output[x_index].add(grad_hy);
     d1 = grad_cy.add(new_grad_hy * o * (1 - cy.tanh() * cy.tanh()));
     dgp = d1 * i;

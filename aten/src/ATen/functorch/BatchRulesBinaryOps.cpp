@@ -14,7 +14,7 @@
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
@@ -91,7 +91,7 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename M, M Meth, typename... ExtraArgs>
-void binary_pointwise_inplace_batch_rule(
+static void binary_pointwise_inplace_batch_rule(
     Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
@@ -118,7 +118,7 @@ void binary_pointwise_inplace_batch_rule(
 }
 
 template <typename F, F Func>
-std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim) {
   // compute max logical rank
@@ -239,8 +239,8 @@ static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
   // We need to apply the same preprocessing on x1 and x2 as in the forward pass
   // _binary_pointwise_batch_rule
   auto x12 = _binary_pointwise_helper(x1_, x1_bdim, x2, x2_bdim);
-  x1_ = std::get<0>(x12);
-  auto x2_ = std::get<1>(x12);
+  x1_ = std::move(std::get<0>(x12));
+  auto& x2_ = std::get<1>(x12);
 
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
   if ((x1_bdim || x2_bdim) && !grad_bdim) {
