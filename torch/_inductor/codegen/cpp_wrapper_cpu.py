@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -197,11 +198,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_path = (
+        extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
-        if os.path.exists(extend_aoti_path):
-            self.header.splice(f"#include <{extend_aoti_path}>")
+        extend_aoti_c_shim_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "include",
+            extend_aoti_c_shim_include,
+        )
+        if os.path.exists(extend_aoti_c_shim_path):
+            self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -250,7 +256,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # real input/output tensor match ones provided at compile time via sample
         # input/output.
         def gen_check(handle_kind, idx, name, tensor):
-            self.prefix.writeline(f"auto {name} = {handle_kind}[{idx}];")
+            # Wrap AtenTensorHandle with ConstantHandle for cleaner utility function access
+            self.prefix.writeline(
+                f"ConstantHandle {name} = ConstantHandle({handle_kind}[{idx}]);"
+            )
             self.codegen_tensor_dtype_var_decl(self.prefix, name)
             expected_dtype_name = DTYPE_TO_ATEN[tensor.dtype]
             dtype_str = str(tensor.dtype).split(".")[-1]
@@ -486,16 +495,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
-        )
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride;")
-        code.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
-        )
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -779,12 +782,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-        self.write_wrapper_decl()
-        return super().generate(is_inference)
+        with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+            if V.graph.aot_mode and not V.graph.is_const_graph:
+                self.codegen_model_kernels()
+                self.codegen_model_constructor()
+                self.codegen_const_run_driver()
+            self.write_wrapper_decl()
+            return super().generate(is_inference)
 
     def finalize_prefix(self):
         cached_dtypes_buffer = IndentedBuffer()
@@ -1102,15 +1106,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x))
+        return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
+        parts = [*map(self.codegen_sizevar, shape)]
         if len(parts) == 0:
             return "{}"
         if len(parts) == 1:
@@ -1139,7 +1146,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
@@ -1363,7 +1370,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
                 call_strs.extend(tmp_call_strs)
             else:
                 call_strs.append(
@@ -1699,7 +1706,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         return new_tensor_args, new_int_args
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed(
+    def generate_fallback_kernel_with_runtime_lookup(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1739,14 +1746,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert raw_args is not None
             assert output_args is not None
 
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+            return self.generate_fallback_kernel_with_runtime_lookup_aot(
                 op_overload,
                 raw_args,
                 output_args,
                 outputs,
             )
         else:
-            return self.generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+            return self.generate_fallback_kernel_with_runtime_lookup_jit(
                 buf_name,
                 python_kernel_name,
                 cpp_kernel_name,
@@ -1886,7 +1893,7 @@ if (custom_op_wrapper.get() == NULL) {
             )
         return "".join(lines)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_jit(
+    def generate_fallback_kernel_with_runtime_lookup_jit(
         self,
         buf_name: str,
         python_kernel_name: str,
@@ -1907,7 +1914,7 @@ if (custom_op_wrapper.get() == NULL) {
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
         lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
 if ({py_args_var}.get() == NULL) {{
 throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
@@ -1961,7 +1968,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         )
         self.writelines(scope_gil_acquire)
 
-    def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
+    def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
         op_overload,
         raw_args,  # contains both args and flatten kwargs

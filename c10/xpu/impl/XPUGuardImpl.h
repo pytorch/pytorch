@@ -103,7 +103,19 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // Delete the event previously recorded.
     if (xpu_event)
       delete xpu_event;
+#if SYCL_COMPILER_VERSION >= 20250000
+    if (flag == EventFlag::BACKEND_DEFAULT) {
+      // Use the profiling tag to record the event to enable timing feature.
+      xpu_event =
+          new sycl::event(sycl::ext::oneapi::experimental::submit_profiling_tag(
+              xpu_stream.queue()));
+    } else {
+      xpu_event =
+          new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+    }
+#else
     xpu_event = new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+#endif
     *event = reinterpret_cast<void*>(xpu_event);
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
