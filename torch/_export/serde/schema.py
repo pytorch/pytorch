@@ -226,7 +226,7 @@ class Graph:
     # list.
     is_single_tensor_return: Annotated[bool, 70] = False
     custom_obj_values: Annotated[Dict[str, CustomObjArgument], 80] = field(default_factory=dict)
-
+    sym_float_values: Annotated[Dict[str, SymFloat], 90] = field(default_factory=dict)
 
 @dataclass
 class UserInputSpec:
