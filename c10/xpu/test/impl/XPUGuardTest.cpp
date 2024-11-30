@@ -113,6 +113,10 @@ TEST(XPUGuardTest, EventBehavior) {
   event2.synchronize();
   EXPECT_TRUE(event2.query());
   EXPECT_NE(event1.eventId(), event2.eventId());
-  EXPECT_GT(event1.elapsedTime(event2));
+#if SYCL_COMPILER_VERSION < 20250000
+  ASSERT_THROW(event1.elapsedTime(event2), c10::Error);
+#else
+  EXPECT_GT(event1.elapsedTime(event2), 0);
+#endif
   sycl::free(deviceData2, c10::xpu::get_device_context());
 }
