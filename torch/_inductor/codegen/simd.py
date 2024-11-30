@@ -1567,7 +1567,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> Dict[str, Tuple[sympy.Expr]]:
+    ) -> Dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
