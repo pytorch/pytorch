@@ -798,6 +798,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
+# When True, complex_memory_overlap always reports True
+always_complex_memory_overlap_TESTING_ONLY: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -1348,6 +1351,8 @@ _cache_config_ignore_prefix = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    # tests assume that changes here don't invalidate cache
+    "always_complex_memory_overlap_TESTING_ONLY",
 ]
 
 # External callable for matmul tuning candidates
@@ -1356,6 +1361,8 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class test_configs:
     force_extern_kernel_in_multi_template = False
+
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:
