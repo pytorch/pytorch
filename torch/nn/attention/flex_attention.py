@@ -1074,6 +1074,14 @@ def _apply_kernel_options(
         # we always write unless in no_grad
         output_logsumexp = torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+        any_inputs_on_cpu_device = (
+            query.device.type == "cpu"
+            or key.device.type == "cpu"
+            or value.device.type == "cpu"
+        )
+        if any_inputs_on_cpu_device:
+            # CPU with torch.compile only supports infernece, and will not return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     return kernel_options
 
