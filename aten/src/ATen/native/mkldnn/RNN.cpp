@@ -554,8 +554,7 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
   output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  std::tie(hy, cy) = result.second;
 }
 } // anonymous namespace
 
