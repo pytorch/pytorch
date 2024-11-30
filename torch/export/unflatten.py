@@ -125,7 +125,7 @@ class InterpreterModule(torch.nn.Module):
     and makes it easier to debug execution.
     """
 
-    graph_module: torch.fx.GraphModule | None
+    graph_module: Optional[torch.fx.GraphModule]
 
     def __init__(
         self,
@@ -825,7 +825,7 @@ def _generate_flatten(gm: torch.fx.GraphModule, node) -> torch.fx.Node:
 
 
 def _generate_flatten_spec(
-    gm: torch.fx.GraphModule | InterpreterModule | UnflattenedModule, node, spec
+    gm: Union[torch.fx.GraphModule, InterpreterModule, UnflattenedModule], node, spec
 ) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
@@ -833,7 +833,7 @@ def _generate_flatten_spec(
 
 
 def _generate_unflatten(
-    gm: torch.fx.GraphModule | InterpreterModule | UnflattenedModule, nodes, spec
+    gm: Union[torch.fx.GraphModule, InterpreterModule, UnflattenedModule], nodes, spec
 ) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
@@ -898,7 +898,7 @@ class _ModuleFrame:
         module_stack: List[Tuple[str, int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
-        module: Optional[torch.fx.GraphModule | UnflattenedModule] = None,
+        module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,
     ):
         self.flat_graph = flat_graph
         self.nodes = nodes
@@ -916,7 +916,7 @@ class _ModuleFrame:
         # generate call name for self.fqn
         self.child_fqn = _call_name(self.fqn, num_calls + 1)
 
-        self.module: torch.fx.GraphModule | UnflattenedModule | InterpreterModule
+        self.module: Union[torch.fx.GraphModule, UnflattenedModule, InterpreterModule]
         if module is not None:
             self.module = module
             self.ivals = module.ivals if hasattr(module, "ivals") else {}  # type: ignore[var-annotated]
