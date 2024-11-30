@@ -7,7 +7,7 @@
     "name": "Builtin `set` is deprecated",
     "original": null,
     "path": "tools/test/set_linter_testdata/includes_doesnt_change.py.txt",
-    "replacement": "OrderedSet",
+    "replacement": null,
     "severity": "error"
   },
   {

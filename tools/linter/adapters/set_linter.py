@@ -1,27 +1,25 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import sys
 import token
 from functools import cached_property
+from pathlib import Path
 from typing import Iterator, Sequence, TYPE_CHECKING
 
-try:
-    from _linter_common import (
-        EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
-    )
-except ImportError:
-    from ._linter_common import (
-        EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
-    )
 
+_PARENT = Path(__file__).parent.absolute()
+_PATH = [Path(p).absolute() for p in sys.path]
+
+if TYPE_CHECKING or _PARENT not in _PATH:
+    from . import _linter
+else:
+    import _linter
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from tokenize import TokenInfo
 
 
-BRACKETS = {"{": "}", "(": ")", "[": "]"}
-BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
 ERROR = "Builtin `set` is deprecated"
 IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
 
@@ -74,30 +72,25 @@ tuple is more time-efficient than an OrderedSet and also has less visual clutter
 """
 
 
-class SetLinter(FileLinter):
+class SetLinter(_linter.FileLinter):
     linter_name = "set_linter"
     description = DESCRIPTION
     epilog = EPILOG
-    is_formatter = True
+    report_column_numbers = True
 
-    def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
-        def lint_result(
-            rep: str, start: tuple[int, int], length: int, name: str = ERROR
-        ) -> LintResult:
-            return LintResult(
-                name=name, line=start[0], char=start[1], length=length, replacement=rep
-            )
-
+    def _lint(self, pf: _linter.PythonFile) -> Iterator[_linter.LintResult]:
         pl = PythonLines(pf)
         for b in pl.braced_sets:
-            yield lint_result("OrderedSet([", b[0].start, 1)
-            yield lint_result("])", b[-1].start, 1)
+            yield _linter.LintResult(ERROR, *b[0].start, "OrderedSet([", 1)
+            yield _linter.LintResult(ERROR, *b[-1].start, "])", 1)
 
         for b in pl.sets:
-            yield lint_result("OrderedSet", b.start, 3)
+            yield _linter.LintResult(ERROR, *b.start, "OrderedSet", 3)
 
-        if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
-            yield lint_result(IMPORT_LINE, (ins, 0), 0, "Add import for OrderedSet")
+        if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line) is not None:
+            yield _linter.LintResult(
+                "Add import for OrderedSet", ins, 0, IMPORT_LINE, 0
+            )
 
 
 @dc.dataclass
@@ -122,23 +115,7 @@ class TokenLine:
 
     @cached_property
     def bracket_pairs(self) -> dict[int, int]:
-        braces: dict[int, int] = {}
-        stack: list[int] = []
-
-        for i, t in enumerate(self.tokens):
-            if t.type == token.OP:
-                if t.string in BRACKETS:
-                    stack.append(i)
-                elif inv := BRACKETS_INV.get(t.string):
-                    ParseError.check(stack, t, "Never opened")
-                    begin = stack.pop()
-                    braces[begin] = i
-
-                    b = self.tokens[begin].string
-                    ParseError.check(b == inv, t, f"Mismatched braces '{b}' at {begin}")
-
-        ParseError.check(not stack, t, "Left open")
-        return braces
+        return _linter.bracket_pairs(self.tokens)
 
     def is_set(self, i: int) -> bool:
         t = self.tokens[i]
@@ -165,7 +142,7 @@ class TokenLine:
             if brace_end := self.bracket_pairs.get(i):
                 # Skip to the end of a subexpression
                 i = brace_end
-            elif t.type not in EMPTY_TOKENS:
+            elif t.type not in _linter.EMPTY_TOKENS:
                 empty = False
             i += 1
         return not empty
@@ -180,58 +157,35 @@ class PythonLines:
     path: Path | None
     sets: list[TokenInfo]
     token_lines: list[TokenLine]
-    tokens: tuple[TokenInfo, ...]
+    tokens: list[TokenInfo]
 
-    def __init__(self, pf: PythonFile) -> None:
+    def __init__(self, pf: _linter.PythonFile) -> None:
         self.contents = pf.contents
         self.lines = pf.lines
         self.path = pf.path
         self.tokens = pf.tokens
         self.omitted = pf.omitted
 
-        self.token_lines = list(self._split_into_token_lines())
+        self.token_lines = [TokenLine(tl) for tl in pf.token_lines]
 
         sets = [t for tl in self.token_lines for t in tl.sets]
-        self.sets = [t for t in sets if not self.omitted([t])]
+        self.sets = [s for s in sets if not pf.omitted([s])]
 
         braced_sets = [t for tl in self.token_lines for t in tl.braced_sets]
-        self.braced_sets = [t for t in braced_sets if not self.omitted(t)]
+        self.braced_sets = [s for s in braced_sets if not pf.omitted(s)]
 
-    def _split_into_token_lines(self) -> Iterator[TokenLine]:
-        token_line = TokenLine([])
-
-        for t in self.tokens:
-            if t.type != token.ENDMARKER:
-                token_line.tokens.append(t)
-                if t.type == token.NEWLINE:
-                    yield token_line
-                    token_line = TokenLine([])
-
-        if token_line.tokens:
-            yield token_line
-
-    def insert_import_line(self) -> int | None:
-        froms, imports = [], []
-
-        for token_line in self.token_lines:
-            tokens = token_line.tokens
-            tokens = [t for t in tokens if t.type not in (token.COMMENT, token.NL)]
-            t = tokens[0]
-            if t.type == token.INDENT:
-                break
-            if not (t.type == token.NAME and t.string in ("from", "import")):
-                continue
-            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tokens):
-                return None
-            if t.string == "from":
-                froms.append(tokens)
-            else:
-                imports.append(tokens)
+        froms, imports = pf.import_lines
+        for i in froms + imports:
+            tl = pf.token_lines[i]
+            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tl):
+                self.insert_import_line = None
+                return
 
         if section := froms or imports:
-            return section[-1][-1].start[0] + 1
-        return 0
+            self.insert_import_line = pf.token_lines[section[-1]][-1].start[0] + 1
+        else:
+            self.insert_import_line = 0
 
 
 if __name__ == "__main__":
-    SetLinter().lint_all()
+    SetLinter.run()

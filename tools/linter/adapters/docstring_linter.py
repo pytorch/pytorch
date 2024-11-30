@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import sys
 import token
 from functools import cached_property
+from pathlib import Path
 from typing import Iterator, Sequence, TYPE_CHECKING
 
-from ._linter_common import EMPTY_TOKENS, FileLinter, LintResult, ParseError, PythonFile
 
+_PARENT = Path(__file__).parent.absolute()
+_PATH = [Path(p).absolute() for p in sys.path]
+
+if TYPE_CHECKING or _PARENT not in _PATH:
+    from . import _linter
+else:
+    import _linter
 
 if TYPE_CHECKING:
     from tokenize import TokenInfo
@@ -26,11 +34,10 @@ def _is_def(t: TokenInfo) -> bool:
     return t.type == token.NAME and t.string in ("class", "def")
 
 
-class DocstringLinter(FileLinter):
+class DocstringLinter(_linter.FileLinter):
     linter_name = "docstring_linter"
     description = DESCRIPTION
-    epilog = None
-    is_formatter = False
+    is_fixer = False
 
     def __init__(self, argv: list[str] | None = None) -> None:
         super().__init__(argv)
@@ -59,7 +66,7 @@ class DocstringLinter(FileLinter):
     def max_lines(self) -> dict[str, int]:
         return {"class": self.args.max_class, "def": self.args.max_def}
 
-    def _lint(self, pf: PythonFile) -> Iterator[LintResult]:
+    def _lint(self, pf: _linter.PythonFile) -> Iterator[_linter.LintResult]:
         tokens = pf.tokens
         indents = indent_to_dedent(tokens)
         defs = [i for i, t in enumerate(tokens) if _is_def(t)]
@@ -68,7 +75,7 @@ class DocstringLinter(FileLinter):
             for i in range(start, len(tokens)):
                 if (t := tokens[i]).type == token_type:
                     return i
-            ParseError.check(False, tokens[-1], error)
+            _linter.ParseError.check(False, tokens[-1], error)
 
         for i in defs:
             name = next_token(i + 1, token.NAME, "Definition with no name")
@@ -90,7 +97,7 @@ class DocstringLinter(FileLinter):
                 if tk.type == token.STRING:
                     docstring_len = len(tk.string)
                     break
-                if tk.type not in EMPTY_TOKENS:
+                if tk.type not in _linter.EMPTY_TOKENS:
                     break
 
             if docstring_len >= self.args.min_docstring:
@@ -102,12 +109,13 @@ class DocstringLinter(FileLinter):
 
             t = tokens[i]
             def_name = "function" if t.string == "def" else t.string
-            msg = f"docstring found for {def_name} '{tokens[name].string}'"
+            tname = tokens[name].string
+            msg = f"docstring found for {def_name} '{tname}' ({lines} lines)"
             if docstring_len < 0:
                 msg = "No " + msg
             else:
-                msg = msg + " was too short"
-            yield LintResult(line=t.start[0], char=t.start[1], name=msg)
+                msg = msg + f" was too short ({docstring_len} characters)"
+            yield _linter.LintResult(msg, *t.start)
 
 
 def indent_to_dedent(tokens: Sequence[TokenInfo]) -> dict[int, int]:
@@ -122,8 +130,10 @@ def indent_to_dedent(tokens: Sequence[TokenInfo]) -> dict[int, int]:
             indent_to_dedent[stack.pop()] = i
 
     assert not stack
+    # Can't happen: the tokenization process would already have failed on a bad indent
+
     return indent_to_dedent
 
 
 if __name__ == "__main__":
-    DocstringLinter().lint_all()
+    DocstringLinter.run()
