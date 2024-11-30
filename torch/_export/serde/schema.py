@@ -81,8 +81,8 @@ class SymInt(_Union):
 
 @dataclass(repr=False)
 class SymFloat(_Union):
-    as_expr: SymExpr
-    as_int: float
+    as_expr: Annotated[SymExpr, 10]
+    as_flaot:  Annotated[float, 20]
 
 
 @dataclass(repr=False)
