@@ -963,6 +963,10 @@ class triton:
     dense_indexing = False
 
     # limit tiling dimensions
+    #   - max_tiles=1 disables tiling
+    #   - max_tiles=2 is the default
+    #   - max_tiles=3 is experimental and may have bugs
+    # higher values are unsupported
     max_tiles = 2
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
