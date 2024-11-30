@@ -1629,7 +1629,9 @@ def make_contiguous_strides_for(
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if is_nested_int(l) else sym_max(l, 1) #  type:ignore[aug-assign]
+        multiplier *= (
+            l if is_nested_int(l) else sym_max(l, 1)
+        )  # type:ignore[assignment]
 
     result = tuple(reversed(strides))
 
