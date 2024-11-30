@@ -1,6 +1,7 @@
 import time
 from typing import Any, Callable, Dict, Optional, Type
 from typing_extensions import TypeAlias
+from torch.utils._ordered_set import OrderedSet
 
 
 OnExitType: TypeAlias = Callable[
@@ -124,5 +125,5 @@ class MetricsContext:
         if self._level == 0:
             raise RuntimeError(f"Cannot add {metric} outside of a MetricsContext")
         if metric not in self._metrics:
-            self._metrics[metric] = set()
+            self._metrics[metric] = OrderedSet()
         self._metrics[metric].add(value)
