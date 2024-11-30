@@ -3305,6 +3305,43 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
+    def test_associative_scan_different_input_size_wrong_dim(self):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        y = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # ValueError,
+            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            out = associative_scan(
+                get_scan_combine_fn("different_input_size_operator", True),
+                elements,
+                3,
+                combine_mode="pointwise",
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
             [[[0.0, 0], [1.0, 2.0]], [[0.0, 0], [3.0, 4.0]], [[0.0, 0], [5.0, 6.0]]]
@@ -3384,43 +3421,6 @@ class AssociativeScanTests(TestCase):
                 get_scan_combine_fn("non_pointwise", True),
                 x,
                 0,
-                combine_mode="pointwise",
-            )
-
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @requires_cuda
-    def test_associative_scan_different_input_size(self):
-        batch = 5
-        hidden_dim = 3
-        length = 10
-        dstate = 7
-
-        deltaA = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        deltaB_u = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
-        x = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        y = torch.randn(
-            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
-        )
-        elements = (x, deltaA, deltaB_u, C, y)
-
-        with self.assertRaisesRegex(
-            # Should be
-            # ValueError,
-            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            torch._dynamo.exc.Unsupported,
-            "Observed exception.*",
-        ):
-            out = associative_scan(
-                get_scan_combine_fn("different_input_size_operator", True),
-                elements,
-                3,
                 combine_mode="pointwise",
             )
 
