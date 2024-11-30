@@ -171,7 +171,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
   //   are expected to check shapes before calling `add_owned_input` or `add_owned_output`.
   TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
-  static_shape_ = std::make_optional(DimVector(shape));
+  static_shape_ = DimVector(shape);
   return *this;
 }
 
@@ -1042,10 +1042,15 @@ void TensorIteratorBase::build_borrowing_unary_op(const TensorBase& out, const T
       .add_const_input(a));
 }
 
-void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a) {
-  build(UNARY_OP_CONFIG()
-      .add_output(out)
-      .add_owned_const_input(a));
+void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(
+    const TensorBase& out,
+    const TensorBase& a) {
+  build(TensorIteratorConfig()
+            .set_check_mem_overlap(true)
+            .cast_common_dtype_to_outputs(true)
+            .enforce_safe_casting_to_output(true)
+            .add_output(out)
+            .add_owned_const_input(a));
 }
 
 // Helper to construct a unary op that forcibly promotes output to boolean.

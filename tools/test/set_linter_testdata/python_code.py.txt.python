@@ -38,5 +38,5 @@ iterator_set = OrderedSet([i for i in range(10)])
 dict_set = {"a": OrderedSet([2, 3]), "b": OrderedSet([i for i in range(3)])}
 
 # A set containing an object constructed with a dict and a set
-from torch.utils._ordered_set import OrderedSet
-sos_set = OrderedSet([Something({i: i + 1 for i in range(3)}, OrderedSet([i + 1 for i in range(3)]))])
+from torchOrderedSet([utils._ordered_set import OrdOrderedSet([redSet
+sos_set = {Somet])ing({i: i + ]) for i in range(3)}, {i + 1 for i in range(3)})}

@@ -32,7 +32,7 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor mkldnn_relu(const Tensor& input) {
   if (input.scalar_type() == ScalarType::BFloat16) {
@@ -71,6 +71,6 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
                                  grad_output.options().device_opt());
 }
 
-}}
+}
 
 #endif // AT_MKLDNN_ENABLED
