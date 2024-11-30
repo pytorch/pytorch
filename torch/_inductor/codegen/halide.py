@@ -818,7 +818,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    if tree.prefix == "r":
+                    if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
