@@ -295,9 +295,9 @@ def build_collectives(
                 candidate_ranks | found_ranks
             ) <= dumps_ranks:
                 mismatch[pg_name] += 1
-                logger_msg = "Not all ranks joining collective %s at entry %s"
+                logger_msg = "Not all ranks joining collective, sequence number: %s"
                 missing_ranks = expected_ranks - (candidate_ranks | found_ranks)
-                entry_state.logging_info(
+                entry_state.log(
                     logger, logger_msg, format_frames, missing_ranks=missing_ranks
                 )
                 candidate_ranks.update(found_ranks)
@@ -320,10 +320,8 @@ def build_collectives(
                     if fail_check:
                         # When we see errors in all_to_all, it's hard to tell which rank is the source of the error.
                         mismatch[pg_name] += 1
-                        logger_msg = (
-                            "Input/output mismatch in the collective %s at entry %s"
-                        )
-                        entry_state.logging_info(
+                        logger_msg = "Input/output mismatch in the collective sequence number: %s"
+                        entry_state.log(
                             logger,
                             logger_msg,
                             format_frames,
@@ -348,10 +346,8 @@ def build_collectives(
             # case four: mismatch cases due to not same type, size mismatch or state mismatch.
             elif len(errors) > 0:
                 mismatch[pg_name] += 1
-                logger_msg = "Collective %s at entry %s errors"
-                entry_state.logging_info(
-                    logger, logger_msg, format_frames, errors=errors
-                )
+                logger_msg = "Collective sequence number: %s has errors"
+                entry_state.log(logger, logger_msg, format_frames, errors=errors)
                 candidate_ranks.update(found_ranks)
                 candidate_idx.update(found_idx)
                 found_idx.clear()
@@ -363,12 +359,18 @@ def build_collectives(
                 found_idx.clear()
                 found_ranks.clear()
                 mismatch[pg_name] += 1
-                logger.info(
-                    "We cannot decide what's wrong with this collective entry "
-                    "because we missed FR dumps from ranks (%s) so we don't have enough "
-                    "information. If you want to debug further use -j to dump all raw trace",
-                    str(expected_ranks - dumps_ranks),
-                )
+                if expected_ranks - dumps_ranks:
+                    logger.info(
+                        "We cannot decide what's wrong with this collective entry "
+                        "because we missed FR dumps from ranks (%s) so we don't have enough "
+                        "information. If you want to debug further use -j to dump all raw trace",
+                        str(expected_ranks - dumps_ranks),
+                    )
+                else:
+                    logger.info(
+                        "No errors found for this collective entry, There could be some "
+                        "other reasons why we see collective timeout."
+                    )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
@@ -412,7 +414,7 @@ def build_collectives(
             logger.error(
                 "Too many mismatches for process_group %s: %s aborting", pg_name, desc
             )
-            sys.exit(-1)
+            break
 
     return tracebacks, collectives, nccl_calls
 

@@ -264,8 +264,8 @@ class _map;
 template <class F, class A, class... Args>
 class _map<F, A, c10::guts::typelist::typelist<Args...>> {
  public:
-  static A function_one(F&& fn, const Args&... nested_node) {
-    return std::forward<F>(fn)(nested_node...);
+  static A function_one(const F& fn, const Args&... nested_node) {
+    return fn(nested_node...);
   }
   static NestedNode<A> function(
       const F& fn,

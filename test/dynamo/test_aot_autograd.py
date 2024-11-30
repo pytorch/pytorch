@@ -1081,7 +1081,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
@@ -1095,9 +1095,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6, dtype=torch.float)
-        z = x.clone().detach()
-        x_opt = x.clone().detach()
-        z_opt = x.clone().detach()
+        z = x.detach().clone()
+        x_opt = x.detach().clone()
+        z_opt = x.detach().clone()
 
         z.requires_grad = True
         z_opt.requires_grad = True
@@ -1198,7 +1198,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         opt_fn = torch.compile(fn, backend="aot_eager")
 
         x = torch.arange(6)
-        x_opt = x.clone().detach()
+        x_opt = x.detach().clone()
         with self.assertRaises(Exception):
             fn(x)
         with self.assertRaises(Exception):
@@ -1330,6 +1330,29 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         #
         # `le` is a donated buffer but primals_1 is not.
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_donated_buffer6(self):
+        if is_dynamic_shape_test(self._testMethodName):
+            # parameters should not be dynamic shape
+            # torch._dynamo.exc.Unsupported: Parameter not python_constant:
+            #    SymNodeVariable() is not a constant
+            return
+
+        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+
+        def fn(x):
+            p = torch.nn.Parameter(x + 123)
+            return p, p.sin()
+
+        opt = torch.compile(fn, fullgraph=True)
+        x = torch.randn(16)
+
+        with self.assertLogs(logger_name, level="INFO") as captured:
+            p, r = opt(x)
+            r.sum().backward()
+
+        FileCheck().check("bw_donated_idxs=[]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer_with_retain_or_create_graph1(self):
