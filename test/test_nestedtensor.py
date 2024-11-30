@@ -1731,7 +1731,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
-    @decorateIf(xfailIfTorchDynamo, lambda params: params["layout"] == torch.jagged)
     @dtypes(torch.float, torch.double)
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_dropout(self, device, dtype, layout):

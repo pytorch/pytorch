@@ -2171,7 +2171,16 @@ def masked_select_default(func, *args, **kwargs):
     mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))  # type: ignore[arg-type]
 
     args = extract_kwargs(inp)
-    args["offsets"] = mask_cumsum[inp._offsets]
+
+    from torch.nested._internal.nested_tensor import _make_ragged_tensors_compat
+
+    metadata, _ = _make_ragged_tensors_compat(
+        offsets=mask_cumsum[inp._offsets],
+        lengths=None,
+        min_seqlen=None,
+        max_seqlen=None,
+    )
+    args["metadata"] = metadata
     return NestedTensor(
         values=res_values,
         **args,

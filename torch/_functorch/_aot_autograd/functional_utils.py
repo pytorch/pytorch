@@ -179,8 +179,6 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
             assert not isinstance(arg, torch.Tensor)
             return False
         assert isinstance(f_arg, FunctionalTensor)
-        if not isinstance(arg, FakeTensor):
-            return False
         assert isinstance(arg, FakeTensor)
 
         arg_after = torch._from_functional_tensor(f_arg.elem)

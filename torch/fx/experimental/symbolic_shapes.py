@@ -3858,6 +3858,9 @@ class ShapeEnv:
                 )
         assert all(x is not None for x in stride)
 
+        custom_size_strides_size = [None] * len(size) if custom_size_strides is None else custom_size_strides.size
+        custom_size_strides_stride = [None] * len(stride) if custom_size_strides is None else custom_size_strides.stride
+
         sym_sizes = [
             self.create_symintnode(
                 sym,
@@ -3866,10 +3869,10 @@ class ShapeEnv:
                 metafy_fn=metafy_fn,
                 nested_int_desc=opt_nested_int,
             )
-            for i, (sym, hint, opt_nested_int) in enumerate(zip(size, ex_size, custom_size_strides.size))
+            for i, (sym, hint, opt_nested_int) in enumerate(zip(size, ex_size, custom_size_strides_size))
         ]
         sym_stride = []
-        for i, (stride_expr, opt_nested_int) in enumerate(zip(stride, custom_size_strides.stride)):
+        for i, (stride_expr, opt_nested_int) in enumerate(zip(stride, custom_size_strides_stride)):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None

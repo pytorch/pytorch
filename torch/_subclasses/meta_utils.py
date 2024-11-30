@@ -365,7 +365,7 @@ class MetaTensorDescriber:
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             nested_int=try_get_int(t),
-            custom_size_strides=self.describe_custom_size_strides(t),
+            custom_size_strides=self.describe_custom_size_strides(t) if is_nested else None,
             subclass_inner_attr=subclass_inner_attr,
             is_functional=is_functional,
             layout=layout,
@@ -726,7 +726,7 @@ class MetaConverter:
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv] = None,
-        callback_=lambda t: t(),
+        callback_=lambda t, device=None: t(),
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ):
@@ -1653,7 +1653,7 @@ class MetaConverter:
         t,
         shape_env=None,
         *,
-        callback_=lambda t: t(),
+        callback_=lambda t, device=None: t(),
         source=None,
         symbolic_context=None,
         # Controls whether or not we should dump the tensor metadata to structured logs

@@ -356,6 +356,8 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
+        constant = t if make_constant else None
+
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
@@ -374,7 +376,7 @@ class FakeTensorConverter:
                     device,
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
-                    constant=t if make_constant else None,
+                    constant=constant,
                 )
 
         out = self.meta_converter(
