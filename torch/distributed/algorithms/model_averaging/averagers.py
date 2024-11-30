@@ -123,6 +123,7 @@ class PeriodicModelAverager(ModelAverager):
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            assert self.process_group is not None
-            utils.average_parameters_or_parameter_groups(params, self.process_group)
+            utils.average_parameters_or_parameter_groups(
+                params, _not_none(self.process_group)
+            )
         self.step += 1
