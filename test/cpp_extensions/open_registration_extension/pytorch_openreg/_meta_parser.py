@@ -6,7 +6,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 
 class OpenRegTensorMeta:
     def __init__(self, tensor, checked=True):
-        if checked and not tensor.device.type == "openreg":
+        if checked and not tensor.device.type == "foo":
             raise RuntimeError(
                 "Creating OpenRegTensorMeta is only for Tensors on openreg device"
             )

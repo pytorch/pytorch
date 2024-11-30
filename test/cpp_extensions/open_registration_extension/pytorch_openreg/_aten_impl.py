@@ -62,7 +62,7 @@ class DeviceContext:
 def _openreg_kernel_fallback(op, *args, **kwargs):
     def get_tensor_device(*args):
         for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.device.type == "openreg":
+            if isinstance(arg, torch.Tensor) and arg.device.type == "foo":
                 return arg.device
 
     device = get_tensor_device(*args)
@@ -131,7 +131,7 @@ def _kernel_fallback(op, *args, **kwargs):
             meta_res = op(*meta_args, **meta_kwargs)
 
             # 2. Allocate the output
-            real_res, _ = to_device_no_copy("openreg", meta_res, {})
+            real_res, _ = to_device_no_copy("foo", meta_res, {})
         else:
             # Slow version for data-dependent functions:
             # Run the op on the device just to get the output shape
@@ -176,17 +176,17 @@ def copy_from_host_to_device(from_, to_):
 
 def _copy_from(from_, to_):
     if from_.device.type == to_.device.type:
-        assert from_.device.type == "openreg"
+        assert from_.device.type == "foo"
         if from_.device.index == to_.device.index:
             op = torch.ops.aten.copy_.default
             return _openreg_kernel_fallback(op, to_, from_)
         else:
             host_mem = copy_from_device(from_)
             return copy_from_host_to_device(host_mem, to_)
-    elif from_.device.type == "openreg":
+    elif from_.device.type == "foo":
         host_mem = copy_from_device(from_)
         return to_.copy_(host_mem)
-    elif to_.device.type == "openreg":
+    elif to_.device.type == "foo":
         return copy_from_host_to_device(from_, to_)
     else:
         raise RuntimeError("Should not happen")
