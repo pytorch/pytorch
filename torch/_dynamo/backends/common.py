@@ -70,6 +70,8 @@ class AotAutograd:
         try:
             # NB: NOT cloned!
             with enable_aot_logging(), patch_config:
+                assert not gm.named_parameters(), gm.print_readable()
+                assert not gm.named_buffers(), gm.print_readable()
                 cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg)
