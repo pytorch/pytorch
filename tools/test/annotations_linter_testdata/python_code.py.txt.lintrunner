@@ -1,0 +1,81 @@
+tools/test/annotations_linter_testdata/python_code.py.txt:0: Add 'from __future__ import annotations' before this line
+    1 | from typing import List, Tuple, Optional, Union
+    2 | 
+    3 | 
+    4 | def f(a: List[int]) -> Tuple[int, int]:
+    5 |     pass
+
+tools/test/annotations_linter_testdata/python_code.py.txt:4: Use 'list' instead of 'typing.List'
+    2 | 
+    3 | 
+    4 | def f(a: List[int]) -> Tuple[int, int]:
+                 ^^^^
+    5 |     pass
+    6 | 
+
+tools/test/annotations_linter_testdata/python_code.py.txt:4: Use 'tuple' instead of 'typing.Tuple'
+    2 | 
+    3 | 
+    4 | def f(a: List[int]) -> Tuple[int, int]:
+                               ^^^^^
+    5 |     pass
+    6 | 
+
+tools/test/annotations_linter_testdata/python_code.py.txt:8: Use '| None' instead of 'typing.Optional'
+    6 | 
+    7 | 
+    8 | def g(a: Optional[int]) -> Union[int, str]:
+                 ^^^^^^^^^^^^^
+    9 |     pass
+   10 | 
+
+tools/test/annotations_linter_testdata/python_code.py.txt:8: Use '|' instead of 'typing.Union'
+    6 | 
+    7 | 
+    8 | def g(a: Optional[int]) -> Union[int, str]:
+                                   ^^^^^^^^^^^^^^^
+    9 |     pass
+   10 | 
+
+tools/test/annotations_linter_testdata/python_code.py.txt:12: Use 'dict' instead of 'typing.Dict'
+   10 | 
+   11 | 
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+           ^^^^
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+
+tools/test/annotations_linter_testdata/python_code.py.txt:12: Use '| None' instead of 'typing.Optional'
+   10 | 
+   11 | 
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+                ^^^^^^^^^^^^^
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+
+tools/test/annotations_linter_testdata/python_code.py.txt:12: Use '|' instead of 'typing.Union'
+   10 | 
+   11 | 
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+
+tools/test/annotations_linter_testdata/python_code.py.txt:14: Use '|' instead of 'typing.Union'
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tools/test/annotations_linter_testdata/python_code.py.txt:14: Use '| None' instead of 'typing.Optional'
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+                 ^^^^^^^^^^^^^
+
+tools/test/annotations_linter_testdata/python_code.py.txt:14: Use '|' instead of 'typing.Union'
+   12 | a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+   13 | 
+   14 | b: Union[Optional[int], list[Union[str, int]]] = None
+                                     ^^^^^^^^^^^^^^^
+

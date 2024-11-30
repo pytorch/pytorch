@@ -1721,3 +1721,20 @@ include_patterns = [
    'torch/**/not-exist.py'
 ]
 is_formatter = false
+
+# `annotations_linter` reports and fixes pre-Python 3.8 annotations:
+# Dict, FrozenSet, List, Optional, Set, Tuple, Union
+#
+[[linter]]
+code = 'ANNOTATIONS_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/annotations_linter.py',
+    '--lintrunner',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+   'torch/**/not-exist.py'
+]
+is_formatter = false
