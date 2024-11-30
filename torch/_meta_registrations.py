@@ -536,14 +536,17 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
     compression_factor = 10 if is_8bit_input_type else 9
+
+    if is_8bit_input_type:
+        assert (
+            not dense_B.is_contiguous()
+        ), "dense input must be transposed for 8bit dtypes"
+
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
     if bias is not None:
         assert m == bias.size(0)
-
-    if is_8bit_input_type:
-        assert not dense_B.is_contiguous()
 
     if out_dtype is not None:
         assert (
@@ -557,8 +560,7 @@ def meta__cslt_sparse_mm(
             }
         ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype)
-    return result
+    return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
 @register_meta(aten.index_reduce.default)
@@ -5601,13 +5603,16 @@ def meta_scaled_mm(
         def is_col_major(stride):
             return stride[0] == 1 and stride[1] > 1
 
+        def has_zero_dim(tensor_2d):
+            return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
+
         torch._check(
-            is_row_major(self.stride()),
-            lambda: "self must be row_major",
+            is_row_major(self.stride()) or has_zero_dim(self),
+            lambda: f"self must be row_major, got stride {self.stride()}",
         )
         torch._check(
-            is_col_major(mat2.stride()),
-            lambda: "mat2 must be col_major",
+            is_col_major(mat2.stride()) or has_zero_dim(mat2),
+            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
         )
         torch._check(
             self.size(1) % 16 == 0,
@@ -6023,6 +6028,11 @@ def argmax_argmin_meta(self, dim=None, keepdim=False):
 
 @register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    # NB: It's always wrong to try to create a scalar tensor with the jagged layout.
+    # Rather than fix this everywhere, just use the strided layout and let NJT handle
+    # scalar tensor broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
