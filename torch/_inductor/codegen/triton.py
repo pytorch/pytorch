@@ -1463,7 +1463,7 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 tree.grid_dim += 1
 
-        sem_count, _ = self.numels.values()
+        sem_count = self.numels["x"]
         if self.fixed_config:
             sem_count = CeilDiv(sem_count, self.fixed_config["XBLOCK"])
         self.semaphores_name = self.args.semaphores(sem_count)
@@ -2497,7 +2497,7 @@ class TritonKernel(SIMDKernel):
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
         value independently.
         """
-        xnumel, rnumel = self.numels.values()
+        xnumel = self.numels["x"]
         mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
         expand = "" if self.no_x_dim else "[None,:]"
 
