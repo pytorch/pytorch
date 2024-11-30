@@ -1,11 +1,17 @@
 # mypy: ignore-errors
 from __future__ import annotations
-
+import sys
 from pathlib import Path
 
 from tools.linter.adapters.docstring_linter import DocstringLinter
-from tools.test.test_set_linter import LinterTestCase
 
+_PARENT = Path(__file__).parent.absolute()
+_PATH = [Path(p).absolute() for p in sys.path]
+
+if _PARENT not in _PATH:
+    from .linter_test_case import LinterTestCase
+else:
+    from linter_test_case import LinterTestCase
 
 TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
 
