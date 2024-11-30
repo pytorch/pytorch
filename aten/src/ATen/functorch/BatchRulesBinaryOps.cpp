@@ -19,12 +19,10 @@ std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
 
-  auto tensor_other = _binary_pointwise_helper(
+  auto [tensor_, other_]= _binary_pointwise_helper(
       tensor, tensor_batch_dim, other, other_batch_dim);
-  auto tensor_ = std::get<0>(tensor_other);
-  auto other_ = std::get<1>(tensor_other);
 
-  auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
+  auto result = Func(tensor_, std::move(other_), std::forward<ExtraArgs>(extra_args)...);
   return std::make_tuple(result, 0);
 }
 
@@ -165,9 +163,7 @@ static std::tuple<Tensor, std::optional<int64_t>> gelu_backward_batch_rule(
     c10::string_view approximate) {
 
   // repeat the preprocessing from _binary_pointwise_batch_rule
-  const auto tensor_other = _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
-  auto grad_out_ = std::get<0>(tensor_other);
-  auto input_ = std::get<1>(tensor_other);
+  auto [grad_out_, input_]= _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
 
   // gelu_backward doesn't broadcast well so we need to insist all inputs have a bdim
   const auto batch_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
