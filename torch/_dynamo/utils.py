@@ -14,6 +14,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
 import linecache
 import logging
 import math
@@ -44,6 +45,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Generic,
     Iterable,
     Iterator,
     KeysView,
@@ -61,7 +63,6 @@ from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
-import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -78,6 +79,7 @@ from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     log_chromium_event_internal,
     log_compilation_event,
+    record_chromium_event_internal,
     signpost_event,
 )
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
@@ -162,12 +164,14 @@ class ReinplaceCounters:
     # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
     @classmethod
     def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
-        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+        if bytes != 0:
+            cls._values[f"missed_bytes_{trigger.name}"] += bytes
 
     # Track number of not re-inplaced tensors.
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
-        cls._values[f"missed_tensors_{trigger}"] += count
+        if count != 0:
+            cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
     def clear(cls):
@@ -295,8 +299,6 @@ def dynamo_timed(
     # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
     log_pt2_compile_event: bool = False,
-    # TODO(masnesral): fwd_only is ignored. Remove it.
-    fwd_only: bool = True,
     metadata: Optional[Dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
 ) -> Generator[Any, None, None]:
@@ -355,7 +357,9 @@ def dynamo_timed(
 
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
-    chromium_log.log_event_start(event_name, start_ns, event_metadata)
+    chromium_log.log_event_start(
+        event_name, start_ns, event_metadata, log_pt2_compile_event
+    )
 
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
@@ -795,7 +799,7 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
 
 # Version field added to every log. Increment to make it easier to distinguish new
 # vs. old entries when you make a substantive change to how the logs are populated.
-LOG_FORMAT_VERSION = 2
+LOG_FORMAT_VERSION = 3
 
 
 @dataclasses.dataclass
@@ -856,7 +860,20 @@ class CompilationMetrics:
     remote_fx_graph_cache_put_time_us: Optional[int] = None
     backward_cumulative_compile_time_us: Optional[int] = None
     end_time_us: Optional[int] = None
+    pre_grad_pass_time_us: Optional[int] = None
+    post_grad_pass_time_us: Optional[int] = None
+    joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
+    inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = None
+    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -867,12 +884,13 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 )
 
 
-def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     event_logger = get_chromium_event_logger()
-    # The following compilation metrics are related to
-    # dynamo, so go with the "entire frame compile" event
+    event_name = event_logger.get_top()
+    if not event_name:
+        return
     event_logger.add_event_data(
-        event_name="dynamo",
+        event_name=event_name,
         frame_key=c.frame_key,
         co_name=c.co_name,
         co_filename=c.co_filename,
@@ -904,9 +922,54 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
     )
 
 
-def record_compilation_metrics(metrics: Dict[str, Any]):
-    # TODO: Temporary; populate legacy fields from their replacements.
-    # Remove when we decide we can really deprecate them.
+def _scrubbed_inductor_config_for_logging() -> Optional[str]:
+    """
+    Method to parse and scrub uninteresting configs from inductor config
+    """
+
+    # TypeSafeSerializer for json.dumps()
+    # Skips complex types as values in config dict
+    class TypeSafeSerializer(json.JSONEncoder):
+        def default(self, o):
+            try:
+                return super().default(o)
+            except Exception:
+                return "Value is not JSON serializable"
+
+    configs_to_scrub_re = r"((^TYPE_CHECKING$)|(.*_progress$)|(.*TESTING.*)|(.*(rocm|halide).*)|(^trace\..*)|(^_))"
+    keys_to_scrub = set()
+    inductor_conf_str = None
+    inductor_config_copy = (
+        torch._inductor.config.get_config_copy() if torch._inductor.config else None
+    )
+    if inductor_config_copy is not None:
+        try:
+            for key, val in inductor_config_copy.items():
+                if not isinstance(key, str) or re.search(configs_to_scrub_re, key):
+                    keys_to_scrub.add(key)
+                # Convert set() to list for json.dumps()
+                if isinstance(val, set):
+                    inductor_config_copy[key] = list(val)
+            # Evict unwanted keys
+            for key in keys_to_scrub:
+                del inductor_config_copy[key]
+            # Stringify Inductor config
+            inductor_conf_str = json.dumps(
+                inductor_config_copy, cls=TypeSafeSerializer, skipkeys=True
+            )
+        except Exception:
+            # Don't crash because of runtime logging errors
+            inductor_conf_str = "Inductor Config is not JSON serializable"
+    return inductor_conf_str
+
+
+def record_compilation_metrics(
+    start_time_ns: int,
+    end_time_ns: int,
+    metrics: Dict[str, Any],
+    exc_type: Optional[Type[BaseException]],
+    exc_value: Optional[BaseException],
+):
     def us_to_s(field):
         metric = metrics.get(field, None)
         return metric / 1e6 if metric is not None else None
@@ -915,7 +978,47 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         metric = metrics.get(field, None)
         return metric // 1000 if metric is not None else None
 
+    def _convert_collection_to_str(field: str) -> Optional[str]:
+        def safe_str(item: Any) -> str:
+            try:
+                return str(item)
+            except Exception:
+                return str(None)
+
+        metric = metrics.get(field, None)
+        if metric is None:
+            return None
+
+        # Remove this field (list/set) from metrics to avoid clashes
+        del metrics[field]
+        if not isinstance(metric, set) and not isinstance(metric, list):
+            return None
+        return ",".join(safe_str(item) for item in metric)
+
+    structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
+    common_metrics = {
+        "compile_id": str(torch._guards.CompileContext.current_compile_id()),
+        "start_time_us": start_time_ns // 1000,
+        "end_time_us": end_time_ns // 1000,
+        "duration_us": (end_time_ns - start_time_ns) // 1000,
+        "fail_type": exc_type.__qualname__ if exc_type else None,
+        "fail_reason": str(exc_value) if exc_value else None,
+        "structured_logging_overhead_us": to_int_us(structured_logging_overhead_s),
+        "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
+        "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_hit_keys"
+        ),
+        "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
+            "inductor_fx_remote_cache_miss_keys"
+        ),
+    }
+
+    # TODO: The following are legacy fields, populated from the fields that replace
+    # them. Remove these when we decide we can really deprecate them.
     legacy_metrics = {
+        "start_time": start_time_ns / 1e9,
         "entire_frame_compile_time_s": us_to_s("dynamo_cumulative_compile_time_us"),
         "backend_compile_time_s": us_to_s("aot_autograd_cumulative_compile_time_us"),
         "inductor_compile_time_s": us_to_s("inductor_cumulative_compile_time_us"),
@@ -927,13 +1030,16 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         "remote_fx_graph_cache_put_time_ms": us_to_ms(
             "remote_fx_graph_cache_put_time_us"
         ),
+        "structured_logging_overhead_s": structured_logging_overhead_s,
     }
 
-    compilation_metrics = CompilationMetrics(**{**metrics, **legacy_metrics})
+    compilation_metrics = CompilationMetrics(
+        **{**legacy_metrics, **common_metrics, **metrics}
+    )
     _compilation_metrics.append(compilation_metrics)
+
     if compilation_metrics.is_forward:
         name = "compilation_metrics"
-        add_compilation_metrics_to_chromium(compilation_metrics)
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
@@ -945,6 +1051,11 @@ def record_compilation_metrics(metrics: Dict[str, Any]):
         # we ignore the (hopefully small) time spent logging compilation metrics
         record_logging_overhead=False,
     )
+
+    # If there's a chromium event in flight, add the CompilationMetrics to it.
+    add_compilation_metrics_to_chromium(compilation_metrics)
+
+    # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
 
@@ -978,11 +1089,33 @@ class ChromiumEventLogger:
     """
 
     def get_stack(self):
+        """
+        The main event stack, with every chromium event.
+        Logged to tlparse.
+        """
         if hasattr(self.tls, "stack"):
             return self.tls.stack
         else:
-            self.tls.stack = ["__start__"]
+            self.tls.stack = []
             return self.tls.stack
+
+    def get_top(self) -> str:
+        """
+        Get the top event name or None if the stack is empty.
+        """
+        stack = self.get_stack()
+        return stack[-1] if stack else None
+
+    def get_pt2_compile_substack(self):
+        """
+        A smaller subset of the main stack that gets used to log
+        PT2 Compile Events internally.
+        """
+        if hasattr(self.tls, "pt2_compile_substack"):
+            return self.tls.pt2_compile_substack
+        else:
+            self.tls.pt2_compile_substack = []
+            return self.tls.pt2_compile_substack
 
     def get_event_data(self) -> Dict[str, Any]:
         if not hasattr(self.tls, "event_data"):
@@ -997,6 +1130,14 @@ class ChromiumEventLogger:
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
+    def try_add_event_data(self, event_name: str, **kwargs) -> None:
+        """
+        Same as add_event_data, but will silently not log if the event isn't in the stack.
+        """
+        if event_name not in self.get_stack():
+            return
+        self.add_event_data(event_name, **kwargs)
 
     def add_event_data(
         self,
@@ -1023,6 +1164,7 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Dict[str, Any],
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Logs the start of a single event.
@@ -1041,13 +1183,16 @@ class ChromiumEventLogger:
         self.get_stack().append(event_name)
         # Add metadata from start event
         self.add_event_data(event_name, **metadata)
+        if log_pt2_compile_event:
+            self.get_pt2_compile_substack().append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
         stack = self.get_stack()
+        substack = self.get_pt2_compile_substack()
         stack.clear()
-        stack.append("__start__")
+        substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
 
@@ -1086,28 +1231,39 @@ class ChromiumEventLogger:
             event_metadata,
         )
 
+        def pop_stack(stack):
+            while event_name != stack[-1]:
+                # If the event isn't the most recent one to end, pop
+                # off the stack until it is.
+                # Since event_name in self.stack, this pop is always safe
+                log.warning(
+                    "ChromiumEventLogger: Detected overlapping events, fixing stack"
+                )
+                stack.pop()
+
+        event_stack = self.get_stack()
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
-        stack = self.get_stack()
-        if event_name not in stack:
+        if event_name not in event_stack:
             # Something went wrong, we never called start on this event,
             # or it was skipped due to overlapping events below
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
 
-        while event_name != stack[-1]:
-            # If the event isn't the most recent one to end, pop
-            # off the stack until it is.
-            # Since event_name in self.stack, this pop is always safe
-            log.warning(
-                "ChromiumEventLogger: Detected overlapping events, fixing stack"
-            )
-            stack.pop()
+        pop_stack(event_stack)
+
         if log_pt2_compile_event:
-            log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+            pt2_compile_substack = self.get_pt2_compile_substack()
+            pop_stack(pt2_compile_substack)
+            log_chromium_event_internal(
+                event, pt2_compile_substack, self.id_, start_time_ns
+            )
+            # Pop actual event off of stack
+            pt2_compile_substack.pop()
+
         # Finally pop the actual event off the stack
-        stack.pop()
+        event_stack.pop()
 
     def _log_timed_event(
         self,
@@ -1135,6 +1291,7 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
+        record_chromium_event_internal(event)
         return event
 
     def log_instant_event(
@@ -1175,7 +1332,9 @@ class ChromiumEventLogger:
         )
         if log_pt2_compile_event:
             # Log an instant event with the same start and end time
-            log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+            log_chromium_event_internal(
+                event, self.get_pt2_compile_substack(), self.id_, time_ns
+            )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -1186,6 +1345,39 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     if CHROMIUM_EVENT_LOG is None:
         CHROMIUM_EVENT_LOG = ChromiumEventLogger()
     return CHROMIUM_EVENT_LOG
+
+
+@contextmanager
+def chromium_event_timed(
+    event_name: str,
+    reset_event_log: bool = False,
+    log_pt2_compile_event: bool = False,
+) -> Generator[Any, None, None]:
+    """
+    Context manager that creates a chromium start and end event. Chromium event
+    logging is integrated with dynamo_timed, so you probably want to use that
+    instead. Use this context manager only if you want to avoid dynamo_timed.
+    """
+    chromium_event_log = get_chromium_event_logger()
+    if reset_event_log:
+        chromium_event_log.reset()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start(
+        event_name,
+        chromium_start_time,
+        {},
+        log_pt2_compile_event,
+    )
+    try:
+        yield
+    finally:
+        chromium_event_log.log_event_end(
+            event_name,
+            time.time_ns(),
+            {},
+            chromium_start_time,
+            log_pt2_compile_event,
+        )
 
 
 @dataclasses.dataclass
@@ -1400,21 +1592,37 @@ def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
-            bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
-            )
+            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+                return True
+            if isinstance(getattr(cls, "_fields", None), tuple) and callable(
+                getattr(cls, "_make", None)
+            ):
+                # The subclassing style namedtuple can have an extra base `typing.Generic`
+                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                if bases == (tuple,):
+                    # This is a namedtuple type directly created by `collections.namedtuple(...)`
+                    return True
+                if bases and any(
+                    (
+                        # Subclass of namedtuple
+                        is_namedtuple_cls(t)
+                        # For subclasses of namedtuple, the __new__ method should not be customized
+                        and cls.__new__ is t.__new__
+                    )
+                    for t in bases
+                ):
+                    return True
     except TypeError:
         pass
     return False
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls):
+def namedtuple_fields(cls) -> Tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
-        return ["start", "stop", "step"]
+        return ("start", "stop", "step")
 
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
@@ -1428,11 +1636,12 @@ def namedtuple_fields(cls):
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: List[Optional[str]] = [None] * cls.n_fields
+    fields: Dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
-            fields[getattr(obj, name).index] = name
-    return fields
+            fields[name] = getattr(obj, name).index
+    assert len(fields) == cls.n_fields
+    return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
 def checkpoint_params(gm):
@@ -1440,9 +1649,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = []
-        for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, param._version, torch.clone(param)))
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():
@@ -1496,11 +1706,17 @@ common_constant_types: Set[type] = {
     bytes,
     type(None),
     Ellipsis.__class__,
+    NotImplemented.__class__,
     types.CodeType,
+    # Commonly used immutable types from torch.
     torch.device,
     torch.dtype,
     torch.memory_format,
     torch.layout,
+    torch.finfo,
+    torch.iinfo,
+    torch.nn.attention.SDPBackend,
+    torch.cuda._CudaDeviceProperties,
 }
 
 if has_triton_package():
@@ -1984,7 +2200,7 @@ def same(
                     and math.isnan(res_error)
                     # Some unit test for the accuracy minifier relies on
                     # returning false in this case.
-                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
+                    and not torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY
                 ):
                     passes_test = True
                 if not passes_test:
@@ -2199,7 +2415,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
+        isinstance(a, complex) for a in args
+    ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
@@ -3171,7 +3389,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
@@ -3460,3 +3678,13 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    # Note that sometimes (tests etc...) we're not in a context which we can record into
+    if get_metrics_context().in_progress():
+        get_metrics_context().set_key_value("feature_usage", feature, usage)

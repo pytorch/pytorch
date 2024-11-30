@@ -8,9 +8,11 @@ import sympy
 
 from torch import dtype as torch_dtype
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from ..codecache import CudaKernelParamCache
+from ..ir import IRNode
 from ..utils import DeferredLineBase, get_gpu_type
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
@@ -55,6 +57,22 @@ class DeferredGpuKernelLine(DeferredLineBase):
                 assert os.path.exists(params[key]), f"{params[key]} does not exist"
 
         return self.line_template % tuple(params[key] for key in self.keys)
+
+    def get_kernel_path(self):
+        params = CudaKernelParamCache.get(self.kernel_name)
+        assert (
+            params is not None
+        ), f"{self.kernel_name} not found in CudaKernelParamCache"
+
+        for key in self.keys:
+            assert (
+                key in params
+            ), f"{key} not found in CudaKernelParamCache[{self.kernel_name}]"
+            if key == get_cpp_wrapper_cubin_path_name():
+                assert os.path.exists(params[key]), f"{params[key]} does not exist"
+                return params[key]
+
+        raise RuntimeError("Unable to find a path for kernel %s", self.kernel_name)
 
     def _new_line(self, line):
         return DeferredGpuKernelLine(self.kernel_name, line, self.keys)
@@ -214,19 +232,22 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
     def generate(self, is_inference):
-        self.prefix.writeline("\n")
-        if not V.graph.aot_mode:
-            for kernel in chain(
-                sorted(self.src_to_kernel.values()),
-                sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
-            ):
-                self.prefix.writeline(
-                    maybe_hipify_code_wrapper(
-                        f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
-                    )
-                )
+        with dynamo_timed("CppWrapperGpu.generate", log_pt2_compile_event=True):
             self.prefix.writeline("\n")
-        return super().generate(is_inference)
+            if not V.graph.aot_mode:
+                for kernel in chain(
+                    sorted(self.src_to_kernel.values()),
+                    sorted(
+                        [entry[0] for entry in self.user_defined_kernel_cache.values()]
+                    ),
+                ):
+                    self.prefix.writeline(
+                        maybe_hipify_code_wrapper(
+                            f"static {self.device_codegen.cpp_kernel_type()} {kernel} = nullptr;"
+                        )
+                    )
+                self.prefix.writeline("\n")
+            return super().generate(is_inference)
 
     def generate_user_defined_triton_kernel(
         self,
@@ -245,7 +266,7 @@ class CppWrapperGpu(CppWrapperCpu):
         ]
         args = [self.val_to_arg_str(v) for v in raw_args]
         arg_types = [
-            arg.get_dtype() if hasattr(arg, "get_dtype") else type(arg)
+            arg.get_dtype() if isinstance(arg, IRNode) else type(arg)
             for arg in raw_args
         ]
         self.generate_kernel_call(
@@ -294,22 +315,21 @@ class CppWrapperGpu(CppWrapperCpu):
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
         self.writeline(f"if ({kernel_var_name} == nullptr) {{")
-        self.writeline(
-            DeferredGpuKernelLine(
-                kernel_name,
-                (
-                    """    """
-                    + kernel_var_name
-                    + """ = loadKernel("%s", "%s", %s, this->cubin_dir_);"""
-                    if V.graph.aot_mode
-                    else """    """
-                    + kernel_var_name
-                    + """ = loadKernel("%s", "%s", %s);"""
-                ),
-                keys,
-            )
+        deferred_gpu_kernel_line = DeferredGpuKernelLine(
+            kernel_name,
+            (
+                "    "
+                + kernel_var_name
+                + ' = loadKernel("%s", "%s", %s, this->cubin_dir_);'
+                if V.graph.aot_mode
+                else "    " + kernel_var_name + ' = loadKernel("%s", "%s", %s);'
+            ),
+            keys,
         )
+        self.writeline(deferred_gpu_kernel_line)
         self.writeline("}")
+
+        self.additional_files.append(deferred_gpu_kernel_line.get_kernel_path())
         return kernel_var_name
 
     def generate_args_decl(self, call_args, arg_types, arg_signatures):
@@ -336,13 +356,11 @@ class CppWrapperGpu(CppWrapperCpu):
                         var_name,
                     )
                 else:
+                    device_ptr_type = self.device_codegen.cpp_device_ptr()
                     self.writeline(
                         maybe_hipify_code_wrapper(
-                            f"{self.device_codegen.cpp_device_ptr()} {var_name};"
+                            f"{device_ptr_type} {var_name} = reinterpret_cast<{device_ptr_type}>({arg}.data_ptr());"
                         )
-                    )
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                     )
             elif arg_type in (sympy.Integer, int):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
