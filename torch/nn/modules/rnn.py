@@ -716,7 +716,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_tanh(
                     input,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type:ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -728,7 +728,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_relu(
                     input,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type:ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -742,7 +742,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type:ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -754,7 +754,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type:ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -1124,7 +1124,7 @@ class LSTM(RNNBase):
             result = _VF.lstm(
                 input,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type:ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1137,7 +1137,7 @@ class LSTM(RNNBase):
                 input,
                 batch_sizes,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type:ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,

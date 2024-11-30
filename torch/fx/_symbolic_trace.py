@@ -916,7 +916,7 @@ class Tracer(TracerBase):
             default: Tuple[Any, ...] = ()
         else:
             param = sig.parameters[name]
-            default: Tuple[Any, ...] = (  # type: ignore[assignment]
+            default = (  # type: ignore[assignment]
                 () if param.default is inspect.Parameter.empty else (param.default,)
             )
         return self.create_proxy(

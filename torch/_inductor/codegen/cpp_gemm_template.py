@@ -323,6 +323,7 @@ def expand_bias(
             assert isinstance(B, torch.Tensor)
             assert isinstance(X, torch.Tensor)
             B = B.expand(X.shape[0], B.shape[-1])
+    assert B is not None
     return B
 
 
