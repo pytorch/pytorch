@@ -1,0 +1,14 @@
+from typing import List, Tuple, Optional, Union
+
+
+def f(a: List[int]) -> Tuple[int, int]:
+    pass
+
+
+def g(a: Optional[int]) -> Union[int, str]:
+    pass
+
+
+a: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}
+
+b: Union[Optional[int], list[Union[str, int]]] = None

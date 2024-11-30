@@ -1,0 +1,134 @@
+[
+  {
+    "char": 0,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 0,
+    "name": "Add 'from __future__ import annotations' before this line",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 9,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 4,
+    "name": "Use 'list' instead of 'typing.List'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 23,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 4,
+    "name": "Use 'tuple' instead of 'typing.Tuple'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 9,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 8,
+    "name": "Use '| None' instead of 'typing.Optional'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 27,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 8,
+    "name": "Use '|' instead of 'typing.Union'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 3,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 12,
+    "name": "Use 'dict' instead of 'typing.Dict'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 8,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 12,
+    "name": "Use '| None' instead of 'typing.Optional'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 28,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 12,
+    "name": "Use '|' instead of 'typing.Union'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 3,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 14,
+    "name": "Use '|' instead of 'typing.Union'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 9,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 14,
+    "name": "Use '| None' instead of 'typing.Optional'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 29,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": 14,
+    "name": "Use '|' instead of 'typing.Union'",
+    "original": null,
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": null,
+    "code": "ANNOTATIONS_LINTER",
+    "description": null,
+    "line": null,
+    "name": "Suggested fixes for annotations_linter",
+    "original": "from typing import List, Tuple, Optional, Union\n\n\ndef f(a: List[int]) -> Tuple[int, int]:\n    pass\n\n\ndef g(a: Optional[int]) -> Union[int, str]:\n    pass\n\n\na: Dict[Optional[int], list[Union[set[int], tuple[str, ...]]]] = {}\n\nb: Union[Optional[int], list[Union[str, int]]] = None\n",
+    "path": "tools/test/annotations_linter_testdata/python_code.py.txt",
+    "replacement": "from typing import List, Tuple, Optional, Union\n\n\ndef f(a: list[int]) -> tuple[int, int]:\n    pass\n\n\ndef g(a: int | None) -> int | str:\n    pass\n\n\na: dict[int | None, list[set[int] | tuple[str, ...]]] = {}\n\nfrom __future__ import annotations\nb: int | None | list[str | int] = None\n",
+    "severity": "error"
+  }
+]

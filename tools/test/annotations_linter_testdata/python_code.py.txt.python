@@ -1,0 +1,15 @@
+from typing import List, Tuple, Optional, Union
+
+
+def f(a: list[int]) -> tuple[int, int]:
+    pass
+
+
+def g(a: int | None) -> int | str:
+    pass
+
+
+a: dict[int | None, list[set[int] | tuple[str, ...]]] = {}
+
+from __future__ import annotations
+b: int | None | list[str | int] = None
