@@ -1434,6 +1434,8 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(composed_score_mod, dtype, device=device)
         self.run_test_with_paged_attention(composed_score_mod, dtype, device=device)
 
+    @supported_platform
+    @common_utils.parametrize("device", test_devices)
     @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers_all_dims(self, device: str, dtype: torch.dtype):
         head_scale = torch.randn(H, device=device)
@@ -3277,22 +3279,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ):
             attention(query, key, value, return_lse=True)
 
-    def test_cpu_error_message_for_no_inference(self):
-        make_tensor = functools.partial(
-            torch.randn,
-            (2, 2, 128, 16),
-            device="cpu",
-            dtype=torch.float32,
-            requires_grad=True,
-        )
-        query, key, value = make_tensor(), make_tensor(), make_tensor()
-        attention = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
-        ):
-            attention(query, key, value)
-
     @supported_platform
     @unittest.skipIf(not TEST_ON_CUDA, "Only test on cuda")
     def test_mixed_device_error_message(self):
@@ -3434,11 +3420,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S, device=device)
 
     @supported_platform
-    def test_non_divisible_with_captured_buffer(self):
+    @common_utils.parametrize("device", test_devices)
+    def test_non_divisible_with_captured_buffer(self, device):
         Q_S = S + 3
         KV_S = S + 3
 
-        multiplier = torch.randn(Q_S, device="cuda", dtype=torch.bfloat16)
+        multiplier = torch.randn(Q_S, device=device, dtype=torch.bfloat16)
 
         def apply_multiplicative_bias(score, b, h, q_idx, kv_idx):
             return score * multiplier[q_idx]
@@ -3447,7 +3434,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_attention, score_mod=apply_multiplicative_bias
         )
 
-        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
+        self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S, device=device)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self):
