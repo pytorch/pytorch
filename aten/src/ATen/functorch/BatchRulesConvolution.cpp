@@ -205,18 +205,17 @@ convolution_backward_input_batch_rule(
       const auto result = at::convolution_backward_symint(
           grad_output, dummy_input, weight_, std::nullopt, stride, padding,
           dilation, transposed, output_padding, groups, mask);
-      const auto grad_input = reshape_dim_outof(1, batch_size, std::get<0>(result));
-      return std::make_tuple(grad_input, 1);
+      auto grad_input = reshape_dim_outof(1, batch_size, std::get<0>(result));
+      return std::make_tuple(std::move(grad_input), 1);
     }
     Tensor grad_input;
     if (!transposed) {
       // N(GO), B(GO)I -> N(GO), (GO)(BI) -> N(GBI)
       const auto weight_ = reshape_dim_into(*weight_bdim, 1, weight);
       auto dummy_input = make_dummy(input, input_bdim, 1, batch_size);
-      const auto result = at::convolution_backward_symint(
+      grad_input = std::get<0>(at::convolution_backward_symint(
           grad_output, dummy_input, weight_, std::nullopt, stride, padding,
-          dilation, transposed, output_padding, groups, mask);
-      grad_input = std::get<0>(result); // N(GBI)
+          dilation, transposed, output_padding, groups, mask)); // N(GBI)
     } else {
       // N(GO), B(GI)O -> N(GO), (GBI)O -> N(GBI)
       auto weight_ = moveBatchDimToFront(weight, weight_bdim); // B(GI)O
@@ -224,24 +223,23 @@ convolution_backward_input_batch_rule(
       weight_ = weight_.transpose(0, 1);                       // GBIO
       weight_ = weight_.flatten(0, 2);                         // (GBI)O
       const auto dummy_input = make_dummy(input, input_bdim, 1, batch_size);
-      const auto result = at::convolution_backward_symint(
+      grad_input = std::get<0>(at::convolution_backward_symint(
           grad_output, dummy_input, weight_, std::nullopt, stride, padding,
-          dilation, transposed, output_padding, groups, mask);
-      grad_input = std::get<0>(result); // N(GBI)
+          dilation, transposed, output_padding, groups, mask)); // N(GBI)
     }
     // N(GBI) -> NG(BI) -> NGBI -> NBGI -> NB(GI)
     grad_input = reshape_dim_outof_symint(1, groups, grad_input);
     grad_input = reshape_dim_outof_symint(2, batch_size, grad_input);
     grad_input = grad_input.transpose(1, 2);
     grad_input = reshape_dim_into(2, 2, grad_input);
-    return std::make_tuple(grad_input, 1);
+    return std::make_tuple(std::move(grad_input), 1);
   } else {
     TORCH_INTERNAL_ASSERT(input_bdim);
     const auto dummy_input = make_dummy(input, input_bdim, 0, 1);
-    const auto result = at::convolution_backward_symint(
+    auto result = at::convolution_backward_symint(
         grad_output, dummy_input, weight, std::nullopt, stride, padding,
         dilation, transposed, output_padding, groups, mask);
-    return std::make_tuple(std::get<0>(result), std::nullopt);
+    return std::make_tuple(std::move(std::get<0>(result)), std::nullopt);
   }
 }
 static std::tuple<Tensor, std::optional<int64_t>>
@@ -258,12 +256,12 @@ convolution_backward_weight_batch_rule(
     const auto grad_output_ = reshape_dim_into(*grad_output_bdim, 1, grad_output);
     const auto input_ = reshape_dim_into(*input_bdim, 1, input);
     const auto dummy_weight = make_dummy(weight, weight_bdim, 0, batch_size);
-    const auto result = at::convolution_backward_symint(
+    auto result = at::convolution_backward_symint(
         grad_output_, input_, dummy_weight, std::nullopt, stride, padding,
         dilation, transposed, output_padding, groups * batch_size, mask);
-    auto grad_weight = std::get<1>(result);
+    auto& grad_weight = std::get<1>(result);
     grad_weight = reshape_dim_outof_symint(0, batch_size, grad_weight);
-    return std::make_tuple(grad_weight, 0);
+    return std::make_tuple(std::move(grad_weight), 0);
   } else if (grad_output_bdim && !input_bdim) {
     const auto batch_size = grad_output.size(*grad_output_bdim);
     if (groups == 1) {
@@ -423,23 +421,23 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   Tensor grad_input;
   if (output_mask[0]) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    auto result = convolution_backward_input_batch_rule(
+    auto [tensor, bdim] = convolution_backward_input_batch_rule(
         grad_output, grad_output_bdim,
         input, input_bdim,
         weight, weight_bdim,
         stride, padding, dilation, transposed, output_padding, groups);
-    grad_input = makeBatched(std::get<0>(result), std::get<1>(result), cur_level);
+    grad_input = makeBatched(tensor, bdim, cur_level);
   }
 
   Tensor grad_weight;
   if (output_mask[1]) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = convolution_backward_weight_batch_rule(
+    auto [tensor, bdim] = convolution_backward_weight_batch_rule(
         grad_output, grad_output_bdim,
         input, input_bdim,
         weight, weight_bdim,
         stride, padding, dilation, transposed, output_padding, groups);
-    grad_weight = makeBatched(std::get<0>(result), std::get<1>(result), cur_level);
+    grad_weight = makeBatched(tensor, bdim, cur_level);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 

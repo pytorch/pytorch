@@ -553,8 +553,8 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   auto result = mkldnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       ideep::rnn_kind::LSTM, num_layers, dropout_p, train, bidirectional, batch_first);
-  output = result.first;
-  std::tie(hy, cy) = result.second;
+  output = std::move(result.first);
+  std::tie(hy, cy) = std::move(result.second);
 }
 } // anonymous namespace
 
