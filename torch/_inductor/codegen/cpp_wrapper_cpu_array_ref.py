@@ -553,7 +553,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
             or (
                 config.use_minimal_arrayref_interface
@@ -892,7 +892,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
                 call_strs.extend(tmp_call_strs)
             else:
                 # No need to wrap with RAIIAtenTensorHandle when using stack allocation.

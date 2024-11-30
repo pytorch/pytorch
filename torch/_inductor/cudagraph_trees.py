@@ -621,13 +621,12 @@ class CUDAWarmupNode:
         )
 
         def get_non_cudagraph_inps() -> List[weakref.ReferenceType[UntypedStorage]]:
-            non_cudagraph_inps = []
-            for t in itertools.chain(new_inputs, self.wrapped_function.constants):
-                if (
-                    isinstance(t, torch.Tensor)
-                    and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
-                ):
-                    non_cudagraph_inps.append(weakref.ref(t.untyped_storage()))
+            non_cudagraph_inps = [
+                weakref.ref(t.untyped_storage())
+                for t in itertools.chain(new_inputs, self.wrapped_function.constants)
+                if isinstance(t, torch.Tensor)
+                and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
+            ]
             return non_cudagraph_inps
 
         non_cudagraph_inps_storages = get_non_cudagraph_inps()
@@ -832,6 +831,20 @@ class CUDAGraphNode:
             for idx, t in enumerate(inputs)
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         ]
+
+        # (depth, offset) of live tensors which are alias of previous graph outputs
+        self.live_cudagraph_managed_path_refs: InputList[Optional[PathOutputIndex]] = [
+            (
+                self._is_alias_of_live_recorded_tensor(t)
+                if isinstance(t, torch.Tensor)
+                else None
+            )
+            for t in inputs
+        ]
+
+        # when replay, preserve the liveness of an input if it AliasesPriorGraphOutput
+        # and also aliases an output of the current CUDAGraphNode
+        self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
 
         self.static_input_idxs: List[int] = list(
             OrderedSet(wrapped_function.static_input_idxs)
@@ -1040,11 +1053,11 @@ class CUDAGraphNode:
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
-        new_inputs.clear()
 
         self.run_graph()
 
         outputs = self.reconstruct_outputs()
+        new_inputs.clear()
 
         if config.triton.fast_path_cudagraph_asserts:
             self.debug_check_invariants_after_invocation()
@@ -1263,6 +1276,12 @@ class CUDAGraphNode:
             path_ref = self._is_alias_of_live_recorded_tensor(o)
             if path_ref is not None:
                 self._mark_prior_graph_output_as_aliased(path_ref)
+
+                for idx, inp_path_ref in enumerate(
+                    self.live_cudagraph_managed_path_refs
+                ):
+                    if path_ref == inp_path_ref:
+                        self.preserved_aliased_inputs[idx] = True
                 self.output_storage_alias.append(AliasesPriorGraphOutput(path_ref))
                 continue
 
@@ -1669,7 +1688,8 @@ class CUDAGraphNode:
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
         for idx in self.cudagraph_managed_idxs:
-            inputs[idx] = None  # type: ignore[call-overload]
+            if not self.preserved_aliased_inputs[idx]:
+                inputs[idx] = None  # type: ignore[call-overload]
 
         torch._check(
             self._check_liveness(
@@ -1710,12 +1730,10 @@ def get_block_addrs(pool_id: Tuple[int, int], live_only: bool = True) -> List[in
 
 
 def format_tb(frames: List[Any]) -> str:
-    formatted_traceback = []
-
-    for entry in frames:
-        formatted_traceback.append(
-            traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
-        )
+    formatted_traceback = [
+        traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
+        for entry in frames
+    ]
 
     return "".join(traceback.format_list(formatted_traceback))
 

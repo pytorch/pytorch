@@ -186,8 +186,8 @@ class HalidePrinter(PythonPrinter):
             return super()._print_FloorDiv(expr)
 
         x, div = expr.args
-        x = self.cast_float(self.paren(self.doprint(x)))
-        div = self.cast_float(self.paren(self.doprint(div)))
+        x = self.cast_float(self.doprint(x))
+        div = self.cast_float(self.doprint(div))
         return self.cast_index(f"hl.floor({x} / {div})")
 
     def _print_Round(self, expr):
@@ -1397,19 +1397,19 @@ class HalideKernel(SIMDKernel):
             result.append((call_str, arg))
             if isinstance(arg, TensorArg):
                 assert arg.offset == 0 and arg.alias_of is None
-                for alias in self.buffer_aliases.get(arg.name, ()):
-                    result.append(
-                        (
-                            None,
-                            TensorArg(
-                                alias,
-                                arg.buffer,
-                                arg.dtype,
-                                arg.offset,
-                                alias_of=arg.name,
-                            ),
-                        )
+                result.extend(
+                    (
+                        None,
+                        TensorArg(
+                            alias,
+                            arg.buffer,
+                            arg.dtype,
+                            arg.offset,
+                            alias_of=arg.name,
+                        ),
                     )
+                    for alias in self.buffer_aliases.get(arg.name, ())
+                )
         return result
 
     def halide_kernel_meta(self) -> HalideMeta:

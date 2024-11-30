@@ -1,14 +1,14 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
-from unittest import TestCase
 
-from tools.linter.adapters._linter_common import PythonFile
+from tools.linter.adapters._linter import PythonFile
 from tools.linter.adapters.set_linter import PythonLines, SetLinter
+
+from .linter_test_case import LinterTestCase
 
 
 TESTDATA = Path("tools/test/set_linter_testdata")
@@ -19,25 +19,13 @@ INCLUDES_FILE2 = TESTDATA / "includes_doesnt_change.py.txt"
 FILES = TESTFILE, INCLUDES_FILE, INCLUDES_FILE2
 
 
-def python_lines(path: str | Path) -> PythonLines:
-    if isinstance(path, Path):
-        pf = PythonFile(SetLinter.linter_name, path)
-    else:
-        pf = PythonFile(SetLinter.linter_name, contents=path)
+def python_lines(p: str | Path) -> PythonLines:
+    pf = PythonFile.make(SetLinter.linter_name, p)
     return PythonLines(pf)
 
 
-def assert_expected(self, path: Path, actual: str, suffix: str) -> None:
-    expected_file = Path(f"{path}.{suffix}")
-    if expected_file.exists():
-        self.assertEqual(actual, expected_file.read_text())
-    else:
-        expected_file.write_text(actual)
-
-
-class TestSetLinter(TestCase):
-    assertExpected = assert_expected
-    maxDiff = 102400
+class TestSetLinter(LinterTestCase):
+    LinterClass = SetLinter
 
     def test_get_all_tokens(self) -> None:
         self.assertEqual(EXPECTED_SETS, python_lines(TESTFILE).sets)
@@ -47,31 +35,11 @@ class TestSetLinter(TestCase):
         expected = [3, 13]
         self.assertEqual(expected, actual)
 
-    # TODO(rec): how to get parametrize to work with unittest?
-    def test_python(self) -> None:
-        self._test_linting(TESTFILE)
-
-    def test_includes(self) -> None:
-        self._test_linting(INCLUDES_FILE)
-
-    def test_includes2(self) -> None:
-        self._test_linting(INCLUDES_FILE2)
-
-    def _test_linting(self, path: Path) -> None:
-        linter = SetLinter([str(path), "--lintrunner"])
-
-        msgs = []
-        linter.lint_all(print=msgs.append)
-        assert msgs
-        messages = [json.loads(m) for m in msgs]
-
-        replace = messages[-1]
-        self.assertEqual(replace["name"], "Suggested fixes for set_linter")
-        self.assertEqual(replace["original"], path.read_text())
-        self.assertExpected(path, replace["replacement"], "python")
-
-        actual = json.dumps(messages, indent=2, sort_keys=True) + "\n"
-        self.assertExpected(path, actual, "json")
+    def test_linting(self) -> None:
+        for path in (TESTFILE, INCLUDES_FILE, INCLUDES_FILE2):
+            with self.subTest(path):
+                r = self.lint_fix_test(path, [])
+                self.assertEqual(r.name, "Suggested fixes for set_linter")
 
     def test_bracket_pairs(self) -> None:
         TESTS: tuple[tuple[str, dict[int, int]], ...] = (
