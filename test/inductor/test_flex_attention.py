@@ -3263,6 +3263,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(flex_k_grad, k.grad, atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(flex_v_grad, v.grad, atol=3e-3, rtol=2e-3)
 
+    @supported_platform
     def test_cpu_error_message_return_lse(self):
         make_tensor = functools.partial(
             torch.randn,
