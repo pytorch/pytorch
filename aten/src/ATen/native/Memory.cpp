@@ -32,13 +32,20 @@ bool is_pinned(const Tensor& self, std::optional<c10::Device> device) {
         "The argument 'device' of Tensor.is_pinned() ",
         "is deprecated. Please do not pass this argument.")
     opt_device_type = device.value().type();
+  } else {
+    opt_device_type = at::getAccelerator();
   }
-  // Only CPU tensors can be pinned
-  if (!self.is_cpu()) {
+
+  if (!self.is_cpu() || // Only CPU tensors can be pinned
+      !opt_device_type.has_value() || // there is no accelerator
+      !at::isAccelerator(
+          opt_device_type.value())) { // passed device not an accelerator
     return false;
   }
-  // Use getAcceleratorHooksInterface to make is_pinned device-agnostic
-  return at::globalContext().isPinnedPtr(self.storage().data(), opt_device_type);
+
+  return at::globalContext()
+      .getAcceleratorHooksInterface(opt_device_type)
+      .isPinnedPtr(self.storage().data());
 }
 
 Tensor pin_memory(const Tensor& self, std::optional<c10::Device> device) {
@@ -57,16 +64,22 @@ Tensor pin_memory(const Tensor& self, std::optional<c10::Device> device) {
 
 Tensor _pin_memory(const Tensor& self, std::optional<c10::Device> device) {
   TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
-  // Use getAcceleratorHooksInterface to make pin_memory device-agnostic
-  auto* allocator = device.has_value()?
-      at::globalContext().getPinnedMemoryAllocator(device.value().type()):
-      at::globalContext().getPinnedMemoryAllocator();
+
+  std::optional<c10::DeviceType> opt_device_type;
+  if (device.has_value()) {
+    opt_device_type = device.value().type();
+  }
+
+  auto* allocator = at::globalContext()
+                        .getAcceleratorHooksInterface(opt_device_type)
+                        .getPinnedMemoryAllocator();
   auto storage = Storage(
       Storage::use_byte_size_t(),
       detail::computeStorageNbytes(
           self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,
       /*resizable=*/false);
+
   auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
   tensor.copy_(self);
   return tensor;
