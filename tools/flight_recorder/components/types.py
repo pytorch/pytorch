@@ -74,7 +74,7 @@ class MatchState(Enum):
         return self
 
     def __str__(self) -> str:
-        details = f", {self.culprit}" if self.culprit else ""
+        details = f", {self.culprit}" if getattr(self, "culprit", None) else ""
         return f"Error type: {self.name}{details}"
 
 
@@ -134,7 +134,7 @@ class Collective(NamedTuple):
     input_numel: Optional[int] = None
     output_numel: Optional[int] = None
     missing_ranks: Optional[Set[int]] = None
-    mismatch_collectives: Optional[List["Collective"]] = None
+    mismatch_collectives: Optional[Dict[int, "Collective"]] = None
     type_of_mismatch: Optional[MatchState] = None
 
 
@@ -220,8 +220,12 @@ class EntryState:
         self.collective_state = entry["state"]
         self.collective_frames = entry["frames"]
         self.expected_ranks = expected_ranks
+        self.missing_ranks: Set[int]
+        self.input_numel: int
+        self.output_numel: int
+        self.errors: Set[Tuple[int, MatchState]]
 
-    def logging_info(
+    def log(
         self,
         logger: FlightRecorderLogger,
         logger_msg: str,
@@ -233,8 +237,8 @@ class EntryState:
         logger.info(
             logger_msg,
             self.collective_seq_id,
-            self.record_id,
         )
+        logger.info("internal record id: %s", self.record_id)
         logger.info("group info: %s", self.pg_desc)
         logger.info("collective: %s", self.profiling_name)
         if missing_ranks:
@@ -286,29 +290,27 @@ class EntryState:
         else:
             assert idx_map is not None, "idx_map is None"
             assert all_entries is not None, "all_entries is None"
-            mismatch_collectives = []
+            mismatch_collectives = {}
             for rank, error in errors:
                 idx = idx_map[rank]
                 entry = all_entries[rank][idx]
                 desc = entry["process_group"][1]
                 pg_name = entry["process_group"][0]
-                mismatch_collectives.append(
-                    Collective(
-                        id=id,
-                        group_id=entry["process_group"][0],
-                        record_id=entry["record_id"],
-                        pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
-                        pass_check=False,
-                        collective_seq_id=entry["collective_seq_id"],
-                        p2p_seq_id=entry["p2p_seq_id"],
-                        collective_name=entry["profiling_name"],
-                        input_sizes=entry["input_sizes"],
-                        output_sizes=entry["output_sizes"],
-                        expected_ranks=self.expected_ranks,
-                        collective_state=entry["state"],
-                        collective_frames=entry["frames"],
-                        type_of_mismatch=error,
-                    )
+                mismatch_collectives[rank] = Collective(
+                    id=id,
+                    group_id=entry["process_group"][0],
+                    record_id=entry["record_id"],
+                    pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
+                    pass_check=False,
+                    collective_seq_id=entry["collective_seq_id"],
+                    p2p_seq_id=entry["p2p_seq_id"],
+                    collective_name=entry["profiling_name"],
+                    input_sizes=entry["input_sizes"],
+                    output_sizes=entry["output_sizes"],
+                    expected_ranks=self.expected_ranks,
+                    collective_state=entry["state"],
+                    collective_frames=entry["frames"],
+                    type_of_mismatch=error,
                 )
             return Collective(
                 id=id,
