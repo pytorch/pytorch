@@ -7,7 +7,7 @@
     "name": "Add import for OrderedSet",
     "original": null,
     "path": "tools/test/set_linter_testdata/includes.py.txt",
-    "replacement": "from torch.utils._ordered_set import OrderedSet\n",
+    "replacement": null,
     "severity": "error"
   },
   {
@@ -18,7 +18,7 @@
     "name": "Builtin `set` is deprecated",
     "original": null,
     "path": "tools/test/set_linter_testdata/includes.py.txt",
-    "replacement": "OrderedSet",
+    "replacement": null,
     "severity": "error"
   },
   {
