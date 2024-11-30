@@ -197,17 +197,12 @@ static cudnn_grid_sample_backward_batch_rule(
     const Tensor& grid, std::optional<int64_t> grid_bdim,
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim) {
 
-  auto new_bw_input = grid_sample_backward_helper_in(
+  auto [new_grad_output,new_input,new_grid,bdim_size]= grid_sample_backward_helper_in(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
-  auto new_grad_output = std::get<0>(new_bw_input);
-  auto new_input = std::get<1>(new_bw_input);
-  auto new_grid = std::get<2>(new_bw_input);
-  int64_t bdim_size = std::get<3>(new_bw_input);
+  auto bw_out = Func(std::move(new_input), std::move(new_grid), std::move(new_grad_output));
 
-  auto bw_out = Func(new_input, new_grid, new_grad_output);
-
-  return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
+  return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, bdim_size);
 }
 
 // TODO: replace with targetable functionalization
