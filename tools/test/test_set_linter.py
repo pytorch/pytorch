@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
@@ -9,14 +8,7 @@ from tokenize import TokenInfo
 from tools.linter.adapters._linter import PythonFile
 from tools.linter.adapters.set_linter import PythonLines, SetLinter
 
-
-_PARENT = Path(__file__).parent.absolute()
-_PATH = [Path(p).absolute() for p in sys.path]
-
-if _PARENT not in _PATH:
-    from .linter_test_case import LinterTestCase
-else:
-    from linter_test_case import LinterTestCase
+from linter_test_case import LinterTestCase
 
 
 TESTDATA = Path("tools/test/set_linter_testdata")
@@ -33,6 +25,7 @@ def python_lines(p: str | Path) -> PythonLines:
 
 
 class TestSetLinter(LinterTestCase):
+    maxDiff = 10000000
     LinterClass = SetLinter
 
     def test_get_all_tokens(self) -> None:
