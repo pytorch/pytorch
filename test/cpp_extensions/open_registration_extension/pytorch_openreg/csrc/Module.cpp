@@ -2,7 +2,7 @@
 
 // Make this a proper CPython module
 static struct PyModuleDef openreg_C_module = {
-    PyModuleDef_HEAD_INIT,
+    .m_base = PyModuleDef_HEAD_INIT,
     .m_name = "pytorch_openreg._C",
 };
 
