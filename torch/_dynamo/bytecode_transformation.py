@@ -13,6 +13,7 @@ from .bytecode_analysis import (
     remove_extra_line_nums,
     stacksize_analysis,
 )
+from .utils import is_safe_constant
 
 
 @dataclasses.dataclass
@@ -137,6 +138,17 @@ def create_instruction(
 def create_jump_absolute(target) -> Instruction:
     inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
     return create_instruction(inst, target=target)
+
+
+def create_load_const(val, checked=True) -> Instruction:
+    """
+    In general we should only create `LOAD_CONST` for immutable objects, but
+    sometimes it's convenient _and safe_ for Dynamo create `LOAD_CONST` for
+    mutable objects. In such cases, use `checked=False`.
+    """
+    if checked:
+        assert is_safe_constant(val), f"unsafe constant {val}"
+    return create_instruction("LOAD_CONST", argval=val)
 
 
 def create_dup_top() -> Instruction:
@@ -1140,11 +1152,12 @@ def update_offsets(instructions) -> None:
 
 def debug_bytes(*args) -> str:
     index = range(max(map(len, args)))
-    result = []
-    for arg in (
-        [index] + list(args) + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
-    ):
-        result.append(" ".join(f"{x:03}" for x in arg))
+    result = [
+        " ".join(f"{x:03}" for x in arg)
+        for arg in [index]
+        + list(args)
+        + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
+    ]
 
     return "bytes mismatch\n" + "\n".join(result)
 
