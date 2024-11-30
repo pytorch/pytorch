@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Sized, Tuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -780,6 +780,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         if isinstance(split_size_or_sections, int)
         else split_size_or_sections
     )
+    assert isinstance(output_size_list, Sized)
     output_spec_list = [
         DTensorSpec(
             mesh=input_spec.mesh,
