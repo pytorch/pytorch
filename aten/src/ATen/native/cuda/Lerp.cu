@@ -51,7 +51,16 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       dtype, "lerp_cuda",
       [&] {
-        at::native::gpu_kernel(
+        if (iter.is_cpu_scalar(3)) {
+          auto weight_val = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          at::native::gpu_kernel(
+            iter,
+            [=] GPU_LAMBDA(scalar_t self_val, scalar_t end_val) {
+              return lerp(self_val, end_val, weight_val);
+            });
+        } else {
+          at::native::gpu_kernel(
             iter,
             [] GPU_LAMBDA(
                 scalar_t self_val,
@@ -59,6 +68,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
                 scalar_t weight_val) -> scalar_t {
               return lerp(self_val, end_val, weight_val);
             });
+        }
       });
   }
 }
