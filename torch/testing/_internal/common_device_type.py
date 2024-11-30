@@ -1953,8 +1953,11 @@ def get_all_device_types() -> List[str]:
 
 
 flex_attention_supported_platform = unittest.skipUnless(
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
+    torch.cpu.is_available()
+    or (
+        torch.cuda.is_available()
+        and torch.utils._triton.has_triton()
+        and torch.cuda.get_device_capability() >= (8, 0)
+    ),
+    "Requires CUDA and Triton, or CPU",
 )

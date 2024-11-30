@@ -59,66 +59,6 @@ struct Welford {
   uint64_t index = 0;
 };
 
-// out = val * a + b
-// is_b_stride_zero: If the stride of b is 0 (mask broadcasting case),
-//                take b as a scalar pointer.
-#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
-template <typename T1, typename T2>
-inline void _scale_attn_mask_fusion_kernel(
-    T1* a,
-    T2* b,
-    const int& size,
-    T1* out,
-    T1& val,
-    bool is_b_stride_zero) {
-#else
-template <bool is_b_stride_zero, typename T1, typename T2>
-inline void _scale_attn_mask_fusion_kernel(
-    T1* a,
-    T2* b,
-    const int& size,
-    T1* out,
-    T1& val) {
-#endif
-  const auto vec_size1 = at::vec::Vectorized<T1>::size();
-  const auto vec_size2 = at::vec::Vectorized<T2>::size();
-  constexpr int64_t T1_n =
-      (vec_size2 == vec_size1 * 2 && std::is_reduced_floating_point_v<T2>) ? 2 : 1;
-  constexpr int64_t T2_n = 1;
-  auto vec_scale = at::vec::VectorizedN<T1, T1_n>(val);
-  int64_t i = 0;
-  for (; i < size - (size % vec_size2); i += vec_size2) {
-    auto a_n = at::vec::VectorizedN<T1, T1_n>::loadu(a + i);
-    at::vec::VectorizedN<T2, T2_n> b_n;
-#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
-    if (is_b_stride_zero) {
-#else
-    if constexpr(is_b_stride_zero) {
-#endif
-      b_n = at::vec::VectorizedN<T2, T2_n>((T1)b[0]);
-    } else {
-      b_n = at::vec::VectorizedN<T2, T2_n>::loadu(b + i);
-    }
-    auto b_n_convert = at::vec::convert<T1, T1_n, T2, T2_n, true>(b_n);
-    auto res = a_n * vec_scale + b_n_convert;
-    res.store(out + i);
-  }
-  for (; i < size; i++) {
-    auto tmp0 = a[i];
-    T1 tmp1;
-#if __GNUC__ == 11 && defined(__ARM_FEATURE_SVE)
-    if (is_b_stride_zero) {
-#else
-    if constexpr(is_b_stride_zero) {
-#endif
-      tmp1 = (T1)b[0];
-    } else {
-      tmp1 = (T1)b[i];
-    }
-    out[i] = tmp0 * val + tmp1;
-  }
-}
-
 // 1) out = exp(a - val)
 // 2) val = sum(out)
 template <typename T1, typename T2>

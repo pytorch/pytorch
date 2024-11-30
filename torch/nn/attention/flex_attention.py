@@ -1240,16 +1240,6 @@ def flex_attention(
     )
 
     if torch.compiler.is_dynamo_compiling():
-        if return_lse:
-            if query.device.type == "cpu":
-                raise NotImplementedError(
-                    "`return_lse` is not supported yet on CPU device when using torch.compile."
-                )
-
-        if query.requires_grad:
-            raise NotImplementedError(
-                "FlexAttention only supports inference on CPU device when using torch.compile."
-            )
         # mark head_dim and number of heads to be static
         for x in [query, key, value]:
             torch._dynamo.mark_static(x, -3)

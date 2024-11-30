@@ -13,6 +13,7 @@ from torch.utils._pytree import tree_map
 
 from .. import config
 from ..ir import (
+    Buffer,
     ComputedBuffer,
     ExternKernel,
     FixedLayout,
@@ -713,7 +714,8 @@ def create_indices_fake(x) -> torch.Tensor:
 
 from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 
-from ..codegen.cpp_mha_template import CppMHATemplate
+from ..codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
+
 
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
@@ -742,31 +744,48 @@ def flex_attention(
         mask_graph,
     ) = block_mask
     if query.get_device().type == "cpu":
+        if kernel_options["OUTPUT_LOGSUMEXP"]:
+            raise NotImplementedError(
+                "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
+            )
+        fake_buffers: List[Buffer] = []  # noqa: F821
         placeholder_inps = [
             create_placeholder(name, dtype, query.get_device())
             for name, dtype in [
-                ("arg0_1", query.get_dtype()),
-                ("arg1_1", torch.int32),
-                ("arg2_1", torch.int32),
-                ("arg3_1", torch.int32),
-                ("arg10_1", torch.int32), # TODO: fix the random picked name here: arg10_1
+                ("score", torch.float),
+                ("b", torch.int32),
+                ("h", torch.int32),
+                ("q_idx", torch.int32),
+                ("kv_idx", torch.int32),
             ]
         ]
         subgraph_buffer = build_subgraph_buffer(
             placeholder_inps + list(score_mod_other_buffers), subgraph
         )
+        subgraph_buffer.freeze_layout()
         mask_graph_placeholder_inps = [
             create_placeholder(name, dtype, query.get_device())
             for name, dtype in [
-                ("arg0_1", torch.int32),
-                ("arg1_1", torch.int32),
-                ("arg2_1", torch.int32),
-                ("arg3_1", torch.int32),
+                ("b", torch.int32),
+                ("h", torch.int32),
+                ("q_idx", torch.int32),
+                ("kv_idx", torch.int32),
             ]
         ]
         mask_graph_buffer = build_subgraph_buffer(
             mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
         )
+
+        buffer_list = (
+            placeholder_inps
+            + list(score_mod_other_buffers)
+            + mask_graph_placeholder_inps
+            + list(mask_mod_other_buffers)
+        )
+        for item in buffer_list:
+            if isinstance(item, TensorBox):
+                fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
         (
             query,
             key,
@@ -794,6 +813,12 @@ def flex_attention(
                 full_q_indices,
             ]
         )
+
+        if len({query.get_name(), key.get_name(), value.get_name()}) != 3:
+            raise NotImplementedError(
+                "Unsupported for now if query, key, value are the same buffer."
+            )
+
         score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
         mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
         Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
@@ -811,21 +836,63 @@ def flex_attention(
             [B, Hq, seq_len_q, v_head_dim],
             stride=out_strides,
         )
-        choices: List[Any] = []
-        input_nodes = [query, key, value, kv_indices]
-        if score_mod_other_buffers and mask_mod_other_buffers:
-            assert len(score_mod_other_buffers) == 1
-            assert len(mask_mod_other_buffers) == 1
-            input_nodes += [score_mod_other_buffers[0], mask_mod_other_buffers[0]]        
+        _choices: List[Any] = []
+        input_nodes = [query, key, value, kv_num_blocks, kv_indices]
+        if not full_kv_num_blocks:
+            no_full_kv_block = True
+        else:
+            no_full_kv_block = False
+            input_nodes += [full_kv_num_blocks]
+        has_other_buffer = False
+        kernel_input_name_to_buffer = {}
+        if score_mod_other_buffers or mask_mod_other_buffers:
+            has_other_buffer = True
+
+            for prefix, buffers in [
+                ("score_others", score_mod_other_buffers),
+                ("mask_others", mask_mod_other_buffers),
+            ]:
+                kernel_input_name_to_buffer.update(
+                    {f"{prefix}_{i}": buf for i, buf in enumerate(buffers)}
+                )
+            input_nodes += [
+                value
+                for value in kernel_input_name_to_buffer.values()
+                if not isinstance(value, sympy.Symbol)
+            ]
+
         skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
-        CppMHATemplate.add_choices(
-            choices=choices,
+        # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+        SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(
+            SPARSE_KV_BLOCK_SIZE
+        )
+        SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(
+            SPARSE_Q_BLOCK_SIZE
+        )
+        assert V.graph.sizevars.evaluate_expr(
+            sympy.Le(
+                seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE)
+            )
+        ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+        assert V.graph.sizevars.evaluate_expr(
+            sympy.Le(
+                seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE)
+            )
+        ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+        CppFlexAttentionTemplate.add_choices(
+            choices=_choices,
             input_nodes=input_nodes,
             layout=layout,
             scale=scale,
             score_mod=None if skip_mask_score else subgraph_buffer,
             mask_mod=None if skip_mask_score else mask_graph_buffer,
-            kv_block_size=seq_len_kv if SPARSE_KV_BLOCK_SIZE == 1073741824 else SPARSE_KV_BLOCK_SIZE,
+            kv_block_size=SPARSE_KV_BLOCK_SIZE,
+            has_other_buffer=has_other_buffer,
+            no_full_kv_block=no_full_kv_block,
+            fake_buffers=fake_buffers,
+            len_score_other=len(score_mod_other_buffers),
+            len_mask_other=len(mask_mod_other_buffers),
+            kernel_input_name_to_buffer=kernel_input_name_to_buffer,
         )
         inputs_for_autotuning = [
             query,
@@ -834,7 +901,7 @@ def flex_attention(
         ]
         res = autotune_select_algorithm(
             "flex_attention",
-            choices,
+            _choices,
             inputs_for_autotuning,
             layout,
         )
