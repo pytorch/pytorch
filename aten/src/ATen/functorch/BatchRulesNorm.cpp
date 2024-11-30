@@ -270,7 +270,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto results = batch_norm_backward_no_weight_bias_batch_rule<F, Func>(
+    auto results = batch_norm_backward_no_weight_bias_batch_rule<F, Func>(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
         running_mean_value, running_mean_bdim,
@@ -278,7 +278,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
         save_mean_value, save_mean_bdim,
         save_rstd_value, save_rstd_bdim,
         training, eps);
-    grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
+    grad_input = makeBatched(std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
@@ -422,14 +422,14 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto res = group_norm_backward_no_weight_bias_batch_rule(
+    auto [tensor, bdim] = group_norm_backward_no_weight_bias_batch_rule(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim,
         N, C, HxW, group
     );
-    grad_input = makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+    grad_input = makeBatched(tensor, bdim, cur_level);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
