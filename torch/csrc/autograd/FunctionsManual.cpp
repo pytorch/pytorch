@@ -625,17 +625,6 @@ template Tensor div_tensor_self_backward(
     ScalarType,
     const std::optional<c10::string_view>&);
 
-template <typename T>
-Tensor div_tensor_self_backward(
-    const Tensor& grad,
-    T other,
-    ScalarType self_st) {
-  return div_tensor_self_backward(
-      grad, std::move(other), self_st, std::nullopt);
-}
-template Tensor div_tensor_self_backward(const Tensor&, Tensor, ScalarType);
-template Tensor div_tensor_self_backward(const Tensor&, Scalar, ScalarType);
-
 Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -647,13 +636,6 @@ Tensor div_tensor_other_backward(
 
   auto result = -grad * ((self / other) / other).conj();
   return handle_r_to_c(other, std::move(result));
-}
-
-Tensor div_tensor_other_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& other) {
-  return div_tensor_other_backward(grad, self, other, std::nullopt);
 }
 
 Tensor permute_backwards(const Tensor& grad, IntArrayRef fwd_dims) {
