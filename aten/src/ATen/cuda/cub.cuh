@@ -420,7 +420,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
         agg_val += BlockReduceT(temp_storage.reduce).Sum(agg_tmp);
 
       } else {
-        BlockLoadT(temp_storage.load).Load(d_in, data, remaining);
+        BlockLoadT(temp_storage.load).Load(d_in, data, remaining, T(0));
         __syncthreads();
         aggT agg_tmp = aggT(0);
         if constexpr (!nonzero) {

@@ -55,7 +55,7 @@ __global__ void write_indices(
     }
   } else if (index < n) {
     for (int dim = ndim - 1; dim >= 0; dim--) {
-      inp[index + dim *n] = fill_value;
+      inp[index + dim * n] = fill_value;
     }
   }
 }
@@ -63,6 +63,7 @@ __global__ void write_indices(
 __global__ void write_fill_value(int64_t * inp, int64_t * total, int64_t fill_value, int64_t n){
   int64_t total_val = *total;
   // not aiming for vectorized stores
+
   for (int64_t idx = total_val + blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
       inp[idx] = fill_value;
   }
@@ -226,7 +227,7 @@ void nonzero_static_cuda_out_impl(
   if (!out_correct_size) {
     out.resize_({self.dim(), size}).t();
   }
-  if (size == 0) return;
+  if (out.numel() == 0) return;
   // we need to allocate temporary out to then copy to user provided out
   at::Tensor out_temp;
   if (need_to_copy) {
@@ -261,8 +262,8 @@ void nonzero_static_cuda_out_impl(
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  int64_t out_grid = (size + BLOCK_THREADS - 1) / BLOCK_THREADS;
-  write_fill_value<<<num_sms, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(out_data_ptr, (int64_t *)agg_cum.get() + grid_size - 1, fill_value, size);
+  int64_t out_grid = std::min(num_sms, (size + BLOCK_THREADS - 1)/BLOCK_THREADS);
+  write_fill_value<<<out_grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(out_data_ptr, (int64_t *)agg_cum.get() + grid_size - 1, fill_value, size);
   if (self.dim() > 1) {
     TensorDims<int64_t> dims;
     for (int i = 0; i < self.dim(); i++) {
@@ -271,10 +272,10 @@ void nonzero_static_cuda_out_impl(
     const int nthreads = 256;
     const int nblocks = (size + nthreads - 1) / nthreads;
     write_indices<<<nblocks, nthreads, 0, at::cuda::getCurrentCUDAStream()>>>(
-        out_temp.mutable_data_ptr<int64_t>(),
+        out_data_ptr,
         dims,
         self.dim(),
-        size, 
+        size,
         (int64_t *)agg_cum.get() + grid_size - 1,
         fill_value);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -325,9 +326,9 @@ Tensor& nonzero_static_out_cuda(
     Tensor& out) {
   TORCH_CHECK(
       out.dtype() == at::kLong,
-      "Expected object of scalar type ",
+      "nonzero_static: Expected out tensor to have scalar type ",
       at::kLong,
-      " as out, but got ",
+      " but got ",
       out.dtype());
   TORCH_CHECK(
       self.device() == out.device(),
@@ -337,9 +338,12 @@ Tensor& nonzero_static_out_cuda(
       self.device());
   TORCH_CHECK(
       self.dim() <= MAX_DIMS,
-      "nonzero is not supported for tensor with more than ",
+      "nonzero_static is not supported for tensor with more than ",
       MAX_DIMS,
       " dimensions");
+  TORCH_CHECK(
+      size >= 0, "nonzero_static: 'size' must be an non-negative integer"
+  )
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf,
       at::ScalarType::Bool,
@@ -357,6 +361,9 @@ Tensor nonzero_static_cuda(
     const Tensor& self,
     int64_t size,
     int64_t fill_value) {
+  TORCH_CHECK(
+      size >= 0, "nonzero_static: 'size' must be an non-negative integer"
+  )
   Tensor out = Tensor(at::detail::empty_cuda(
                           {self.dim(), size}, self.options().dtype(kLong)))
                    .t();
