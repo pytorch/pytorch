@@ -236,20 +236,16 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim,
       T... extra_args) {
-    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
-    const auto tensor_ = std::get<0>(tensor_other);
-    const auto other_ = std::get<1>(tensor_other);
-    return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
+    auto [tensor_, other_]= check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
+    return std::make_tuple(Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...), 0);
   }
 
   static twoOutputs apply_two(
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim,
       T... extra_args) {
-    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
-    const auto tensor_ = std::get<0>(tensor_other);
-    const auto other_ = std::get<1>(tensor_other);
-    const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
+    auto [tensor_, other_]= check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
+    const auto res = Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...);
     return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
   }
 };
@@ -338,9 +334,7 @@ oneOutput cholesky_solve_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
-  const auto tensor_ = std::get<0>(tensor_other);
-  const auto other_ = std::get<1>(tensor_other);
+  auto [tensor_, other_]= _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
 }
 
