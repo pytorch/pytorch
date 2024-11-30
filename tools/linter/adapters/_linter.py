@@ -417,15 +417,21 @@ class FileLinter(ABC):
         """Emit a series of human-readable strings representing the results"""
         show_edits = not self.args.fix or self.args.verbose
 
+        first = True
         for r in results:
             if show_edits or r.is_edit:
                 if self.args.test or self.args.lintrunner:
                     msg = r.as_message(code=self.code, path=str(pf.path))
                     yield json.dumps(msg.asdict(), sort_keys=True)
-                elif r.line is None:
+                    continue
+                if first:
+                    first = False
+                else:
+                    yield ""
+                if r.line is None:
                     yield f"{pf.path}: {r.name}"
                 else:
-                    yield from self._display_window(pf, r)
+                    yield from (i.rstrip() for i in self._display_window(pf, r))
 
     def _display_window(self, pf: PythonFile, r: LintResult) -> Iterator[str]:
         """Display a window onto the code with an error"""
@@ -444,8 +450,6 @@ class FileLinter(ABC):
                 spaces = 8 + (r.char or 0)
                 carets = len(source_line) if r.char is None else (r.length or 1)
                 yield spaces * " " + carets * "^"
-
-        yield ""
 
 
 def set_logging_level(args: argparse.Namespace, paths: Sequence[Path | str]) -> None:
