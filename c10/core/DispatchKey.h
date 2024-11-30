@@ -77,13 +77,14 @@ enum class BackendComponent : uint8_t {
   // Instead, they represent the backends that are allowed to override specific
   // pieces of functionality:
   // - dense kernels (e.g. DispatchKey::CPU)
-  // - sparse kernels (e.g. DispatchKey::SparseCPU)
   // - quantized kernels (e.g. DispatchKey::QuantizedCPU)
+  // - sparse kernels (e.g. DispatchKey::SparseCPU)
+  // - sparse csr kernels (e.g. DispatchKey::SparseCsrCPU)
+  // - nestedtensor kernels (e.g. DispatchKey::NestedTensorCPU)
   // - autograd kernels (e.g. DispatchKey::AutogradCPU)
   // We reserve space in the runtime operator table for this full cross product
-  // of
-  // [backends in this enum] x [keys below that are explicitly marked as having
-  // per-backend functionality]
+  // of [backends in this enum] x [keys below that are explicitly marked as
+  // having per-backend functionality]
   //
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -116,9 +117,10 @@ enum class BackendComponent : uint8_t {
 // (1) non-customizable backends (e.g. FPGA)
 // (2) non-customizable functionalities (e.g. Functionalize)
 // (3) functionalized that are customizable per backend (e.g. Dense, Sparse,
-// AutogradFunctionality) (4) per-backend instances of customizable
-// functionalities (e.g. CPU, SparseCPU, AutogradCPU) (5) alias keys (e.g.
-// CompositeImplicitAutograd)
+//     AutogradFunctionality)
+// (4) per-backend instances of customizable functionalities (e.g. CPU,
+//     SparseCPU, AutogradCPU)
+// (5) alias keys (e.g. CompositeImplicitAutograd)
 //
 // Of the categories above, it's important to note:
 // (a) which keys are assigned individual bits in a DispatchKeySet
@@ -155,8 +157,7 @@ enum class DispatchKey : uint16_t {
   // Every value in the enum (up to EndOfFunctionalityKeys)
   // corresponds to an individual "functionality" that can be dispatched to.
   // This is represented in the DispatchKeySet by assigning each of these enum
-  // values
-  // to each of the remaining (64 - len(BackendComponent)) bits.
+  // values to each of the remaining (64 - len(BackendComponent)) bits.
   //
   // Most of these functionalities have a single handler assigned to them,
   // making them "runtime keys".
@@ -216,8 +217,10 @@ enum class DispatchKey : uint16_t {
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 
+  // See [Note: Per-Backend Functionality Dispatch Keys]
   SparseCsr,
 
+  // See [Note: Per-Backend Functionality Dispatch Keys]
   NestedTensor,
 
   // In some situations, it is not immediately obvious what the correct
@@ -464,9 +467,7 @@ enum class DispatchKey : uint16_t {
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
 
   // Note: The alias keyset for FuncTorchBatchedDecomposition is disjoint from
-  // all
-  // other alias keysets
-  // and so precedence order doesn't matter
+  // all other alias keysets and so precedence order doesn't matter
   FuncTorchBatchedDecomposition, // registered at
   // build/aten/src/ATen/RegisterFuncTorchBatchedDecomposition.cpp
   // Note: The alias keyset for CompositeImplicitAutogradNestedTensor is
