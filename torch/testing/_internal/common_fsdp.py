@@ -202,7 +202,7 @@ def _broadcast_state_dict(rank, state_dict):
 
     olist = [state_dict if rank == 0 else None]
     dist.broadcast_object_list(olist)
-    state_dict = olist[0]
+    state_dict : Dict[str, torch.Tensor] = olist[0]
     # Ensure that the state is on DEVICE
     for param_name in state_dict.keys():
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
