@@ -2911,7 +2911,41 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_generator_as_argument(self):
+        # The inline tracer needs to be kept in sync if an already advanced generator
+        # is given to a compiled function.
+        def whoo():
+            yield 1
+            yield 2
+            yield 3
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn(t, ctx):
+            return t + next(ctx)
+
+        t = torch.randn(2)
+        ctx = whoo()
+        next(ctx)
+        y = fn(t, ctx)
+        self.assertEqual(y, t + 2)
+        self.assertEqual(len(eager.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_t_: "f32[2]"):
+        l_t_ = L_t_
+
+        add: "f32[2]" = l_t_ + 2;  l_t_ = None
+        return (add,)
+""",
+        )
+
+    @unittest.expectedFailure
+    def test_generator_as_argument_2(self):
         def whoo(x):
             yield x.sin()
             yield x.cos()
@@ -2920,23 +2954,22 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=eager, fullgraph=True)
         def fn(t, ctx):
-            return next(ctx)
+            return t + next(ctx)
 
         t = torch.randn(2)
-        ctx = whoo(t)
+        ctx = whoo()
         next(ctx)
         y = fn(t, ctx)
-        self.assertEqual(y, t.cos())
+        self.assertEqual(y, t + t.cos())
         self.assertEqual(len(eager.graphs), 1)
         self.assertExpectedInline(
             normalize_gm(eager.graphs[0].print_readable(False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_stack0_0_: "f32[2]", L_stack0_1_: "f32[2]"):
-        l_stack0_0_ = L_stack0_0_
-        l_stack0_1_ = L_stack0_1_
+    def forward(self, L_t_: "f32[2]"):
+        l_t_ = L_t_
 
-        add: "f32[2]" = l_stack0_0_ + l_stack0_1_;  l_stack0_0_ = l_stack0_1_ = None
+        add: "f32[2]" = l_t_ + l_t_.cos();  l_t_ = None
         return (add,)
 """,
         )

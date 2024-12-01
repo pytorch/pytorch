@@ -370,8 +370,8 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         )
 
         code = self.vt.get_code()
-        _globals = self.get_globals()
-        _locals = self.bind_args(tx, args, kwargs)
+        _globals = self.vt.get_globals()
+        _locals = self.vt.bind_args(tx, args, kwargs)
         fn = types.FunctionType(
             code,
             _globals,
@@ -382,7 +382,10 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
                 make_cell(None) for _ in range(len(self.get_code().co_freevars))
             ),  # closure
         )
-        gen_obj = fn(*args)
+        # gen_obj = fn(*args)
+        # _args = [_locals.get(name) for name in code.co_varnames if name in _locals]
+        _args = [_locals.get(name) for name in inspect.signature(fn).parameters.keys()]
+        gen_obj = fn(*_args)
 
         # calling a generator returns a generator object
         return GeneratorObjectVariable(gen_obj, inline_tracer, source=self.source)
@@ -437,6 +440,13 @@ class GeneratorObjectVariable(VariableTracker):
             self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
                 tx, self, [], {}
             )
+            # self.inline_tracer.instruction_pointer = self.value.gi_frame.f_lasti + 1
+            # self.accept_prefix_inst = False
+            # for name, value in self.value.gi_frame.f_locals.items():
+            #     var = variables.LazyVariableTracker.create(
+            #         value, LocalSource(name, is_input=True),
+            #     )
+            #     self.inline_tracer.symbolic_locals[name] = var
         return self.inline_tracer
 
     def next_variable(self, tx):
