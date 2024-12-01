@@ -3234,13 +3234,13 @@ class GraphModule(torch.nn.Module):
             if nt_view_name == "subclass_dense":
                 self.assertExpectedInline(guard_str, """\
 Eq(s2 - 1, s0)
-Eq(s0*s5, s0*s1)""")
+Eq(s6, s1)""")
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s4 - 1, s2)
-Eq(s1*s5, s1*s3)
+Eq(s6, s3)
 Eq(s2 + 1, s7)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
@@ -3248,15 +3248,15 @@ Eq(s2 + 1, s7)""",
                     guard_str,
                     """\
 Eq(s2 - 1, s0)
-Eq(s0*s5, s0*s1)
-Eq(s0*s1, s0*s7)""",
+Eq(s6, s1)
+Eq(s1, s7)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
 Eq(s3 - 1, s1)
-Eq(s1*s6, s1*s2)""",
+Eq(s7, s2)""",
                 )
             return gm
 

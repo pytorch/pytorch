@@ -116,3 +116,11 @@ def make_cached_tensor(metadata):
         source_fields=source_fields,
         extra_fields=extra_fields,
     )
+
+@torch._dynamo.allow_in_graph
+def make_cached_tensor_with_offsets(offsets):
+    prefix = "_host" if offsets.is_cpu else "_device"
+    metadata = {
+        f"{prefix}_offsets": offsets
+    }
+    return make_cached_tensor(metadata)

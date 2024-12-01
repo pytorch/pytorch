@@ -232,6 +232,14 @@ class SymNodePropertySource(ChainedSource):
     def name(self):
         return f"{self.base.name()}.node.{self.prop}()"
 
+@dataclasses.dataclass(frozen=True)
+class NestedIntSource(ChainedSource):
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"torch.nested_int_from_offsets({self.base.name()})"
+
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going

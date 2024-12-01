@@ -23,6 +23,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import defaultdict
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
@@ -3934,32 +3935,25 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         elif is_nested_int(hint) and nested_int_desc is not None:
-            # NB: We want create_symbolic_nested_int to actually call into
-            #     the branch below. This branch handles (1) recursive
-            #     fakification (See Note [Recursive fakification]) and
-            #     (2) special strides logic.
             from torch._dynamo.source import SymNodePropertySource
             from torch.nested._internal.nested_int import NestedIntNode
-            from torch.nested._internal.utils import _try_get_fake_mode
 
             cache = metafy_fn(
                 nested_int_desc.cache,
                 SymNodePropertySource(source, "nested_int_cache"),
             )
             coeff = hint.node.nested_int_coeff()
-                
-            if coeff == 1:
-                fake_mode = _try_get_fake_mode(cache)
-                return fake_mode.get_nested_int(cache=cache)
-            else:
-                # Don't participate in caching when coeff != 1
-                return SymInt(
-                    SymNode(
-                        sym, self, int,
-                        SymInt(NestedIntNode(cache, coeff=coeff)),
-                        fx_node=fx_node,
-                    )
+
+            out = SymInt(
+                SymNode(
+                    sym, self, int,
+                    SymInt(NestedIntNode(cache, coeff=coeff)),
+                    fx_node=fx_node,
                 )
+            )
+            if coeff != 1:
+                # Don't participate in caching when coeff != 1
+                cache.nested_int_ref = weakref.ref(out)
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
             # tensor that has hints for all sizes, but we MUST NOT create a
@@ -4823,6 +4817,14 @@ class ShapeEnv:
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
                         curr_t.storage_offset(),
                     )
+                    from torch.nested._internal.nested_int import _get_tensor_id
+                    from torch.nested._internal.nested_tensor import NestedTensor
+
+                    if isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor) and curr_t.try_get_nested_int_id() is not None:
+                        track_symint(
+                            torch._dynamo.source.NestedIntSource(src),
+                            torch.nested_int_from_offsets(curr_t)
+                        )
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
