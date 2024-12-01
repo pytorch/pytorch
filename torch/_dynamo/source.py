@@ -238,7 +238,7 @@ class NestedIntSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        return f"torch.nested_int_from_offsets({self.base.name()})"
+        return f"torch._nested_int_from_offsets({self.base.name()})"
 
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.

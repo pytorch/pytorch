@@ -4823,7 +4823,7 @@ class ShapeEnv:
                     if isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor) and curr_t.try_get_nested_int_id() is not None:
                         track_symint(
                             torch._dynamo.source.NestedIntSource(src),
-                            torch.nested_int_from_offsets(curr_t)
+                            torch._nested_int_from_offsets(curr_t)
                         )
 
         # 1. Every input must equal the final simplified symbolic expression
