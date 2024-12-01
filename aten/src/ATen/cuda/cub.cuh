@@ -386,13 +386,23 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
 
 }
 
+template <typename T, typename aggT, bool nonzero>
+struct TransformFunctor {
+  __device__ aggT operator()(T value) const {
+    if constexpr (!nonzero) {
+      return value;
+    } else {
+      return (value != T(0)) ? 1 : 0;
+    }
+  }
+};
 
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, bool nonzero, typename T, typename aggT>
 __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int iters_per_cta){
     if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
     d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
 
-    using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
+    using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<aggT, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
     using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<aggT, BLOCK_THREADS>;
     // Shared memory
     __shared__ union TempStorage
@@ -400,41 +410,23 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
       typename BlockLoadT::TempStorage load;
       typename BlockReduceT::TempStorage reduce;
     } temp_storage;
-    T data[ITEMS_PER_THREAD];
+    aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
     int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+    TransformFunctor<T, aggT, nonzero> transform_functor;
+    auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
       if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
-        BlockLoadT(temp_storage.load).Load(d_in, data);
+        BlockLoadT(temp_storage.load).Load(iter_in, data);
         __syncthreads();
-        aggT agg_tmp = aggT(0);
-        if constexpr (!nonzero) {
-          for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-            agg_tmp += data[ii];
-          }
-        } else {
-          for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-            agg_tmp += (data[ii] != T(0)) ? 1 : 0; 
-          }
-        }
-        agg_val += BlockReduceT(temp_storage.reduce).Sum(agg_tmp);
+        agg_val += BlockReduceT(temp_storage.reduce).Sum(data);
 
       } else {
-        BlockLoadT(temp_storage.load).Load(d_in, data, remaining, T(0));
+        BlockLoadT(temp_storage.load).Load(iter_in, data, remaining, aggT(0));
         __syncthreads();
-        aggT agg_tmp = aggT(0);
-        if constexpr (!nonzero) {
-          for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-            agg_tmp += data[ii];
-          }
-        } else {
-          for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-            agg_tmp += (data[ii] != T(0)) ? 1 : 0; 
-          }
-        }
-        agg_val += BlockReduceT(temp_storage.reduce).Sum(agg_tmp);
+        agg_val += BlockReduceT(temp_storage.reduce).Sum(data);
       }
-      d_in += BLOCK_THREADS * ITEMS_PER_THREAD;
+      iter_in += BLOCK_THREADS * ITEMS_PER_THREAD;
       remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
       if (remaining <= 0) {
         // for nonzeros we need to write out last blocks
