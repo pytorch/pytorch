@@ -94,6 +94,9 @@ class CachedTensor(torch.Tensor):
         return op(*unwrapped_args, **unwrapped_kwargs)
 
 
+torch.serialization.add_safe_globals([CachedTensor])
+
+
 _func_registry = {}
 
 
@@ -111,7 +114,6 @@ def register_cached_tensor_func(aten_op):
 
 
 # NestedTensor-specific helpers
-@torch._dynamo.allow_in_graph
 def make_cached_tensor(metadata, target_field=None):
     from torch.nested._internal.nested_tensor import extra_fields, source_fields
 
@@ -122,7 +124,6 @@ def make_cached_tensor(metadata, target_field=None):
         target_field=target_field,
     )
 
-@torch._dynamo.allow_in_graph
 def make_cached_tensor_with_offsets(offsets):
     prefix = "_host" if offsets.is_cpu else "_device"
     metadata = {

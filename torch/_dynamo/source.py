@@ -279,6 +279,17 @@ class AutoDerefLocalSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class SymNodePropertySource(ChainedSource):
+    prop: str
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.node.{self.prop}()"
+
+
+@dataclasses.dataclass(frozen=True)
 class NestedIntSource(ChainedSource):
     def guard_source(self):
         return self.base.guard_source()

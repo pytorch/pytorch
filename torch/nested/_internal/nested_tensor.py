@@ -6,7 +6,7 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor, try_as_variant
+from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor
 from torch.nested._internal.nested_int import NestedIntNode, get_metadata
 from torch.nested._internal.offload_tensor import (
     init_offload_tensor_registry,
@@ -33,13 +33,6 @@ extra_fields = (
     "_inverse_indices",
 )
 # UnpackResult = namedtuple("UnpackResult", source_fields + extra_fields)
-
-
-@torch._dynamo.allow_in_graph
-def unpack(x):
-    # Need to hide the attribute access from dynamo. GetAttrVariable does not
-    # support any operations.
-    return UnpackResult(**{k: x.metadata.get(k) for k in x.all_fields})
 
 
 def get_tensor_symint(metadata_tensor, *, coeff=1):

@@ -113,6 +113,8 @@ class OffloadTensor(torch.Tensor):
 
         return out
 
+torch.serialization.add_safe_globals([OffloadTensor])
+
 
 _global_is_pending_offload = False
 
@@ -194,7 +196,6 @@ def maybe_offload_all(device_tensor):
 
 
 # Offload tensor wrapper is disposable
-@torch._dynamo.allow_in_graph
 def make_offload_tensor(
     device_tensor: Optional[torch.Tensor] = None,
     host_tensor: Optional[torch.Tensor] = None,
