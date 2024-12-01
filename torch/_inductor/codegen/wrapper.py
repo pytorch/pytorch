@@ -234,8 +234,11 @@ def user_defined_kernel_grid_fn_code(
             for grid, c in sorted(
                 zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
             ):
-                guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
-                guards = " and ".join(guards) or "True"  # for configs with empty kwargs
+                if c.kwargs:
+                    guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
+                    guards = " and ".join(guards)
+                else:
+                    guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
