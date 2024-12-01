@@ -605,88 +605,77 @@ inline void tinygemm_kernel(
 //
 void weight_to_int4pack_kernel(
     const Tensor& weight_packed,
-    const Tensor& weight,
-    int N, int K) {
+    const Tensor& weight) {
 
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
-  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto weight_data = weight.data_ptr<int32_t>();
+
+  int N = weight.size(0);
+  int K = weight.size(1);
 
   // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
   const int NB =  (N + BLOCK_N - 1) / BLOCK_N;
-  int K_div_2 = K / 2;
 
   // parallel on NB blocks
   at::parallel_for(0, NB, 0, [&](int begin, int end) {
     for (const auto i : c10::irange(begin, end)) {
       int nb_size = std::min(BLOCK_N, N - i * BLOCK_N);
 
-      const uint8_t* src = weight_data + i * BLOCK_N * K_div_2;
+      const int32_t* src = weight_data + i * BLOCK_N * K;
       uint8_t* dst = weight_packed_data + i * K * BLOCK_N / 2;
-      for (const auto k : c10::irange(K_div_2)) {
+      for (const auto k : c10::irange(K)) {
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           for (const auto d : c10::irange(16)) {
-            uint8_t val0 = src[(d + 0) * K_div_2 + k];
-            uint8_t val1 = src[(d + 16) * K_div_2 + k];
-            uint8_t val2 = src[(d + 32) * K_div_2 + k];
-            uint8_t val3 = src[(d + 48) * K_div_2 + k];
+            int32_t val0 = src[(d +  0) * K + k];
+            int32_t val1 = src[(d + 16) * K + k];
+            int32_t val2 = src[(d + 32) * K + k];
+            int32_t val3 = src[(d + 48) * K + k];
 
-            uint8_t packed02_0 = (val2 & 0xF0) | ((val0 & 0xF0) >> 4);
-            uint8_t packed13_0 = (val3 & 0xF0) | ((val1 & 0xF0) >> 4);
-            uint8_t packed02_1 = ((val2 & 0xF) << 4) | (val0 & 0xF);
-            uint8_t packed13_1 = ((val3 & 0xF) << 4) | (val1 & 0xF);
+            uint8_t packed02 = (((uint8_t)(val2) << 4)) | ((uint8_t)(val0));
+            uint8_t packed13 = (((uint8_t)(val3) << 4)) | ((uint8_t)(val1));
 
-            dst[k * 2 * 32 + d] = packed02_0;
-            dst[k * 2 * 32 + 16 + d] = packed13_0;
-            dst[(k * 2 + 1) * 32 + d] = packed02_1;
-            dst[(k * 2 + 1) * 32 + 16 + d] = packed13_1;
+            dst[k * 32 + d] = packed02;
+            dst[k * 32 + 16 + d] = packed13;
           }
         } else {
           // for nb_size 16, 32, 48
           for (int n = 0; n < nb_size; n += 2) {
-            uint8_t val0 = src[n * K_div_2 + k];
-            uint8_t val1 = src[n * K_div_2 + K_div_2 + k];
+            int32_t val0 = src[n * K + k];
+            int32_t val1 = src[n * K + K + k];
 
-            uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
-            uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
-            dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
-            dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
+            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
 #elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
         if (nb_size == BLOCK_N) {
           // for nb_size 32
           for (const auto d : c10::irange(16)) {
-            uint8_t val0 = src[(d + 0) * K_div_2 + k];
-            uint8_t val1 = src[(d + 16) * K_div_2 + k];
+            int32_t val0 = src[(d + 0) * K + k];
+            int32_t val1 = src[(d + 16) * K + k];
 
-            uint8_t packed01_0 = ((val1 & 0xF0) | ((val0 & 0xF0) >> 4));
-            uint8_t packed01_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
-            dst[k * 2 * 16 + d] = packed01_0;
-            dst[(k * 2 + 1) * 16 + d] = packed01_1;
+            uint8_t packed01 = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            dst[k * 16 + d] = packed01;
           }
         } else {
           // for nb_size 16
           for (int n = 0; n < nb_size; n += 2) {
-            int32_t val0 = src[n * K_div_2 + k];
-            int32_t val1 = src[n * K_div_2 + K_div_2 + k];
+            int32_t val0 = src[n * K + k];
+            int32_t val1 = src[n * K + K + k];
 
-            uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
-            uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
-            dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
-            dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
+            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
 #else
         for (int n = 0; n < nb_size; n += 2) {
-          uint8_t val0 = src[n * K_div_2 + k];
-          uint8_t val1 = src[n * K_div_2 + K_div_2 + k];
+          int32_t val0 = src[n * K + k];
+          int32_t val1 = src[n * K + K + k];
 
-          uint8_t packed_0 = ((val1 & 0xF0)) | ((val0 & 0xF0) >> 4);
-          uint8_t packed_1 = ((val1 & 0xF) << 4) | (val0 & 0xF);
-          dst[k * 2 * nb_size / 2 + n / 2] = packed_0;
-          dst[(k * 2 + 1) * nb_size / 2 + n / 2] = packed_1;
+          uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+          dst[k * nb_size / 2 + n / 2] = packed;
         }
 #endif
       }
@@ -700,8 +689,7 @@ void int4pack_mm_kernel_(
     const Tensor& A,
     const Tensor& B,
     int qGroupSize,
-    const Tensor& qScaleAndZeros,
-    int N, int K) {
+    const Tensor& qScaleAndZeros) {
 
   const auto* A_data = A.const_data_ptr<T>();
   const auto* B_data = reinterpret_cast<const uint8_t*>(B.const_data_ptr());
@@ -709,6 +697,8 @@ void int4pack_mm_kernel_(
   const auto* S_data = qScaleAndZeros.const_data_ptr<T>();
 
   int M = A.size(0);
+  int N = B.size(0);
+  int K = A.size(1);
 
   constexpr int BLOCK_M = 4;
   // 64 for avx512 and 32 for avx2/non-vectorized
@@ -762,14 +752,13 @@ void int4pack_mm_kernel(
     const Tensor& A,
     const Tensor& B,
     int qGroupSize,
-    const Tensor& qScaleAndZeros,
-    int N, int K) {
+    const Tensor& qScaleAndZeros) {
   if (C.scalar_type() == kBFloat16) {
-    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros);
   } else if (C.scalar_type() == kHalf) {
-    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros);
   } else {
-    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros);
   }
 }
 

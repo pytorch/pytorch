@@ -139,13 +139,14 @@ inline void _mul_reduce_max_fusion_kernel(
     tmp_max = std::max(tmp_max, tmp1);
     out[i] = tmp1;
   }
-  max = std::max(
-      tmp_max,
-      vec::vec_reduce_all<scalar_t>(
-          [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
-            return vec::maximum(x, y);
-          },
-          vec_tmp_max));
+  auto reduced_tmp_max = vec::vec_reduce_all<scalar_t>(
+      [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
+        return vec::maximum(x, y);
+      },
+      vec_tmp_max);
+  // Guard against Q*K^T being NaN
+  max = std::isnan(reduced_tmp_max) ? std::numeric_limits<scalar_t>::quiet_NaN()
+                                    : std::max(tmp_max, reduced_tmp_max);
 }
 
 template <typename scalar_t>
@@ -603,8 +604,7 @@ void cpu_flash_attention(
                   headSize_even ? qStrideM : eheadSize,
                   packb_size,
                   rkvBlockSize,
-                  1.f,
-                  0.f,
+                  false,
                   !headSize_even
                       ? query_t_padding_ptr
                       : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
@@ -738,8 +738,7 @@ void cpu_flash_attention(
                   ekvBlockSize,
                   packb_size,
                   rHeadSize,
-                  1.0,
-                  n == 0 ? 0.f : 1.f,
+                  n > 0,
                   qk_reduced_data,
                   value_reorder_ptr +
                       i * num_head * kv_padding_size * rHeadSize +
@@ -791,10 +790,10 @@ void cpu_flash_attention(
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
+    if (need_pack) {
+      cpublas::brgemm_release();
+    }
   });
-  if (need_pack) {
-    cpublas::brgemm_release();
-  }
 }
 
 template <typename scalar_t, typename mask_t, int64_t q_split_size, int64_t kv_split_size>

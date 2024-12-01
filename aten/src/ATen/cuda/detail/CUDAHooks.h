@@ -21,7 +21,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void init() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(const void* data) const override;
-  const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
+  const Generator& getDefaultGenerator(
+      DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
