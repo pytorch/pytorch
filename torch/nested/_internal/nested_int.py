@@ -134,3 +134,9 @@ class NestedIntNode:
     def wrap_int(self, num: int) -> ConstantIntNode:
         assert type(num) is int
         return ConstantIntNode(num)
+
+def get_metadata(x: torch.SymInt):
+    if isinstance(x.node, NestedIntNode):
+        return x.node.nested_int_cache()
+    else:
+        return x.node.hint.node.nested_int_cache()

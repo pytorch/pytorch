@@ -1696,7 +1696,6 @@ def index_put_(func, *args, **kwargs):
     return NestedTensor(
         func(inp._values, func_indices, **new_kwargs),
         **extract_kwargs(inp),
-        lengths=inp.lengths(),
     )
 
 

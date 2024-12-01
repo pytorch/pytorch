@@ -1,3 +1,5 @@
+from typing import *  # noqa: F403
+
 import torch
 from torch.utils import _pytree as pytree
 
@@ -18,6 +20,7 @@ class CachedTensor(torch.Tensor):
         metadata: dict,
         source_fields=None,
         extra_fields=(),
+        target_field=None,
     ):
         assert source_fields is not None
         assert any(
@@ -25,7 +28,7 @@ class CachedTensor(torch.Tensor):
         ), f"CachedTensor: At least one of {source_fields} must be passed"
 
         # Tensor's metadata is the first non-None source field
-        source = _get_source(metadata, source_fields)
+        source = _get_source(metadata, source_fields) if target_field is None else metadata[target_field]
         shape = source.shape
         kwargs = {}
         kwargs["strides"] = source.stride()
@@ -37,7 +40,7 @@ class CachedTensor(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
         return out
 
-    def __init__(self, metadata: dict, source_fields=None, extra_fields=()):
+    def __init__(self, metadata: dict, source_fields=None, extra_fields=(), target_field=None):
         self.source_fields = source_fields
         self.extra_fields = extra_fields
         self.all_fields = source_fields + extra_fields
@@ -107,14 +110,16 @@ def register_cached_tensor_func(aten_op):
     return wrapper
 
 
+# NestedTensor-specific helpers
 @torch._dynamo.allow_in_graph
-def make_cached_tensor(metadata):
+def make_cached_tensor(metadata, target_field=None):
     from torch.nested._internal.nested_tensor import extra_fields, source_fields
 
     return CachedTensor(
         metadata,
         source_fields=source_fields,
         extra_fields=extra_fields,
+        target_field=target_field,
     )
 
 @torch._dynamo.allow_in_graph
@@ -124,3 +129,12 @@ def make_cached_tensor_with_offsets(offsets):
         f"{prefix}_offsets": offsets
     }
     return make_cached_tensor(metadata)
+
+
+@torch._dynamo.allow_in_graph
+def try_as_variant(metadata, device, variant) -> Optional[CachedTensor]:
+    prefix = "_host" if device.type == "cpu" else "_device"
+    target_field = f"{prefix}_{variant}"
+    if target_field not in metadata:
+        return None
+    return make_cached_tensor(metadata, target_field=target_field)

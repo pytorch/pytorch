@@ -691,8 +691,8 @@ class FakeTensorTest(TestCase):
         # does!
         self.assertTrue(free_symbols(t1.size()))
         self.assertIsNot(t2, t1)
-        self.assertIs(t1._host_offsets.fake_mode, mode1)
-        self.assertIs(t2._host_offsets.fake_mode, mode2)
+        self.assertIs(t1.offsets().fake_mode, mode1)
+        self.assertIs(t2.offsets().fake_mode, mode2)
         self.assertIs(t2.size(1).node.shape_env, t1.size(1).node.shape_env)
         self.assertEqual(str(t2.size(1)), str(t1.size(1)))
 

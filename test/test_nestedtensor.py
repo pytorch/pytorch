@@ -4254,31 +4254,17 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @onlyCUDA
     @dtypes(torch.float32)
     def test_record_stream(self, device, dtype):
-        def is_plain_cuda_tensor(t):
-            from torch.nested._internal.cached_tensor import CachedTensor
-            from torch.nested._internal.offload_tensor import OffloadTensor
-
-            return (
-                isinstance(t, torch.Tensor)
-                and not isinstance(t, (CachedTensor, OffloadTensor))
-                and "cuda" in str(t.device)
-            )
-
         def _create_nt():
             values = torch.ones(1024, 4 * 1024, device="cuda")
             offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
             lengths = offsets.diff()
             nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
 
-            flat_tensors = [
-                nt._values,
-                nt._non_contig_offsets,
-                nt._device_lengths.device_tensor,
-            ]
-            assert all(is_plain_cuda_tensor(x) for x in flat_tensors)
             data_ptrs = {
-                x.data_ptr() for x in flat_tensors
-            }
+                nt.values().data_ptr(),
+                nt.offsets().data_ptr(),
+                nt.lengths().data_ptr(),
+             }
             return nt, data_ptrs
 
         def fn(record_stream):
@@ -5552,9 +5538,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             cached_max_seqlen=(max_seqlen if pass_min_max else None),
             base=values,
         )
-        # Not the same exact instance because we returned a CachedTensor
-        # wrapper lengths.
-        self.assertIsNot(nt.lengths(), lengths)
+        self.assertIs(nt.lengths(), lengths)
 
         # === construct from (values, lengths) ===
         values = torch.randn(14, 5, device=device, dtype=dtype)

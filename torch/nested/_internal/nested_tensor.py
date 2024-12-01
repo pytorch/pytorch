@@ -6,8 +6,8 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor
-from torch.nested._internal.nested_int import NestedIntNode
+from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor, try_as_variant
+from torch.nested._internal.nested_int import NestedIntNode, get_metadata
 from torch.nested._internal.offload_tensor import (
     init_offload_tensor_registry,
     make_offload_tensor,
@@ -159,40 +159,41 @@ class NestedTensor(torch.Tensor):
         # dispatch to get proper view relationship
         return torch._nested_get_values(self)  # type: ignore[attr-defined]
 
-    # Lengths and offsets returns CachedTensor so that if the user reconstructs
-    # user either lengths and offsets, they would have any metadata cached.
-    def offsets(self):
+    # Public APIs for lengths/offsets returns plain tensor for BC reasons, e.g. user
+    # can access .data_ptr() on it, etc.
+    # .lengths() and .offsets() do not automatically do conversion between lengths
+    # and offsets. If the requested variant does not exist, then None is returned.
+    def offsets(self) -> Optional[torch.Tensor]:
         if self._non_contig_offsets is not None:
             return self._non_contig_offsets
-        return self._metadata
-
-    def lengths(self):
-        if self._non_contig_offsets is not None:
-            return self._metadata
+        if self.is_cpu:
+            return self._host_offsets
         else:
-            # We should wrap this in another CachedTensor
-            # But we probably shouldn't even reach here today.
-            return self._host_lengths if self.is_cpu else self._device_lengths
+            return self._device_offsets.restore() if self._device_offsets is not None else None
 
-    def __getattr__(self, name):
-        from torch.nested._internal.nested_int import NestedIntNode
-
-        # Put this logic somewhere else
-        node = self.shape[self._ragged_idx].node
-        if isinstance(node, NestedIntNode):
-            metadata = node.nested_int_cache()
+    def lengths(self) -> Optional[torch.Tensor]:
+        if self.is_cpu:
+            return self._host_lengths
         else:
-            metadata = node.hint.node.nested_int_cache()
+            return self._device_lengths.restore() if self._device_lengths is not None else None
 
-        if name == "_lengths":
-            return self.lengths()
-        if name == "_offsets":
-            return self.offsets()
-
-        if name not in source_fields + extra_fields:
+    def __getattr__(self, name) -> Optional[torch.Tensor]:
+        if name not in source_fields + extra_fields + ("_lengths", "_offsets"):
             raise AttributeError(
                 f"{type(self).__name__} object has no attribute '{name}'"
             )
+
+        metadata = get_metadata(self.shape[self._ragged_idx])
+
+        if name == "_offsets":
+            if self._non_contig_offsets is not None:
+                return self._non_contig_offsets
+            # Return CachedTensor with the correct dtype/shape
+            return try_as_variant(self._metadata.metadata, self.device, "offsets")
+        elif name == "_lengths":
+            # Return CachedTensor with the correct dtype/shape
+            return try_as_variant(self._metadata.metadata, self.device, "lengths")
+
         return metadata.metadata.get(name)
 
     @property
