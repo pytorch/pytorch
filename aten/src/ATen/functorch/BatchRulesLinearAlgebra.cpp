@@ -245,8 +245,8 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& second, std::optional<int64_t> second_bdim,
       T... extra_args) {
     auto [tensor_, other_]= check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
-    const auto res = Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...);
-    return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
+    auto res = Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...);
+    return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0);
   }
 };
 
