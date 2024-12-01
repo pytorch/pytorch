@@ -1050,7 +1050,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   template <typename T>
   void addCallback(T callback, bool uses_future = true) {
     static_assert(
-        std::is_invocable_r<void, T, Future&>::value,
+        std::is_invocable_r_v<void, T, Future&>,
         "The callback must have signature void(Future&)");
 
     std::unique_lock<std::mutex> lock(mutex_);
@@ -1071,9 +1071,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
     static_assert(
-        std::disjunction<
+        std::disjunction_v<
             std::is_invocable_r<IValue, T, Future&>,
-            std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
+            std::is_invocable_r<IValueWithStorages, T, Future&>>,
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
 
@@ -1097,7 +1097,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   template <typename T>
   c10::intrusive_ptr<Future> thenAsync(T callback, TypePtr type) {
     static_assert(
-        std::is_invocable_r<c10::intrusive_ptr<Future>, T, Future&>::value,
+        std::is_invocable_r_v<c10::intrusive_ptr<Future>, T, Future&>,
         "The callback must have signature c10::intrusive_ptr<Future>(Future&)");
 
     auto childFut = createInstance(std::move(type));
@@ -2130,7 +2130,7 @@ template <
             std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
-    : IValue(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
+    : IValue(std::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
 }
 
 template <
@@ -2141,7 +2141,7 @@ template <
             std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
-    : IValue(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
+    : IValue(std::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
