@@ -226,9 +226,16 @@ def user_defined_kernel_grid_fn_code(
             assert len(grids) > 1
             assert len(grids) == len(configs)
             seen = set()
-            for grid, c in zip(grids, configs):
+            # sort the configs from the largest # of kwargs to the smallest to
+            # emit the grids in the order of (approximately) decreasing specificity
+            # TODO(aakhundov): the sorting below is generally not sufficient, so
+            # maybe we'll need to restrict the supported cases to identical kwarg
+            # names in all autotuning configs.
+            for grid, c in sorted(
+                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            ):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
-                guards = " and ".join(guards)
+                guards = " and ".join(guards) or "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
