@@ -934,7 +934,7 @@ def _nested_mod_func_adapter(
         seq_idx = torch.searchsorted(offsets, range_tensor, right=True) - 1
         return seq_idx
 
-    q_offsets = q_nt._offsets  # type: ignore[attr-defined]
+    q_offsets = q_nt._offsets # type: ignore[attr-defined]
     kv_offsets = kv_nt._offsets  # type: ignore[attr-defined]
     q_seq_idx = _build_seq_idx(q_offsets, q_nt._values.shape[q_nt._ragged_idx - 1])  # type: ignore[attr-defined]
     if q_nt is kv_nt:

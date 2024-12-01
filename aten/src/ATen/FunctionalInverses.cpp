@@ -304,7 +304,7 @@ Tensor FunctionalInverses::_nested_view_from_buffer_inverse(const Tensor& base, 
     return Tensor();
 }
 
-Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& offsets, const Tensor& dummy, const std::optional<Tensor>& lengths, int64_t ragged_idx, const std::optional<Tensor>& min_seqlen, const std::optional<Tensor>& max_seqlen) {
+Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& metadata, const c10::optional<Tensor>& non_contig_offsets, int64_t ragged_idx) {
   auto values = at::_nested_get_values(mutated_view);
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return values;
@@ -314,16 +314,10 @@ Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, 
 }
 
 Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
-  auto offsets = at::_nested_get_offsets(base);
-  auto lengths = at::_nested_get_lengths(base);
   auto ragged_idx = at::_nested_get_ragged_idx(base);
-  auto dummy = at::_nested_get_jagged_dummy(base);
-  auto min_seqlen = at::_nested_get_min_seqlen(base);
-  auto max_seqlen = at::_nested_get_max_seqlen(base);
-  auto nt = at::_nested_view_from_jagged(
-      mutated_view, offsets, dummy, lengths, ragged_idx,
-      (min_seqlen.defined() ? std::optional<Tensor>(min_seqlen) : std::nullopt),
-      (max_seqlen.defined() ? std::optional<Tensor>(max_seqlen) : std::nullopt));
+  auto metadata = at::_nested_get_jagged_metadata(base);
+  auto non_contig_offsets = at::_nested_get_non_contig_offsets(base);
+  auto nt = at::_nested_view_from_jagged(mutated_view, metadata, non_contig_offsets, ragged_idx);
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;

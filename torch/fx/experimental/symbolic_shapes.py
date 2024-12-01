@@ -23,6 +23,7 @@ import re
 import sys
 import threading
 import traceback
+import weakref
 from collections import defaultdict
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
@@ -3717,6 +3718,8 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        metafy_fn: Optional[Callable] = None,
+        custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None,
     ) -> Tuple[
         Tuple[Union[int, SymInt], ...],
         Tuple[Union[int, SymInt], ...],
@@ -3745,6 +3748,8 @@ class ShapeEnv:
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             symbolic_context=symbolic_context,
+            metafy_fn=metafy_fn,
+            custom_size_strides=custom_size_strides,
         )
 
     # Dynamo may want to wrap FakeTensors with SymInt sizes up e.g. make_fx(opt_f(), tracing_mode="symbolic").
@@ -3804,6 +3809,8 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        metafy_fn = None,
+        custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None,
     ) -> Tuple[
         Tuple[Union[int, SymInt], ...],
         Tuple[Union[int, SymInt], ...],
@@ -3918,16 +3925,21 @@ class ShapeEnv:
                 )
         assert all(x is not None for x in stride)
 
+        custom_size_strides_size = [None] * len(size) if custom_size_strides is None else custom_size_strides.size
+        custom_size_strides_stride = [None] * len(stride) if custom_size_strides is None else custom_size_strides.stride
+
         sym_sizes = [
             self.create_symintnode(
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
+                metafy_fn=metafy_fn,
+                nested_int_desc=opt_nested_int,
             )
-            for i, (sym, hint) in enumerate(zip(size, ex_size))
+            for i, (sym, hint, opt_nested_int) in enumerate(zip(size, ex_size, custom_size_strides_size))
         ]
         sym_stride = []
-        for i, stride_expr in enumerate(stride):
+        for i, (stride_expr, opt_nested_int) in enumerate(zip(stride, custom_size_strides_stride)):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
@@ -3936,6 +3948,8 @@ class ShapeEnv:
                     stride_expr,
                     hint=ex_stride[i],
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                    metafy_fn=metafy_fn,
+                    nested_int_desc=opt_nested_int,
                 )
             )
         sym_storage_offset = self.create_symintnode(
@@ -3956,8 +3970,10 @@ class ShapeEnv:
         self,
         sym: sympy.Expr,
         *,
-        hint: Optional[int],
+        hint: Optional[Union[int, torch.SymInt]],
         source: Optional[Source] = None,
+        metafy_fn: Optional[Callable] = None,
+        nested_int_desc: Optional[MetaNestedIntDesc] = None,
     ) -> Union[int, SymInt]:
         """Create a SymInt value from a symbolic expression
 
@@ -3984,6 +4000,26 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
+        elif is_nested_int(hint) and nested_int_desc is not None:
+            from torch._dynamo.source import SymNodePropertySource
+            from torch.nested._internal.nested_int import NestedIntNode
+
+            cache = metafy_fn(
+                nested_int_desc.cache,
+                SymNodePropertySource(source, "nested_int_cache"),
+            )
+            coeff = hint.node.nested_int_coeff()
+
+            out = SymInt(
+                SymNode(
+                    sym, self, int,
+                    SymInt(NestedIntNode(cache, coeff=coeff)),
+                    fx_node=fx_node,
+                )
+            )
+            if coeff != 1:
+                # Don't participate in caching when coeff != 1
+                cache.nested_int_ref = weakref.ref(out)
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
             # tensor that has hints for all sizes, but we MUST NOT create a
@@ -4185,7 +4221,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_symbol(
         self,
-        val: int,
+        val: Union[int, torch.SymInt],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
@@ -4877,6 +4913,14 @@ class ShapeEnv:
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
                         curr_t.storage_offset(),
                     )
+                    from torch.nested._internal.nested_int import _get_tensor_id
+                    from torch.nested._internal.nested_tensor import NestedTensor
+
+                    if isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor) and curr_t.try_get_nested_int_id() is not None:
+                        track_symint(
+                            torch._dynamo.source.NestedIntSource(src),
+                            torch._nested_int_from_offsets(curr_t)
+                        )
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),

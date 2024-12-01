@@ -5435,14 +5435,16 @@ class NestedTensorTestCase(TestCase):
     @contextlib.contextmanager
     def branch_nested_state(self):
         """Context manager to branch and restore the nested tensor state."""
-        nested_tensor_module = torch.nested._internal.nested_tensor
-        original_tensor_symint_registry = nested_tensor_module._tensor_symint_registry.copy()
-        original_tensor_id_counter = nested_tensor_module._tensor_id_counter
+        offload_tensor_module = torch.nested._internal.offload_tensor
+
+        # original_offload_tensor_registry = offload_tensor_module._global_offload_tensor_registry.copy()
+        # original_tensor_registry = offload_tensor_module._global_tensor_registry.copy()
         try:
             yield
         finally:
-            nested_tensor_module._tensor_id_counter = original_tensor_id_counter
-            nested_tensor_module._tensor_symint_registry = original_tensor_symint_registry
+            pass
+            # offload_tensor_module._global_offload_tensor_registry = original_offload_tensor_registry
+            # offload_tensor_module._global_tensor_registry = original_tensor_registry
 
 
 @make_lazy_class
