@@ -1661,7 +1661,6 @@ class MetaConverter:
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace=True,
     ):
-        callback = functools.partial(callback_, device=t.device)
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
 
@@ -1724,7 +1723,7 @@ class MetaConverter:
             r = self.meta_tensor(
                 t_desc,
                 shape_env=shape_env,
-                callback_=callback,
+                callback_=callback_,
                 source=source,
                 symbolic_context=symbolic_context,
             )
