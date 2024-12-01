@@ -45,9 +45,9 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
+        Tuple[Argument, ...],
+        List[Argument],
+        Dict[str, Argument],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "Node",
