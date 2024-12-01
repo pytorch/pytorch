@@ -3,7 +3,19 @@ import builtins
 import inspect
 import types
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch._C import _NodeBase
@@ -45,9 +57,9 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple[Argument, ...],
-        List[Argument],
-        Dict[str, Argument],
+        Tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "Node",

@@ -4,21 +4,22 @@
 from __future__ import annotations
 
 from typing import (
+    TYPE_CHECKING,
     Any,
     Dict,
     List,
+    Mapping,
     Optional,
     Protocol,
-    runtime_checkable,
+    Sequence,
     Tuple,
-    TYPE_CHECKING,
     Union,
+    runtime_checkable,
 )
 
 import numpy
 
 import onnx
-
 import torch
 from torch._subclasses import fake_tensor
 
@@ -32,7 +33,8 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> torch.dtype | None: ...
+    def dtype(self) -> torch.dtype | None:
+        ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
@@ -246,8 +248,8 @@ BaseArgumentTypes = Union[
 Argument = Optional[
     Union[
         Tuple["Argument", ...],
-        List["Argument"],
-        Dict[str, "Argument"],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "torch.fx.Node",
