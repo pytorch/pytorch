@@ -595,8 +595,7 @@ def to_dtype(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
-    from torch.nested._internal.cached_tensor import make_cached_tensor
-    from torch.nested._internal.offload_tensor import make_offload_tensor
+    from torch.nested._internal.wrappers import make_cached_tensor, make_offload_tensor
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]

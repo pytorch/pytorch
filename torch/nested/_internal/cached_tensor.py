@@ -114,7 +114,7 @@ def register_cached_tensor_func(aten_op):
 
 
 # NestedTensor-specific helpers
-def make_cached_tensor(metadata, target_field=None):
+def _make_cached_tensor(metadata, target_field=None):
     from torch.nested._internal.nested_tensor import extra_fields, source_fields
 
     return CachedTensor(
@@ -129,4 +129,4 @@ def make_cached_tensor_with_offsets(offsets):
     metadata = {
         f"{prefix}_offsets": offsets
     }
-    return make_cached_tensor(metadata)
+    return _make_cached_tensor(metadata)

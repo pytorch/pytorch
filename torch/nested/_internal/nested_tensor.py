@@ -6,11 +6,10 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.nested._internal.cached_tensor import CachedTensor, make_cached_tensor
+from torch.nested._internal.cached_tensor import CachedTensor
 from torch.nested._internal.nested_int import NestedIntNode, get_metadata
 from torch.nested._internal.offload_tensor import (
     init_offload_tensor_registry,
-    make_offload_tensor,
     OffloadTensorRegistry,
 )
 from torch.nested._internal.tensor_registry import register_tensor, try_get_int
@@ -568,6 +567,7 @@ def jagged_from_tensor_and_lengths(
 
 
 def normalize_lengths_offsets(metadata):
+    from torch.nested._internal.wrappers import make_offload_tensor
     # Does the follow conversion:
     # {
     #     "lengths": torch.Tensor,
@@ -630,6 +630,8 @@ def normalize_min_max_seqlen(metadata):
 
 
 def _make_ragged_tensors_compat(*, offsets, lengths, min_seqlen, max_seqlen):
+    from torch.nested._internal.wrappers import make_cached_tensor
+
     assert offsets is not None or lengths is not None
     metadata = {}
     if offsets is not None and lengths is not None:

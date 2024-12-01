@@ -196,7 +196,7 @@ def maybe_offload_all(device_tensor):
 
 
 # Offload tensor wrapper is disposable
-def make_offload_tensor(
+def _make_offload_tensor(
     device_tensor: Optional[torch.Tensor] = None,
     host_tensor: Optional[torch.Tensor] = None,
     device: Optional[torch.device] = None,
