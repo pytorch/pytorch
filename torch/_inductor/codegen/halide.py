@@ -185,8 +185,8 @@ class HalidePrinter(PythonPrinter):
             return super()._print_FloorDiv(expr)
 
         x, div = expr.args
-        x = self.cast_float(self.paren(self.doprint(x)))
-        div = self.cast_float(self.paren(self.doprint(div)))
+        x = self.cast_float(self.doprint(x))
+        div = self.cast_float(self.doprint(div))
         return self.cast_index(f"hl.floor({x} / {div})")
 
     def _print_Round(self, expr):
@@ -673,10 +673,10 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         **kwargs,
     ) -> None:
-        super().__init__(*groups, **kwargs)
+        super().__init__(tiling, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -818,7 +818,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    if tree.prefix == "r":
+                    if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
