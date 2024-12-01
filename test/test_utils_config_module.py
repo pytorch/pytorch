@@ -1,15 +1,24 @@
 # Owner(s): ["module: unknown"]
+import os
 import pickle
+from unittest.mock import patch
+
+
+os.environ["ENV_TRUE"] = "1"
+os.environ["ENV_FALSE"] = "0"
+
+from typing import Optional
 
 from torch.testing._internal import fake_config_module as config
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._config_module import _UNSET_SENTINEL
+from torch.utils._config_module import _UNSET_SENTINEL, Config
 
 
 class TestConfigModule(TestCase):
     def test_base_value_loading(self):
         self.assertTrue(config.e_bool)
         self.assertTrue(config.nested.e_bool)
+        self.assertTrue(config.e_optional)
         self.assertEqual(config.e_int, 1)
         self.assertEqual(config.e_float, 1.0)
         self.assertEqual(config.e_string, "string")
@@ -22,6 +31,10 @@ class TestConfigModule(TestCase):
             AttributeError, msg="fake_config_module.does_not_exist does not exist"
         ):
             config.does_not_exist
+
+    def test_type_loading(self):
+        self.assertEqual(config.get_type("e_optional"), Optional[bool])
+        self.assertEqual(config.get_type("e_none"), Optional[bool])
 
     def test_overrides(self):
         config.e_bool = False
@@ -46,6 +59,10 @@ class TestConfigModule(TestCase):
         self.assertEqual(config.e_none, "not none")
         config.e_none = None
         self.assertEqual(config.e_none, None)
+        config.e_optional = None
+        self.assertEqual(config.e_optional, None)
+        config.e_optional = False
+        self.assertEqual(config.e_optional, False)
         with self.assertRaises(
             AttributeError, msg="fake_config_module.does_not_exist does not exist"
         ):
@@ -67,6 +84,17 @@ class TestConfigModule(TestCase):
         self.assertEqual(config.e_set, {1, 2})
         config.e_dict[2] = 3
         self.assertEqual(config.e_dict, {1: 2, 2: 3})
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
+
+    def test_env_name_semantics(self):
+        self.assertTrue(config.e_env_default)
+        self.assertFalse(config.e_env_default_FALSE)
+        self.assertTrue(config.e_env_force)
+        config.e_env_default = False
+        self.assertFalse(config.e_env_default)
+        config.e_env_force = False
+        self.assertTrue(config.e_env_force)
         for k in config._config:
             config._config[k].user_override = _UNSET_SENTINEL
 
@@ -93,6 +121,10 @@ class TestConfigModule(TestCase):
                 "e_config": True,
                 "e_jk": True,
                 "e_jk_false": False,
+                "e_env_default": True,
+                "e_env_default_FALSE": False,
+                "e_env_force": True,
+                "e_optional": True,
             },
         )
         config.e_bool = False
@@ -123,6 +155,10 @@ class TestConfigModule(TestCase):
                 "e_config": True,
                 "e_jk": True,
                 "e_jk_false": False,
+                "e_env_default": True,
+                "e_env_default_FALSE": False,
+                "e_env_force": True,
+                "e_optional": True,
             },
         )
         config.e_bool = False
@@ -151,36 +187,28 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
             config._config[k].user_override = _UNSET_SENTINEL
 
     def test_get_hash(self):
-        self.assertEqual(
-            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
-        )
+        self.assertEqual(config.get_hash(), b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ")
         # Test cached value
-        self.assertEqual(
-            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
-        )
-        self.assertEqual(
-            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
-        )
+        self.assertEqual(config.get_hash(), b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ")
+        self.assertEqual(config.get_hash(), b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ")
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
+            config.get_hash(), b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ"
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
-        self.assertEqual(
-            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
-        )
+        self.assertEqual(config.get_hash(), b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ")
         for k in config._config:
             config._config[k].user_override = _UNSET_SENTINEL
 
     def test_dict_copy_semantics(self):
         p = config.shallow_copy_dict()
-        self.assertEqual(
+        self.assertDictEqual(
             p,
             {
                 "e_bool": True,
@@ -202,6 +230,10 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_config": True,
                 "e_jk": True,
                 "e_jk_false": False,
+                "e_env_default": True,
+                "e_env_default_FALSE": False,
+                "e_env_force": True,
+                "e_optional": True,
             },
         )
         p2 = config.to_dict()
@@ -227,6 +259,10 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_config": True,
                 "e_jk": True,
                 "e_jk_false": False,
+                "e_env_default": True,
+                "e_env_default_FALSE": False,
+                "e_env_force": True,
+                "e_optional": True,
             },
         )
         p3 = config.get_config_copy()
@@ -252,6 +288,10 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_config": True,
                 "e_jk": True,
                 "e_jk_false": False,
+                "e_env_default": True,
+                "e_env_default_FALSE": False,
+                "e_env_force": True,
+                "e_optional": True,
             },
         )
 
@@ -280,6 +320,21 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         self.assertFalse(config.e_bool)
         revert()
         self.assertTrue(config.e_bool)
+
+    def test_unittest_patch(self):
+        with patch("torch.testing._internal.fake_config_module.e_bool", False):
+            with patch("torch.testing._internal.fake_config_module.e_bool", False):
+                self.assertFalse(config.e_bool)
+            # unittest.mock has some very weird semantics around deletion of attributes when undoing patches
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+
+    def test_bad_jk_type(self):
+        with self.assertRaises(
+            AssertionError,
+            msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
+        ):
+            Config(default="bad", justknob="fake_knob")
 
 
 if __name__ == "__main__":

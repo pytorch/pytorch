@@ -45,12 +45,21 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #endif  // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-#include <oneapi/dnnl/dnnl_version.h>
-#endif // oneDNN
+#include <ideep.hpp>
+// Add uKernel API versioning to be compatible with different oneDNN versions
+// oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
+// brgemm_pack_B is changed to transform and the setting of brgemm beta is changed to set_add_C
+#if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
+#define ONEDNN_UKERNEL_1
+#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#define ONEDNN_UKERNEL_2
+#endif
+#if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
+#define ONEDNN_UKERNEL_ENABLED
+#endif
+#endif  // AT_MKLDNN_ENABLED()
 
-#define ONEDNN_UKERNEL_ENABLED (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=5)
-
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
 #include <oneapi/dnnl/dnnl.hpp>
 #endif // oneDNN BRGEMM
@@ -335,7 +344,18 @@ void gemm(
    }
 #endif
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+#ifdef __aarch64__
+   // MKLDNN also supports ARM for bf16, and the bypass is only
+   // currently intended for x86/x86_64.
+   const bool use_bf16_gemv_trans = false;
+#else
+   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#endif
+   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -847,7 +867,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 }
 
 // oneDNN BRGEMM
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
 struct BrgemmKey {
   int64_t M;
   int64_t N;
@@ -859,8 +879,8 @@ struct BrgemmKey {
   ScalarType dt_a;
   ScalarType dt_b;
   ScalarType dt_c;
-  float alpha;
-  float beta;
+  bool add_C;
+
   BrgemmKey(
       int64_t M,
       int64_t N,
@@ -872,8 +892,7 @@ struct BrgemmKey {
       ScalarType dt_a,
       ScalarType dt_b,
       ScalarType dt_c,
-      float alpha,
-      float beta)
+      bool add_C)
       : M(M),
         N(N),
         K(K),
@@ -884,14 +903,12 @@ struct BrgemmKey {
         dt_a(dt_a),
         dt_b(dt_b),
         dt_c(dt_c),
-        alpha(alpha),
-        beta(beta) {}
+        add_C(add_C) {}
   bool operator==(const BrgemmKey& other) const {
     return M == other.M && N == other.N && K == other.K &&
         batch_size == other.batch_size && lda == other.lda &&
         ldb == other.ldb && ldc == other.ldc && dt_a == other.dt_a &&
-        dt_b == other.dt_b && dt_c == other.dt_c && alpha == other.alpha &&
-        beta == other.beta;
+        dt_b == other.dt_b && dt_c == other.dt_c && add_C == other.add_C;
   }
 };
 
@@ -945,13 +962,13 @@ struct UnsafeUkernelKeyHasher {
 
 template<>
 std::size_t UnsafeUkernelKeyHasher<BrgemmKey>::operator()(const BrgemmKey& key) const {
-  // Use beta, M, N, and K to compute hash to reduce the overhead as
-  // batch size, alpha, and data types are unlikely to change within the same kernel and
-  // leading dimensions are likely to be related to M, K, N or use fixed values.
-  std::size_t h = std::hash<float>()(key.beta + 1);
-  h = std::hash<int64_t>()(key.M) ^ (h << 1);
+  // Use M, N, K add_C, and ldc to compute hash to reduce the overhead as
+  // batch size and data types are unlikely to change within the same kernel and
+  // lda/ldb are likely to be related to M, K, N or use fixed values.
+  std::size_t h = std::hash<int64_t>()(key.M);
   h = std::hash<int64_t>()(key.N) ^ (h << 1);
   h = std::hash<int64_t>()(key.K) ^ (h << 1);
+  h = std::hash<bool>()(key.add_C) ^ (h << 1);
   h = std::hash<int64_t>()(key.ldc) ^ (h << 1);
   return h;
 }
@@ -1000,9 +1017,9 @@ struct GemmHelper {
       ScalarType dt_a,
       ScalarType dt_b,
       ScalarType dt_c,
-      const float alpha,
-      const float beta) {
+      const bool add_C) {
     // Create brgemm
+#if defined(ONEDNN_UKERNEL_1)
     brg = dnnl::ukernel::brgemm(
         M,
         N,
@@ -1014,8 +1031,23 @@ struct GemmHelper {
         get_dnnl_dtype(dt_a),
         get_dnnl_dtype(dt_b),
         get_dnnl_dtype(dt_c),
-        alpha,
-        beta);
+        1,
+        add_C ? 1 : 0);
+#elif defined(ONEDNN_UKERNEL_2)
+    brg = dnnl::ukernel::brgemm(
+        M,
+        N,
+        K,
+        bs,
+        ld_a,
+        ld_b,
+        ld_c,
+        get_dnnl_dtype(dt_a),
+        get_dnnl_dtype(dt_b),
+        get_dnnl_dtype(dt_c));
+    brg.set_add_C(add_C);
+    brg.finalize();
+#endif
     // Create a scratchpad buffer for the brgemm execution
     scratchpad = std::vector<uint8_t>(brg.get_scratchpad_size());
     // Prepare default vector of pairs of tensors A and B offsets for each batch.
@@ -1037,8 +1069,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
       int64_t ld_a,
       int64_t ld_b,
       int64_t ld_c,
-      const float alpha,
-      const float beta,
+      const bool add_C,
       const scalar_t_a* A,
       const scalar_t_b* B,
       scalar_t_c* C) {
@@ -1053,8 +1084,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
         c10::CppTypeToScalarType<scalar_t_a>::value,
         c10::CppTypeToScalarType<scalar_t_b>::value,
         c10::CppTypeToScalarType<scalar_t_c>::value,
-        alpha,
-        beta);
+        add_C);
     // Fetch/create GemmHelper object
     auto&& value = fetch_or_create(key, [&]() {
       auto&& v = std::make_shared<GemmHelper>(
@@ -1068,13 +1098,14 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
           c10::CppTypeToScalarType<scalar_t_a>::value,
           c10::CppTypeToScalarType<scalar_t_b>::value,
           c10::CppTypeToScalarType<scalar_t_c>::value,
-          alpha,
-          beta);
+          add_C);
       (*v).brg.generate();
       return std::move(v);
     });
     if (get_current() != value) {
+#if defined(ONEDNN_UKERNEL_1)
       dnnl::ukernel::brgemm::release_hw_context();
+#endif
       ((*value).brg).set_hw_context();
       get_current() = value;
     }
@@ -1099,7 +1130,11 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
   }
 };
 
+#if defined(ONEDNN_UKERNEL_1)
 using pack_t = dnnl::ukernel::brgemm_pack_B;
+#elif defined(ONEDNN_UKERNEL_2)
+using pack_t = dnnl::ukernel::transform;
+#endif
 struct Pack : public KernelCache <PackKey, pack_t> {
   static inline void call(
       int64_t K,
@@ -1113,7 +1148,11 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     auto&& key = PackKey(K, N, ld_in, ld_out, dt_in, dt_out);
     auto&& pack = fetch_or_create(key, [&]() {
       auto&& p = std::make_shared<pack_t>(
+#if defined(ONEDNN_UKERNEL_1)
           K, N, ld_in, ld_out, get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
+#elif defined(ONEDNN_UKERNEL_2)
+          K, N, dnnl::ukernel::pack_type::no_trans, ld_in, ld_out, get_dnnl_dtype(dt_in), get_dnnl_dtype(dt_out));
+#endif
       if (need_pack(dt_in)) {
         (*p).generate();
       }
@@ -1146,15 +1185,14 @@ void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    const float alpha,
-    const float beta,
+    const bool add_C,
     const at::Half* A,
     const at::Half* B,
     float* C) {
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
   if (Brgemm::device_check(ScalarType::Half)) {
     Brgemm::call<at::Half, at::Half, float>(
-      M, N, K, ld_a, ld_b, ld_c, alpha, beta, A, B, C);
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
@@ -1163,8 +1201,9 @@ void brgemm(
 }
 
 void brgemm_release() {
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
   dnnl::ukernel::brgemm::release_hw_context();
+  Brgemm::get_current() = nullptr;
 #endif
 }
 
@@ -1177,7 +1216,7 @@ void pack(
     ScalarType dt_out,
     const void* in,
     void* out) {
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
   Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
   TORCH_CHECK(false, "pack is only supported on X64 with oneDNN ukernel enabled");
@@ -1185,7 +1224,7 @@ void pack(
 }
 
 bool need_pack(ScalarType dt_in) {
-#if ONEDNN_UKERNEL_ENABLED && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC)))
+#if defined(ONEDNN_UKERNEL_ENABLED)
   return Pack::need_pack(dt_in);
 #else
   return false;
