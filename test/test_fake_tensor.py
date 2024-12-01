@@ -1951,6 +1951,35 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res4),
             )
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_wrapper_tensor_subclass_different_device(self):
+        from torch.nested._internal.wrappers import make_offload_tensor, OffloadTensor
+        from torch.nested._internal.offload_tensor import request_offload_all
+
+
+        device_tensor = torch.ones(2, 2, 768, device="cuda")
+
+        a = make_offload_tensor(device_tensor=device_tensor)
+        # Trigger 'a' to be offloaded
+        request_offload_all()
+        make_offload_tensor(device_tensor=device_tensor.clone())
+
+        # Outer Tensor is on cuda, inner is on cpu
+        self.assertFalse(a.is_cpu)
+        self.assertIsNotNone(a.host_tensor)
+        assert a.host_tensor is not None
+        self.assertTrue(a.host_tensor.is_cpu)
+
+        with FakeTensorMode() as fake_mode:
+            fake_a = fake_mode.from_tensor(a)
+
+        self.assertFalse(fake_a.is_cpu)
+        assert isinstance(fake_a, OffloadTensor)
+        self.assertIsNotNone(fake_a.host_tensor)
+        assert fake_a.host_tensor is not None
+        self.assertTrue(fake_a.host_tensor.is_cpu)
+
+
     def test_cache_tuple_outputs(self):
         """
         Test to check that ops with tuple outputs work.
