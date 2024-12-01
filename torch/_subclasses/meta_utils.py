@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import typing
+import functools
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -756,10 +757,11 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
+        callback_: Callable[[Callable[[], torch.Tensor]], _TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
-    ) -> _TensorT:
+    ):
+        callback = functools.partial(callback_, device=t.device)
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -933,12 +935,13 @@ class MetaConverter(Generic[_TensorT]):
                             )
 
                     current_source = AttrSource(source, attr)
+                    inner_callback = functools.partial(callback_, device=t.device)
                     new_empty_tensor = _empty_create_subclass(
                         meta_tensor_desc,
                         meta_tensor_desc.size,
                         meta_tensor_desc.stride,
                         current_context,
-                        callback,
+                        inner_callback,
                         current_source,
                     )
                     inner_tensors[attr] = new_empty_tensor
