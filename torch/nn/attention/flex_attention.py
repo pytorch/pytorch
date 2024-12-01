@@ -389,11 +389,15 @@ class BlockMask:
         Args:
             flatten (bool): If True, it will flatten the tuple of (KV_BLOCK_SIZE, Q_BLOCK_SIZE)
         """
-        block_size = (
-            (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1]) if flatten else (self.BLOCK_SIZE,)
-        )
+        if flatten:
+            block_size = (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1])  # type: ignore[assignment]
+            seq_lengths = (self.seq_lengths[0], self.seq_lengths[1])  # type: ignore[assignment]
+        else:
+            block_size = (self.BLOCK_SIZE,)  # type: ignore[assignment]
+            seq_lengths = (self.seq_lengths,)  # type: ignore[assignment]
 
         return (
+            *seq_lengths,
             self.kv_num_blocks,
             self.kv_indices,
             self.full_kv_num_blocks,

@@ -579,9 +579,9 @@ class TestFlexDecoding(InductorTestCase):
         ref_out = golden_call(q_ref, k_ref, v_ref)
 
         if mask_mod is not None:
-            block_mask = create_block_mask(mask_mod, Q_B, 1, 1, S)
+            block_mask = create_block_mask(mask_mod, Q_B, 1, Q_S, KV_S)
         else:
-            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S)
+            block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S)
 
         compiled_out, _ = self.run_paged_attention(
             score_mod, q, k, v, dtype, block_mask
@@ -1567,8 +1567,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             mask_mod=mask_mod,
             B=2,
             H=None,
-            Q_LEN=128,
-            KV_LEN=256,
+            Q_LEN=2,
+            KV_LEN=2,
             device="cuda",
         )
 
