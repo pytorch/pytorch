@@ -1538,7 +1538,7 @@ calc_i1e(T _x) {
     const T out = chbevl(y, A, len) * x;
     return (_x < T{0.0}) ? -out : out;
   }
-  auto [B,len] = chebyshev_coefficients_i1e_B<T>();
+  auto [B, len] = chebyshev_coefficients_i1e_B<T>();
   const auto out = chbevl(T{32.0} / x - T{2.0}, B, len) / std::sqrt(x);
   return (_x < T{0.0}) ? -out : out;
 }

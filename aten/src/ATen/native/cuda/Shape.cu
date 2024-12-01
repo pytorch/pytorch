@@ -385,7 +385,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 #else
     dim3 applyBlock, catGrid;
     if (isContig && sizeof(scalar_t) > 2) {
-        std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
+      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
           max_elements_per_tensor, batchCounter);
     } else {
       applyBlock = dim3(32 * 16);
