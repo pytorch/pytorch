@@ -1404,9 +1404,9 @@ class GRU(RNNBase):
         else:
             result = _VF.gru(
                 input,
-                batch_sizes,  # type: ignore[arg-type]
+                batch_sizes,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
