@@ -377,7 +377,7 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 static constexpr int32_t kTruncatLength = 30;
 
 template <typename ListLikeType>
-inline std::string format_list(
+static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
@@ -411,7 +411,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     for (const auto j : c10::irange(tuple_size)) {
       auto [is_list, res] = findStartAddrForTensors(val_tuple[j]);
       if (is_list) {
-        auto vec_res = std::get<std::vector<int>>(res);
+        const auto& vec_res = std::get<std::vector<int>>(res);
         responses.insert(responses.end(), vec_res.begin(), vec_res.end());
       } else {
         responses.push_back(std::get<int>(res));
@@ -426,7 +426,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     for (const auto j : c10::irange(list_size)) {
       auto [is_list, res] = findStartAddrForTensors(val_list[j]);
       if (is_list) {
-        auto vec_res = std::get<std::vector<int>>(res);
+        auto const& vec_res = std::get<std::vector<int>>(res);
         responses.insert(responses.end(), vec_res.begin(), vec_res.end());
       } else {
         responses.push_back(std::get<int>(res));
@@ -515,7 +515,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           const c10::IValue& val = inputs[i];
           auto [is_list, result] = findStartAddrForTensors(val);
           if (is_list) {
-            auto list_result = std::get<std::vector<int>>(result);
+            auto const& list_result = std::get<std::vector<int>>(result);
             addressList.push_back(
                 format_list(list_result, config.truncate, false));
           } else {
@@ -542,7 +542,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           const c10::IValue& val = outputs[i];
           auto [is_list, result] = findStartAddrForTensors(val);
           if (is_list) {
-            auto list_result = std::get<std::vector<int>>(result);
+            auto const& list_result = std::get<std::vector<int>>(result);
             addressList.push_back(
                 format_list(list_result, config.truncate, false));
           } else {
