@@ -735,7 +735,7 @@ class MetaConverter(Generic[_TensorT]):
         return typing.cast(_TensorT, t)
 
     @classmethod
-    def _identity_callable(cls, t: Callable[[], torch.Tensor]) -> _TensorT:
+    def _identity_callable(cls, t: Callable[[], torch.Tensor], device: torch.device) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
     @classmethod
