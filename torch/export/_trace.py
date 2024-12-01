@@ -410,7 +410,7 @@ def _remap_constants(
 
 def _produce_aten_artifact(
     *,
-    gm,
+    gm: torch.fx.GraphModule,
     mod,
     constant_attrs,
     graph_signature,
@@ -443,6 +443,7 @@ def _produce_aten_artifact(
     )
     set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
 
+    export_graph_signature: Optional[ExportGraphSignature]
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
@@ -483,6 +484,7 @@ def _produce_aten_artifact(
                 node.meta.pop("stack_trace", None)
 
     # Prettify names for placeholder nodes.
+    assert export_graph_signature is not None
     placeholder_naming_pass(
         gm,
         export_graph_signature,

@@ -1,9 +1,17 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import operator
+from typing import Dict, TYPE_CHECKING
 
 import torch
 from torch.export.exported_program import ConstantArgument, TensorArgument
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
+
+
+if TYPE_CHECKING:
+    from torch.export.exported_program import ModuleCallSignature
+    from torch.export.graph_signature import ExportGraphSignature
 
 
 __all__ = ["CollectTracepointsPass"]
@@ -14,7 +22,9 @@ class CollectTracepointsPass(PassBase):
     Performs constant folding and constant propagation.
     """
 
-    def __init__(self, specs, sig) -> None:
+    def __init__(
+        self, specs: Dict[str, ModuleCallSignature], sig: ExportGraphSignature
+    ) -> None:
         super().__init__()
         self.specs = specs
         self.sig = sig
