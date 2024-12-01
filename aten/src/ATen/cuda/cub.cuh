@@ -473,23 +473,9 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64
   {
     typename BlockLoadT::TempStorage load;
     typename BlockScanT::TempStorage scan;
-    //typename BlockReduceT::TempStorage reduce;
     typename BlockExchangeT::TempStorage exchange;
   } temp_storage;
 
-  // load agg and reduce my starting value
-  // int agg_data;
-  // agg_data = threadIdx.x >= blockIdx.x ? 0 : agg[threadIdx.x];
-  // int aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
-  // int __shared__ aggregate_sh;
-  // if (threadIdx.x == 0){
-  //   aggregate_sh = aggregate;
-  //   // write out full sum 
-  //   if (blockIdx.x == gridDim.x - 1) {
-  //     agg[blockIdx.x] = agg[blockIdx.x] + aggregate;
-  //   }
-  // }
-  // __syncthreads();
   int64_t aggregate = blockIdx.x == 0 ? 0 : agg[blockIdx.x - 1];
   d_out += aggregate;
  
@@ -501,7 +487,6 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64
 
   int64_t remaining =  input_nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
   int64_t out_remaining = output_nelem - aggregate;
-  //CountingInputIteratorT counting_itr(BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x);
   for (int i=0; i<iters_per_cta; i++){
 
   // Load items into a blocked arrangement
