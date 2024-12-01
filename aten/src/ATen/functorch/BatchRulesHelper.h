@@ -264,7 +264,7 @@ inline void boxed_existing_bdim_all_batch_rule(
 
   // for each tensor, ensure it has a bdim and reshape it.
   for (const auto tensor_idx : c10::irange(0, tensor_inputs.size())) {
-    const auto& [value,bdim] = tensor_inputs[tensor_idx];
+    const auto& [value, bdim] = tensor_inputs[tensor_idx];
     auto value_ = ensure_has_bdim(value, bdim.has_value(), batch_size);
     (*stack)[args_begin + tensor_pos[tensor_idx]] = reshape_dim_into(bdim.value_or(0), 0, value_);
   }
