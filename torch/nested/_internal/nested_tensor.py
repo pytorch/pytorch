@@ -674,7 +674,7 @@ def make_cached_tensor_with_offsets(offsets):
         f"{prefix}_offsets": offsets
     }
     return make_cached_tensor(
-        metadata
+        metadata,
         source_fields=source_fields,
         extra_fields=extra_fields,
     )
