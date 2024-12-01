@@ -421,9 +421,7 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
       getMPSProfiler().beginProfileKernel(cplState, "lgamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-
+      mtl_setArgs(computeEncoder, self, output);
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -461,8 +459,7 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
       getMPSProfiler().beginProfileKernel(cplState, "digamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_setArgs(computeEncoder, self, output);
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -512,8 +509,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
       getMPSProfiler().beginProfileKernel(cplState, func_name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_setArgs(computeEncoder, self, output);
 
       if (func_name == "polygamma") {
         mtl_setBytes(computeEncoder, order, 2);

@@ -18,6 +18,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
   this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("root"));
+  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
+      this->guard_manager.attr("diff_guard_root"));
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
@@ -40,6 +42,21 @@ py::object CacheEntry::next() {
     return py::none();
   }
   return py::cast(*it, py::return_value_policy::reference);
+}
+
+void CacheEntry::invalidate(py::object deleted_guard_manager) {
+  // Keep the current pointer alive but make the fields as if no-op
+  this->guard_manager.attr("cache_entry") = py::none();
+  this->guard_manager.attr("extra_state") = py::none();
+  this->code = py::none();
+  this->guard_manager = std::move(deleted_guard_manager);
+  this->root_mgr = nullptr;
+  this->trace_annotation = "Invalidated";
+}
+
+void CacheEntry::update_diff_guard_root_manager() {
+  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
+      this->guard_manager.attr("diff_guard_root"));
 }
 
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {

@@ -15,7 +15,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
+TORCH_DECLARE_bool(torch_jit_enable_expanded_stacks);
 
 namespace torch::jit {
 
