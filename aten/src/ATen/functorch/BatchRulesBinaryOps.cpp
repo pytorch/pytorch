@@ -14,7 +14,7 @@
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-static std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
+static Tensor _binary_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
@@ -22,8 +22,7 @@ static std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
   auto [tensor_, other_]= _binary_pointwise_helper(
       tensor, tensor_batch_dim, other, other_batch_dim);
 
-  auto result = Func(tensor_, std::move(other_), std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple(result, 0);
+  return Func(tensor_, std::move(other_), std::forward<ExtraArgs>(extra_args)...);
 }
 
 template <typename A, A a, typename C>
@@ -35,9 +34,9 @@ struct BinaryPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
       const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
       const Tensor& other, std::optional<int64_t> other_batch_dim,
       T... extra_args) {
-    return _binary_pointwise_batch_rule<F, Func, T...>(
+    return std::tuple(_binary_pointwise_batch_rule<F, Func, T...>(
         tensor, tensor_batch_dim, other, other_batch_dim,
-        std::forward<T>(extra_args)...);
+        std::forward<T>(extra_args)...), 0);
   }
 };
 
@@ -80,7 +79,7 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     auto res = _binary_pointwise_batch_rule<F, Func, T...>(
       tensor_value, tensor_bdim, other_value, other_bdim,
       std::forward<T>(extra_args)...);
-    return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+    return makeBatched(std::move(res), 0, cur_level);
   }
 };
 
