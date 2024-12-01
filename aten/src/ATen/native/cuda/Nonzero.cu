@@ -54,7 +54,8 @@ __global__ void write_indices(
       div *= dim_size;
     }
   } else if (index < n) {
-    for (int dim = ndim - 1; dim >= 0; dim--) {
+    // 0th dim has correct values already
+    for (int dim = ndim - 1; dim > 0; dim--) {
       inp[index + dim * n] = fill_value;
     }
   }
@@ -253,7 +254,8 @@ void nonzero_static_cuda_out_impl(
     in_data_ptr, (int*)agg.get(), self.numel(), iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   auto agg_cum = allocator.allocate(grid_size * sizeof(int64_t));
-
+  // computing partial sums in int64 in the flag kernel
+  // leads to 20-30% slowdown, so compute them in a separate 2 us kernel
   compute_agg<BLOCK_THREADS><<<1, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
    (int*)agg.get(), (int64_t*)agg_cum.get(), grid_size
   );
