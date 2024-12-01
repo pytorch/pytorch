@@ -663,6 +663,8 @@ class Vectorized<BFloat16>: public Vectorized16<BFloat16> {
 public:
   using Vectorized16::Vectorized16;
 
+  using value_type = BFloat16;
+
   Vectorized<BFloat16> frac() const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
@@ -864,6 +866,8 @@ template <>
 class Vectorized<Half>: public Vectorized16<Half> {
 public:
   using Vectorized16::Vectorized16;
+
+  using value_type = Half;
 
   Vectorized<Half> frac() const;
 
@@ -1096,8 +1100,8 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   convert(arr, arr2, K); \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
 #if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
 CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 

@@ -129,12 +129,3 @@ def make_cached_tensor_with_offsets(offsets):
         f"{prefix}_offsets": offsets
     }
     return make_cached_tensor(metadata)
-
-
-@torch._dynamo.allow_in_graph
-def try_as_variant(metadata, device, variant) -> Optional[CachedTensor]:
-    prefix = "_host" if device.type == "cpu" else "_device"
-    target_field = f"{prefix}_{variant}"
-    if target_field not in metadata:
-        return None
-    return make_cached_tensor(metadata, target_field=target_field)

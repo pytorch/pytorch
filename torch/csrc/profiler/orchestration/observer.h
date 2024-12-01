@@ -104,7 +104,7 @@ struct TORCH_API ProfilerConfig {
       bool with_flops = false,
       bool with_modules = false,
       ExperimentalConfig experimental_config = ExperimentalConfig(),
-      const std::string& trace_id = "");
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;
@@ -128,6 +128,10 @@ struct TORCH_API ProfilerConfig {
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   explicit ProfilerStateBase(ProfilerConfig config);
+  ProfilerStateBase(const ProfilerStateBase&) = delete;
+  ProfilerStateBase(ProfilerStateBase&&) = delete;
+  ProfilerStateBase& operator=(const ProfilerStateBase&) = delete;
+  ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);
