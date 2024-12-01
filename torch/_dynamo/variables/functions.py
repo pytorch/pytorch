@@ -430,7 +430,7 @@ class GeneratorObjectVariable(VariableTracker):
         return self.value.gi_frame.f_globals
 
     def can_reconstruct(self, tx):
-        # Any graph break should force the entire context manager to run on eager mode
+        # TODO: reconstruct generator object
         return False
 
     def _get_inline_tracer(self, tx):
@@ -474,7 +474,13 @@ class GeneratorObjectVariable(VariableTracker):
             skip_code(code)
             raise exc.SkipFrame from e
 
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def has_unpack_var_sequence(self, tx):
+        # the base class method runs unpack_var_sequence to determine if
+        # GeneratorObjectVariable implements it. We should avoid this as
+        # it would exhaust the generator.
+        return True
+
+    def unpack_var_sequence(self, tx) -> List[VariableTracker]:
         result = []
         while True:
             try:
@@ -483,6 +489,9 @@ class GeneratorObjectVariable(VariableTracker):
                 handle_observed_exception(tx)
                 break
         return result
+
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        return self.unpack_var_sequence(tx)
 
     def call_method(
         self,
