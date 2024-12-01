@@ -1167,7 +1167,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def scoremod_2(qk, b, h, q, kv):
             return torch.where(q >= kv, qk, -float("inf"))
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1, S)
+        block_mask = create_block_mask(noop_mask, 1, 1, 4, 1024)
 
         attention1 = functools.partial(
             flex_attention, score_mod=scoremod_1, block_mask=block_mask
