@@ -972,8 +972,8 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     lock.unlock();
 
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      invokeCallback(std::move(callback.callback), callback.uses_future);
+    for (const auto& callback : cbs) {
+      invokeCallback(callback.callback, callback.uses_future);
     }
   }
 
@@ -1175,9 +1175,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
   template<typename T>
-  void invokeCallback(T callback, bool uses_future) {
+  void invokeCallback(const T& callback, bool uses_future) {
     static_assert(
-        std::is_invocable_r<void, T, Future&>::value,
+        std::is_invocable_r_v<void, T, Future&>,
         "The callback must have signature void(Future&)");
 
     // The synchronization performed below shouldn't be needed when the future
@@ -1237,7 +1237,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
-      invokeCallback(std::move(callback.callback), callback.uses_future);
+      invokeCallback(callback.callback, callback.uses_future);
     }
   }
 
@@ -1425,6 +1425,7 @@ struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
   Await(Await&&) = delete;
   Await& operator=(const Await&) = delete;
   Await& operator=(Await&&) = delete;
+  ~Await() override = default;
 
   IValue wait() {
     if (!completed_) {
@@ -1790,7 +1791,7 @@ std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
 template <typename T>
 c10::intrusive_ptr<T> IValue::toCustomClass() && {
   static_assert(
-      std::is_base_of<torch::CustomClassHolder, T>::value == true,
+      std::is_base_of_v<torch::CustomClassHolder, T> == true,
       "toCustomClass requires that template parameter T must inherit "
       "from torch::CustomClassHolder");
   auto obj = toObject();
@@ -1808,7 +1809,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() && {
 template <typename T>
 c10::intrusive_ptr<T> IValue::toCustomClass() const& {
   static_assert(
-      std::is_base_of<torch::CustomClassHolder, T>::value == true,
+      std::is_base_of_v<torch::CustomClassHolder, T> == true,
       "toCustomClass requires that template parameter T must inherit "
       "from torch::CustomClassHolder");
   auto obj = toObject();
@@ -2254,7 +2255,7 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
 template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::IListRef<T> v) : IValue() {
   constexpr bool boxed_type_constructs_ivalue =
-      std::is_constructible<IValue, typename c10::IListRef<T>::boxed_type>::value;
+      std::is_constructible_v<IValue, typename c10::IListRef<T>::boxed_type>;
   // First, we try to use the boxed value.
   // If we fail (either it's not in the boxed state, or its boxed type
   // can not construct an IValue), we fallback to copying the list.
