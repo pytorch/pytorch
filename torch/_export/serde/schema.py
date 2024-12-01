@@ -82,7 +82,7 @@ class SymInt(_Union):
 @dataclass(repr=False)
 class SymFloat(_Union):
     as_expr: Annotated[SymExpr, 10]
-    as_float:  Annotated[float, 20]
+    as_float: Annotated[float, 20]
 
 
 @dataclass(repr=False)
@@ -121,8 +121,8 @@ class SymIntArgument(_Union):
 # to the "as_float" field.
 @dataclass(repr=False)
 class SymFloatArgument(_Union):
-    as_name: str
-    as_float: float
+    as_name: Annotated[str, 10]
+    as_float: Annotated[float, 20]
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
