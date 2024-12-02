@@ -1743,7 +1743,7 @@ class TritonKernel(SIMDKernel):
                 ]
 
                 # Match each range tree's subexpression separately.
-                range_symbols = OrdereredSet(tree.symbol() for tree in range_trees)
+                range_symbols = OrderedSet(tree.symbol() for tree in range_trees)
                 block_params = BlockParameters()
                 for tree, subexpr in zip(range_trees, index_subexprs):
                     # Reject mixed terms, e.g. xindex * rindex.
