@@ -32,7 +32,7 @@ class TritonSplitScanKernel(TritonKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         pid_cache=None,
         fixed_config=None,
         **kwargs,

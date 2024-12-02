@@ -1205,7 +1205,7 @@ if torch._C._has_mkldnn:
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
 
-                packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
+                packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()

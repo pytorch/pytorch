@@ -17,15 +17,14 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterator,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
     Union,
 )
+from collections.abc import Iterator, Sequence
 
 import sympy
 from sympy import Expr
@@ -75,7 +74,7 @@ if TYPE_CHECKING:
 pexpr = PythonPrinter().doprint
 
 
-ReuseKey = Tuple[torch.device, torch.dtype, str]
+ReuseKey = tuple[torch.device, torch.dtype, str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 
 
@@ -157,21 +156,21 @@ def get_cpp_op_schema(kernel: torch._ops.OpOverload) -> str:
 
 
 # TODO: Move to a well known place
-TritonMetaParams = Dict[str, int]
+TritonMetaParams = dict[str, int]
 TritonGrid = Union[
-    Tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], Tuple[int, ...]]
+    tuple[Union[int, sympy.Expr], ...], Callable[[TritonMetaParams], tuple[int, ...]]
 ]
 
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: List[triton.Config],  # type: ignore[name-defined]
-    grids: List[TritonGrid],
-    wrapper: Optional[PythonWrapperCodegen] = None,
-) -> Tuple[str, str]:
+    configs: list[triton.Config],  # type: ignore[name-defined]
+    grids: list[TritonGrid],
+    wrapper: PythonWrapperCodegen | None = None,
+) -> tuple[str, str]:
     output = IndentedBuffer()
 
-    def _convert_to_sympy_expr(item: Union[int, sympy.Expr]) -> sympy.Expr:
+    def _convert_to_sympy_expr(item: int | sympy.Expr) -> sympy.Expr:
         return item if isinstance(item, sympy.Expr) else sympy.Integer(item)
 
     def determine_grid(
@@ -202,7 +201,7 @@ def user_defined_kernel_grid_fn_code(
             ),
         )
 
-    def writeline(line: str, example_grid: Optional[str] = None):
+    def writeline(line: str, example_grid: str | None = None):
         output.writeline(line)
         if (
             wrapper
@@ -330,8 +329,8 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            ReuseKey, List[FreeIfNotReusedLine]
+        self.reuse_pool: dict[
+            ReuseKey, list[FreeIfNotReusedLine]
         ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
@@ -380,7 +379,7 @@ class ExitSubgraphLine(WrapperLine):
 @dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
-    last_seen_device_guard_index: Optional[int]
+    last_seen_device_guard_index: int | None
 
     def codegen(self, code: IndentedBuffer) -> None:
         if V.graph.cpp_wrapper:
@@ -433,7 +432,7 @@ class MemoryPlanningLine(WrapperLine):
         """
         Emits a string representation that fits on one line.
         """
-        args: List[str] = []
+        args: list[str] = []
         for field in dataclasses.fields(self):
             if field.name == "wrapper":
                 continue
@@ -620,12 +619,12 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
-        self.kernel_autotune_names: Set[str] = set()
+        self.kernel_autotune_names: set[str] = set()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
-        self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[Tuple[str, GraphLowering]] = set()
-        self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
+        self.src_to_kernel: dict[str, str] = {}
+        self.kernel_numel_expr: set[tuple[str, GraphLowering]] = set()
+        self.lines: list[MemoryPlanningLine | LineContext] = []
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
@@ -638,12 +637,12 @@ class PythonWrapperCodegen(CodeGen):
         self.stride = "stride()"
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
-        self.last_seen_device_guard_index: Optional[int] = None
+        self.last_seen_device_guard_index: int | None = None
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
-        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
-        self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
-        self.computed_sizes: Set[sympy.Symbol] = set()
+        self.user_defined_kernel_cache: dict[tuple[Any, ...], tuple[str, Any]] = {}
+        self.unbacked_symbol_decls: set[str] = set()  # str of sympy.Symbol
+        self.computed_sizes: set[sympy.Symbol] = set()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -664,11 +663,11 @@ class PythonWrapperCodegen(CodeGen):
                 # include a hash so our code cache puts different constants into different files
                 self.write_constant(name, hashed)
 
-        self.allocated: Set[BufferName] = set()
-        self.freed: Set[BufferName] = set()
+        self.allocated: set[BufferName] = set()
+        self.freed: set[BufferName] = set()
 
         # maps from reusing buffer to reused buffer
-        self.reuses: Dict[BufferName, BufferName] = {}
+        self.reuses: dict[BufferName, BufferName] = {}
 
         self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_raw_stream
@@ -681,11 +680,11 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_calls.writeline(line)
 
         self.add_import_once = add_import_once
-        self._metas: Dict[str, str] = {}
-        self._meta_vars: Set[str] = set()
+        self._metas: dict[str, str] = {}
+        self._meta_vars: set[str] = set()
         self.multi_kernel_state = MultiKernelState()
-        self.already_codegened_subgraphs: Set[str] = set()
-        self.allocated_workspaces: Dict[str, Any] = {}
+        self.already_codegened_subgraphs: set[str] = set()
+        self.allocated_workspaces: dict[str, Any] = {}
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -827,7 +826,7 @@ class PythonWrapperCodegen(CodeGen):
         return self._metas[meta]
 
     @cache_on_self
-    def get_output_refs(self) -> List[str]:
+    def get_output_refs(self) -> list[str]:
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
     def mark_output_type(self) -> None:
@@ -945,7 +944,7 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.do_unindent()
 
-    def generate_return(self, output_refs: List[str]) -> None:
+    def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
@@ -990,7 +989,7 @@ class PythonWrapperCodegen(CodeGen):
                 )
 
     def generate_extern_kernel_out(
-        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+        self, kernel: str, out: str, out_view: str | None, args: list[str]
     ):
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -1002,8 +1001,8 @@ class PythonWrapperCodegen(CodeGen):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -1082,8 +1081,8 @@ class PythonWrapperCodegen(CodeGen):
         buf_name: str,
         python_kernel_name: str,
         cpp_kernel_name: str,
-        codegen_args: List[str],
-        op_overload: Optional[torch._ops.OpOverload] = None,
+        codegen_args: list[str],
+        op_overload: torch._ops.OpOverload | None = None,
         raw_args=None,
         outputs=None,
     ):
@@ -1238,7 +1237,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_inputs(
-        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
+        self, code: IndentedBuffer, graph_inputs: dict[str, ir.TensorBox]
     ):
         """Assign all symbolic shapes to locals"""
 
@@ -1253,7 +1252,7 @@ class PythonWrapperCodegen(CodeGen):
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
-        bound_vars: Set[sympy.Symbol] = set()
+        bound_vars: set[sympy.Symbol] = set()
 
         def is_expr(x):
             return isinstance(x[1], sympy.Expr)
@@ -1493,7 +1492,7 @@ class PythonWrapperCodegen(CodeGen):
         self,
         kernel_name: str,
         kernel_body: str,
-        metadata: Optional[str] = None,
+        metadata: str | None = None,
         gpu=True,
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
@@ -1521,10 +1520,10 @@ class PythonWrapperCodegen(CodeGen):
 
         from .common import KernelArgType, SizeArg, TensorArg, TMADescriptorArg
 
-        signature: List[KernelArgType] = []
-        constants: Dict[str, Any] = {}
+        signature: list[KernelArgType] = []
+        constants: dict[str, Any] = {}
         non_constant_indices = []
-        equal_to_1_args: List[str] = []
+        equal_to_1_args: list[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
@@ -1603,7 +1602,7 @@ class PythonWrapperCodegen(CodeGen):
             triton_meta["reset_to_zero"] = tuple(reset_to_zero_args)
 
         # Distinguish between different functions using function id
-        cache_key: List[Any] = [id(kernel.fn)]
+        cache_key: list[Any] = [id(kernel.fn)]
         if len(configs) > 0:
             for arg in kwargs.values():
                 # We need to key on non tensor arg only in autotune mode
@@ -1668,7 +1667,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         return name, triton_meta
 
-    def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
+    def generate_numel_expr(self, kernel_name: str, tree, suffix: str | None = None):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
@@ -1784,9 +1783,9 @@ class PythonWrapperCodegen(CodeGen):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid: List[Any],
+        grid: list[Any],
         gpu: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = None,
+        grid_callable: Callable[..., Any] | None = None,
         **grid_extra_kwags,
     ):
         return grid
@@ -2081,7 +2080,7 @@ class PythonWrapperCodegen(CodeGen):
     def make_buffer_free(self, buffer: BufferLike):
         return f"del {buffer.get_name()}"
 
-    def make_free_by_names(self, names_to_del: List[str]):
+    def make_free_by_names(self, names_to_del: list[str]):
         return f"del {', '.join(name for name in names_to_del)}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):

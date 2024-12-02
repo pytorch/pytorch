@@ -15,7 +15,8 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from collections.abc import Container
 
 import torch
 
@@ -105,11 +106,11 @@ log = logging.getLogger(__name__)
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint],
+    hints: set[AutotuneHint],
     size_hints,
     block_size: int,
     device_props: DeviceProperties,
-) -> List[Config]:
+) -> list[Config]:
     """
     AutotuneHints can be attached to the metadata of triton kernels for providing
     suggestions about what to try for autotuning. One reason to do this is if there are
@@ -119,8 +120,8 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: Tuple[Tuple[int, Optional[int], Optional[int]], ...]
-    configs: List[Config] = []
+    xyz_options: tuple[tuple[int, int | None, int | None], ...]
+    configs: list[Config] = []
     warp_size = device_props.warp_size
     # CPU target has no concept of "warp"
     if warp_size is None:
@@ -201,14 +202,14 @@ class CachingAutotuner(KernelInterface):
         triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
-        mutated_arg_names: List[str],  # see [Note: clone mutated buffers]
+        mutated_arg_names: list[str],  # see [Note: clone mutated buffers]
         optimize_mem,
         heuristic_type,
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
-        filename: Optional[str] = None,
-        reset_to_zero_arg_names: Optional[List[str]] = None,
+        filename: str | None = None,
+        reset_to_zero_arg_names: list[str] | None = None,
     ):
         super().__init__()
 
@@ -852,7 +853,7 @@ class CachingAutotuner(KernelInterface):
 
     def maybe_clone_args(
         self, exclude: Container[str], *args, **kwargs
-    ) -> Tuple[List[Any], Dict[str, Any]]:
+    ) -> tuple[list[Any], dict[str, Any]]:
         """
         Prepare new args and kwargs by cloning any in-place buffers
         (that are not in the provided exclusion list), to avoid autotune
@@ -875,7 +876,7 @@ class CachingAutotuner(KernelInterface):
 
         return cloned_args, cloned_kwargs
 
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args, **kwargs) -> tuple[list[Any], dict[str, Any]]:
         return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
@@ -1101,7 +1102,7 @@ def _find_names(obj):
     return obj_names
 
 
-collected_calls: List[Any] = []
+collected_calls: list[Any] = []
 
 
 def start_graph():
@@ -1220,7 +1221,7 @@ class DebugAutotuner(CachingAutotuner):
                 collected_calls.append(self.cached)
 
 
-def hash_configs(configs: List[Config]):
+def hash_configs(configs: list[Config]):
     """
     Hash used to check for changes in configurations
     """
@@ -1233,8 +1234,8 @@ def hash_configs(configs: List[Config]):
 
 
 def cached_autotune(
-    size_hints: Optional[List[int]],
-    configs: List[Config],
+    size_hints: list[int] | None,
+    configs: list[Config],
     triton_meta,
     heuristic_type,
     filename=None,
@@ -1276,7 +1277,7 @@ def cached_autotune(
     if "restore_value" in triton_meta:
         mutated_arg_names += triton_meta.pop("restore_value")
 
-    reset_to_zero_arg_names: List[str] = []
+    reset_to_zero_arg_names: list[str] = []
     if "reset_to_zero" in triton_meta:
         reset_to_zero_arg_names.extend(triton_meta.pop("reset_to_zero"))
 
@@ -1331,7 +1332,7 @@ def cached_autotune(
     return decorator
 
 
-def unique_configs(configs: List[Config]):
+def unique_configs(configs: list[Config]):
     """Remove duplicate configurations"""
     seen = set()
     pruned_configs = []
@@ -1655,8 +1656,8 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: List[int], inductor_meta: Dict[str, Any]
-) -> List[Config]:
+    *, size_hints: list[int], inductor_meta: dict[str, Any]
+) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
@@ -1896,7 +1897,7 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
-def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+def _pop_config_kwargs(config: dict[str, Any]) -> dict[str, Any]:
     """Extract triton.Config options that should become kwargs"""
     popped = {}
     for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):

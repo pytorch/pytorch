@@ -83,7 +83,7 @@ class PT2ArchiveReader:
         assert self.archive_file is not None
         self.archive_file.extractall(path)
 
-    def get_file_names(self) -> List[str]:
+    def get_file_names(self) -> list[str]:
         assert self.archive_file is not None
         return self.archive_file.namelist()
 
@@ -96,7 +96,7 @@ def _run_command_and_check(cmd: str) -> None:
         raise exc.CppCompileError(cmd, e.output) from e
 
 
-def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
+def compile_so(aoti_dir: str, aoti_files: list[str], so_path: str) -> str:
     def get_aoti_file_with_suffix(suffix: str) -> str:
         for file in aoti_files:
             if file.endswith(suffix):
@@ -156,7 +156,7 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 
 def package_aoti(
-    archive_file: str, aoti_files: Union[List[str], Dict[str, List[str]]]
+    archive_file: str, aoti_files: Union[list[str], dict[str, list[str]]]
 ) -> str:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
@@ -237,7 +237,7 @@ class AOTICompiledModel:
         flat_outputs = self.loader.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
-    def get_metadata(self) -> Dict[str, str]:
+    def get_metadata(self) -> dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
 

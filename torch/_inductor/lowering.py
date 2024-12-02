@@ -9,7 +9,8 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import sympy
@@ -76,19 +77,19 @@ from .virtualized import ops, V
 
 
 log = logging.getLogger(__name__)
-lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
-_maybe_layout_constraints: Dict[
+_maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
 ] = {}
-fallbacks: Set[torch._ops.OpOverload] = set()
+fallbacks: set[torch._ops.OpOverload] = set()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
-needs_realized_inputs: Set[torch._ops.OpOverload] = set()
-foreach_ops: Set[torch._ops.OpOverload] = set()
-inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
-inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
+needs_realized_inputs: set[torch._ops.OpOverload] = set()
+foreach_ops: set[torch._ops.OpOverload] = set()
+inplace_foreach_ops: set[torch._ops.OpOverload] = set()
+inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
@@ -261,12 +262,12 @@ def in_namespace(op, namespace):
 
 
 def transform_args(
-    args: List[Any],
-    kwargs: Dict[str, Any],
+    args: list[Any],
+    kwargs: dict[str, Any],
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-) -> Tuple[List[Any], Dict[str, Any]]:
+) -> tuple[list[Any], dict[str, Any]]:
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -376,8 +377,8 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: List[Any] = list(args)
-        kwargs: Dict[str, Any] = dict(kwargs)
+        args: list[Any] = list(args)
+        kwargs: dict[str, Any] = dict(kwargs)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -600,7 +601,7 @@ def make_pointwise(
 
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
-    def inner(*inputs: List[List[TensorBox]], alpha=1):
+    def inner(*inputs: list[list[TensorBox]], alpha=1):
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -650,7 +651,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
-            operation_list: List[str] = []
+            operation_list: list[str] = []
             for (
                 output_ind,
                 args,
@@ -872,7 +873,7 @@ def where(cond, a, b):
 def broadcast_tensors(*inputs):
     if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
         return broadcast_tensors(*inputs[0])
-    target: List[sympy.Expr] = functools.reduce(
+    target: list[sympy.Expr] = functools.reduce(
         broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
     )
     outputs = []
@@ -1151,7 +1152,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 def pointwise_cat(inputs, dim=0):
     # (inclusive, exclusive)
-    inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
+    inputs_ranges: list[tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
         inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
@@ -2069,7 +2070,7 @@ def inductor_lookup_seed(seeds, index):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2098,7 +2099,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
 
 @register_lowering(inductor_prims.randint, type_promotion_kind=None)
 def inductor_randint(
-    low: int, high: int, size: List[int], seed: TensorBox, *, offset: int = 0
+    low: int, high: int, size: list[int], seed: TensorBox, *, offset: int = 0
 ):
     assert not config.fallback_random
     size = [*size]
@@ -2125,7 +2126,7 @@ def inductor_randint(
     )
 
 
-def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
     return (
         tb.get_name(),
         tb.get_size()[-1],
@@ -2134,7 +2135,7 @@ def _boundaries_helper(tb: TensorBox) -> Tuple[str, sympy.Expr, sympy.Expr, symp
     )
 
 
-def _sorter_helper(tb: TensorBox) -> Tuple[str, sympy.Expr]:
+def _sorter_helper(tb: TensorBox) -> tuple[str, sympy.Expr]:
     return tb.get_name(), tb.get_stride()[-1]
 
 
@@ -2783,7 +2784,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    ranges: List[sympy.Expr] = []
+    ranges: list[sympy.Expr] = []
 
     if isinstance(data, sympy.Basic):
 
@@ -3717,7 +3718,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 def upsample_nearestnd(
     x,
     output_size,
-    scales_x: Tuple[Optional[float], ...],
+    scales_x: tuple[Optional[float], ...],
     n: int = 2,
     exact: bool = False,
 ):
@@ -3847,7 +3848,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     n = len(sizes) - len(bounds)
 
     # if padding is a complicated expression, hoist it
-    bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
+    bounds_precomp: list[tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
         bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
 

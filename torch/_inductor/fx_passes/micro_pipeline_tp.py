@@ -36,11 +36,11 @@ def _compute_mm_arithmetic_intensity(M: int, N: int, K: int) -> float:
     return M * N * K / (M * K + N * K + M * N)
 
 
-def _filter_nodes_by_target(nodes: List[torch.fx.Node], target) -> List[torch.fx.Node]:
+def _filter_nodes_by_target(nodes: list[torch.fx.Node], target) -> list[torch.fx.Node]:
     return [x for x in nodes if x.target == target]
 
 
-def _find_ancestors(node: torch.fx.Node) -> Set[torch.fx.Node]:
+def _find_ancestors(node: torch.fx.Node) -> set[torch.fx.Node]:
     ancestors = set()
     ancestors.add(node)
     cur_nodes = [node]
@@ -287,8 +287,8 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
 
 @dataclass
 class _Matmul:
-    nodes: List[torch.fx.Node]
-    arg_ancestor_nodes: Set[torch.fx.Node] = field(init=False)
+    nodes: list[torch.fx.Node]
+    arg_ancestor_nodes: set[torch.fx.Node] = field(init=False)
     A_node: torch.fx.Node
     B_node: torch.fx.Node
 
@@ -343,7 +343,7 @@ class _Matmul:
                 node.graph.erase_node(node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_Matmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_Matmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten.mm.default,
@@ -372,7 +372,7 @@ class _ScaledMatmul(_Matmul):
         self.arg_ancestor_nodes |= _find_ancestors(self.B_scale_node)
 
     @classmethod
-    def from_match(cls, match: List[torch.fx.Node]) -> "_ScaledMatmul":
+    def from_match(cls, match: list[torch.fx.Node]) -> "_ScaledMatmul":
         assert len(match) in (1, 3)
         assert match[0].target in (
             aten._scaled_mm.default,
@@ -398,7 +398,7 @@ class _ScaledMatmul(_Matmul):
         )
 
 
-def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
+def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     if node.target != aten.reshape.default:
         return []
 
@@ -446,7 +446,7 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> List[_Matmul]:
     return matmuls
 
 
-def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
+def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     """
     Find the matmuls that use `node` as the lhs argument.
     """
@@ -467,7 +467,7 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[_Matmul]:
 
 def _insert_fused_all_gather_matmul(
     graph: torch.fx.Graph,
-    matmuls: List[_Matmul],
+    matmuls: list[_Matmul],
     shard_node: torch.fx.Node,
     gather_dim: int,
     group_name: str,
@@ -482,7 +482,7 @@ def _insert_fused_all_gather_matmul(
             args=(shard_node, B_nodes, gather_dim, group_name),
         )
     elif mm_type == _ScaledMatmul:
-        scaled_matmuls = cast(List[_ScaledMatmul], matmuls)
+        scaled_matmuls = cast(list[_ScaledMatmul], matmuls)
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_scaled_matmul.default,
             args=(
@@ -750,7 +750,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
 def _get_node_to_ancestors(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, Set[torch.fx.Node]]:
+) -> dict[torch.fx.Node, set[torch.fx.Node]]:
     """
     Compute the ancestors for all nodes in a graph.
     """
@@ -765,7 +765,7 @@ def _get_node_to_ancestors(
 
 def _get_collective_to_overlappable_nodes(
     graph: torch.fx.Graph,
-) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
+) -> dict[torch.fx.Node, list[torch.fx.Node]]:
     """
     For each collective in the graph, find nodes that are neither ancestors nor
     descendants of the collective.
@@ -795,7 +795,7 @@ def _get_collective_to_overlappable_nodes(
     return collective_to_overlappable_nodes
 
 
-def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
     Find all unexposed collectives in the graph.
 

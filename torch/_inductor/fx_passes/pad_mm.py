@@ -44,7 +44,7 @@ aten = torch.ops.aten
 _skip_do_bench_times = False
 
 
-def fetch_fake_tensors(match, kwarg_names) -> List[Tensor]:
+def fetch_fake_tensors(match, kwarg_names) -> list[Tensor]:
     kwargs = match.kwargs
     return [kwargs[name].meta["val"] for name in kwarg_names]
 
