@@ -354,8 +354,9 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
-        result._boxed_call = True
+        # TODO: How come cudagraphs could be None here?
+        # TODO: How come gm is None here?
+        result.post_compile(example_inputs, fx_config["cudagraphs"], None)  # type: ignore[arg-type]
         return result
 
 
