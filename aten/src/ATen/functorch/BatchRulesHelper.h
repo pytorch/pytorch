@@ -145,7 +145,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
-      tensor_inputs.emplace_back(tensor_value, tensor_bdim);
+      tensor_inputs.emplace_back(std::move(tensor_value), tensor_bdim);
       tensor_pos.push_back(static_cast<int64_t>(idx));
     }
   }
@@ -220,8 +220,7 @@ inline void find_and_unpack_tensors(
       continue;
     }
     auto unpacked = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
-    const auto& tensor_value = std::get<0>(unpacked);
-    const auto tensor_bdim = std::get<1>(unpacked);
+    const auto& [tensor_value, tensor_bdim] = unpacked;
     if (tensor_bdim.has_value()) {
       auto candidate_batch_size = tensor_value.size(*tensor_bdim);
       if (computed_batch_size == -1) {
@@ -265,13 +264,9 @@ inline void boxed_existing_bdim_all_batch_rule(
 
   // for each tensor, ensure it has a bdim and reshape it.
   for (const auto tensor_idx : c10::irange(0, tensor_inputs.size())) {
-    const auto& value = std::get<0>(tensor_inputs[tensor_idx]);
-    auto bdim = std::get<1>(tensor_inputs[tensor_idx]);
+    const auto& [value, bdim] = tensor_inputs[tensor_idx];
     auto value_ = ensure_has_bdim(value, bdim.has_value(), batch_size);
-    if (!bdim.has_value()) {
-      bdim = 0;
-    }
-    (*stack)[args_begin + tensor_pos[tensor_idx]] = reshape_dim_into(*bdim, 0, value_);
+    (*stack)[args_begin + tensor_pos[tensor_idx]] = reshape_dim_into(bdim.value_or(0), 0, value_);
   }
 
   op.callBoxed(stack);
