@@ -23,7 +23,6 @@ if TYPE_CHECKING:
         itertools as itertools,
         operator as operator,
         os as os,
-        pytree as pytree,
         sys as sys,
     )
 
