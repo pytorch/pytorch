@@ -205,6 +205,8 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+    if torch._inductor.config.freezing:
+        raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
@@ -803,9 +805,9 @@ class AOTAutogradCache:
 
         # Prefer local cache to remote, fallback to remote if local missed
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
 
             if remote_cache is not None:
                 try:
@@ -847,9 +849,9 @@ class AOTAutogradCache:
         counters["aot_autograd"]["autograd_cache_saved"] += 1
 
         if remote:
-            remote_cache: Optional[
-                RemoteCache[JsonDataTy]
-            ] = AOTAutogradCache.get_remote_cache()
+            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
+                AOTAutogradCache.get_remote_cache()
+            )
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
