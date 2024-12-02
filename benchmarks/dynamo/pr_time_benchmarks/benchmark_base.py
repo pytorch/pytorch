@@ -1,4 +1,7 @@
 import csv
+import gc
+import json
+import os
 from abc import ABC, abstractmethod
 
 from fbscribelogger import make_scribe_logger
@@ -39,7 +42,7 @@ struct TorchBenchmarkCompileTimeLogEntry {
   # The weight of the record according to current sampling rate
   25: optional i64 weight;
 
-  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, amz2023.linux.2xlarge).
+  # The name of the current job. Derived from JOB_NAME, e.g., linux-jammy-py3.8-gcc11 / test (default, 3, 4, linux.2xlarge).
   26: optional string github_job;
 
   # The GitHub user who triggered the job.  Derived from GITHUB_TRIGGERING_ACTOR.
@@ -53,12 +56,36 @@ struct TorchBenchmarkCompileTimeLogEntry {
 
 
 class BenchmarkBase(ABC):
-    # measure total number of instruction spent in _work.
+    # Measure total number of instruction spent in _work.
+    # Garbage collection is NOT disabled during _work().
     _enable_instruction_count = False
 
-    # measure total number of instruction spent in convert_frame.compile_inner
-    # TODO is there other parts we need to add ?
+    # Measure total number of instruction spent in convert_frame.compile_inner
+    # Garbage collection is disabled during _work() to avoid noise.
     _enable_compile_time_instruction_count = False
+
+    # number of iterations used to run when collecting instruction_count or compile_time_instruction_count.
+    _num_iterations = 5
+
+    def __init__(
+        self,
+        category: str,
+        device: str,
+        backend: str = "",
+        mode: str = "",
+        dynamic=None,
+    ):
+        # These individual attributes are used to support different filters on the
+        # dashboard later
+        self._category = category
+        self._device = device
+        self._backend = backend
+        self._mode = mode  # Training or inference
+        self._dynamic = dynamic
+
+    def with_iterations(self, value):
+        self._num_iterations = value
+        return self
 
     def enable_instruction_count(self):
         self._enable_instruction_count = True
@@ -70,6 +97,21 @@ class BenchmarkBase(ABC):
 
     def name(self):
         return ""
+
+    def backend(self):
+        return self._backend
+
+    def mode(self):
+        return self._mode
+
+    def category(self):
+        return self._category
+
+    def device(self):
+        return self._device
+
+    def is_dynamic(self):
+        return self._dynamic
 
     def description(self):
         return ""
@@ -88,7 +130,7 @@ class BenchmarkBase(ABC):
     def _count_instructions(self):
         print(f"collecting instruction count for {self.name()}")
         results = []
-        for i in range(10):
+        for i in range(self._num_iterations):
             self._prepare()
             id = i_counter.start()
             self._work()
@@ -98,26 +140,72 @@ class BenchmarkBase(ABC):
         return min(results)
 
     def _count_compile_time_instructions(self):
-        print(f"collecting compile time instruction count for {self.name()}")
-        config.record_compile_time_instruction_count = True
+        gc.disable()
 
-        results = []
-        for i in range(10):
-            self._prepare()
-            # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
-            # hence this will only count instruction count spent in compile_inner.
-            CompileTimeInstructionCounter.clear()
-            self._work()
-            count = CompileTimeInstructionCounter.value()
-            if count == 0:
-                raise RuntimeError(
-                    "compile time instruction count is 0, please check your benchmarks"
-                )
-            print(f"compile time instruction count for iteration {i} is {count}")
-            results.append(count)
+        try:
+            print(f"collecting compile time instruction count for {self.name()}")
+            config.record_compile_time_instruction_count = True
 
-        config.record_compile_time_instruction_count = False
-        return min(results)
+            results = []
+            for i in range(self._num_iterations):
+                self._prepare()
+                gc.collect()
+                # CompileTimeInstructionCounter.record is only called on convert_frame._compile_inner
+                # hence this will only count instruction count spent in compile_inner.
+                CompileTimeInstructionCounter.clear()
+                self._work()
+                count = CompileTimeInstructionCounter.value()
+                if count == 0:
+                    raise RuntimeError(
+                        "compile time instruction count is 0, please check your benchmarks"
+                    )
+                print(f"compile time instruction count for iteration {i} is {count}")
+                results.append(count)
+
+            config.record_compile_time_instruction_count = False
+            return min(results)
+        finally:
+            gc.enable()
+
+    def _write_to_json(self, output_dir: str):
+        """
+        Write the result into JSON format, so that it can be uploaded to the benchmark database
+        to be displayed on OSS dashboard. The JSON format is defined at
+        https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+        """
+        records = []
+        for entry in self.results:
+            metric_name = entry[1]
+            value = entry[2]
+
+            if not metric_name or value is None:
+                continue
+
+            records.append(
+                {
+                    "benchmark": {
+                        "name": "pr_time_benchmarks",
+                        "mode": self.mode(),
+                        "extra_info": {
+                            "is_dynamic": self.is_dynamic(),
+                            "device": self.device(),
+                            "description": self.description(),
+                        },
+                    },
+                    "model": {
+                        "name": self.name(),
+                        "type": self.category(),
+                        "backend": self.backend(),
+                    },
+                    "metric": {
+                        "name": metric_name,
+                        "benchmark_values": [value],
+                    },
+                }
+            )
+
+        with open(os.path.join(output_dir, f"{self.name()}.json"), "w") as f:
+            json.dump(records, f)
 
     def append_results(self, path):
         with open(path, "a", newline="") as csvfile:
@@ -126,6 +214,10 @@ class BenchmarkBase(ABC):
             # Write the data to the CSV file
             for entry in self.results:
                 writer.writerow(entry)
+
+        # TODO (huydhn) This requires the path to write to, so it needs to be in the same place
+        # as the CSV writer for now
+        self._write_to_json(os.path.dirname(os.path.abspath(path)))
 
     def print(self):
         for entry in self.results:

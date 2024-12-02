@@ -3,13 +3,24 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
+#include <ATen/detail/AcceleratorHooksInterface.h>
+
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
-struct TORCH_API MAIAHooksInterface {
+struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~MAIAHooksInterface() = default;
+  ~MAIAHooksInterface() override = default;
+
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+  }
+
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
+    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+    return false;
+  }
 
   virtual std::string showConfig() const {
     TORCH_CHECK(false, "Cannot query detailed MAIA version information.");

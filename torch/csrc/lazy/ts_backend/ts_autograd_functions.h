@@ -2,14 +2,13 @@
 
 #include <torch/csrc/autograd/custom_function.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct MaxPool3dAutogradFunctionTS
     : public torch::autograd::Function<MaxPool3dAutogradFunctionTS> {
   static at::Tensor forward(
       torch::autograd::AutogradContext* ctx,
-      at::Tensor self,
+      const at::Tensor& self,
       at::IntArrayRef kernel_size,
       at::IntArrayRef stride,
       at::IntArrayRef padding,
@@ -20,5 +19,4 @@ struct MaxPool3dAutogradFunctionTS
       torch::autograd::variable_list grad_output);
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

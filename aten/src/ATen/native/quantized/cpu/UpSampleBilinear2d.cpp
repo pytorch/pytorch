@@ -18,8 +18,7 @@
 
 #include <cstring>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // pre calculate interpolation params on width
@@ -124,7 +123,7 @@ static void upsample_bilinear2d_out_frame(
 
         const auto* pos1 = i_ptr + h1 * input_width + w1;
 
-        float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
+        const float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
                  w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
@@ -217,5 +216,4 @@ Tensor upsample_bilinear2d_quantized_cpu(
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
-} // namespace native
-} // namespace at
+} // namespace at::native

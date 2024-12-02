@@ -56,7 +56,8 @@ void genericAddOptionalInput(
 
 template <typename T>
 void badArgType(const T& v) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type in the JIT tracer: ",
       c10::demangle_type<T>(),
       ". File a bug report.");
@@ -323,7 +324,8 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
     graph->insertNode(dict_node);
     return dict_node->output();
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Only tensors, lists, tuples of tensors, or dictionary of tensors can be output from traced functions");
   }
 }
@@ -345,7 +347,7 @@ static IValue addInput(
   value->setType(type);
   if (type->isSubtypeOf(*TensorType::get())) {
     auto input_tensor = input.toTensor();
-    auto name = Variable(input_tensor).name();
+    auto const& name = input_tensor.name();
     if (state->hasValue(input)) {
       input_tensor = input_tensor.view(input_tensor.sizes());
     }
@@ -416,7 +418,8 @@ static IValue addInput(
       return elems;
     }
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Only tensors or (possibly nested) dict or tuples of tensors can be "
         "inputs to traced functions. Got ",
         type->repr_str());
@@ -472,7 +475,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // varied on subsequent invocations of the trace.  Any other variables
     // will be treated as constants.
     if (isTracing()) {
-      AT_ERROR("Tracing can't be nested");
+      TORCH_CHECK(false, "Tracing can't be nested");
     }
     auto state = std::make_shared<TracingState>();
     setTracingState(state);

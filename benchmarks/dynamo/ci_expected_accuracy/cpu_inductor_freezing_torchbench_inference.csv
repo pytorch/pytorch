@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
@@ -138,6 +138,10 @@ hf_Bert_large,pass,0
 
 
 
+hf_BigBird,pass,19
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -150,7 +154,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,5
+
+
+
+hf_T5,pass,0
 
 
 
@@ -179,6 +191,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+mnasnet1_0,pass,0
 
 
 
@@ -255,6 +271,10 @@ resnet50_quantized_qat,pass,2
 
 
 resnext50_32x4d,pass,0
+
+
+
+shufflenet_v2_x1_0,pass,0
 
 
 

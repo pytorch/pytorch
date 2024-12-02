@@ -14,6 +14,7 @@ from .ctx_manager import (
     GradModeVariable,
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
+    SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -24,14 +25,17 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
+    TMADescriptorVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -43,9 +47,12 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -62,7 +69,6 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    ClosureVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
@@ -81,6 +87,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -91,6 +98,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
+    DataPtrVariable,
     FakeItemVariable,
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -104,7 +112,6 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
@@ -115,14 +122,15 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
-    "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
+    "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -159,6 +167,7 @@ __all__ = [
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
+    "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
     "TorchVersionVariable",

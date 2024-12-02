@@ -75,6 +75,7 @@ SUPPORTED_QDTYPES = [
     torch.qint32,
     torch.uint8,
     torch.int8,
+    torch.uint16,
     torch.int16,
     torch.int32,
     torch.float8_e5m2,
@@ -341,7 +342,18 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 ]
             graph.erase_node(node)
     elif dtype == torch.float16:
-        raise NotImplementedError("decomposed to float16 op not implemented yet")
+        # Insert to_fp16 -> to_fp32 node
+        dtype_convert_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+        with graph.inserting_before(node):
+            input_node = node.args[0]
+            convert_fp16_node = graph.create_node(
+                "call_function", dtype_convert_op, (input_node, torch.float16), {}
+            )
+            convert_fp32_node = graph.create_node(
+                "call_function", dtype_convert_op, (convert_fp16_node, torch.float), {}
+            )
+            node.replace_all_uses_with(convert_fp32_node)
+            graph.erase_node(node)
 
     # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
@@ -1115,10 +1127,9 @@ def convert(
     # for dynamic quant ops or weight only quant ops
     _run_weight_observers(model, backend_config)
 
-    graph_inputs: List[str] = []
-    for node in model.graph.nodes:
-        if node.op == "placeholder":
-            graph_inputs.append(node.name)
+    graph_inputs: List[str] = [
+        node.name for node in model.graph.nodes if node.op == "placeholder"
+    ]
 
     # additional state to override inputs to be quantized, if specified
     # by the user

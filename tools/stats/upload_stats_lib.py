@@ -3,25 +3,29 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import math
 import os
 import time
 import zipfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
-import rockset  # type: ignore[import]
 
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
-S3_RESOURCE = boto3.resource("s3")
+
+
+@lru_cache
+def get_s3_resource() -> Any:
+    return boto3.resource("s3")
+
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
-# NB: Rockset has an upper limit of 5000 documents in one request
-BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> dict[str, str]:
@@ -82,7 +86,7 @@ def _download_artifact(
 def download_s3_artifacts(
     prefix: str, workflow_run_id: int, workflow_run_attempt: int
 ) -> list[Path]:
-    bucket = S3_RESOURCE.Bucket("gha-artifacts")
+    bucket = get_s3_resource().Bucket("gha-artifacts")
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/{prefix}"
     )
@@ -115,33 +119,6 @@ def download_gha_artifacts(
     return paths
 
 
-def upload_to_rockset(
-    collection: str,
-    docs: list[Any],
-    workspace: str = "commons",
-    client: Any = None,
-) -> None:
-    if not client:
-        client = rockset.RocksetClient(
-            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-        )
-
-    index = 0
-    while index < len(docs):
-        from_index = index
-        to_index = min(from_index + BATCH_SIZE, len(docs))
-        print(f"Writing {to_index - from_index} documents to Rockset")
-
-        client.Documents.add_documents(
-            collection=collection,
-            data=docs[from_index:to_index],
-            workspace=workspace,
-        )
-        index += BATCH_SIZE
-
-    print("Done!")
-
-
 def upload_to_dynamodb(
     dynamodb_table: str,
     repo: str,
@@ -171,7 +148,7 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    S3_RESOURCE.Object(
+    get_s3_resource().Object(
         f"{bucket_name}",
         f"{key}",
     ).put(
@@ -188,7 +165,8 @@ def read_from_s3(
 ) -> list[dict[str, Any]]:
     print(f"Reading from s3://{bucket_name}/{key}")
     body = (
-        S3_RESOURCE.Object(
+        get_s3_resource()
+        .Object(
             f"{bucket_name}",
             f"{key}",
         )
@@ -197,6 +175,23 @@ def read_from_s3(
     )
     results = gzip.decompress(body).decode().split("\n")
     return [json.loads(result) for result in results if result]
+
+
+def remove_nan_inf(old: Any) -> Any:
+    # Casta NaN, inf, -inf to string from float since json.dumps outputs invalid
+    # json with them
+    def _helper(o: Any) -> Any:
+        if isinstance(o, float) and (math.isinf(o) or math.isnan(o)):
+            return str(o)
+        if isinstance(o, list):
+            return [_helper(v) for v in o]
+        if isinstance(o, dict):
+            return {_helper(k): _helper(v) for k, v in o.items()}
+        if isinstance(o, tuple):
+            return tuple(_helper(v) for v in o)
+        return o
+
+    return _helper(old)
 
 
 def upload_workflow_stats_to_s3(

@@ -1,22 +1,24 @@
 # mypy: allow-untyped-defs
-from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 import collections
 import itertools
 import logging
-
 from copy import copy
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, _get_qualified_name
+from torch.fx.node import _get_qualified_name, Node
 from torch.fx.passes.operator_support import OperatorSupportBase
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
+
 class Partition:
-    def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
+    def __init__(
+        self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None
+    ):
         self.id = id
         self.nodes = dict.fromkeys(nodes) if nodes is not None else {}
 
@@ -31,6 +33,7 @@ class Partition:
 
     def size(self):
         return len(self.nodes)
+
 
 class _DependencyViewer:
     def __init__(self, graph_module: GraphModule):
@@ -55,15 +58,16 @@ class _DependencyViewer:
     def upstreams_of(self, node: Node) -> Set[Node]:
         return self.upstreams[node]
 
-class CapabilityBasedPartitioner:
 
-    def __init__(self,
-                 graph_module: GraphModule,
-                 operator_support: OperatorSupportBase,
-                 allows_single_node_partition: bool = False,
-                 non_compute_ops: Optional[Sequence[str]] = None,
-                 allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
-                 ) -> None:
+class CapabilityBasedPartitioner:
+    def __init__(
+        self,
+        graph_module: GraphModule,
+        operator_support: OperatorSupportBase,
+        allows_single_node_partition: bool = False,
+        non_compute_ops: Optional[Sequence[str]] = None,
+        allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
+    ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
@@ -76,19 +80,27 @@ class CapabilityBasedPartitioner:
         self.dependency_viewer = _DependencyViewer(graph_module)
 
     def __is_node_supported(self, node: Node) -> bool:
-        return (
-            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+        return self.operator_support.is_node_supported(
+            dict(self.graph_module.named_modules()), node
         )
 
     def propose_partitions(self) -> List[Partition]:
         # partition_map is a mapping from partition id to a set of partition id's.
         # The value set contains all the partition ids that can be reached by doing a
         # DFS starting from the partition id in the key.
-        partition_map : Dict[int, Set] = collections.defaultdict(set)
+        partition_map: Dict[int, Set] = collections.defaultdict(set)
 
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}   # mapping from node to partition_id
-        partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
+        assignment: Dict[Node, int] = {}  # mapping from node to partition_id
+        partitions_by_id: Dict[
+            int, Partition
+        ] = {}  # mapping from partition_id to partition
+        nodes_order: Dict[
+            Node, int
+        ] = {}  # mapping from nodes to reversed topological order
+        partitions_order: Dict[
+            int, int
+        ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
         new_partition_id = itertools.count()
 
         # try to merge partition other_id into partition self_id
@@ -149,21 +161,32 @@ class CapabilityBasedPartitioner:
             # delete other partition
             del partitions_by_id[other_id]
 
-            partition_map[self_id] = partition_map[self_id].union(partition_map[other_id])
+            partitions_order[self_id] = min(
+                partitions_order[self_id], partitions_order[other_id]
+            )
+            del partitions_order[other_id]
+
+            partition_map[self_id] = partition_map[self_id].union(
+                partition_map[other_id]
+            )
             del partition_map[other_id]
 
             return True
 
         def merge_single_node(node: Node, id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
-                # Iterate through all the downstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of this node to the target
-                # partition id.
-                downstream_nodes = self.dependency_viewer.downstreams_of(node)
-                for curr_node in downstream_nodes:
-                    target_id = assignment.get(curr_node, None)
+                # Iterate through all the users of this node and update the partition map to indicate
+                # that there is a path from the partition id of this node to the target partition id.
+                for user_node in node.users:
+                    target_id = assignment.get(user_node, None)
                     if target_id is not None:
                         partition_map[id].add(target_id)
+                        partition_map[id].update(partition_map[target_id])
+                    else:
+                        assert not self.__is_node_supported(
+                            user_node
+                        ), "Encountered user node which has not been traversed yet. \
+                            This should only happen if this is an unsupported node."
 
                 # Iterate through all the upstream nodes of this node and update the partition map
                 # to indicate that there is a path from the partition id of the upstream node to the
@@ -201,12 +224,16 @@ class CapabilityBasedPartitioner:
             # the fusion by adding an `else` block here to skip horizontal fusion.
             if self.__is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
+                nodes_order[node] = partition_id
+                partitions_order[partition_id] = partition_id
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
-            for node in assignment:
-                merge_candidates[assignment[node]] = None
+            for partition_id, _ in sorted(
+                partitions_order.items(), key=lambda item: item[1]
+            ):
+                merge_candidates[partition_id] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -223,16 +250,18 @@ class CapabilityBasedPartitioner:
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
             for user in node.users:
-                if user.op != "call_function" or \
-                   _get_qualified_name(user.target) != "_operator.getitem":     # type: ignore[arg-type]
+                if (
+                    user.op != "call_function"
+                    or _get_qualified_name(user.target) != "_operator.getitem"
+                ):  # type: ignore[arg-type]
                     is_tuple_output = False
                     break
 
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node, None)     # type: ignore[arg-type]
+                id = assignment.get(node, None)  # type: ignore[arg-type]
                 for user in node.users:
-                    if assignment.get(user, None) != id:    # type: ignore[arg-type]
+                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, id)
@@ -250,7 +279,10 @@ class CapabilityBasedPartitioner:
                         assert callable(node.target)
                         if _get_qualified_name(node.target) not in non_compute_ops:
                             compute_node_count += 1
-                        if _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
+                        if (
+                            _get_qualified_name(node.target)
+                            in self.allowed_single_node_partition_ops
+                        ):
                             compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
@@ -259,16 +291,22 @@ class CapabilityBasedPartitioner:
 
         logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
+            logger.debug(
+                "partition #%s: %s", id, [node.name for node in partition.nodes]
+            )
 
-        return [partition for partition in partitions_by_id.values() if partition.size() > 0]
+        return [
+            partition for partition in partitions_by_id.values() if partition.size() > 0
+        ]
 
-    def fuse_partitions(self, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
+    def fuse_partitions(
+        self, partitions: List[Partition], prefix: str = "fused_"
+    ) -> GraphModule:
         logger.debug("Fusing partitions...")
-        # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
+        # fuse_by_partitions expects partitions in List[Dict[Node, None]]: [ {node0 : None}, {node1 : None} ]
         return fuse_by_partitions(
             self.graph_module,
-            [list(partition.nodes) for partition in partitions],
+            [partition.nodes for partition in partitions],
             prefix=prefix,
         )
 
@@ -277,15 +315,23 @@ class CapabilityBasedPartitioner:
         non_compute_ops = set(self.non_compute_ops)
 
         def is_non_compute_node(node: Node):
-            return node.op == "call_function" and \
-                _get_qualified_name(node.target) in non_compute_ops  # type: ignore[arg-type]
+            return (
+                node.op == "call_function"
+                and _get_qualified_name(node.target) in non_compute_ops  # type: ignore[arg-type]
+            )
 
         # cache transparent nodes
         transparent_input_nodes: Dict[Node, bool] = {}
         transparent_output_nodes: Dict[Node, bool] = {}
 
-        def is_transparent_input_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
-            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+        def is_transparent_input_node(
+            node: Node, partition: Set[Node], removed_nodes: Set[Node]
+        ):
+            if (
+                node.op == "placeholder"
+                or (node not in partition)
+                or (node in removed_nodes)
+            ):
                 return True
             if node in transparent_input_nodes:
                 return transparent_input_nodes[node]
@@ -299,14 +345,22 @@ class CapabilityBasedPartitioner:
             transparent_input_nodes[node] = False
             return False
 
-        def is_transparent_output_node(node: Node, partition: Set[Node], removed_nodes: Set[Node]):
-            if node.op == "placeholder" or (node not in partition) or (node in removed_nodes):
+        def is_transparent_output_node(
+            node: Node, partition: Set[Node], removed_nodes: Set[Node]
+        ):
+            if (
+                node.op == "placeholder"
+                or (node not in partition)
+                or (node in removed_nodes)
+            ):
                 return True
             if node in transparent_output_nodes:
                 return transparent_output_nodes[node]
             if is_non_compute_node(node):
                 for output_n in node.users:
-                    if not is_transparent_output_node(output_n, partition, removed_nodes):
+                    if not is_transparent_output_node(
+                        output_n, partition, removed_nodes
+                    ):
                         transparent_output_nodes[node] = False
                         return False
                 transparent_output_nodes[node] = True
@@ -320,9 +374,12 @@ class CapabilityBasedPartitioner:
             # the set.
             remove_node: Set[Node] = set()
             for node in partition.nodes:
-                if is_non_compute_node(node) and \
-                    (is_transparent_input_node(node, set(partition.nodes), remove_node) or
-                     is_transparent_output_node(node, set(partition.nodes), remove_node)):
+                if is_non_compute_node(node) and (
+                    is_transparent_input_node(node, set(partition.nodes), remove_node)
+                    or is_transparent_output_node(
+                        node, set(partition.nodes), remove_node
+                    )
+                ):
                     remove_node.add(node)
 
             if len(remove_node) != 0:

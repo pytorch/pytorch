@@ -412,7 +412,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(asarray.dtype, dtype)
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
             if np.dtype(dtype).kind == "u":  # type: ignore[misc]
-                wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
+                wrapped_x = np.array([1, -2, 3, -4]).astype(dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
             else:
@@ -472,11 +472,18 @@ class TestNumPyInterop(TestCase):
     def test_parse_numpy_int_overflow(self, device):
         # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(
-            RuntimeError,
-            "(Overflow|an integer is required)",
-            lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
-        )  # type: ignore[call-overload]
+        if np.__version__ > "2":
+            self.assertRaisesRegex(
+                OverflowError,
+                "out of bounds",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
+        else:
+            self.assertRaisesRegex(
+                RuntimeError,
+                "(Overflow|an integer is required)",
+                lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+            )  # type: ignore[call-overload]
 
     @onlyCPU
     def test_parse_numpy_int(self, device):
@@ -571,7 +578,7 @@ class TestNumPyInterop(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test___eq__(self, device, dtype):
         a = make_tensor((5, 7), dtype=dtype, device=device, low=-9, high=9)
-        b = a.clone().detach()
+        b = a.detach().clone()
         b_np = b.numpy()
 
         # Check all elements equal

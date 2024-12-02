@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp-extensions"]
 
 import glob
+import locale
 import os
 import re
 import shutil
@@ -35,18 +36,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
-def remove_build_path():
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a word-around
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
-        else:
-            shutil.rmtree(default_build_root)
-
-
-# There's only one test that runs gracheck, run slow mode manually
+# There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
@@ -67,11 +57,11 @@ class TestCppExtensionJIT(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     @classmethod
     def tearDownClass(cls):
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -539,6 +529,40 @@ class TestCppExtensionJIT(common.TestCase):
 
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
+
+    @unittest.skipIf(
+        "utf" not in locale.getlocale()[1].lower(), "Only test in UTF-8 locale"
+    )
+    def test_load_with_non_platform_default_encoding(self):
+        # Assume the code is saved in UTF-8, but the locale is set to a different encoding.
+        # You might encounter decoding errors in ExtensionVersioner.
+        # But this case is quite hard to cover because CI environments may not in non-latin locale.
+        # So the following code just test source file in gbk and locale in utf-8.
+
+        cpp_source = """
+        #include <torch/extension.h>
+
+        // Non-latin1 character test: 字符.
+        // It will cause utf-8 decoding error.
+
+        int f() { return 123; }
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            m.def("f", &f, "f");
+        }
+        """
+
+        build_dir = tempfile.mkdtemp()
+        src_path = os.path.join(build_dir, "main.cpp")
+
+        with open(src_path, encoding="gbk", mode="w") as f:
+            f.write(cpp_source)
+
+        module = torch.utils.cpp_extension.load(
+            name="non_default_encoding",
+            sources=src_path,
+            verbose=True,
+        )
+        self.assertEqual(module.f(), 123)
 
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
