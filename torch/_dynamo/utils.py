@@ -998,18 +998,17 @@ def record_compilation_metrics(
 
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
-            from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
-            from torch._utils_internal import justknobs_check
+            from torch._inductor.fb.remote_cache import (
+                FbRemoteFxGraphCache,
+                REMOTE_CACHE_VERSION,
+            )
         except ModuleNotFoundError:
             REMOTE_CACHE_VERSION = None
+            inductor_fx_remote_cache_backend_type = None
 
         remote_cache_version = REMOTE_CACHE_VERSION
-        if (os.environ.get("TORCHINDUCTOR_USE_ZIPPYDB") == "1") or justknobs_check(
-            "pytorch/remote_cache:fx_graph_cache_use_zippydb"
-        ):
-            inductor_fx_remote_cache_backend_type = "ZippyDBCache"
-        else:
-            inductor_fx_remote_cache_backend_type = "_ManifoldCache"
+        backend = FbRemoteFxGraphCache.get_remote_backend()
+        inductor_fx_remote_cache_backend_type = type(backend).__name__
     else:
         inductor_fx_remote_cache_backend_type = None
         remote_cache_version = None
