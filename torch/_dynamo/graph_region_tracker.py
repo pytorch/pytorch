@@ -59,6 +59,8 @@ def _extract_tensor_metadata_for_node_hash(
 
 class InputPickler(pickle.Pickler):
     def __init__(self) -> None:
+        from torch._inductor.codecache import _ident
+
         stream = io.BytesIO()
         self._stream = stream
         super().__init__(stream)
@@ -66,7 +68,7 @@ class InputPickler(pickle.Pickler):
         self.dispatch_table.update(
             {
                 FakeTensor: _extract_tensor_metadata_for_node_hash,
-                torch.SymInt: lambda x: str(x),
+                torch.SymInt: lambda x: (_ident, (str(x),)),
             }
         )
         self.fast = True
