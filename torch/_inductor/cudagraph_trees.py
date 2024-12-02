@@ -424,8 +424,8 @@ def cudagraphify(
     mutated_input_idxs: Tuple[int, ...] = (),
     compile_id: Optional[CompileId] = None,
 ) -> Tuple[ModelType, OutputType]:
-    # Even though this is technically runtime, we want to capture some overheads for
-    # "compilation metrics" loggingl
+    # Even though this is technically runtime, we want to capture these overheads for
+    # "compilation metrics" logging.
     metrics_context = get_metrics_context()
     with metrics_context, dynamo_timed(
         "cudagraphify",
