@@ -348,11 +348,9 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
+        # Avoid VT cycles from e.g., recursive function.
+        visited: Set[VariableTracker] = set()
         live_new_objects: Set[VariableTracker] = set()
-
-        # use this to avoid cycles in mutation_type (though I'm not sure if that
-        # can actually happen).
-        visited: Set[VariableTracker] = set({})
 
         def visit(var: VariableTracker):
             if var in visited:
