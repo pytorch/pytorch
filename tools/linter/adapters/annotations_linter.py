@@ -8,7 +8,7 @@ from typing import Iterator, Sequence, TYPE_CHECKING
 _PARENT = Path(__file__).parent.absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
 
-if _PARENT not in _PATH:
+if TYPE_CHECKING or _PARENT not in _PATH:
     from . import _linter
 else:
     import _linter
