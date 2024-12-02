@@ -4767,10 +4767,7 @@ class CPUReproTests(TestCase):
             converted_model = convert_pt2e(prepared_model)
             torch.ao.quantization.move_exported_model_to_eval(converted_model)
             metrics.reset()
-            self.common(
-                converted_model,
-                (example_batch["context_layer"], example_batch["hidden_states"]),
-            )
+            torch.compile(converted_model)(**example_batch)
             check_metrics_vec_kernel_count(3)
 
 
