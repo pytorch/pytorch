@@ -617,7 +617,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto [q, v, k] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   qkv = Tensor(); // Not used any more, allow free
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
