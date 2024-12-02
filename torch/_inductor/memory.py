@@ -35,9 +35,9 @@ class MemoryPlanningInfoForBuffer:
 class MemoryPlanningInfoForNode:
     index: int = 0
     size: int = 0
-    pred_buffers: OrderedSet[
-        SchedulerBuffer | FreeableInputBuffer
-    ] = dataclasses.field(default_factory=OrderedSet)
+    pred_buffers: OrderedSet[SchedulerBuffer | FreeableInputBuffer] = dataclasses.field(
+        default_factory=OrderedSet
+    )
     pred_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
     )
@@ -217,9 +217,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
 
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
-        pred_buffers: OrderedSet[
-            SchedulerBuffer | FreeableInputBuffer
-        ] = OrderedSet()
+        pred_buffers: OrderedSet[SchedulerBuffer | FreeableInputBuffer] = OrderedSet()
         for dep in node.read_writes.reads:
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
                 pred_buffers.add(name_to_buf[dep.name])

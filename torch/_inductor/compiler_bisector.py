@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 

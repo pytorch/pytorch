@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from collections.abc import Sequence
 
 import torch
 from torch._dynamo.utils import counters

@@ -3,13 +3,10 @@ import itertools
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     Literal,
     NamedTuple,
     Optional,
-    Tuple,
     TypeVar,
     Union,
 )

@@ -13,7 +13,8 @@ import pprint
 import textwrap
 import traceback
 import typing
-from collections import defaultdict
+from collections import Counter, defaultdict
+from collections.abc import Sequence
 from typing import (
     Any,
     Callable,
@@ -27,8 +28,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from collections import Counter
-from collections.abc import Sequence
 
 import sympy
 

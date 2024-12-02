@@ -23,6 +23,8 @@ serialized format:
 from __future__ import annotations
 
 import dataclasses
+from collections import Counter
+from collections.abc import Sequence
 from typing import (
     Any,
     Callable,
@@ -35,8 +37,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from collections import Counter
-from collections.abc import Sequence
 from typing_extensions import TypeAlias
 
 import torch
@@ -319,9 +319,7 @@ class CompiledFxGraph:
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
 
-    def get_constants(
-        self, gm: torch.fx.GraphModule | None
-    ) -> dict[str, torch.Tensor]:
+    def get_constants(self, gm: torch.fx.GraphModule | None) -> dict[str, torch.Tensor]:
         """
         Get the constant attributes.
         """

@@ -15,10 +15,10 @@ import subprocess
 import sys
 import sysconfig
 import warnings
+from collections.abc import Sequence
 from ctypes import cdll
 from pathlib import Path
 from typing import Any, List, Optional, Tuple, Union
-from collections.abc import Sequence
 
 import torch
 from torch._dynamo.utils import dynamo_timed

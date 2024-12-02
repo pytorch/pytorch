@@ -9,8 +9,8 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from collections.abc import Sequence
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import sympy

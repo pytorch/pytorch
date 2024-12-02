@@ -10,8 +10,8 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, List, Optional, Type, Union
 from collections.abc import Iterator
+from typing import Any, Callable, Dict, IO, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch

@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, TYPE_CHECKING, TypeVar
 
 from .ops_handler import (  # noqa: F401
     KernelFormatterHandler,

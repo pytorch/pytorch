@@ -16,7 +16,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import sympy

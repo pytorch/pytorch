@@ -9,6 +9,7 @@ import logging
 import sys
 import time
 import warnings
+from collections.abc import Generator, Sequence
 from itertools import count
 from typing import (
     Any,
@@ -22,7 +23,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from collections.abc import Generator, Sequence
 from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 

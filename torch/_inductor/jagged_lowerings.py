@@ -1,6 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import sympy
 

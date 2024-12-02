@@ -48,6 +48,7 @@ import traceback
 import warnings
 import weakref
 from collections import defaultdict
+from collections.abc import Generator, Iterator, Sequence
 from enum import auto, Enum
 from typing import (
     Any,
@@ -64,7 +65,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from collections.abc import Generator, Iterator, Sequence
 
 import torch.fx
 from torch import Tensor
@@ -2267,9 +2267,7 @@ class CUDAGraphTreeManager:
         return self._current_node
 
     @current_node.setter
-    def current_node(
-        self, value: CUDAGraphNode | CUDAWarmupNode | None
-    ) -> None:
+    def current_node(self, value: CUDAGraphNode | CUDAWarmupNode | None) -> None:
         self._current_node = value
         if value is None:
             self.path_state = ExecutionState.NONE

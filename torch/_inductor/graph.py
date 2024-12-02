@@ -8,6 +8,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
 from typing import (
@@ -22,7 +23,6 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from collections.abc import Iterable, Iterator, Sequence
 
 import sympy
 from sympy import Expr

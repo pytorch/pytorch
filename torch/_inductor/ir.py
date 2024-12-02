@@ -8,6 +8,7 @@ import logging
 import textwrap
 import traceback
 import typing
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -27,7 +28,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from collections.abc import Generator, Iterable, Sequence
 from typing_extensions import assert_never, Never, TypeAlias
 from unittest.mock import patch
 
@@ -334,9 +334,7 @@ def may_convert_to_optional(
     return value
 
 
-def get_device_type(
-    x: IRNode | OutputSpec | torch.device | None | str
-) -> str | None:
+def get_device_type(x: IRNode | OutputSpec | torch.device | None | str) -> str | None:
     if isinstance(x, str) or x is None:
         return x
     elif isinstance(x, torch.device):
@@ -4716,9 +4714,7 @@ class ExternKernel(InputsKernel):
     ordered_kwargs_for_cpp_kernel: Iterable[str] = dataclasses.field(
         default_factory=list
     )
-    op_overload: None | (
-        torch._ops.OpOverload | torch._ops.HigherOrderOperator
-    ) = None
+    op_overload: None | (torch._ops.OpOverload | torch._ops.HigherOrderOperator) = None
     arg_properties: list[dict[str, Any]] | None = None
     kwarg_properties: dict[str, dict[str, Any]] | None = None
     unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(

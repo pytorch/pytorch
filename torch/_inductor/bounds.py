@@ -1,7 +1,7 @@
 import logging
 import operator
 from functools import partial
-from typing import Any, Callable, Dict, Union
+from typing import Any, Callable, Union
 
 from sympy import Expr
 

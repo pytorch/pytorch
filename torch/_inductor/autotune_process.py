@@ -10,18 +10,10 @@ import os
 import queue
 import time
 import warnings
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import byref, c_size_t, c_void_p, CDLL
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
-from collections.abc import Iterable, Sequence
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools

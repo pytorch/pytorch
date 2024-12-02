@@ -2,20 +2,10 @@
 
 import functools
 import operator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
-from collections.abc import Generator
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

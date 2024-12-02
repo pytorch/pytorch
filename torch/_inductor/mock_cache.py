@@ -6,7 +6,7 @@ import contextlib
 import dataclasses
 import sys
 import threading
-from typing import Any, Callable, Dict, Optional, Type, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 from typing_extensions import override, Self
 from unittest.mock import patch
 

@@ -1,7 +1,7 @@
 import hashlib
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 from typing_extensions import TypeAlias
 
 import torch.fx.graph

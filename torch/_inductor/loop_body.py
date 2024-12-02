@@ -5,18 +5,9 @@ import collections
 import functools
 import itertools
 import re
-from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TypeVar,
-)
 from collections.abc import Sequence
+from enum import auto, Enum
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, TypeVar
 
 import sympy
 
