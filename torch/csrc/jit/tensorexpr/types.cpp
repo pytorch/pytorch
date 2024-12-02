@@ -31,6 +31,7 @@ TORCH_API Dtype kHandle(ScalarType::Undefined, 1);
 
 Dtype ToDtype(ScalarType type) {
   switch (type) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
     return k##n;
@@ -92,6 +93,7 @@ int Dtype::byte_size() const {
 
 std::string Dtype::ToCppString() const {
   switch (scalar_type_) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(t, n) \
   case ScalarType::n:   \
     return #t;

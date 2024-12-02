@@ -447,6 +447,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
   // The LockDevices() API returns a vector of
   // ExceptionCleanup object, which is going to be freed
   // immediately, turning this operation into a lock barrier.
+  // NOLINTNEXTLINE
   DeviceLockerArena::Get()->LockDevices(wait_devices);
 }
 

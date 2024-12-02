@@ -22,6 +22,7 @@ RegisterNNCLoweringsFunction::RegisterNNCLoweringsFunction(
 }
 
 namespace {
+// NOLINTNEXTLINE
 int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction aten_dropout(
       {"aten::dropout(Tensor input, float p, bool train) -> (Tensor)"},
