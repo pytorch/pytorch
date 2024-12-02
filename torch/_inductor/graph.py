@@ -74,6 +74,7 @@ from .exc import (
 )
 from .ir import (
     Constant,
+    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -103,6 +104,7 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
+    get_donated_idxs,
     get_sympy_Expr_dtype,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
@@ -467,7 +469,7 @@ class GraphLowering(torch.fx.Interpreter):
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
-        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(  # type: ignore[operator, union-attr]
             "dynamo_flat_name_to_original_fqn", {}
         )
         self.allocated_constant_name: Dict[str, str] = (
@@ -485,6 +487,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
+
+        # track the current placeholder index that we are processing
+        self.placeholder_idx = -1
+
+        self.bw_donated_idxs = get_donated_idxs()
 
     def has_feature(
         self,
@@ -726,7 +733,7 @@ class GraphLowering(torch.fx.Interpreter):
         can be saved.
         """
         output_set: OrderedSet[Node] = OrderedSet()
-        for n in reversed(self.module.graph.nodes):
+        for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
                 continue
@@ -750,7 +757,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - res2net101_26w_4s
         # - res2net50_14w_8s
         # - sebotnet33ts_256
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if n in output_set:
                 output_set.update(n.users)
 
@@ -812,13 +819,11 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def get_numel(self, buffer_name: str) -> Union[int, Expr]:
-        from .ir import MultiOutputLayout
-
         if buffer_name in self.constants:
             return self.constants[buffer_name].numel()
         if buffer_name in self.name_to_buffer:
             buf = self.name_to_buffer[buffer_name]
-            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+            if not buf.has_tensor_output():
                 return 1
             return buf.get_numel()
         if buffer_name in self.graph_inputs:
@@ -897,8 +902,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
         return (
-            self.module.meta[orig_name]
-            if orig_name in self.module.meta
+            self.module.meta[orig_name]  # type: ignore[index]
+            if orig_name in self.module.meta  # type: ignore[operator]
             else self.constants[name]
         )
 
@@ -965,6 +970,7 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
+        self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
@@ -995,13 +1001,27 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
-        # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                name=target,
-                layout=FixedLayout(example.device, example.dtype, sizes, strides),
+
+        if (
+            self.is_backward
+            and self.bw_donated_idxs
+            and self.placeholder_idx in self.bw_donated_idxs
+        ):
+            tensor = TensorBox.create(
+                DonatedBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
             )
-        )
+        else:
+            # TODO(jansel): handle input aliasing
+            tensor = TensorBox.create(
+                InputBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
+
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
@@ -1191,7 +1211,7 @@ class GraphLowering(torch.fx.Interpreter):
         for r, fx_node in zip(result, fx_node_args):
             if not isinstance(r, (ir.TensorBox, ir.BaseView)):
                 result_correct_strides.append(r)
-            elif isinstance(r.get_layout(), ir.CommBufferLayout):
+            elif isinstance(r.get_output_spec(), ir.CommBufferLayout):
                 # Active references to persistent comm buffers are not allowed
                 # outside of graphs
                 result_correct_strides.append(ir.ExternKernel.copy_input(r))
@@ -1295,7 +1315,7 @@ class GraphLowering(torch.fx.Interpreter):
             return tensor
 
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
-        new_stride = list(old_layout.stride)
+        new_stride = [*old_layout.stride]
         for i, s in enumerate(tensor.get_size()):
             if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
                 new_stride[i] = meta_strides[i]
@@ -1998,6 +2018,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
+            output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
@@ -2037,42 +2058,6 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.output_code(mod.__file__)
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
-
-    def compile_to_fn(self) -> Any:
-        with dynamo_timed("GraphLowering.compile_to_fn", log_pt2_compile_event=True):
-            return self._compile_to_fn()
-
-    def _compile_to_fn(self) -> Any:
-        if self.aot_mode:
-            from .codecache import AotCodeCompiler
-
-            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
-            code, linemap = self.codegen_with_cpp_wrapper()
-            output_code_log.debug("Output code: \n%s", code)
-
-            serialized_extern_kernel_nodes = None
-            if self.extern_kernel_nodes:
-                serialized_extern_kernel_nodes = self.extern_node_serializer(
-                    self.extern_kernel_nodes
-                )
-                output_code_log.debug(
-                    "Serialized Extern Kernel Nodes: \n%s",
-                    serialized_extern_kernel_nodes,
-                )
-
-            additional_files = self.wrapper_code.additional_files
-
-            with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
-                # Directly return the file path with the compiled code
-                return AotCodeCompiler.compile(
-                    self,
-                    code,
-                    serialized_extern_kernel_nodes,
-                    device_type=self.device_type,
-                    additional_files=additional_files,
-                )
-        else:
-            return self.compile_to_module().call
 
     def get_output_names(self) -> List[str]:
         return [
@@ -2114,53 +2099,3 @@ class SubgraphLowering(GraphLowering):
             subgraph_name=self.name,
             parent_wrapper_code=self.parent.wrapper_code,
         )
-
-    def add_symbol_graph_inputs(self) -> None:
-        """
-        For subgraphs, it is possible that the aten graph does not have a symint
-        associated with the shape of the input tensors. To ensure that the
-        shape/stride symbol is available for the subgraph code (e.g. for
-        allocating intermediate tensor), we collect all the symbols from input
-        tensors of this subgraph (passed as inputs from the parent graph) and
-        add them as extra inputs to the subgraph.
-
-        The parent wrapper `codegen_subgraph` then ensures to pass on the
-        corresponding symints from the parent function to the lifted subgraph
-        function.
-        """
-
-        def get_free_symbols(expr: sympy.Expr) -> OrderedSet[sympy.Symbol]:
-            # expr can be s0 + s1, recurse to get s0 and s1
-            symbols: OrderedSet[
-                sympy.Symbol
-            ] = OrderedSet()  # Use a set to avoid duplicates
-            if isinstance(expr, sympy.Symbol):
-                symbols.add(expr)
-            elif isinstance(expr, sympy.Expr):
-                symbols.update(expr.free_symbols)
-            return symbols
-
-        subgraph_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-
-        graph_inputs_tensors = list(
-            filter(
-                lambda x: not isinstance(x[1], sympy.Expr), self.graph_inputs.items()
-            )
-        )
-
-        for name_value in graph_inputs_tensors:
-            _, value = name_value
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                subgraph_symbols.update(get_free_symbols(shape))
-
-            strides = value.get_stride()
-            for dim, shape in enumerate(strides):
-                subgraph_symbols.update(get_free_symbols(shape))
-
-        # Add the extra symints in the subgraph
-        for symbol in subgraph_symbols:
-            if symbol.name in self.graph_input_names:
-                continue
-            self.graph_inputs[symbol.name] = symbol
-            self.graph_input_names.append(symbol.name)
