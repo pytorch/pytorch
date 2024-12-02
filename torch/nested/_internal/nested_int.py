@@ -83,18 +83,21 @@ class NestedIntNode:
     def clone(self) -> "NestedIntNode":
         return self
 
-    def _str(self) -> str:
+    def _str(self) -> Any:
         if self.coeff == 1:
             return f"j{self.t_id}"
         return f"{self.coeff}*j{self.t_id}"
 
-    def __str__(self) -> str:
+    def str(self) -> Any:
         return self._str()
 
-    def __repr__(self) -> str:
+    def __str__(self) -> Any:
         return self._str()
 
-    def _graph_repr(self) -> str:
+    def __repr__(self) -> Any:
+        return self._str()
+
+    def _graph_repr(self) -> Any:
         return self._str()
 
     def mul(self, other: Any) -> "NestedIntNode":
