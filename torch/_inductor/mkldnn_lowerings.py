@@ -178,7 +178,7 @@ def register_onednn_fusion_ops():
                 x = view(x, [-1, x_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            choices: List[ChoiceCaller] = []
+            choices: list[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
@@ -241,7 +241,7 @@ def register_onednn_fusion_ops():
                 y = view(y, [-1, y_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            choices: List[ChoiceCaller] = []
+            choices: list[ChoiceCaller] = []
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w, y = mm_args(
@@ -330,7 +330,7 @@ def register_onednn_fusion_ops():
             hx: TensorBox,
             cx: TensorBox,
             reverse: bool,
-            batch_sizes: List[int],
+            batch_sizes: list[int],
             mode: int,
             hidden_size: int,
             num_layers: int,
@@ -544,7 +544,7 @@ def register_onednn_fusion_ops():
 
             bias_dtype = None if bias is None else bias.get_dtype()
 
-            choices: List[ChoiceCaller] = []
+            choices: list[ChoiceCaller] = []
             if use_max_autotune():
                 *_, layout, x, packed_weight = mm_args(
                     x, packed_weight, layout=layout, out_dtype=output_dtype
@@ -821,7 +821,7 @@ def register_onednn_fusion_ops():
                     ), "dtype of accum for qlinear post op sum should be the same as output"
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
-            choices: List[ChoiceCaller] = []
+            choices: list[ChoiceCaller] = []
             if (
                 use_max_autotune() and binary_attr == "add"
             ):  # <TODO> Support inplace sum fusion
@@ -1064,7 +1064,7 @@ def register_onednn_fusion_ops():
                 *,
                 layout=None,
             ):
-                choices: List[ChoiceCaller] = []
+                choices: list[ChoiceCaller] = []
                 if use_max_autotune():
                     transposed_w = permute(orig_w, [1, 0])
                     *_, layout, x, transposed_w = mm_args(
