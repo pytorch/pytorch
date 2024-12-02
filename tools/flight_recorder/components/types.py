@@ -134,7 +134,7 @@ class Collective(NamedTuple):
     input_numel: Optional[int] = None
     output_numel: Optional[int] = None
     missing_ranks: Optional[Set[int]] = None
-    mismatch_collectives: Optional[List["Collective"]] = None
+    mismatch_collectives: Optional[Dict[int, "Collective"]] = None
     type_of_mismatch: Optional[MatchState] = None
 
 
@@ -290,29 +290,27 @@ class EntryState:
         else:
             assert idx_map is not None, "idx_map is None"
             assert all_entries is not None, "all_entries is None"
-            mismatch_collectives = []
+            mismatch_collectives = {}
             for rank, error in errors:
                 idx = idx_map[rank]
                 entry = all_entries[rank][idx]
                 desc = entry["process_group"][1]
                 pg_name = entry["process_group"][0]
-                mismatch_collectives.append(
-                    Collective(
-                        id=id,
-                        group_id=entry["process_group"][0],
-                        record_id=entry["record_id"],
-                        pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
-                        pass_check=False,
-                        collective_seq_id=entry["collective_seq_id"],
-                        p2p_seq_id=entry["p2p_seq_id"],
-                        collective_name=entry["profiling_name"],
-                        input_sizes=entry["input_sizes"],
-                        output_sizes=entry["output_sizes"],
-                        expected_ranks=self.expected_ranks,
-                        collective_state=entry["state"],
-                        collective_frames=entry["frames"],
-                        type_of_mismatch=error,
-                    )
+                mismatch_collectives[rank] = Collective(
+                    id=id,
+                    group_id=entry["process_group"][0],
+                    record_id=entry["record_id"],
+                    pg_desc=f"{pg_name}:{desc}" if desc != "undefined" else pg_name,
+                    pass_check=False,
+                    collective_seq_id=entry["collective_seq_id"],
+                    p2p_seq_id=entry["p2p_seq_id"],
+                    collective_name=entry["profiling_name"],
+                    input_sizes=entry["input_sizes"],
+                    output_sizes=entry["output_sizes"],
+                    expected_ranks=self.expected_ranks,
+                    collective_state=entry["state"],
+                    collective_frames=entry["frames"],
+                    type_of_mismatch=error,
                 )
             return Collective(
                 id=id,
@@ -388,9 +386,11 @@ class Op:
         }, f"{type} is not a supported operation"
         self.type = type
         if type == "send":
+            assert isinstance(meta, str)
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
+            assert isinstance(meta, str)
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:

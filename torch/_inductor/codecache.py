@@ -36,22 +36,25 @@ from typing import (
     Any,
     Callable,
     cast,
-    Counter,
     Dict,
     Generator,
     List,
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
 
 import torch
+
+# WARNING: Do not directly import has_frozen_params, it is monkeypatched in
+# python test/inductor/test_codecache.py
+# TestFxGraphCache.test_constant_handling_device_cpu
+# TODO: Why are we monkeypatching it......
+import torch._inductor.output_code as output_code
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
@@ -72,7 +75,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler, TritonKernelArtifacts
+from .triton_bundler import TritonBundler
 
 
 T = TypeVar("T")
@@ -81,7 +84,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .compile_fx import _CompileFxKwargs
+    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .output_code import OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -101,11 +105,6 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    log_cudagraph_skip_and_bump_counter,
-)
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -114,12 +113,9 @@ from torch._inductor.runtime.compile_tasks import (
 from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
-    align_inputs_from_check_idxs,
-    BoxedBool,
     clear_on_fresh_inductor_cache,
     is_linux,
     is_windows,
-    set_tracing_context_output_strides,
 )
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -868,7 +864,6 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
-
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -886,10 +881,6 @@ class FxGraphHashDetails:
         return custom_pass.uuid()
 
 
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
-
-
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: Sequence[InputType],
@@ -902,7 +893,7 @@ def compiled_fx_graph_hash(
     # To support caching when the graph has frozen params, we ignore the tensor values
     # of non-inlined constants since they won't be included in the cache entry. Without
     # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not has_frozen_params(gm)
+    include_non_inlined = not output_code.has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
@@ -916,117 +907,6 @@ def compiled_fx_graph_hash(
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
-
-
-def cudagraph_post_compile(
-    example_inputs: Sequence[InputType],
-    compiled_graph: CompiledFxGraph,
-    cudagraphs: BoxedBool,
-    gm: Optional[torch.fx.GraphModule],
-) -> None:
-    """
-    Checks for any reasons not to run cudagraphs and then
-    runs it on compiled_graph.
-    Mutates the `compiled_graph.current_callable` and `cudagraphs`
-    """
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.cudagraph_info is not None
-    cached_info = compiled_graph.cudagraph_info
-    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
-    inputs_to_check = compiled_graph.inputs_to_check
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
-    is_inference = compiled_graph.fx_kwargs["is_inference"]
-    is_backward = compiled_graph.fx_kwargs["is_backward"]
-
-    if not cudagraph_fail_reasons:
-        fx_kwargs = compiled_graph.fx_kwargs
-        static_input_idxs = fx_kwargs["static_input_idxs"]
-
-        placeholders = cached_info.placeholders
-        stack_traces = cached_info.stack_traces
-        if not config.triton.cudagraph_trees:
-            # Force specialize all inputs so that CUDA graphs will work
-            for t in example_inputs:
-                if isinstance(t, torch.SymInt):
-                    int(t)  # guard
-
-        if (
-            boxed_forward_device_index is not None
-            and not is_inference
-            and not is_backward
-        ):
-            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
-
-        from .compile_fx import cudagraphify
-
-        current_callable = compiled_graph.current_callable
-        assert current_callable is not None
-        compiled_graph.current_callable = cudagraphify(
-            current_callable,
-            static_input_idxs=static_input_idxs or (),
-            device_index=next(iter(compiled_graph.device_idxs)),
-            stack_traces=stack_traces,
-            is_backward=is_backward,
-            is_inference=is_inference,
-            constants=tuple(compiled_graph.get_constants(gm).values()),
-            placeholders=placeholders,
-            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
-        )
-
-    else:
-        BoxedBool.disable(cudagraphs)
-
-        # See [Backward Generation Handling]
-        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-        # know we are we running the backward even if we will not run it in cudagraphs
-        if is_backward and config.triton.cudagraph_trees:
-            assert boxed_forward_device_index is not None
-            assert boxed_forward_device_index.value is not None
-            compiled_graph_callable = compiled_graph.current_callable
-
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                boxed_forward_device_index.value, create_if_none_exists=False
-            )
-            # should already exist from forward
-            assert manager is not None
-
-            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
-                manager.set_to_running_backward()  # type: ignore[union-attr]
-                return compiled_graph_callable(new_inputs)
-
-            compiled_graph.current_callable = compiled_artifact
-
-        if "cuda" in compiled_graph.device_types:
-            # prefer better disable_cudagraphs_reason bc stack trace
-            # TODO: migrate all disable reasons to stack trace, refactor
-            if compiled_graph.disabled_cudagraphs_reason:
-                log_cudagraph_skip_and_bump_counter(
-                    compiled_graph.disabled_cudagraphs_reason
-                )
-            else:
-                log_cudagraph_skip_and_bump_counter(
-                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
-                )
-
-
-def maybe_realign_inputs(
-    ran_cudagraphs: BoxedBool,
-    compiled_graph: CompiledFxGraph,
-    inputs_to_check: Sequence[int],
-) -> None:
-    """
-    Realigns input strides from inputs_to_check if
-    we didn't end up running cudagraphs. Mutates
-    `compiled_graph.current_callable` if cudagraphs
-    was run. Otherwise, does nothing.
-    """
-    if not ran_cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
 
 
 def add_ephemeral_timeout_increase_for_distributed(time_saved_ns: int) -> int:
@@ -1277,57 +1157,9 @@ class FxGraphCache:
         return graph, cache_info
 
     @staticmethod
-    def post_compile(
-        compiled_graph: CompiledFxGraph,
-        example_inputs: Sequence[InputType],
-        cudagraphs: BoxedBool,
-        gm: Optional[torch.fx.GraphModule] = None,
-    ) -> CompiledFxGraph:
-        """
-        Run a set of post processing steps after loading from the cache. These involve:
-         - Setting the tracing context output strides
-         - Running cudagraphs if enabled
-         - Realigning inputs
-
-        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
-        The results of this function are *not* saved in the cache itself.
-        """
-        set_tracing_context_output_strides(example_inputs, compiled_graph)
-
-        if cudagraphs:
-            # It's possible that cudagraphs is enabled, but was disabled
-            # during a previous compilation we're loading from the cache.
-            # If so, we need to disable it on this new process too.
-            if compiled_graph.disabled_cudagraphs_reason:
-                if "cuda" in compiled_graph.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                cudagraph_post_compile(
-                    example_inputs,
-                    compiled_graph,
-                    cudagraphs,
-                    gm,
-                )
-        inputs_to_check = compiled_graph.inputs_to_check
-        # cudagraphs could have been disabled from the earlier conditions
-        # so we still need to realign inputs if that happens
-        maybe_realign_inputs(
-            cudagraphs,
-            compiled_graph,
-            inputs_to_check,
-        )
-
-        return compiled_graph
-
-    @staticmethod
     def _save_graph(
         key: str,
-        compiled_graph: CompiledFxGraph,
+        compiled_graph: OutputCode,
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
@@ -1335,6 +1167,11 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
+        from .compile_fx import CompiledFxGraph
+
+        assert isinstance(
+            compiled_graph, CompiledFxGraph
+        ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
@@ -1400,7 +1237,9 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
-        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
+        if output_code.has_frozen_params(
+            gm
+        ) and not torch._utils_internal.justknobs_check(
             "pytorch/inductor:allow_freezing_with_caching"
         ):
             raise BypassFxGraphCache("Skipping graph with frozen constants")
@@ -1552,124 +1391,6 @@ class FxGraphCache:
         return compiled_graph, cache_info
 
     @staticmethod
-    def load(  # type: ignore[no-untyped-def]
-        compile_fx_fn: Callable[..., Any],
-        gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        local: bool,
-        remote: bool,
-    ):
-        """
-        Load a compiled graph from the cache. If a cached entry does not exist,
-        compile the graph and save it to the cache.
-        """
-        assert local or remote, "at least one of them needs to be enabled"
-        compiled_graph = None
-        remote_cache = None
-        (key_info, cache_info) = FxGraphCache.prepare_key(
-            gm, example_inputs, fx_kwargs, inputs_to_check, remote
-        )
-        if key_info is not None:
-            key, debug_lines = key_info
-            if remote:
-                remote_cache = FxGraphCache.get_remote_cache()
-            compiled_graph, cache_info = FxGraphCache.load_with_key(
-                key,
-                debug_lines,
-                example_inputs,
-                local,
-                remote_cache,
-                is_backward=fx_kwargs.get("is_backward", False),
-                gm=gm,
-            )
-
-        # CACHE BYPASS: Compile the graph, don't save it to the cache
-        if cache_info["cache_state"] == "bypass":
-            assert compiled_graph is None
-            compiled_graph = compile_fx_fn(
-                gm, example_inputs, inputs_to_check, fx_kwargs
-            )
-
-        # CACHE MISS: Compile the graph and save to cache
-        elif cache_info["cache_state"] == "miss":
-            assert compiled_graph is None
-            assert key_info is not None
-            start_time = cache_info["cache_event_time"]
-            TritonBundler.begin_compile()
-            try:
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
-                compiled_graph._time_taken_ns = time_ns() - start_time
-                cache_key = key_info[0]
-                compiled_graph._fx_graph_cache_key = cache_key
-                (
-                    compiled_graph._triton_bundle,
-                    triton_bundler_meta,
-                ) = TritonBundler.collect()
-            finally:
-                TritonBundler.end_compile()
-            if triton_bundler_meta is not None:
-                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
-            cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
-            FxGraphCache._save_graph(
-                cache_key,
-                compiled_graph,
-                example_inputs,
-                local,
-                remote_cache,
-            )
-        # CACHE HIT: not much to really do, just make sure the cache key
-        # is recorded on the graph
-        else:
-            assert cache_info["cache_state"] == "hit"
-            assert compiled_graph is not None
-            assert key_info is not None
-            cache_key = key_info[0]
-            compiled_graph._fx_graph_cache_key = cache_key
-
-        assert compiled_graph is not None
-
-        # Logging and observability: we log a single chromium event
-        # and a tlparse log for every cache action.
-        # In the event of a bypass, we also logged to the remote table earlier
-        # with log_cache_bypass.
-        chromium_log = get_chromium_event_logger()
-        cache_state = cache_info["cache_state"]
-        chromium_log.log_instant_event(
-            f"fx_graph_cache_{cache_state}",
-            cache_info["cache_event_time"],
-            metadata=cache_info,
-        )
-        # Add event data about cache hits/miss
-        # TODO: add remote cache get/put timings here too
-        chromium_log.add_event_data(
-            "inductor_compile",
-            cache_state=cache_state,
-            cache_event_time=cache_info["cache_event_time"],
-            key=cache_info.get("key"),
-            components=cache_info.get("components"),
-            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-            remote_cache_enabled=remote,
-            local_cache_enabled=local,
-        )
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": f"fx_graph_cache_{cache_state}",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(cache_info),
-        )
-        # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
-        FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
-        )
-        return compiled_graph
-
-    @staticmethod
     def clear() -> None:
         """
         Clear out the on-disk cache.
@@ -1678,121 +1399,6 @@ class FxGraphCache:
             shutil.rmtree(FxGraphCache._get_tmp_dir())
         except FileNotFoundError:
             pass
-
-
-_StrideExprStr: TypeAlias = str
-
-
-@dataclasses.dataclass
-class CompiledFxGraph:
-    """
-    Class holding a compiled FX graph. This is the object serialized on disk
-    to support FxGraph caching.
-    """
-
-    current_callable: Optional[Callable[..., Any]]
-    cache_key: str
-    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
-    # We populate exactly one of the next two fields. In the common case, we store the
-    # constant attirbutes in the cache entry and re-attach them to the module created in
-    # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
-    # however, we save the mapping from attribute names in the GraphLowering to the
-    # original name of the attribute in the GraphModule. When we create the module from
-    # the cache entry, we then look up the constants from the current GraphModule. This
-    # scheme allows us to support caching with freezing.
-    allocated_constant_name: Optional[Dict[str, str]]
-    constants: Optional[Dict[str, torch.Tensor]]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
-    disabled_cudagraphs_reason: Optional[str]
-    metrics_deltas: metrics.CachedMetricsDeltas
-    counter_deltas: Counter[str]
-    # This is a string representation of an expression we serialize
-    # with the object so the guards can be evaluated in a different
-    # context in order to verify the validity of serving a cached
-    # fx graph. The expression must be generated by:
-    # ShapeEnv.produce_guards_expression()
-    guards_expr: Optional[str]
-
-    cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: _CompileFxKwargs
-    inputs_to_check: Sequence[int]
-    boxed_forward_device_index: Optional[BoxedDeviceIndex]
-
-    _time_taken_ns: Optional[int] = None
-    _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
-    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
-
-    def __init__(
-        self,
-        current_callable: Optional[Callable[..., Any]],
-        graph: GraphLowering,
-        gm: torch.fx.GraphModule,
-        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
-        disabled_cudagraphs_reason: Optional[str],
-        metrics_deltas: metrics.CachedMetricsDeltas,
-        counter_deltas: Counter[str],
-    ) -> None:
-        self.current_callable = current_callable
-        self.cache_key = graph.cache_key
-        if graph.cache_path:
-            with open(graph.cache_path) as f:
-                self.source_code = f.read()
-        self.cache_linemap = graph.cache_linemap
-        # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
-        if has_frozen_params(gm):
-            self.allocated_constant_name = graph.allocated_constant_name
-            self.constants = None
-        else:
-            self.allocated_constant_name = None
-            self.constants = graph.constants
-        self.torchbind_constants = graph.torchbind_constants
-        self.output_strides = output_strides
-        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
-        self.metrics_deltas = metrics_deltas
-        self.counter_deltas = counter_deltas
-        self.guards_expr = None
-        self.cudagraph_info = None
-        self.fx_kwargs = {}
-        self.inputs_to_check = ()
-        self.boxed_forward_device_index = None
-
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def get_constants(
-        self, gm: Optional[torch.fx.GraphModule]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Get the constant attributes.
-        """
-        # Normal case: The constants are stored in the entry.
-        if self.constants is not None:
-            return self.constants
-
-        # Freezing case: Look up the constants from attributes on the GraphModule using
-        # the allocated_constant_name map.
-        assert gm is not None
-        assert self.allocated_constant_name is not None
-        constants = {
-            name: getattr(gm, orig_name)
-            for name, orig_name in self.allocated_constant_name.items()
-        }
-        return constants
 
 
 def run_command_and_check(cmd_: str) -> None:

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import dataclasses
 import itertools
 import operator
@@ -739,9 +740,21 @@ def _fuse_conv_bn_qat_helper(
 
     all_original_to_replacement_nodes = {}
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
-        for original_node, replacement_node in _get_conv_bn_pattern_nodes(r).values():
+        replacement_dict = _get_conv_bn_pattern_nodes(r)
+        # The original conv node's "nn_module_stack"
+        conv_nn_module = replacement_dict["conv"][0].meta.get("nn_module_stack", None)
+        for k, node_tuple in replacement_dict.items():
+            original_node, replacement_node = node_tuple
             # Step (3a): Copy over metadata for all nodes in [conv - bn - getitem]
             replacement_node.meta = original_node.meta
+            # If original_node is a get_attr node, it doesn't have nn_module_stack.
+            # In this case, we copy nn_module_stack from the original conv node.
+            if (
+                k in ["conv_input", "conv_weight"]
+                and conv_nn_module
+                and "nn_module_stack" not in replacement_node.meta
+            ):
+                replacement_node.meta["nn_module_stack"] = copy.deepcopy(conv_nn_module)
             if _is_conv_or_conv_transpose_node(original_node):
                 # Step (3b): Copy over conv literal args
                 _copy_over_literal_conv_args(original_node, replacement_node)
