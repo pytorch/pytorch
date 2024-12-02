@@ -2541,60 +2541,72 @@ def _register_smooth_quant_int_mm_pattern():
     # When torch.compile'ing with dynamic=False, they don't exist
     def get_pattern_no_bias(expand_a_scale: bool):
         return CallFunction(
-            aten.reshape.default,
+            aten.mul.Tensor,
             CallFunction(
                 aten.mul.Tensor,
                 CallFunction(
-                    aten.mul.Tensor,
+                    prims.convert_element_type.default,
                     CallFunction(
-                        prims.convert_element_type.default,
+                        aten._int_mm.default,
                         CallFunction(
-                            aten._int_mm.default,
-                            CallFunction(
-                                aten.reshape.default,
-                                KeywordArg("a"),
-                                KeywordArg("in_shape"),
-                            ),
-                            KeywordArg("b"),
+                            aten.reshape.default,
+                            KeywordArg("a"),
+                            KeywordArg("in_shape"),
                         ),
-                        KeywordArg("dtype"),
+                        KeywordArg("b"),
                     ),
-                    (
-                        CallFunction(
-                            aten.expand.default,
-                            KeywordArg("x_scale"),
-                            Arg(),
-                        )
-                        if expand_a_scale
-                        else KeywordArg("x_scale")
-                    ),
+                    KeywordArg("dtype"),
                 ),
-                KeywordArg("w_scale"),
+                (
+                    CallFunction(
+                        aten.expand.default,
+                        KeywordArg("x_scale"),
+                        Arg(),
+                    )
+                    if expand_a_scale
+                    else KeywordArg("x_scale")
+                ),
             ),
-            KeywordArg("out_shape_no_bias"),
+            KeywordArg("w_scale"),
+        )
+
+    def _with_outer_reshape(pattern):
+        return CallFunction(
+            aten.reshape.default, pattern, KeywordArg("out_shape_no_bias")
         )
 
     # for torch.compile(dynamic=False)
-    pattern_no_bias_1 = get_pattern_no_bias(expand_a_scale=False)
-    pattern_with_bias_1 = CallFunction(
-        aten.add.Tensor,
-        pattern_no_bias_1,
-        KeywordArg("bias"),
+    pattern_no_bias_1 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=False))
+    pattern_with_bias_1 = _with_outer_reshape(
+        CallFunction(
+            aten.add.Tensor,
+            pattern_no_bias_1,
+            KeywordArg("bias"),
+        )
     )
     # for torch.compile(dynamic=True)
-    pattern_no_bias_2 = get_pattern_no_bias(expand_a_scale=True)
-    pattern_with_bias_2 = CallFunction(
-        aten.reshape.default,
+    pattern_no_bias_2 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=True))
+    pattern_with_bias_2 = _with_outer_reshape(
         CallFunction(
             aten.reshape.default,
             CallFunction(
-                aten.add.Tensor,
-                pattern_no_bias_2,
-                KeywordArg("bias"),
+                aten.reshape.default,
+                CallFunction(
+                    aten.add.Tensor,
+                    pattern_no_bias_2,
+                    KeywordArg("bias"),
+                ),
+                Arg(),
             ),
-            Arg(),
-        ),
-        KeywordArg("out_shape_with_bias"),
+            KeywordArg("out_shape_with_bias"),
+        )
+    )
+
+    pattern1_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=True)
+    pattern1_with_bias_no_outer_reshape = CallFunction(
+        aten.add.Tensor,
+        pattern1_with_no_outer_reshape,
+        KeywordArg("bias"),
     )
 
     def _validate_pattern(match: Match):
@@ -2619,6 +2631,8 @@ def _register_smooth_quant_int_mm_pattern():
     pattern_to_pass_number = {
         pattern_no_bias_2: 0,
         pattern_with_bias_2: 0,
+        pattern1_with_no_outer_reshape: 1,
+        pattern1_with_bias_no_outer_reshape: 1,
         pattern_no_bias_1: 1,
         pattern_with_bias_1: 1,
     }
@@ -2723,22 +2737,31 @@ def _register_smooth_quant_int_mm_pattern():
                         aten.mul.Tensor, args=(new_linear_node, x_scale)
                     )
                     # Add bias and reshape
-                    out_shape = kwargs.get(
-                        "out_shape_with_bias", kwargs["out_shape_no_bias"]
+
+                    has_outer_reshape = (
+                        kwargs.get("out_shape_with_bias", None) is None
+                        and kwargs.get("out_shape_no_bias", None) is None
                     )
+
+                    if has_outer_reshape:
+                        out_shape = kwargs.get(
+                            "out_shape_with_bias", kwargs["out_shape_no_bias"]
+                        )
                     if bias is not None:
                         new_out_node = match.graph.call_function(
                             aten.add.Tensor, args=(new_out_node, bias)
                         )
-                        new_out_node = match.graph.call_function(
-                            aten.reshape.default,
-                            args=(new_out_node, out_shape),
-                        )
+                        if has_outer_reshape:
+                            new_out_node = match.graph.call_function(
+                                aten.reshape.default,
+                                args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
+                            )
                     else:
-                        new_out_node = match.graph.call_function(
-                            aten.reshape.default,
-                            args=(new_out_node, out_shape),
-                        )
+                        if has_outer_reshape:
+                            new_out_node = match.graph.call_function(
+                                aten.reshape.default,
+                                args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
+                            )
                     out_node.replace_all_uses_with(new_out_node)
                     new_out_node.meta.update(out_node.meta)
                 for node in reversed(match.nodes):
