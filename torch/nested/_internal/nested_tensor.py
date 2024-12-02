@@ -631,9 +631,6 @@ def nested_view_from_values_offsets_lengths(
 def nested_from_padded(
     padded, offsets, ragged_idx=1, min_seqlen=None, max_seqlen=None, sum_S=None
 ):
-    if ragged_idx != 1:
-        raise RuntimeError("nested_from_padded(): only ragged_idx=1 supported for now")
-
     min_seqlen_tensor = None
     if min_seqlen is not None:
         min_seqlen_tensor = _store_val_in_tensor(min_seqlen)

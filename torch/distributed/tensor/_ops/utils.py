@@ -209,9 +209,10 @@ def map_placements_after_broadcast(
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
 ) -> List[float]:
-    redistribute_costs: List[float] = []
-    for strat in src_strategy.strategies:
-        redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
+    redistribute_costs: List[float] = [
+        redistribute_cost(strat.output_spec, dst_spec)
+        for strat in src_strategy.strategies
+    ]
 
     return redistribute_costs
 

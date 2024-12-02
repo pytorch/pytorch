@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/Generator.h>
+#include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/mps/MPSEvent.h>
 #include <optional>
 
@@ -39,7 +39,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   Allocator* getPinnedMemoryAllocator() const override;
 
   // MPSProfiler interface
-  void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const override;
+  void profilerStartTrace(const std::string& mode, bool waitUntilCompleted)
+      const override;
   void profilerStopTrace() const override;
 
   // MPSEvent interface
@@ -49,7 +50,8 @@ struct MPSHooks : public at::MPSHooksInterface {
   void waitForEvent(uint32_t event_id) const override;
   void synchronizeEvent(uint32_t event_id) const override;
   bool queryEvent(uint32_t event_id) const override;
-  double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const override;
+  double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)
+      const override;
 
   // Compatibility with Accelerator API
   bool hasPrimaryContext(DeviceIndex device_index) const override {

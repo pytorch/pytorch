@@ -45,7 +45,7 @@ class TestDataParallel(TestCase):
             def __init__(self, t):
                 super().__init__()
                 self.t_rg = nn.Buffer(t)
-                self.t_not_rg = nn.Buffer(t.clone().detach())
+                self.t_not_rg = nn.Buffer(t.detach().clone())
 
             def forward(self, x):
                 return x * self.t_rg + self.t_not_rg
