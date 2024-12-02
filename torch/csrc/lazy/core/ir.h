@@ -18,7 +18,7 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/core/shape.h>
 
-C10_DECLARE_bool(ltc_enable_dynamic_shapes);
+TORCH_DECLARE_bool(ltc_enable_dynamic_shapes);
 
 namespace torch::lazy {
 

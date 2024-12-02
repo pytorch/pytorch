@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
+#include <c10/util/error.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -49,7 +50,7 @@ std::string create_temp_dir() {
   if (mkdtemp(temp_dir.data()) == nullptr) {
     throw std::runtime_error(
         std::string("Failed to create temporary directory: ") +
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
   return temp_dir;
 #endif
@@ -327,7 +328,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path.c_str())) {
         throw std::runtime_error(fmt::format(
-            "Failed to create directory {}: {}", parent_path, strerror(errno)));
+            "Failed to create directory {}: {}",
+            parent_path,
+            c10::utils::str_error(errno)));
       }
 
       // Extracts file to the temp directory
@@ -397,7 +400,7 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    std::vector<at::Tensor>& inputs) {
+    const std::vector<at::Tensor>& inputs) {
   return runner_->run(inputs);
 }
 

@@ -147,16 +147,6 @@ inline void initDeviceStreamOnce(DeviceIndex device) {
   c10::call_once(device_flags[device], initDeviceStreamState, device);
 }
 
-inline void check_device(DeviceIndex device) {
-  TORCH_CHECK(
-      device >= 0 && device < num_gpus,
-      "device is out of range, device is ",
-      static_cast<int16_t>(device),
-      ", total number of device is ",
-      static_cast<int16_t>(num_gpus),
-      ".");
-}
-
 uint32_t get_idx(std::atomic<uint32_t>& counter) {
   auto raw_idx = counter++;
   return raw_idx % kStreamsPerPool;
@@ -210,7 +200,7 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   TORCH_CHECK(
       priority <= 0,
       "Expected XPU stream priority to be less than or equal to 0, got ",
@@ -238,7 +228,7 @@ XPUStream getCurrentXPUStream(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pool (once)
   initDeviceStreamOnce(device);
   return XPUStreamForId(device, current_streams[device]);
@@ -276,7 +266,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
   if (device == -1) {
     device = c10::xpu::current_device();
   }
-  check_device(device);
+  check_device_index(device);
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
 

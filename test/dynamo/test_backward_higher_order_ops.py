@@ -47,7 +47,7 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 x.register_hook(_multiply_invoke)
                 return x * y
 
-            fn = torch._dynamo.optimize(backend)(fn)
+            fn = torch.compile(fn, backend=backend)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
             out.backward(grad_out)
@@ -114,10 +114,10 @@ class _multiply_invoke(torch.nn.Module):
                 x.register_hook(_multiply_invoke)
                 return x + y
 
-            fn = torch._dynamo.optimize(backend)(fn)
+            fn = torch.compile(fn, backend=backend)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
@@ -179,10 +179,10 @@ class GraphModule(torch.nn.Module):
             def fn(x, y):
                 return x + y
 
-            fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+            fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
@@ -237,14 +237,14 @@ class GraphModule(torch.nn.Module):
                 x.register_hook(_graph_break_invoke)
                 return x + y
 
-            fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+            fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
             grad_out = torch.tensor([2.0, 2.0])
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "print",
             ):
-                with compiled_autograd.enable(compiler_fn):
+                with compiled_autograd._enable(compiler_fn):
                     out.backward(grad_out)
 
             graph = None
