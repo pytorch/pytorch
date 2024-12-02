@@ -1,6 +1,6 @@
 import contextlib
 import threading
-from typing import Callable, Generator, Iterable, Optional, Union
+from typing import Any, Callable, Generator, Iterable, Optional, Union
 
 from .custom_ops import custom_op
 from .infer_schema import infer_schema
@@ -92,7 +92,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Callable:
+    def dec(fn: Callable) -> Any:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
