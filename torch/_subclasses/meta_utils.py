@@ -797,11 +797,11 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback_: Callable[[Callable], _TensorT],
+        callback: Callable[[Callable], _TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
     ) -> _TensorT:
-        callback = functools.partial(callback_, device=t.device)  # type: ignore[call-arg]
+        callback = functools.partial(callback, device=t.device)  # type: ignore[call-arg]
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -999,7 +999,7 @@ class MetaConverter(Generic[_TensorT]):
 
                     current_source = AttrSource(source, attr)
                     inner_callback = functools.partial(
-                        callback_, device=meta_tensor_desc.device  # type: ignore[call-arg]
+                        callback, device=meta_tensor_desc.device  # type: ignore[call-arg]
                     )
                     new_empty_tensor = _empty_create_subclass(
                         meta_tensor_desc,
