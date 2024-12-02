@@ -450,8 +450,6 @@ def topological_sort_lpmf(
         if collective_indices_remaining
         else len(nodes)
     )
-    need_new_subgraph = True
-    nodes_to_schedule_allowed = nodes_to_schedule
 
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
@@ -467,8 +465,7 @@ def topological_sort_lpmf(
                     if collective_indices_remaining
                     else len(nodes)
                 )
-                need_new_subgraph = True
-            elif need_new_subgraph:
+            else:
                 nodes_to_schedule_allowed = OrderedSet(
                     [
                         node
@@ -476,10 +473,10 @@ def topological_sort_lpmf(
                         if node.mpi_node.index < next_collective_index
                     ]
                 )
-                need_new_subgraph = False
+        else:
+            nodes_to_schedule_allowed = nodes_to_schedule
 
         # select a node to schedule:
-        assert nodes_to_schedule_allowed
         selected_node = min(
             nodes_to_schedule_allowed,
             key=lambda node: (
