@@ -56,6 +56,7 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
     import triton
 
     from ..graph import GraphLowering
