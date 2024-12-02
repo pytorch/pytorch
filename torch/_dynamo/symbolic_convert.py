@@ -3259,7 +3259,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             distributed_state=parent.distributed_state,
         )
         self.parent = parent
-        self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
