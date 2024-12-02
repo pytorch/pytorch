@@ -8677,7 +8677,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         # Create CachedTensor without target_field
         cached_tensor = CachedTensor(metadata, source_fields, extra_fields)
         # Test that cached_tensor is created correctly
-        self.assertIsInstance(cached_tensor, CachedTensor)x
+        self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
         self.assertEqual(cached_tensor.shape, a.shape)
         # Test that cached_tensor behaves like 'a'
