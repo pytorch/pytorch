@@ -226,9 +226,21 @@ def user_defined_kernel_grid_fn_code(
             assert len(grids) > 1
             assert len(grids) == len(configs)
             seen = set()
-            for grid, c in zip(grids, configs):
-                guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
-                guards = " and ".join(guards)
+            # sort the configs from the largest # of kwargs to the smallest to
+            # emit the grids in the order of (approximately) decreasing specificity
+            # TODO(aakhundov): the sorting below is generally not sufficient, so
+            # maybe we'll need to restrict the supported cases to identical kwarg
+            # names in all autotuning configs.
+            for grid, c in sorted(
+                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            ):
+                if c.kwargs:
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
+                else:
+                    guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
@@ -2120,7 +2132,11 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
-        if name in V.graph.removed_buffers or name in self.allocated:
+        if (
+            name in V.graph.removed_buffers
+            or name in self.allocated
+            or isinstance(buffer, ir.DonatedBuffer)
+        ):
             return
         self.allocated.add(name)
         if isinstance(
@@ -2174,7 +2190,12 @@ class PythonWrapperCodegen(CodeGen):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
-            or name in V.graph.graph_inputs
+            or (
+                name in V.graph.graph_inputs
+                and not isinstance(
+                    V.graph.graph_inputs_original[name], ir.DonatedBuffer
+                )
+            )
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
