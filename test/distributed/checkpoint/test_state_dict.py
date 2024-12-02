@@ -10,13 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
-
-# importing fully_shard as FSDP2 since the original fully_shard is used in this test.
-# TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
-from torch.distributed._composable.fsdp import (
-    fully_shard as FSDP2,
-    fully_shard as fsdp_fully_shard,
-)
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -33,7 +26,12 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
+
+# importing fully_shard as FSDP2 since the original fully_shard is used in this test.
+# TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
 from torch.distributed.fsdp import (
+    fully_shard as FSDP2,
+    fully_shard as fsdp_fully_shard,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
     StateDictType,

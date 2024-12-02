@@ -8,10 +8,8 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed._composable.fsdp._fsdp_collectives import (
-    _get_gradient_divide_factors,
-)
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fsdp_collectives import _get_gradient_divide_factors
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,

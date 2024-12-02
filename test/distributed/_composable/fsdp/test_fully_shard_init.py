@@ -9,13 +9,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_init import (
-    _get_managed_modules,
-    _get_managed_states,
-)
-from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
-from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -24,6 +17,10 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fsdp_init import _get_managed_modules, _get_managed_states
+from torch.distributed.fsdp._fsdp_param import ParamModuleInfo
+from torch.distributed.fsdp._fsdp_param_group import _get_param_module_infos
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
     _init_intra_node_process_group,
