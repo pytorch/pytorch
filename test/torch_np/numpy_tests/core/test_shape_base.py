@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -358,7 +358,7 @@ class TestConcatenate(TestCase):
         assert out is rout
         assert np.all(r == rout)
 
-    @xpassIfTorchDynamo  # (reason="concatenate(x, axis=None) relies on x being a sequence")
+    @xpassIfTorchDynamo_np  # (reason="concatenate(x, axis=None) relies on x being a sequence")
     def test_large_concatenate_axis_None(self):
         # When no axis is given, concatenate uses flattened versions.
         # This also had a bug with many arrays (see gh-5979).
