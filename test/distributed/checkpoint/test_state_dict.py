@@ -3,7 +3,6 @@
 import copy
 import functools
 import sys
-from itertools import chain
 from typing import Callable, Tuple, Type, Union
 
 import torch
@@ -26,7 +25,6 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
@@ -34,7 +32,6 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (

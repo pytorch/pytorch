@@ -34,6 +34,14 @@ from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
+__all__ = [
+    "fully_shard",
+    "FSDPModule",
+    "UnshardHandle",
+    "register_fsdp_forward_method",
+]
+
+
 cls_to_fsdp_cls: Dict[Type, Type] = {}
 
 
@@ -174,14 +182,14 @@ def fully_shard(
         cls = module.__class__
         new_cls = cls_to_fsdp_cls.get(cls, None)
         if not new_cls:
-            dct = {"__deepcopy__": unimplemented_deepcopy}
+            dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
             cls_to_fsdp_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
