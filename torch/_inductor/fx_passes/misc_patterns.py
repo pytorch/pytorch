@@ -70,14 +70,14 @@ def _misc_patterns_init():
 
 
 class NumpyCompatNormalization:
-    numpy_compat: Dict[str, Tuple[str, ...]] = {
+    numpy_compat: dict[str, tuple[str, ...]] = {
         "dim": ("axis",),
         "keepdim": ("keepdims",),
         "input": ("x", "a", "x1"),
         "other": ("x2",),
     }
-    inverse_mapping: Dict[str, str]
-    cache: Dict["torch.fx.graph.Target", Set[str]]
+    inverse_mapping: dict[str, str]
+    cache: dict["torch.fx.graph.Target", set[str]]
 
     def __init__(self) -> None:
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]

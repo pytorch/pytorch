@@ -4,7 +4,8 @@
 import logging
 import math
 from dataclasses import dataclass
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
+from collections.abc import Sequence
 
 import sympy
 
@@ -87,7 +88,7 @@ def create_placeholder(
     return TensorBox.create(input_buffer)
 
 
-def maybe_realize(args: List[Optional[IRNode]]):
+def maybe_realize(args: list[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
     return tree_map(
         lambda x: (
@@ -106,7 +107,7 @@ def get_float32_precision():
         return "'tf32'"
 
 
-def zeros_and_scatter_lowering(shape: List[int], indices, values):
+def zeros_and_scatter_lowering(shape: list[int], indices, values):
     # Always accumulate into fp32 then cast
     grad = _full(0, values.get_device(), torch.float32, shape)
     assert isinstance(grad, TensorBox)
@@ -150,10 +151,10 @@ def zeros_and_scatter_lowering(shape: List[int], indices, values):
     return buffer
 
 
-SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
 
 
-def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -671,7 +672,7 @@ _rocm_default_config = {
 }
 
 
-def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: str) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
@@ -703,7 +704,7 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: str) -> tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
@@ -748,14 +749,14 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_fwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, "fwd")
     else:
         return _get_rocm_config(query, "fwd")
 
 
-def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
+def _get_default_config_bwd(query) -> tuple[int, int, int, int]:
     if torch.version.hip is None:
         return _get_nv_config(query, "bwd")
     else:
@@ -949,8 +950,8 @@ def flex_attention(
     kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
 
-    choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_fwd(query))
     if config.max_autotune:
         configs += [
@@ -1791,9 +1792,9 @@ class JointOutputResult:
     """Results from processing joint outputs."""
 
     grad_input: ComputedBuffer
-    captured_grads_compute: List[ComputedBuffer]
-    captured_grads: List[Optional[TensorBox]]
-    mutated_grads: List[TensorBox]
+    captured_grads_compute: list[ComputedBuffer]
+    captured_grads: list[Optional[TensorBox]]
+    mutated_grads: list[TensorBox]
 
 
 def process_joint_outputs(
@@ -1808,7 +1809,7 @@ def process_joint_outputs(
     Returns:
         JointOutputResult containing processed buffers and gradients
     """
-    assert isinstance(all_joint_outputs, List)
+    assert isinstance(all_joint_outputs, list)
     assert (
         all_joint_outputs[0] is not None
     ), "joint_subgraph_buffer is None this is a bug!"
@@ -2012,8 +2013,8 @@ def flex_attention_backward(*args, **kwargs):
     kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
     kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
 
-    choices: List[Any] = []
-    configs: List[Tuple[int, int, int, int]] = []
+    choices: list[Any] = []
+    configs: list[tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
     if config.max_autotune:
         num_stages_list = [1, 3, 4, 5] if torch.version.hip is None else [1]

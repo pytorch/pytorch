@@ -30,7 +30,7 @@ if has_triton_package():
 log = logging.getLogger(__name__)
 
 
-_InductorMetaTy = Dict[str, object]
+_InductorMetaTy = dict[str, object]
 
 
 def inductor_meta_from_config() -> _InductorMetaTy:
@@ -64,14 +64,14 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 class AutotuneCache:
     configs_hash: str
     filename: str
-    local_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
-    remote_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
+    local_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
+    remote_cache: tuple[RemoteCache[JsonDataTy], str] | None = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
-    ) -> Optional[AutotuneCache]:
+    ) -> AutotuneCache | None:
         cache = AutotuneCache(configs_hash, filename)
         cache._setup_local_cache(inductor_meta, filename)
         cache._setup_remote_autotune_cache(inductor_meta, filename)
@@ -81,7 +81,7 @@ class AutotuneCache:
             return None
 
     # Read the best config options from the most local cache and return it.
-    def _read(self) -> Optional[Dict[str, JsonDataTy]]:
+    def _read(self) -> dict[str, JsonDataTy] | None:
         if local_cache := self.local_cache:
             cache, key = local_cache
             if best_config := cache.get(key):
@@ -99,8 +99,8 @@ class AutotuneCache:
     # Read the best config options from the most local cache and figure out
     # which `configs` represents that option.
     def read_best(
-        self, inductor_meta: _InductorMetaTy, configs: List[Config]
-    ) -> Optional[Config]:
+        self, inductor_meta: _InductorMetaTy, configs: list[Config]
+    ) -> Config | None:
         if best := self._read():
             return _load_cached_autotuning(
                 best, self.configs_hash, configs, inductor_meta
@@ -186,7 +186,7 @@ class _AutotuneCacheBundlerImpl:
     _cache: RemoteCache[JsonDataTy]
 
     # All known entries from LocalAutotuneCache.put()
-    _entries: Dict[str, JsonDataTy]
+    _entries: dict[str, JsonDataTy]
 
     def end_compile(self) -> None:
         # TODO: Do we need to compute time_taken_ms and encode that somehow?
@@ -281,7 +281,7 @@ class _AutotuneCacheBundlerImpl:
 
 
 class AutotuneCacheBundler:
-    _bundler: Optional[_AutotuneCacheBundlerImpl] = None
+    _bundler: _AutotuneCacheBundlerImpl | None = None
 
     def __init__(self) -> None:
         pass
@@ -294,8 +294,8 @@ class AutotuneCacheBundler:
         cls,
         inductor_meta: _InductorMetaTy,
         *,
-        code: Optional[str] = None,
-        code_hash: Optional[str] = None,
+        code: str | None = None,
+        code_hash: str | None = None,
     ) -> None:
         assert cls._bundler is None
 
@@ -403,11 +403,11 @@ def _should_use_remote_autotune_cache(inductor_meta: _InductorMetaTy) -> bool:
 
 
 def _load_cached_autotuning(
-    best_config: Dict[str, JsonDataTy],
+    best_config: dict[str, JsonDataTy],
     configs_hash: str,
-    configs: List[Config],
+    configs: list[Config],
     inductor_meta: _InductorMetaTy,
-) -> Optional[Config]:
+) -> Config | None:
     if best_config is None:
         return None
     if best_config.pop("configs_hash", None) != configs_hash:
@@ -440,7 +440,7 @@ def _load_cached_autotuning(
 
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
-    def _get(self, key: str) -> Optional[bytes]:
+    def _get(self, key: str) -> bytes | None:
         try:
             with open(key, "rb") as fd:
                 return fd.read()
@@ -461,7 +461,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         super().__init__(backend, serde)
 
     @override
-    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
+    def _get(self, key: str, sample: Sample | None) -> JsonDataTy | None:
         AutotuneCacheBundler.sync()
         result = super()._get(key, sample)
         if result is not None:
@@ -474,12 +474,12 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         return result
 
     @override
-    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
+    def _put(self, key: str, value: JsonDataTy, sample: Sample | None) -> None:
         AutotuneCacheBundler.put(key, value)
         super()._put(key, value, sample)
 
 
-def _splitext_nodot(basename: str) -> Tuple[str, str]:
+def _splitext_nodot(basename: str) -> tuple[str, str]:
     root, ext = os.path.splitext(basename)
     if ext:
         ext = ext[1:]

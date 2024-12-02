@@ -1911,7 +1911,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -2225,7 +2225,7 @@ def _register_qlinear_weight_prepack_pass(
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,

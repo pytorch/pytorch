@@ -779,7 +779,7 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     m, n, k, layout, mat1, mat2, mat3 = mm_args(
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
-    choices: List[Dict[Any, Any]] = []
+    choices: list[dict[Any, Any]] = []
     for config in int8_mm_configs(
         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
     ):
