@@ -11,7 +11,6 @@ import unittest
 from collections import namedtuple
 from enum import Enum
 from functools import partial, wraps
-from math import inf
 from typing import (
     Any,
     ClassVar,
@@ -45,7 +44,6 @@ from torch.testing._internal.common_utils import (
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    MAX_CUDA_MEM,
     NATIVE_DEVICES,
     PRINT_REPRO_ON_FAILURE,
     skipCUDANonDefaultStreamIf,
@@ -1315,12 +1313,9 @@ def _has_sufficient_memory(device, size):
         if device == "cuda":
             device = "cuda:0"
         return (
-            min(
-                MAX_CUDA_MEM if MAX_CUDA_MEM else inf,
-                torch.cuda.memory.mem_get_info(device)[0],
-            )
-            >= size
-        )
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        ) >= size
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
@@ -1854,7 +1849,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
+def skipCUDAVersionIn(versions: Optional[List[Tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1872,7 +1867,7 @@ def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Tuple[int, int] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[Tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
