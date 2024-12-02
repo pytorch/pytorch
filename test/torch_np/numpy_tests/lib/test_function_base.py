@@ -35,10 +35,22 @@ IS_PYPY = False
 
 import string
 
+
 # FIXME: make from torch._numpy
 # These are commented, as if they are imported, some of the tests pass for the wrong reasons
 # from numpy lib import digitize, piecewise, trapz, select, trim_zeros, interp
-from numpy.lib import delete, extract, insert, msort, place, setxor1d, unwrap, vectorize
+# FIXME: broken on numpy 2.0+
+if int(numpy.__version__[0]) < 2:
+    from numpy.lib import (
+        delete,
+        extract,
+        insert,
+        msort,
+        place,
+        setxor1d,
+        unwrap,
+        vectorize,
+    )
 
 
 # If we are going to trace through these, we should use NumPy
