@@ -6,15 +6,15 @@ add_loop_eager_dynamic,compile_time_instruction_count,5703000000,0.025
 
 
 
-add_loop_inductor,compile_time_instruction_count,29490000000,0.015
+add_loop_inductor,compile_time_instruction_count,29510000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,43310000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,43280000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,25660000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,25690000000,0.015
 
 
 
@@ -22,7 +22,7 @@ basic_modules_ListOfLinears_eager,compile_time_instruction_count,1033000000,0.01
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,20790000000,0.015
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,20810000000,0.015
 
 
 
