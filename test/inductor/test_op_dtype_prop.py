@@ -16,6 +16,11 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import op_db
 
 
 # Make the helper files in test/ importable
@@ -32,7 +37,6 @@ from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-# Collect pointwise ops
 unique_pointwise_op_names = set()
 
 for op in lowerings:

@@ -1759,8 +1759,6 @@ Tensor _embedding_bag_sparse_backward_symint(
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);
 
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);

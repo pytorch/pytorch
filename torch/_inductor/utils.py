@@ -323,11 +323,15 @@ def convert_shape_to_symint(
     from .virtualized import V
 
     return [
-        i
-        if isinstance(i, int)
-        else int(i)
-        if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        (
+            i
+            if isinstance(i, int)
+            else (
+                int(i)
+                if isinstance(i, sympy.Integer)
+                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+            )
+        )
         for i in lst
     ]
 
@@ -1450,8 +1454,8 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 
 
 def run_and_get_graph_lowering(fn, *args, **kwargs):
-    from torch._inductor.codecache import CompiledFxGraph
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.output_code import CompiledFxGraph
 
     real_init = CompiledFxGraph.__init__
     graph_lowerings = []
@@ -2254,3 +2258,10 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     if cls is None:
         return wrap
     return wrap(cls)
+
+
+def get_donated_idxs() -> Optional[List[int]]:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is not None and tracing_context.fw_metadata:
+        return tracing_context.fw_metadata.bw_donated_idxs
+    return None
