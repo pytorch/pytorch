@@ -39,7 +39,6 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
-from torch._inductor.output_code import OutputCode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -52,6 +51,7 @@ from .. import config
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
+    from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.utils import InputType
 
 
@@ -83,7 +83,7 @@ def wrap_compiler_debug(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
         **kwargs: Unpack["_CompileFxKwargs"],
-    ) -> OutputCode:
+    ) -> Union["CompiledFxGraph", str]:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)

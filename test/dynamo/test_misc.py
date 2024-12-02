@@ -1398,7 +1398,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 8)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -3747,18 +3747,8 @@ utils_device.CURRENT_DEVICE == None""".split(
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
-            if i == 1:
-                # No automatic dynamic
-                self.assertEqual(cnts.frame_count, 1)
-                self.assertEqual(cnts.op_count, 3)
-            elif i == 2:
-                # Automatic dynamic float arguments kicked in
-                self.assertEqual(cnts.frame_count, 1)
-                self.assertEqual(cnts.op_count, 6)
-            else:
-                # No more recompiles
-                self.assertEqual(cnts.frame_count, 0)
-                self.assertEqual(cnts.op_count, 0)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 3)
             cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):

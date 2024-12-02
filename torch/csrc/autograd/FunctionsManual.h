@@ -144,13 +144,22 @@ template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
     T other,
+    ScalarType self_st);
+at::Tensor div_tensor_other_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& other);
+template <typename T>
+at::Tensor div_tensor_self_backward(
+    const Tensor& grad,
+    T other,
     ScalarType self_st,
-    const std::optional<c10::string_view>& rounding_mode = std::nullopt);
+    const std::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other,
-    const std::optional<c10::string_view>& rounding_mode = std::nullopt);
+    const std::optional<c10::string_view>& rounding_mode);
 at::Tensor mvlgamma_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
