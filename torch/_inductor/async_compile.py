@@ -232,7 +232,12 @@ class AsyncCompile:
                 ),
             )
         else:
-            kernel.precompile()
+            with dynamo_timed(
+                "async_compile.precompile",
+                log_pt2_compile_event=True,
+                log_waitcounter=True,
+            ):
+                kernel.precompile()
             return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
@@ -299,7 +304,9 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        with dynamo_timed("async_compile.wait", log_pt2_compile_event=True):
+        with dynamo_timed(
+            "async_compile.wait", log_pt2_compile_event=True, log_waitcounter=True
+        ):
             num_kernels = len(
                 [
                     value
