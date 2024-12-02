@@ -2760,7 +2760,6 @@ def _as_tensor_fullprec(t):
         return torch.as_tensor(t)
 
 def _nested_int_from_offsets(t):
-    from torch.nested._internal.nested_tensor import get_tensor_symint
-    from torch.nested._internal.cached_tensor import make_cached_tensor_with_offsets
+    from torch.nested._internal.nested_tensor import get_tensor_symint, make_cached_tensor_with_offsets
 
     return get_tensor_symint(make_cached_tensor_with_offsets(t))
