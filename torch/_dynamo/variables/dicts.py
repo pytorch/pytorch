@@ -845,7 +845,7 @@ class CustomizedDictVariable(ConstDictVariable):
                 if val is not None:
                     key = ConstantVariable.create(key)
                     items[key] = var
-        return cls(items, user_cls)
+        return cls(items, user_cls, source=builder.source)
 
     def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)
