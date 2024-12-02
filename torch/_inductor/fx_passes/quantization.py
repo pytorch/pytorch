@@ -2598,6 +2598,7 @@ def _register_smooth_quant_int_mm_pattern():
         KeywordArg("out_shape_with_bias"),
     )
 
+    pattern1_with_no_reshape = get_pattern_no_bias(expand_a_scale=False)
     pattern1_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=True)
     pattern1_with_bias_no_outer_reshape = CallFunction(
         aten.add.Tensor,
@@ -2606,7 +2607,7 @@ def _register_smooth_quant_int_mm_pattern():
     )
 
     def _validate_pattern(match: Match):
-        if len(match.nodes) not in [6, 7, 10]:
+        if len(match.nodes) not in [5, 6, 7, 10]:
             return False
         if len(match.nodes) == 10:
             # Check the two tailing reshape nodes can be fused
@@ -2631,6 +2632,7 @@ def _register_smooth_quant_int_mm_pattern():
         pattern_with_bias_1: 1,
         pattern1_with_no_outer_reshape: 2,
         pattern1_with_bias_no_outer_reshape: 2,
+        pattern1_with_no_reshape: 2,
     }
     for pattern, pass_number in pattern_to_pass_number.items():
 
