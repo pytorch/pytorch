@@ -48,7 +48,7 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
-if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
@@ -615,6 +615,11 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
+  # torchao requires cuda 8.0 or above for bfloat16 support
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;8.6"
+  fi
+  install_torchao
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     test_inductor_set_cpu_affinity
@@ -951,6 +956,9 @@ test_distributed() {
     python test/run_test.py --cpp --verbose -i cpp/FileStoreTest
     python test/run_test.py --cpp --verbose -i cpp/HashStoreTest
     python test/run_test.py --cpp --verbose -i cpp/TCPStoreTest
+
+    echo "Testing multi-GPU linalg tests"
+    python test/run_test.py -i test_linalg.py -k test_matmul_offline_mgpu_tunable --verbose
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       MPIEXEC=$(command -v mpiexec)
@@ -1385,7 +1393,8 @@ test_executorch() {
 
 test_linux_aarch64() {
   python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
-        test_transformers test_multiprocessing test_numpy_interop \
+        test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
+        test_foreach test_reductions test_unary_ufuncs \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1403,6 +1412,7 @@ test_linux_aarch64() {
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
+       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 

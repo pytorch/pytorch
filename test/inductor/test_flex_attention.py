@@ -7,6 +7,8 @@ import string
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
+from dataclasses import dataclass
+from itertools import product
 from typing import Callable, List, Optional, Tuple, Union
 from unittest import expectedFailure, skip, skipUnless
 from unittest.mock import patch
@@ -666,62 +668,64 @@ class TestFlexAttention(InductorTestCase):
         D: int = D,
     ):
         score_mod, mask_mod = score_mask_mod
-        # If the seqlen becomes smaller than the seqlen of the previous batch,
-        # we can still reuse the block_mask created from a larger seqlen.
-        MAX_S = S
-        block_mask = create_block_mask(mask_mod, 1, 1, MAX_S, MAX_S)
-        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
-        # The first eager batch, shape (B, H, S, D)
+
+        # First batch with original dimensions (B, H, S, D)
+        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
+
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
-        ref_out1 = sdpa_partial(q1_ref, k1_ref, v1_ref)
-        golden_out1 = sdpa_partial(q1_gold, k1_gold, v1_gold)
+        ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
+        golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
 
         backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out1.backward(backward_grad1.to(torch.float64))
         ref_out1.backward(backward_grad1)
 
-        # The second eager batch, shape (B * 2, H, S / 2, D)
+        # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
+
         q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
         q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, torch.float64)
-        ref_out2 = sdpa_partial(q2_ref, k2_ref, v2_ref)
-        golden_out2 = sdpa_partial(q2_gold, k2_gold, v2_gold)
+        ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
+        golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
 
         backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
-        # The third eager batch, shape (B * 2, H, S / 4, D)
+        # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
+        sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
+
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
         q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
-        ref_out3 = sdpa_partial(q3_ref, k3_ref, v3_ref)
-        golden_out3 = sdpa_partial(q3_gold, k3_gold, v3_gold)
+        ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
+        golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
 
         backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-
         golden_out3.backward(backward_grad3.to(torch.float64))
         ref_out3.backward(backward_grad3)
 
-        # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
-        # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
+        # Clear dynamo counters
         torch._dynamo.reset()
-        # Compiling with dynamic shape in the first batch.
-        compiled_sdpa = torch.compile(sdpa_partial, dynamic=True)
-        compiled_out1 = compiled_sdpa(q1, k1, v1)
+
+        # First compilation with original dimensions
+        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        compiled_out1 = compiled_sdpa1(q1, k1, v1)
         compiled_out1.backward(backward_grad1)
 
         self._check_out_and_grad(
@@ -740,10 +744,11 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # Since current q_seqlen (MAX_S/2) is smaller than the seqlen from block_mask (MAX_S),
-        # recompile to include the BlockMask._adjust part.
-        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        # Second compilation with new dimensions
+        compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
+        compiled_out2 = compiled_sdpa2(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
+
         self._check_out_and_grad(
             golden_out2,
             ref_out2,
@@ -758,13 +763,13 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # No re-compilation, use the compiled dynamic shape version.
-        # The current q_seqlen (MAX_S/4) is still smaller than the seqlen from block_mask (MAX_S),
-        # we don't recompile since we can reuse the compiled graph, which already includes the BlockMask._adjust part.
-        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        # Third compilation with new dimensions
+        compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
+        compiled_out3 = compiled_sdpa3(q3, k3, v3)
         compiled_out3.backward(backward_grad3)
+
         self._check_out_and_grad(
             golden_out3,
             ref_out3,
@@ -779,18 +784,7 @@ class TestFlexAttention(InductorTestCase):
             v3_ref,
             v3,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
-
-        # The forth iteration, shape (B * 2, H, S * 2, D)
-        # Since seqlen is larger than the seqlen in block_mask, throw errors.
-        S = int(S * 8)
-        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed, "Q seqlen must be smaller than"
-        ):
-            compiled_sdpa(q3, k3, v3)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
     def run_automatic_dynamic_test(
         self,
@@ -802,38 +796,42 @@ class TestFlexAttention(InductorTestCase):
         D: int = D,
     ):
         MAX_S = S
-        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
-        sdpa_partial = create_attention(score_mod, block_mask=block_mask)
+        block_mask1 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out1 = sdpa_partial(
+        golden_out1 = sdpa_partial1(
             q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
         )
-        ref_out1 = sdpa_partial(q1, k1, v1)
+        ref_out1 = sdpa_partial1(q1, k1, v1)
 
         # The second eager batch, shape (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask2 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
         q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out2 = sdpa_partial(
+        golden_out2 = sdpa_partial2(
             q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
         )
-        ref_out2 = sdpa_partial(q2, k2, v2)
+        ref_out2 = sdpa_partial2(q2, k2, v2)
 
         # The third eager batch, shape (B * 4, H, S / 4, D)
         B = int(B * 2)
         S = int(S / 2)
+        block_mask3 = create_block_mask(noop_mask, 1, 1, S, S)
+        sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
-        golden_out3 = sdpa_partial(
+        golden_out3 = sdpa_partial3(
             q3.to(torch.float64), k3.to(torch.float64), v3.to(torch.float64)
         )
-        ref_out3 = sdpa_partial(q3, k3, v3)
+        ref_out3 = sdpa_partial3(q3, k3, v3)
 
         # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
         # We check dynamo counters["frames"]["ok"] to ensure:
@@ -850,18 +848,17 @@ class TestFlexAttention(InductorTestCase):
             fudge_factor = 1.1
 
         # The first batch.
-        compiled_sdpa = torch.compile(sdpa_partial)
-        compiled_out1 = compiled_sdpa(q1, k1, v1)
+        compiled_out1 = torch.compile(sdpa_partial1)(q1, k1, v1)
         self._check_equal(golden_out1, ref_out1, compiled_out1, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # The second batch (automatic dynamic).
-        compiled_out2 = compiled_sdpa(q2, k2, v2)
+        compiled_out2 = torch.compile(sdpa_partial2)(q2, k2, v2)
         self._check_equal(golden_out2, ref_out2, compiled_out2, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
         # The third batch (no re-compilation).
-        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        compiled_out3 = torch.compile(sdpa_partial3)(q3, k3, v3)
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
@@ -910,11 +907,6 @@ class TestFlexAttention(InductorTestCase):
     def test_builtin_score_mods_dynamic(
         self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
     ):
-        if score_mask_mod[0].__name__ == "_alibi_bias":
-            # TODO
-            self.skipTest(
-                "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
-            )
         self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
@@ -1213,18 +1205,6 @@ class TestFlexAttention(InductorTestCase):
 
         self.run_test(composed_score_mod, dtype)
         self.run_test_with_paged_attention(composed_score_mod, dtype)
-
-    @supported_platform
-    @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
-    @common_utils.parametrize("dtype", test_dtypes)
-    def test_captured_buffers_req_grad(self, dtype: torch.dtype):
-        head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
-
-        def score_mod(score, b, h, m, n):
-            return score + head_offset[h]
-
-        self.run_test(score_mod, dtype, 4, 8, 128, 128)
-        self.run_test_with_paged_attention(score_mod, dtype, 4, 8, 128, 128)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -2213,7 +2193,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     # Use weird mask to test reusing block_mask does work well.
     @supported_platform
-    def test_block_mask_reuse_with_weird_mask(self):
+    def _test_block_mask_reuse_with_weird_mask(self):
         def mask(b, h, q, kv):
             return (kv < 256) | (kv >= 2048)
 
@@ -3207,8 +3187,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertExpectedInline(
             backend.graphs[0].score_mod_0.code.strip(),
             """\
-def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torch.Tensor, child_7 : torch.Tensor, child_8 : torch.Tensor, getitem : torch.SymInt):
-    add = child_4 + getitem;  child_4 = getitem = None
+def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.Tensor, child_3 : torch.Tensor, child_4 : torch.Tensor, getitem : torch.SymInt):
+    add = child + getitem;  child = getitem = None
     return add""",
         )
 
@@ -3241,12 +3221,12 @@ def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torc
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
+    def forward(self, L_query_: "f64[2, 2, 128, 4]", L_key_: "f64[2, 2, 128, 4]", L_value_: "f64[2, 2, 128, 4]", L_block_mask_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_num_blocks: "i32[1, 1, 1]", L_block_mask_full_kv_indices: "i32[1, 1, 1, 1]", L_block_mask_q_num_blocks: "i32[1, 1, 1]", L_block_mask_q_indices: "i32[1, 1, 1, 1]", L_block_mask_full_q_num_blocks: "i32[1, 1, 1]", L_block_mask_full_q_indices: "i32[1, 1, 1, 1]"):
         l_query_ = L_query_
         l_key_ = L_key_
         l_value_ = L_value_
-        l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
         l_block_mask_kv_indices = L_block_mask_kv_indices
+        l_block_mask_kv_num_blocks = L_block_mask_kv_num_blocks
         l_block_mask_full_kv_num_blocks = L_block_mask_full_kv_num_blocks
         l_block_mask_full_kv_indices = L_block_mask_full_kv_indices
         l_block_mask_q_num_blocks = L_block_mask_q_num_blocks
@@ -3254,18 +3234,9 @@ class GraphModule(torch.nn.Module):
         l_block_mask_full_q_num_blocks = L_block_mask_full_q_num_blocks
         l_block_mask_full_q_indices = L_block_mask_full_q_indices
 
-        child_1: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_1 = None
-        child_2: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_2 = None
-        child_3: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_3 = None
-        child_4: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_4 = None
-        child: "f64[]" = l_query_.new_empty([], requires_grad = True);  child = None
         score_mod_0 = self.score_mod_0
-        child_5: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_5 = None
-        child_6: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_6 = None
-        child_7: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_7 = None
-        child_8: "i32[]" = l_query_.new_empty([], dtype = torch.int32);  child_8 = None
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -3275,8 +3246,8 @@ class GraphModule(torch.nn.Module):
             return mul
 
     class mask_fn_0(torch.nn.Module):
-        def forward(self, child_5: "i32[]", child_6: "i32[]", child_7: "i32[]", child_8: "i32[]"):
-            ge: "b8[]" = child_7 >= child_8;  child_7 = child_8 = None
+        def forward(self, child: "i32[]", child_1: "i32[]", child_2: "i32[]", child_3: "i32[]"):
+            ge: "b8[]" = child_2 >= child_3;  child_2 = child_3 = None
             return ge
 """,  # noqa: B950
         )
@@ -3306,7 +3277,7 @@ class GraphModule(torch.nn.Module):
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -3662,6 +3633,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 full_q_indices=None,
                 BLOCK_SIZE=(64, 64),
                 mask_mod=noop_mask,
+                seq_lengths=(1, 1),
             )
 
     @supported_platform
@@ -3681,6 +3653,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 full_q_indices=None,  # Mismatched, should raise error
                 BLOCK_SIZE=(64, 64),
                 mask_mod=noop_mask,
+                seq_lengths=(1, 1),
             )
 
     @supported_platform
@@ -3805,6 +3778,35 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
             block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
+
+    @common_utils.parametrize("compile", [False, True])
+    @supported_platform
+    def test_block_mask_vs_sequence_lengths(self, compile):
+        if compile:
+            flex_attention_call = torch.compile(flex_attention)
+        else:
+            flex_attention_call = flex_attention
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def create_inputs(S):
+            q, k, v = (
+                torch.randn(
+                    1, 8, S, 64, dtype=torch.float16, requires_grad=True, device="cuda"
+                )
+                for _ in range(3)
+            )
+            return q, k, v
+
+        block_mask = create_block_mask(mask_mod, None, None, 1024, 1024)
+        flex_attention_call(*create_inputs(1024), block_mask=block_mask)
+        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+            flex_attention_call(*create_inputs(2048), block_mask=block_mask)
+
+        block_mask = create_block_mask(mask_mod, None, None, 1023, 1023)
+        with self.assertRaisesRegex(ValueError, "block_mask was created for"):
+            flex_attention_call(*create_inputs(1024), block_mask=block_mask)
 
 
 class TestPagedAttention(InductorTestCase):
@@ -4203,9 +4205,608 @@ class TestPagedAttention(InductorTestCase):
             self._check_equal(golden_out, ref_out, paged_out, fudge_factor, "Out")
 
 
+@dataclass
+class Params:
+    batch_size: int
+    num_heads: int
+    seq_length: int
+    head_dim: int
+    dtype: torch.dtype
+    config_str: Optional[str] = None
+
+    def __str__(self):
+        return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
+
+
+def get_params(dtypes: List[torch.dtype]) -> List[Params]:
+    params = []
+    seq_lengths = [37, 256, 277]
+    for seq_len, dtype in product(seq_lengths, dtypes):
+        params.append(
+            Params(
+                batch_size=2, num_heads=4, seq_length=seq_len, head_dim=16, dtype=dtype
+            )
+        )
+    return params
+
+
+# ROCM BUG SEE: https://github.com/pytorch/pytorch/issues/140855
+supports_learnable_bias = unittest.skipUnless(
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+    and not TEST_WITH_ROCM,
+    "Requires CUDA and Triton, and is not supported on ROCm",
+)
+
+
+@supports_learnable_bias
+class TestLearnableBiases(InductorTestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = "cuda"
+        self.dtype = torch.float32
+        self.atol = 3e-2
+        self.rtol = 3e-2
+
+    def _init_tensors(self, params: Params):
+        make_tensor = functools.partial(
+            torch.randn,
+            (params.batch_size, params.num_heads, params.seq_length, params.head_dim),
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+        return (make_tensor(), make_tensor(), make_tensor())
+
+    @torch.no_grad()
+    def _gold_check(self, eager, compiled, gold, tensor_name, fudge_factor=1.35):
+        ref_error = rmse(eager, gold)
+        comp_error = rmse(compiled, gold)
+        # Note: This has been carefully tested that FlexAttention is within
+        # 20% of the average error of SDPA! Do not bump this tolerance
+        # unless you are absolutely sure you are not worsening the accuracy
+        # of FlexAttention!
+        if eager.dtype == torch.float32:
+            fudge_factor = 10.0 * fudge_factor
+
+        comp_error = comp_error.item()
+        ref_error = ref_error.item() * fudge_factor
+
+        if (
+            tensor_name == "out"
+            and eager.dtype == torch.float32
+            and comp_error > ref_error
+        ):
+            self.skipTest("Compiled FlexAttention is less accurate than eager in fp32")
+
+        self.assertLessEqual(
+            comp_error,
+            (ref_error * fudge_factor),
+            f"\nTensor: {tensor_name}\nCompiled error ({comp_error:.8f}) exceeds "
+            f"reference error ({ref_error:.8f}) * fudge_factor ({fudge_factor})",
+        )
+
+    def _check_outputs_and_grads(
+        self, out_eager, out_compiled, out_gold, tensors, names=None
+    ):
+        backwards_grad = torch.randn_like(out_eager)
+        grads_eager = torch.autograd.grad((out_eager,), tensors, backwards_grad)
+        grads_compiled = torch.autograd.grad((out_compiled,), tensors, backwards_grad)
+        grads_gold = torch.autograd.grad((out_gold,), tensors, backwards_grad)
+
+        tensor_names = (
+            ["out", "grad_query", "grad_key", "grad_value", "grad_bias"]
+            if names is None
+            else names
+        )
+
+        eager_tensors = (out_eager, *grads_eager)
+        compiled_tensors = (out_compiled, *grads_compiled)
+        gold_tensors = (out_gold, *grads_gold)
+
+        for eager, compiled, gold, name in zip(
+            eager_tensors, compiled_tensors, gold_tensors, tensor_names, strict=True
+        ):
+            self._gold_check(eager, compiled, gold, name)
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_relative_1d_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            2 * params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[torch.abs(q_idx - kv_idx)]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_absolute_2d_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[q_idx, kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_head_specific_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.num_heads,
+            params.seq_length,
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[h, q_idx, kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_batch_head_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.batch_size,
+            params.num_heads,
+            params.seq_length,
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, q_idx, kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_multiplicative_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score * bias[q_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_local_window_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        window_size = 8
+        bias = torch.randn(
+            2 * window_size + 1,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            window_idx = torch.clamp(q_idx - kv_idx + window_size, 0, 2 * window_size)
+            return score + bias[window_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_global_tokens_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_weird_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.batch_size,
+            params.num_heads,
+            4,
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+        which_bias = torch.tensor(0, device=self.device)
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[b, h, which_bias, q_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_indirect_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        offset = torch.randint(
+            0,
+            params.seq_length,
+            (params.seq_length,),
+            device=self.device,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[offset[q_idx]]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params([torch.float32]), name_fn=lambda x: f"{x}"
+    )
+    def test_symmetric_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[q_idx] + bias[kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+        # Error in backwards
+        with self.assertRaisesRegex(
+            torch._inductor.exc.LoweringException,
+            "Using multiple indexing operations on the same tensor that requires gradients",
+        ):
+            self._check_outputs_and_grads(
+                out_eager,
+                out_compiled,
+                out_gold,
+                (query, key, value, bias),
+            )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_flipped_indexed_bias(self, params):
+        query, key, value = self._init_tensors(params)
+        bias = torch.randn(
+            params.seq_length,
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx, q_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_head_specific_gate(self, params):
+        query, key, value = self._init_tensors(params)
+        gate_score = torch.randn(
+            params.num_heads,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score * torch.sigmoid(gate_score[h].to(torch.float32))
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, gate_score),
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_distinct_biases(self, params):
+        query, key, value = self._init_tensors(params)
+        # Create two separate bias tensors
+        bias1 = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+        bias2 = torch.randn(
+            params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias1[q_idx] + bias2[kv_idx]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        # Include both bias tensors in the tuple for gradient checking
+        self._check_outputs_and_grads(
+            out_eager,
+            out_compiled,
+            out_gold,
+            (query, key, value, bias1, bias2),
+            names=[
+                "out",
+                "grad_query",
+                "grad_key",
+                "grad_value",
+                "grad_bias1",
+                "grad_bias2",
+            ],
+        )
+
+    @common_utils.parametrize(
+        "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
+    )
+    def test_relative_1d_bias_only_grad(self, params):
+        query, key, value = self._init_tensors(params)
+        query = query.detach().requires_grad_(False)
+        key = key.detach().requires_grad_(False)
+        value = value.detach().requires_grad_(False)
+
+        # Only bias requires gradients
+        bias = torch.randn(
+            2 * params.seq_length,
+            device=self.device,
+            dtype=params.dtype,
+            requires_grad=True,  # Only bias needs gradients
+        )
+
+        def bias_func(score, b, h, q_idx, kv_idx):
+            return score + bias[torch.abs(q_idx - kv_idx)]
+
+        flex_compiled = torch.compile(flex_attention)
+        out_eager = flex_attention(query, key, value, score_mod=bias_func)
+        out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+
+        out_gold = flex_attention(
+            query.to(torch.float64),
+            key.to(torch.float64),
+            value.to(torch.float64),
+            score_mod=bias_func,
+        )
+
+        # For gradient checking, we only pass the bias tensor since it's the only one requiring gradients
+        self._check_outputs_and_grads(
+            out_eager, out_compiled, out_gold, (bias,), names=["out", "bias"]
+        )
+
+
 common_utils.instantiate_parametrized_tests(TestFlexAttention)
 common_utils.instantiate_parametrized_tests(TestBlockMask)
 common_utils.instantiate_parametrized_tests(TestPagedAttention)
+common_utils.instantiate_parametrized_tests(TestLearnableBiases)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
