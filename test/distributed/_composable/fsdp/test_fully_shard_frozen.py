@@ -11,7 +11,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed.fsdp import fully_shard
-from torch.distributed.fsdp._fsdp_param_group import RegisterPostBackwardFunction
+from torch.distributed.fsdp.fully_shard._fsdp_param_group import (
+    RegisterPostBackwardFunction,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,

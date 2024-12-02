@@ -12,7 +12,6 @@ from unittest import mock
 
 import torch
 import torch._dynamo.testing
-import torch.distributed._composable.fsdp._fsdp_param
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import counters
@@ -24,8 +23,8 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp._fsdp_common import TrainingState
-from torch.distributed.fsdp._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.fully_shard._fsdp_common import TrainingState
+from torch.distributed.fsdp.fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
