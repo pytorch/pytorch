@@ -79,7 +79,7 @@ from torch._inductor.config import is_fbcode
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
 # serializable before enabling warm cache with this config turned on.
-view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
+view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
