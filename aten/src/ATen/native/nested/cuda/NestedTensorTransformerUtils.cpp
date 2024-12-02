@@ -273,7 +273,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
           TensorOptions().device(at::kCUDA).dtype(at::kInt));
       Nnz_kv = output_batch_size * max_seqlen_batch_kv;
     } else {
-      std::tie(cumulative_sequence_length_q, max_seqlen_batch_q, Nnz_q) =
+      std::tie(cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv) =
       k_batch_size_needs_broadcast
           ? cumulative_and_max_seq_len_nnz(v_t)
           : cumulative_and_max_seq_len_nnz(k_t);
@@ -362,14 +362,14 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     }
 
     return std::make_tuple(
-        query_buffer_reshaped,
-        key_buffer_reshaped,
-        value_buffer_reshaped,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_kv,
+        std::move(query_buffer_reshaped),
+        std::move(key_buffer_reshaped),
+        std::move(value_buffer_reshaped),
+        std::move(cumulative_sequence_length_q),
+        std::move(cumulative_sequence_length_kv),
         max_seqlen_batch_q,
         max_seqlen_batch_kv,
-        output_shape);
+        std::move(output_shape));
   }
 
 } // namespace
