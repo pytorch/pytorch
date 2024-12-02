@@ -641,18 +641,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cf = torch.compile(backend=cnts, fullgraph=True)(f)
 
         x = torch.randn(3)
-        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 2.0), cf(x, 2.0))
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))  # automatic dynamic kicks in here
         self.assertEqual(f(x, 4.0), cf(x, 4.0))
-        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        self.assertExpectedInline(cnts.frame_count, """2""")  # no recompile
         self.assertEqual(f(x, 5.0), cf(x, 5.0))
-        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertExpectedInline(cnts.frame_count, """3""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
-        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+        self.assertExpectedInline(cnts.frame_count, """4""")  # nan always recompiles
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_multiply_precision(self):
         dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
-        for dtype in dtypes:
+        for i, dtype in enumerate(dtypes):
 
             def fn(x, y):
                 return x * y
@@ -662,10 +663,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(5, dtype=dtype, requires_grad=True)
             y1 = 1.00048828125
             y2 = 1.00048828126
+            y3 = 1.00048828127
 
             self.assertEqual(fn_opt(x, y1), fn(x, y1))
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
-            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(fn_opt(x, y3), fn(x, y3))
+            if i == 0:
+                # This is kind of quirky part of automatic dynamic,
+                # since it just uses source name + tx.f_code as the key
+                # subsequent recompilations will actually reuse the automatic
+                # dynamic choices.
+                self.assertEqual(cnt.frame_count, 2)
+            else:
+                self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
