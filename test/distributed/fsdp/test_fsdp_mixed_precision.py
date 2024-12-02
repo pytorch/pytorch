@@ -22,7 +22,6 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
-from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim.swa_utils import AveragedModel
 from torch.testing._internal.common_distributed import (

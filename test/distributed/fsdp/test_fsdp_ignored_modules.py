@@ -194,9 +194,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             self._test_ignored_modules_nested,
         )
 
-    def _test_ignored_modules_nested(
-        self, use_orig_params: bool, ignore_modules: bool
-    ):
+    def _test_ignored_modules_nested(self, use_orig_params: bool, ignore_modules: bool):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
