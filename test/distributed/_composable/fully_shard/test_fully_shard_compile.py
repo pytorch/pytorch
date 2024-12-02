@@ -89,7 +89,7 @@ class TestCompile(FSDPTest):
                     checkpoint(module)
         model = torch.compile(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for i in range(10):
+        for _ in range(10):
             losses = []
             inp = ref_model.get_input(torch.device("cuda"))
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):

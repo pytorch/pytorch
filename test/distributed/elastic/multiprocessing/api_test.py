@@ -259,7 +259,7 @@ class _StartProcessesTest(TestCase):
     ) -> None:
         mp_queue = mp.get_context("spawn").Queue()
         child_nproc = 2
-        ctx = mp.spawn(
+        mp.spawn(
             start_processes_zombie_test,
             nprocs=1,
             args=(entrypoint, mp_queue, self.log_dir(), child_nproc),

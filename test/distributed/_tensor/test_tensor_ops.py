@@ -622,7 +622,7 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
-        fp32_sharded_dtensor1 = bf16_sharded_dtensor1.float()
+        bf16_sharded_dtensor1.float()
         hits, misses, _, _ = _get_sharding_prop_cache_info()
         # by now we should have cache hit
         self.assertEqual(hits, 1)

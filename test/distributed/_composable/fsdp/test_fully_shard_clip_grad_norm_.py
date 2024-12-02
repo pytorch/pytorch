@@ -35,7 +35,7 @@ class _TestClipGradNormBase(FSDPTest):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
         dp_mesh = dp_mesh or init_device_mesh("cuda", (self.world_size,))
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_optim.zero_grad()
             ref_model(inp).sum().backward()
             optim.zero_grad()

@@ -518,7 +518,7 @@ def fn():
         insts = bytecode_transformation.bytecode_from_template(fn, noprefix=False)
         self.assertEqual(insts[-1].opname, "NOP")
         insts_i = 0
-        for i, inst in enumerate(dis_insts):
+        for inst in dis_insts:
             if inst.opname == "RETURN_CONST":
                 self.assertEqual(insts[insts_i].opname, "LOAD_CONST")
                 insts_i += 1

@@ -105,7 +105,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
                 )
             return None
 
-        for callback in [callback1, callback2]:
+        for _ in [callback1, callback2]:
             torch._dynamo.reset()
             expected_varargs_output = target_with_varargs(
                 1, 2, 3, 4, name1=1, name2=2, name3=3
