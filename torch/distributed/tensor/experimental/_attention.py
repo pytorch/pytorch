@@ -443,6 +443,8 @@ def _templated_ring_attention(
         raise NotImplementedError(
             "is_causal requires the same query and context sequence lengths"
         )
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
 
     if isinstance(mesh, dist.ProcessGroup):
         pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
@@ -616,6 +618,8 @@ def _templated_ring_attention_backward(
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     """This API implements the backward of the ring attention."""
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
     pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
     rank = dist.get_rank(pg)
