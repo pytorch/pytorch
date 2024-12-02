@@ -54,8 +54,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_linear(
     const Tensor& self,
@@ -445,7 +444,6 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
       TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
