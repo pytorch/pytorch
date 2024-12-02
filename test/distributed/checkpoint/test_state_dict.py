@@ -873,12 +873,15 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             model_state_dict=full_sd,
             options=StateDictOptions(full_state_dict=True, strict=False),
         )
-        meta_model_dict = meta_model.state_dict()
-        cpu_mocel_dict = get_model_state_dict(cpu_model)
-        for key, value in cpu_mocel_dict.items():
-            device = value.device
-            meta_model_change_device = meta_model_dict[key].to(device=device)
-            self.assertEqual(value, meta_model_change_device)
+        meta_model_state_dict = meta_model.state_dict()
+        cpu_model_state_dict = get_model_state_dict(cpu_model)
+        for cpu_model_key, cpu_model_value in cpu_model_state_dict.items():
+            meta_model_value = (
+                meta_model_state_dict[cpu_model_key]
+                .full_tensor()
+                .to(device=cpu_model_value.device)
+            )
+            self.assertEqual(cpu_model_value, meta_model_value)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -902,12 +905,15 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 broadcast_from_rank0=True, full_state_dict=True, strict=False
             ),
         )
-        meta_model_dict = meta_model.state_dict()
-        cpu_mocel_dict = get_model_state_dict(cpu_model)
-        for key, value in cpu_mocel_dict.items():
-            device = value.device
-            meta_model_change_device = meta_model_dict[key].to(device=device)
-            self.assertEqual(value, meta_model_change_device)
+        meta_model_state_dict = meta_model.state_dict()
+        cpu_model_state_dict = get_model_state_dict(cpu_model)
+        for cpu_model_key, cpu_model_value in cpu_model_state_dict.items():
+            meta_model_value = (
+                meta_model_state_dict[cpu_model_key]
+                .full_tensor()
+                .to(device=cpu_model_value.device)
+            )
+            self.assertEqual(cpu_model_value, meta_model_value)
 
 
 class TestNoComm(MultiProcessTestCase):
