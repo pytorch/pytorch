@@ -1,4 +1,5 @@
 from typing import *  # noqa: F403
+from contextlib import contextmanager
 import weakref
 
 import torch
@@ -170,6 +171,20 @@ _global_offload_tensor_registry = None
 def init_offload_tensor_registry(registry):
     global _global_offload_tensor_registry
     _global_offload_tensor_registry = registry
+
+
+@contextmanager
+def offload_tensor_registry(registry):
+    global _global_offload_tensor_registry
+    # Save the current registry to restore it later
+    old_registry = _global_offload_tensor_registry
+    # Set the new registry
+    _global_offload_tensor_registry = registry
+    try:
+        yield
+    finally:
+        # Restore the old registry
+        _global_offload_tensor_registry = old_registry
 
 
 def create_offload_tensor(device, device_tensor, host_tensor):
