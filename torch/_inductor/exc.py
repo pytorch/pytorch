@@ -4,7 +4,7 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, List
+from typing import Any
 
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":

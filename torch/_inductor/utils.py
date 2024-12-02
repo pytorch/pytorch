@@ -26,19 +26,14 @@ from io import StringIO
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     NamedTuple,
     Optional,
     Protocol,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from collections.abc import Iterable, Sequence, ValuesView
 from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
@@ -48,6 +43,8 @@ import torch
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence, ValuesView
+
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
 from torch.utils._pytree import tree_map_only
@@ -251,9 +248,7 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(
-    numer: int | sympy.Expr, denom: int | sympy.Expr
-) -> int | sympy.Expr:
+def ceildiv(numer: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Expr:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
         return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
@@ -300,9 +295,7 @@ def _type_of(key):
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
-def convert_shape_to_inductor(
-    lst: Iterable[int | torch.SymInt]
-) -> list[sympy.Expr]:
+def convert_shape_to_inductor(lst: Iterable[int | torch.SymInt]) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -312,7 +305,7 @@ def convert_shape_to_inductor(
 
 
 def convert_shape_to_symint(
-    lst: Iterable[int | sympy.Expr]
+    lst: Iterable[int | sympy.Expr],
 ) -> list[int | torch.SymInt]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
@@ -865,9 +858,7 @@ def argsort(seq) -> list[int]:
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
-def argsort_sym(
-    shape_env, seq: Sequence[int | torch.SymInt | sympy.Expr]
-) -> list[int]:
+def argsort_sym(shape_env, seq: Sequence[int | torch.SymInt | sympy.Expr]) -> list[int]:
     def cmp(a, b):
         a_idx, a_val = a
         b_idx, b_val = b

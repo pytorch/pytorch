@@ -6,17 +6,7 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TypeVar,
-)
-from collections.abc import Sequence
+from typing import Any, Callable, NamedTuple, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -29,6 +19,10 @@ from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 T = TypeVar("T")

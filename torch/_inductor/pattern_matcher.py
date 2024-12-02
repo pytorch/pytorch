@@ -50,23 +50,9 @@ import textwrap
 import typing
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Dict,
-    List,
-    NoReturn,
-    Optional,
-    Protocol,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
 from collections.abc import Generator, Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import Any, Callable, DefaultDict, NoReturn, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -1846,9 +1832,8 @@ def fx_to_pattern(
 
                 def process_arg_fn_impl(
                     x: T,
-                    ignore_types_override: Sequence[type[Any]] | None = tuple(
-                        t for t in ignore_types if t is not int
-                    ),
+                    ignore_types_override: Sequence[type[Any]]
+                    | None = tuple(t for t in ignore_types if t is not int),
                 ) -> T | KeywordArg | Ignored:
                     return process_arg(x, ignore_types_override)
 

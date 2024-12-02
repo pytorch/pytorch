@@ -2,18 +2,8 @@
 import functools
 import itertools
 import logging
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-)
 from collections.abc import Iterable, Sequence
+from typing import Any, Callable, cast, Optional, Union
 
 import sympy
 from sympy import Expr

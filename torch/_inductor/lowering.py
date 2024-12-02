@@ -9,8 +9,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
-from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -74,6 +73,10 @@ from .utils import (
     use_scatter_fallback,
 )
 from .virtualized import ops, V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)

@@ -8,21 +8,10 @@ import re
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from types import ModuleType
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Dict,
-    List,
-    NoReturn,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
-from collections.abc import Iterable, Iterator, Sequence
+from typing import Any, Callable, DefaultDict, NoReturn, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr

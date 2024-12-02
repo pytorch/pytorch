@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch import _prims, Tensor
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)

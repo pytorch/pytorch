@@ -10,7 +10,7 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed

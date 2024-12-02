@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree

@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree

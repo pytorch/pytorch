@@ -13,22 +13,8 @@ import pprint
 import textwrap
 import traceback
 import typing
-from collections import defaultdict
-from typing import (
-    Any,
-    Callable,
-    DefaultDict,
-    Dict,
-    Generic,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
-from collections import Counter
-from collections.abc import Sequence
+from collections import Counter, defaultdict
+from typing import Any, Callable, DefaultDict, Generic, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -64,6 +50,10 @@ from .utils import (
     sympy_product,
 )
 from .virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
