@@ -942,8 +942,12 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, torch.SymBool):
-            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+        elif isinstance(value, (torch.SymBool, torch.SymInt)):
+            assert torch.compiler.is_compiling(), (
+                "We only expect to receive torch.SymBool and torch.SymInt input during export."
+                " Please file an issue if you see this error message."
+            )
+            # Note: the idea for supporting SymBool input is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
 
             # Concretely,
@@ -951,31 +955,42 @@ class VariableBuilder:
             # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
-
-            new_source = ConvertIntSource(self.source)
+            source = (
+                self.source
+                if isinstance(value, torch.SymInt)
+                else ConvertIntSource(self.source)
+            )
             if value.node.has_hint():
-                value_hint = value.node.require_hint()
-
                 new_symint = (
                     self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value_hint),
-                        new_source,
+                        int(value.node.hint),
+                        source,
                         dynamic_dim=DimDynamic.DYNAMIC,
                     )
                 )
             else:
-                # We need to create an unbacked symint to replace the unbacked symbool.
-                new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                if isinstance(value, torch.SymBool):
+                    # We need to create an unbacked symint to replace the unbacked symbool.
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                else:
+                    # TODO (yidi): we need to figure out a way to propagate the guards
+                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
+                    # this is automatically done by evaluating the guards once but this
+                    # will cause data-dependent error when we evaluate the outer unbacked symints.
+                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                    unimplemented(
+                        "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
+                    )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
                 new_symint,
-                source=new_source,
+                source=source,
             )
 
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                new_source,
+                source,
                 new_symint,
                 False,
                 None,
@@ -987,55 +1002,13 @@ class VariableBuilder:
             assert isinstance(
                 sym_expr, sympy.Symbol
             ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, new_source, None)
-            )
-            return SymNodeVariable(
-                sym_node_proxy,
-                new_symint == 1,
-            )
-        elif isinstance(value, torch.SymInt):
-            if value.node.has_hint():
-                new_symint = (
-                    self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        value.node.hint,
-                        self.source,
-                        dynamic_dim=DimDynamic.DYNAMIC,
-                    )
-                )
-            else:
-                # TODO (yidi): we need to figure out a way to propagate the guards
-                # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
-                # this is automatically done by evaluating the guards once but this
-                # will cause data-dependent error when we evaluate the outer unbacked symints.
-                # The test case that triggers this graph break is test_cond_unbacked_symint_closure
-                unimplemented(
-                    "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
-                )
+            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
 
-            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(new_symint),
-                new_symint,
-                source=self.source,
-            )
+            tracing_symint = (
+                new_symint if isinstance(value, torch.SymInt) else new_symint == 1
+            )  # cast it back to symbool for tracing
+            return SymNodeVariable(sym_node_proxy, tracing_symint)
 
-            sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                self.source,
-                new_symint,
-                False,
-                None,
-                is_tensor=False,
-                example_strong_ref=new_symint,
-            )
-            sym_expr = new_symint.node.expr
-            assert isinstance(
-                sym_expr, sympy.Symbol
-            ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, self.source, None)
-            )
-            return SymNodeVariable.create(self.tx, sym_node_proxy, new_symint)
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(

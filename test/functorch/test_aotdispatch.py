@@ -5106,6 +5106,7 @@ class TestPartitioning(AOTTestCase):
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all(is_sym_node(n) for n in outs[1:]))
 
+    @skipIfTorchDynamo("Testing isinstance raw symints is not meaningful in user code.")
     def test_default_partitioner_output_tensor_shape_tensor(self):
         inp = [
             torch.randn(10, requires_grad=True),
