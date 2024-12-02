@@ -478,7 +478,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64
 
   int64_t aggregate = blockIdx.x == 0 ? 0 : agg[blockIdx.x - 1];
   d_out += aggregate;
- 
+
   TransformInputIteratorT t_input_itr(d_in, NonZeroOp<T>());
 
   // Per-thread tile data
@@ -507,7 +507,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64
     int aggregate;
     __shared__ int aggregate_sh;
     BlockScanT(temp_storage.scan).ExclusiveSum(data, out_indices, aggregate);
-    
+
     if (threadIdx.x == 0){
       aggregate_sh = aggregate;
     }
@@ -524,7 +524,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64
     for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
       if (data[ii] != 0 && out_indices[ii] < out_remaining) {
         int64_t inp_idx = start_idx + threadIdx.x + blockDim.x * ii;
-        d_out[out_indices[ii]] = inp_idx; 
+        d_out[out_indices[ii]] = inp_idx;
       }
     }
 

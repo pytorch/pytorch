@@ -287,9 +287,9 @@ void nonzero_static_cuda_out_impl(
   if (need_to_copy) {
     out.copy_(out_temp);
   }
-#else 
+#else
   TORCH_CHECK(false, "Nonzero_statis is not supported for cuda <= 11.4");
-#endif  
+#endif
 }
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {
