@@ -1552,6 +1552,7 @@ class Kernel(CodeGen):
         class CSEProxy:
             self.name = "CSEProxy"
             vr_analysis = ValueRangeAnalysis()
+            dtype_handler = DtypePropagationOpsHandler()
 
             @staticmethod
             def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
@@ -1559,7 +1560,6 @@ class Kernel(CodeGen):
                     bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
-                    dtype_handler = DtypePropagationOpsHandler()
 
                     output_idx = 0
 
