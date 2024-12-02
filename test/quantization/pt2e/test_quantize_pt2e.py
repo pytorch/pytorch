@@ -1174,40 +1174,44 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    @skipIfHpu
+    class DtypeActQuantizer(Quantizer):
+        def __init__(self, quant_dtype, op_name):
+            self.quant_dtype = quant_dtype
+            self.op_name = op_name
+
+        def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+            quant_dtype = self.quant_dtype
+            info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
+            activate_qspec = QuantizationSpec(
+                dtype=quant_dtype,
+                quant_min=int(info_fun(quant_dtype).min),
+                quant_max=int(info_fun(quant_dtype).max),
+                qscheme=torch.per_tensor_affine,
+                is_dynamic=False,
+                observer_or_fake_quant_ctr=observer.default_observer,
+            )
+            int8_qspec = QuantizationSpec(
+                dtype=torch.int8,
+                quant_min=-128,
+                quant_max=127,
+                qscheme=torch.per_tensor_symmetric,
+                is_dynamic=False,
+                observer_or_fake_quant_ctr=observer.default_weight_observer,
+            )
+            quantization_config = QuantizationConfig(
+                input_activation=activate_qspec,
+                weight=int8_qspec,
+                bias=None,
+                output_activation=activate_qspec,
+            )
+            OP_TO_ANNOTATOR[self.op_name](model, quantization_config)
+
+        def validate(self, model: torch.fx.GraphModule) -> None:
+            pass
+
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("quant_dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
     def test_quantization_dtype(self, dtype, quant_dtype):
-        class DtypeActQuantizer(Quantizer):
-            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
-                activate_qspec = QuantizationSpec(
-                    dtype=quant_dtype,
-                    quant_min=int(info_fun(quant_dtype).min),
-                    quant_max=int(info_fun(quant_dtype).max),
-                    qscheme=torch.per_tensor_affine,
-                    is_dynamic=False,
-                    observer_or_fake_quant_ctr=observer.default_observer,
-                )
-                int8_qspec = QuantizationSpec(
-                    dtype=torch.int8,
-                    quant_min=-128,
-                    quant_max=127,
-                    qscheme=torch.per_tensor_symmetric,
-                    is_dynamic=False,
-                    observer_or_fake_quant_ctr=observer.default_weight_observer,
-                )
-                quantization_config = QuantizationConfig(
-                    input_activation=activate_qspec,
-                    weight=int8_qspec,
-                    bias=None,
-                    output_activation=activate_qspec,
-                )
-                OP_TO_ANNOTATOR["conv"](model, quantization_config)
-
-            def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
         class M(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
@@ -1216,7 +1220,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        quantizer = DtypeActQuantizer()
+        quantizer = self.DtypeActQuantizer(quant_dtype=quant_dtype, op_name="conv")
         node_occurrence = {
             # one for input of the first conv, one for output for the first conv
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
@@ -1452,9 +1456,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 
-    def test_save_load(self):
+    @parametrize("quant_dtype", (torch.float32, torch.float8_e5m2, torch.float8_e4m3fn))
+    def test_save_load(self, quant_dtype=None):
         """Test save/load a quantized model"""
-        m = self._get_pt2e_quantized_linear()
+        quantizer = None
+        if quant_dtype != torch.float32:
+            quantizer = self.DtypeActQuantizer(quant_dtype=quant_dtype, op_name="conv")
+        m = self._get_pt2e_quantized_linear(quantizer=quantizer)
         example_inputs = (torch.randn(2, 2),)
         ref_res = m(*example_inputs)
 
