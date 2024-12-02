@@ -315,10 +315,10 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     const auto bdim_size = input_value.size(*input_bdim);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = at::native_group_norm(input_, std::nullopt, std::nullopt, N * bdim_size, C, HxW, group, eps);
-    result0 = makeBatched(reshape_dim_outof(0, bdim_size, std::get<0>(result)), 0, cur_level);
-    mean = makeBatched(reshape_dim_outof(0, bdim_size, std::get<1>(result)), 0, cur_level);
-    rstd = makeBatched(reshape_dim_outof(0, bdim_size, std::get<2>(result)), 0, cur_level);
+    std::tie(result0, mean, rstd) = at::native_group_norm(input_, std::nullopt, std::nullopt, N * bdim_size, C, HxW, group, eps);
+    result0 = makeBatched(reshape_dim_outof(0, bdim_size, result0), 0, cur_level);
+    mean = makeBatched(reshape_dim_outof(0, bdim_size, mean), 0, cur_level);
+    rstd = makeBatched(reshape_dim_outof(0, bdim_size, rstd), 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     std::tie(result0, mean, rstd) = at::native_group_norm(input_value, std::nullopt, std::nullopt, N, C, HxW, group, eps);
@@ -334,10 +334,10 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     result0 = result0 + padded_bias;
   }
 
-  return std::make_tuple(result0, mean, rstd);
+  return std::make_tuple(std::move(result0), std::move(mean), std::move(rstd));
 }
 
-static std::tuple<at::Tensor, std::optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
+static at::Tensor group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
     const at::Tensor & mean, std::optional<int64_t> mean_bdim,
@@ -359,15 +359,13 @@ static std::tuple<at::Tensor, std::optional<int64_t>> group_norm_backward_no_wei
   mean_ = reshape_dim_into(0, 0, mean_);         // [B0 * N, G]
   rstd_ = reshape_dim_into(0, 0, rstd_);         // [B0 * N, G]
 
-  const auto result = native_group_norm_backward(
+  auto result0 = std::get<0>(native_group_norm_backward(
       grad_out_.contiguous(),
       input_.contiguous(),
       mean_.contiguous(),
       rstd_.contiguous(),
-      std::nullopt, N * bdim_size, C, HxW, group, {true, false, false});
-  auto result0 = std::get<0>(result);
-  result0 = reshape_dim_outof(0, bdim_size, result0);
-  return std::make_tuple(result0, 0);
+      std::nullopt, N * bdim_size, C, HxW, group, {true, false, false}));
+  return reshape_dim_outof(0, bdim_size, result0);
 }
 
 static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
@@ -422,14 +420,14 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    auto [tensor, bdim] = group_norm_backward_no_weight_bias_batch_rule(
+    auto tensor = group_norm_backward_no_weight_bias_batch_rule(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
         mean_value, mean_bdim,
         rstd_value, rstd_bdim,
         N, C, HxW, group
     );
-    grad_input = makeBatched(tensor, bdim, cur_level);
+    grad_input = makeBatched(std::move(tensor), 0, cur_level);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
