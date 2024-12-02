@@ -23,9 +23,9 @@ from .virtualized import V
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(
-    pattern: Tuple[Type[torch.nn.modules.Module], Callable[..., Any]],
+    pattern: tuple[type[torch.nn.modules.Module], Callable[..., Any]],
     node: torch.fx.node.Node,
-    modules: Dict[str, torch.nn.modules.Module],
+    modules: dict[str, torch.nn.modules.Module],
 ) -> bool:
     if len(node.args) == 0:
         return False
@@ -208,7 +208,7 @@ def get_fake(x):
     return x
 
 
-def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, Any]]:
+def get_fake_args_kwargs(x: torch.fx.Node) -> tuple[bool, tuple[Any], dict[str, Any]]:
     """
     First value returns a boolean if any of the input nodes don't have a faketensor.
     """

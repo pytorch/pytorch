@@ -8,7 +8,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Generator,
     List,
     Optional,
     Set,
@@ -16,6 +15,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from collections.abc import Generator
 from typing_extensions import ParamSpec
 
 import torch
@@ -30,7 +30,7 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = Dict[Union[OpOverload, str], Callable[..., Any]]
+LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
 TargetType = Union[Callable[..., Any], str]
 
 
@@ -40,20 +40,20 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
     lowering object. Errors if buffers are created unexpectedly
     """
 
-    graph_outputs: Optional[List[ir.IRNode]]
+    graph_outputs: Optional[list[ir.IRNode]]
     root_graph: torch._inductor.graph.GraphLowering
     _current_op: Optional[TargetType]
     # For backwards of buffer_grads with scatters we allow mutations
-    allowed_mutations: Optional[Set[OpOverload]]
+    allowed_mutations: Optional[set[OpOverload]]
     additional_lowerings: Optional[LoweringDict]
-    buffers: List[ir.Buffer]
-    mutated_buffers: Set[str]
+    buffers: list[ir.Buffer]
+    mutated_buffers: set[str]
 
     def __init__(
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: torch._inductor.graph.GraphLowering,
-        allowed_mutations: Optional[Set[OpOverload]] = None,
+        allowed_mutations: Optional[set[OpOverload]] = None,
         additional_lowerings: Optional[LoweringDict] = None,
     ) -> None:
         super().__init__(gm)
@@ -112,7 +112,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         target: TargetType,
         args: Any,
-        kwargs: Dict[str, Any],
+        kwargs: dict[str, Any],
     ) -> Any:
         from .lowering import lowerings
 
@@ -133,7 +133,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
             return lowerings[target](*args, **kwargs)
 
-    def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
+    def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 
@@ -158,14 +158,14 @@ class TracingOpsHandler(WrapperHandler[T]):
     def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args: Tuple[object]) -> torch.fx.Node:
+    def output(self, *args: tuple[object]) -> torch.fx.Node:
         return self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )
 
 
 def lower_pointwise_subgraph(
-    subgraph: ir.Subgraph, inputs: List[InputDescriptor]
+    subgraph: ir.Subgraph, inputs: list[InputDescriptor]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(

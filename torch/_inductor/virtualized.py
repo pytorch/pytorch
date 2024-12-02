@@ -106,7 +106,7 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
+    def __init__(self, vname: str, default: Callable[[], T] | type[NullHandler]):
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
@@ -154,7 +154,7 @@ class NullKernelHandler(NullHandler):
 
 _ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
-_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
     "kernel", NullKernelHandler
