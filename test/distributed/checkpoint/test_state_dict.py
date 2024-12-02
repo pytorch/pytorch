@@ -204,7 +204,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.run_subtests(
             {
                 "use_orig_params": [True, False],
-                "use_composable": [False],
                 "use_dtensor": [True, False],
                 "wrapping": [(), (nn.Linear, UnitModule)],
                 "optimizer_class": [
@@ -222,7 +221,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.run_subtests(
             {
                 "use_orig_params": [True],
-                "use_composable": [False],
                 "use_dtensor": [False],
                 "wrapping": [()],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
