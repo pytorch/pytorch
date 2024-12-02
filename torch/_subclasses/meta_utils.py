@@ -821,7 +821,7 @@ class MetaConverter(Generic[_TensorT]):
         self.arg_cnt += 1
 
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            callback = functools.partial(callback_, device=t.device)
+            callback = functools.partial(callback, device=t.device)
 
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)
