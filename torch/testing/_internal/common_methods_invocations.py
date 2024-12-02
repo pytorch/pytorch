@@ -13120,7 +13120,8 @@ op_db: List[OpInfo] = [
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="trunc")),
+                    sample_kwargs=lambda device, dtype, input:
+                        ({"rounding_mode": "trunc"}, {"rounding_mode": "trunc"}),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -13149,7 +13150,8 @@ op_db: List[OpInfo] = [
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="floor")),
+                    sample_kwargs=lambda device, dtype, input:
+                        ({"rounding_mode": "floor"}, {"rounding_mode": "floor"}),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
