@@ -103,15 +103,23 @@ std::vector<at::Tensor> constructTensors(
   if (!qdataArg.has_value()) {
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
                          .memory_format(deduce_memory_format(
-                             buf_strides_vec[i], buf_dims_vec[i]))
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
                          .requires_grad(false);
       auto tensor = at::from_blob(
-          buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
-      tensors.emplace_back(std::move(tensor));
+          // NOLINTNEXTLINE
+          buf_data_vec[i],
+          buf_dims_vec[i],
+          buf_strides_vec[i],
+          options);
+      tensors.emplace_back(tensor);
     }
   } else {
     // handle quantized
@@ -121,26 +129,35 @@ std::vector<at::Tensor> constructTensors(
     }
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
                          .memory_format(deduce_memory_format(
-                             buf_strides_vec[i], buf_dims_vec[i]))
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
                          .requires_grad(false);
       if (auto qd = qdata[i]) {
         // inplace tensor
         auto tensor = from_blob_quantized(
+            // NOLINTNEXTLINE
             buf_data_vec[i],
             buf_dims_vec[i],
             buf_strides_vec[i],
             qd->scale,
             qd->zero,
             qd->scalarType);
-        tensors.emplace_back(std::move(tensor));
+        tensors.emplace_back(tensor);
       } else {
         auto tensor = at::from_blob(
-            buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
-        tensors.emplace_back(std::move(tensor));
+            // NOLINTNEXTLINE
+            buf_data_vec[i],
+            buf_dims_vec[i],
+            buf_strides_vec[i],
+            options);
+        tensors.emplace_back(tensor);
       }
     }
   }
@@ -196,15 +213,23 @@ std::vector<at::Tensor> constructTensors2(
   if (!qdataArg.has_value()) {
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
                          .memory_format(deduce_memory_format(
-                             buf_strides_vec[i], buf_dims_vec[i]))
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
                          .requires_grad(false);
       auto tensor = at::from_blob(
-          buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
-      tensors.emplace_back(std::move(tensor));
+          // NOLINTNEXTLINE
+          buf_data_vec[i],
+          buf_dims_vec[i],
+          buf_strides_vec[i],
+          options);
+      tensors.emplace_back(tensor);
     }
   } else {
     // handle quantized
@@ -214,26 +239,35 @@ std::vector<at::Tensor> constructTensors2(
     }
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
                          .memory_format(deduce_memory_format(
-                             buf_strides_vec[i], buf_dims_vec[i]))
+                             // NOLINTNEXTLINE
+                             buf_strides_vec[i],
+                             // NOLINTNEXTLINE
+                             buf_dims_vec[i]))
                          .requires_grad(false);
       if (auto qd = qdata[i]) {
         // inplace tensor
         auto tensor = from_blob_quantized(
+            // NOLINTNEXTLINE
             buf_data_vec[i],
             buf_dims_vec[i],
             buf_strides_vec[i],
             qd->scale,
             qd->zero,
             qd->scalarType);
-        tensors.emplace_back(std::move(tensor));
+        tensors.emplace_back(tensor);
       } else {
         auto tensor = at::from_blob(
-            buf_data_vec[i], buf_dims_vec[i], buf_strides_vec[i], options);
-        tensors.emplace_back(std::move(tensor));
+            // NOLINTNEXTLINE
+            buf_data_vec[i],
+            buf_dims_vec[i],
+            buf_strides_vec[i],
+            options);
+        tensors.emplace_back(tensor);
       }
     }
   }
@@ -395,6 +429,7 @@ void nnc_aten_quantized_conv1d(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
@@ -427,6 +462,7 @@ void nnc_aten_quantized_conv1d_out(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
@@ -459,6 +495,7 @@ void nnc_aten_quantized_conv2d(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -489,6 +526,7 @@ void nnc_aten_quantized_conv2d_out(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -519,6 +557,7 @@ void nnc_aten_quantized_conv2d_relu(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -549,6 +588,7 @@ void nnc_aten_quantized_conv2d_relu_out(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -579,6 +619,7 @@ void nnc_aten_quantized_linear(
       reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -609,6 +650,7 @@ void nnc_aten_quantized_linear_out(
       reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -639,6 +681,7 @@ void nnc_aten_quantized_linear_relu(
       reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = linearPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -673,6 +716,7 @@ void nnc_aten_quantized_add(
 
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
+  // NOLINTNEXTLINE
   auto r = quantized_add(tensors[1], tensors[2], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -703,6 +747,7 @@ void nnc_aten_quantized_mul(
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
+  // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -735,6 +780,7 @@ void nnc_aten_quantized_mul_out(
       1u);
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
+  // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -762,6 +808,7 @@ void nnc_aten_quantized_mul_scalar(
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
   const double scalar = ((double*)extra_args)[3];
+  // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -789,6 +836,7 @@ void nnc_aten_quantized_mul_scalar_out(
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
       bufs_out_num);
   const double scalar = ((double*)extra_args)[3];
+  // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -815,6 +863,7 @@ void nnc_aten_quantized_relu(
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+  // NOLINTNEXTLINE
   auto r = at::relu(tensors[1]);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -840,6 +889,7 @@ void nnc_aten_quantized_sigmoid(
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
 
+  // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -867,6 +917,7 @@ void nnc_aten_quantized_sigmoid_out(
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
       bufs_out_num);
 
+  // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
@@ -1072,6 +1123,7 @@ void nnc_aten_dequantize(
       buf_dtypes,
       {{1u,
         {qscale, qzero, toQIntType(static_cast<c10::ScalarType>(qdtype))}}});
+  // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
@@ -1098,6 +1150,7 @@ void nnc_aten_dequantize_out(
       buf_dtypes,
       {{1u, {qscale, qzero, toQIntType(static_cast<c10::ScalarType>(qdtype))}}},
       bufs_out_num);
+  // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
