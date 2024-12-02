@@ -1190,7 +1190,7 @@ def wrap_key(
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
-        out = f(*tensors)  # type:ignore[call-arg]
+        out = f(*tensors)
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out

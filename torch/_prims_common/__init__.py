@@ -1612,7 +1612,7 @@ def reduction_dtypes(
 # batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
-) -> Tuple[Union[_IntLikeT, int], ...]:
+) -> Tuple[int, ...]:
     """
     Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
@@ -1625,13 +1625,11 @@ def make_contiguous_strides_for(
 
     from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    multiplier: Union[_IntLikeT, int] = 1
+    multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= (
-            l if is_nested_int(l) else sym_max(l, 1)
-        )  # type:ignore[assignment]
+        multiplier *= l if is_nested_int(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
