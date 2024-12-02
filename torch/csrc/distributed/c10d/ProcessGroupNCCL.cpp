@@ -21,6 +21,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -476,10 +477,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // DEFAULT_FLAGS = cudaEventDisableTiming.
   if (cudaEventCacheEnabled) {
     ncclStartEvent_ = enableTiming
-        ? ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming)
+        ? ProcessGroupNCCL::CUDAEventCache::get(device.index())
+              .create(enableTiming)
         : nullptr;
-    ncclEndEvent_ =
-        ProcessGroupNCCL::CUDAEventCache::get().create(enableTiming);
+    ncclEndEvent_ = ProcessGroupNCCL::CUDAEventCache::get(device.index())
+                        .create(enableTiming);
   } else {
     ncclStartEvent_ = enableTiming
         ? std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault)
@@ -828,10 +830,27 @@ std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
   return std::shared_ptr<at::cuda::CUDAEvent>(event, std::move(deleter));
 }
 
-ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get() {
-  // Return a singleton instance of CUDAEventCache.
-  static ProcessGroupNCCL::CUDAEventCache cache;
-  return cache;
+ProcessGroupNCCL::CUDAEventCache& ProcessGroupNCCL::CUDAEventCache::get(
+    at::DeviceIndex device) {
+  // A per-thread singleton of device-to-CUDAEventCache map.
+  // Map is needed because events cannot be reused across devices.
+  // Per-thread ownership is needed to support multi-threaded case (instead of
+  // multi-process case).
+  static thread_local std::
+      map<at::DeviceIndex, ProcessGroupNCCL::CUDAEventCache>
+          cacheDeviceMap;
+  // Check if device has already been in the map, if not, add a new entry
+  auto it = cacheDeviceMap.find(device);
+  if (it == cacheDeviceMap.end()) {
+    // Use in-place contruction, which avoids move or copy of the cache
+    // (the mutex of the cache is not movable/copiable)
+    it = cacheDeviceMap.emplace_hint(
+        it,
+        std::piecewise_construct,
+        std::forward_as_tuple(device),
+        std::forward_as_tuple());
+  }
+  return it->second;
 }
 
 static std::atomic<size_t> process_group_id = 0;
@@ -885,7 +904,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
-  cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, false));
+  cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 8 /*8 Mins*/);
   waitTimeoutDumpInMilSec_ =
@@ -1421,7 +1440,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
           "ensure that any pending NCCL operations have finished in this process. "
           "In rare cases this process can exit before this point and block the progress of "
           "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.4");
+          "but this warning has only been added since PyTorch 2.4");
     }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
