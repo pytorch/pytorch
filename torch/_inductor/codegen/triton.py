@@ -1076,6 +1076,7 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.log2({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def nextafter(x, y):
         return f"libdevice.nextafter({x}, {y})"
 
