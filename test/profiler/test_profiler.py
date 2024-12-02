@@ -65,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
-    TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
@@ -95,7 +94,6 @@ except ModuleNotFoundError:
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
-@unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
@@ -2085,7 +2083,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     def test_skip_first_wait(self):
         # Other tests test when skip_first_wait is false (default) so just test the true case
         test_schedule = torch.profiler.schedule(
-            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=True
+            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=1
         )
         test_schedule_expected_outputs = [
             # repeat No. 1 begin

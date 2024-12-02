@@ -669,7 +669,9 @@ class OptimizeContext(_TorchDynamoContext):
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+                ctx = torch._dynamo.compiled_autograd._enable(
+                    compiler_fn, dynamic=self._dynamic
+                )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
 
@@ -1501,6 +1503,7 @@ def export(
                 # NB: this is wrong if graph_captured_result has
                 # data-dependent output size!
                 ignore_fresh_unbacked = null_context()
+                assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 
