@@ -388,17 +388,17 @@ class LSTM(torch.nn.Module):
                 **factory_kwargs,
             )
         ]
-        for _ in range(1, num_layers):
-            layers.append(
-                _LSTMLayer(
-                    self.hidden_size,
-                    self.hidden_size,
-                    self.bias,
-                    batch_first=False,
-                    bidirectional=self.bidirectional,
-                    **factory_kwargs,
-                )
+        layers.extend(
+            _LSTMLayer(
+                self.hidden_size,
+                self.hidden_size,
+                self.bias,
+                batch_first=False,
+                bidirectional=self.bidirectional,
+                **factory_kwargs,
             )
+            for _ in range(1, num_layers)
+        )
         self.layers = torch.nn.ModuleList(layers)
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):

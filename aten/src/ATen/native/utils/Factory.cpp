@@ -4,9 +4,7 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
 
-namespace at {
-namespace native {
-namespace mobile {
+namespace at::native::mobile {
 
 Tensor empty_with_tail_padding(
     const IntArrayRef size,
@@ -61,6 +59,4 @@ Tensor allocate_padded_contiguous_if_needed(
   return padded_input.copy_(input);
 }
 
-} // namespace mobile
-} // namespace native
 } // namespace at

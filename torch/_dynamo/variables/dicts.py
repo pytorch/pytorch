@@ -497,8 +497,6 @@ class SetVariable(ConstDictVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
@@ -536,24 +534,12 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfills.set_difference
             ).call_function(tx, [self, args[0]], {})
-        elif (
-            name == "update"
-            and len(args) == 1
-            and isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    ListVariable,
-                    TupleVariable,
-                ),
+        elif name == "update" and len(args) == 1 and self.is_mutable():
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(polyfills.set_update).call_function(
+                tx, [self, args[0]], {}
             )
-            and self.is_mutable()
-        ):
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                arg = SetVariable(args[0].unpack_var_sequence(tx))
-            else:
-                arg = args[0]
-            return super().call_method(tx, "update", (arg,), kwargs)
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
@@ -880,7 +866,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
                 codegen.add_push_null(gen_fn2)
 
-            codegen.extend_output([codegen._create_load_const(self.user_cls)])
+            codegen.extend_output([codegen.create_load_const_unchecked(self.user_cls)])
 
             if is_hf_model_output:
                 # Wrap user_cls with disable

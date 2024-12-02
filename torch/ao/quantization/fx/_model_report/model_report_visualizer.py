@@ -527,8 +527,9 @@ class ModelReportVisualizer:
             # gather the x_data and multiple y_data
             # calculate the number of channels
             num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
-            for _ in range(num_channels):
-                y_data.append([])  # separate data list per channel
+
+            # separate data list per channel
+            y_data.extend([] for _ in range(num_channels))
 
             for table_row_num, row in enumerate(table):
                 # get x_value to append
