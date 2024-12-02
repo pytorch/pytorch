@@ -105,7 +105,6 @@ def post_localSGD_hook(
     # Run allreduce using `global_group_to_use` in the first `start_localSGD_iter` iterations.
     if state.iter < state.start_localSGD_iter:
         state.maybe_increase_iter(bucket)
-        assert isinstance(global_group_to_use, dist.ProcessGroup)
         return default._allreduce_fut(global_group_to_use, input_tensor)
 
     # If `post_local_gradient_allreduce` is not set,
