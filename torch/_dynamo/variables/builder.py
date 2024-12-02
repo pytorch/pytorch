@@ -1904,6 +1904,13 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
+
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
         if (
@@ -1918,6 +1925,7 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
