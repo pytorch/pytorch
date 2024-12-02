@@ -487,6 +487,8 @@ test_perf_for_dashboard() {
     device=cuda_a10g
   fi
 
+  export TORCHINDUCTOR_CPP_WRAPPER=1
+
   for mode in "${modes[@]}"; do
     if [[ "$mode" == "inference" ]]; then
       dtype=bfloat16
