@@ -586,7 +586,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         )
         assert (
             not any_buffer_requires_grad
-        ), "Captured buffers from mask mod that require grad are not yet supported."
+        ), "Captured buffers from mask mod that require grad are not supported."
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
@@ -614,7 +614,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 value,
                 out,
                 logsumexp,
-                *block_mask[:10],
+                *block_mask[:-1],
                 *score_mod_other_buffers,
                 *mask_mod_other_buffers,
             ),
@@ -630,6 +630,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             value,
             out,
             logsumexp,
+            query_lengths,
+            kv_lengths,
             kv_num_blocks,
             kv_indices,
             full_kv_num_blocks,
@@ -672,6 +674,8 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             fw_graph,
             joint_graph,
             (
+                query_lengths,
+                kv_lengths,
                 kv_num_blocks,
                 kv_indices,
                 full_kv_num_blocks,
@@ -707,7 +711,10 @@ def flex_attention_autograd(
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     with TransformGetItemToIndex():
-        input_requires_grad = any(t.requires_grad for t in (query, key, value))
+        input_requires_grad = any(
+            isinstance(t, torch.Tensor) and t.requires_grad
+            for t in (query, key, value, *score_mod_other_buffers)
+        )
         if torch.is_grad_enabled() and input_requires_grad:
             example_vals = (
                 query.new_zeros((), requires_grad=input_requires_grad),
@@ -930,7 +937,8 @@ def trace_flex_attention_backward(
         mask_mod_other_buffers,
     )
 
-    fw_example_vals = [query.new_zeros((), requires_grad=query.requires_grad)] + [
+    requires_grad = any(pytree.tree_map(lambda x: x.requires_grad, (query, key)))
+    fw_example_vals = [query.new_zeros((), requires_grad=requires_grad)] + [
         query.new_zeros((), dtype=torch.int) for _ in range(4)
     ]
     bw_example_vals = fw_example_vals + [query.new_zeros(())]
@@ -1127,7 +1135,9 @@ def flex_attention_backward_fake_tensor_mode(
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer) if buffer.requires_grad else None
+                torch.empty_like(buffer)
+                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
+                else None
                 for buffer in score_mod_other_buffers
             ]
         )
