@@ -63,25 +63,25 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
 // grid stride loop kernel for distributions
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
-__global__ void distribution_elementwise_grid_stride_kernel(int numel,
+__global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
   auto seeds = at::cuda::philox::unpack(philox_args);
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds),
               idx,
               std::get<1>(seeds),
               &state);
 
-  int rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
-  for(int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
     auto rand = dist_func(&state);
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
-      int li = linear_index + blockDim.x * gridDim.x * ii;
+      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
       if (li < numel) {
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
@@ -123,10 +123,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     return;
   }
 
-  auto execution_policy = calc_execution_policy(numel, unroll_factor);
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]

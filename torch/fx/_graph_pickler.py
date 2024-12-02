@@ -212,7 +212,7 @@ class _NodePickleData:
 class _OpPickleData:
     @classmethod
     def reduce_helper(
-        cls, pickler: "_SubprocPickler", op: object
+        cls, pickler: "_GraphPickler", op: object
     ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
         result = cls.pickle(op)
         return (result.unpickle, (pickler._unpickle_state,))
@@ -390,7 +390,7 @@ class _TracingContextPickleData:
         return context
 
 
-class _SubprocPickler(pickle.Pickler):
+class _GraphPickler(pickle.Pickler):
     def __init__(self, file: io.BytesIO) -> None:
         super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -471,7 +471,7 @@ class _UnpickleState:
         self.meta_converter: MetaConverter[FakeTensor] = MetaConverter()
 
 
-class _SubprocUnpickler(pickle.Unpickler):
+class _GraphUnpickler(pickle.Unpickler):
     def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
         super().__init__(stream)
         self._unpickle_state = unpickle_state
