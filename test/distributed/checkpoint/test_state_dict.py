@@ -303,7 +303,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_fsdp_ddp(
         self,
-        use_composable: bool,
         optimizer_class: Type[Optimizer],
         optim_in_backward: bool = False,
         test_frozen: bool = False,
@@ -318,17 +317,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             copy_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
             dist_model = copy.deepcopy(orig_model)
-            if use_composable:
-                replicate(dist_model.l)
-                fully_shard(dist_model, policy=ModuleWrapPolicy({UnitModule}))
-            else:
-                dist_model.l = DDP(dist_model.l)
-                dist_model = FSDP(
-                    copy.deepcopy(orig_model),
-                    auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
-                    use_orig_params=optim_in_backward,
-                    ignored_modules=[dist_model.l],
-                )
+            dist_model.l = DDP(dist_model.l)
+            dist_model = FSDP(
+                copy.deepcopy(orig_model),
+                auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                use_orig_params=optim_in_backward,
+                ignored_modules=[dist_model.l],
+            )
             if optim_in_backward:
                 _apply_optimizer_in_backward(
                     optimizer_class, dist_model.parameters(), {"lr": 1e-4}
@@ -347,45 +342,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def test_fsdp_ddp(self) -> None:
         self.run_subtests(
             {
-                "use_composable": [True, False],
                 "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_fsdp_ddp,
         )
-
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_frozen_parameters(self) -> None:
-        self.run_subtests(
-            {
-                "use_composable": [True],
-                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
-                "test_frozen": [True],
-            },
-            self._test_fsdp_ddp,
-        )
-
-    # TODO: enable use_dtensor once 2D device_mesh support is fully landed.
-    """
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_use_dtensor(self) -> None:
-        self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
-    """
-
-    # TODO: enable the test after FSDP + apply_optimizer_in_backward works.
-    # Disable this test as it is broken after
-    # https://github.com/pytorch/pytorch/pull/108298.
-    """
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_apply_optimizer_in_backward(self) -> None:
-        self.run_subtests(
-            {"use_composable": [True, False]},
-            self._test_fsdp_ddp,
-            optim_in_backward=True,
-        )
-    """
 
     def _test_single_gpu(self, optimizer_class: Type[Optimizer]) -> None:
         def init_model_optim():
