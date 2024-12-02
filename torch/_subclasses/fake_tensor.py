@@ -365,7 +365,9 @@ class FakeTensorConverter:
         # This callback is used by both subclass and inner tensors. Require the
         # caller to explicitly specify the device in case outer and inner tensors
         # have different devices.
-        def mk_fake_tensor(make_meta_t: Callable[[], object], device) -> FakeTensor:
+        def mk_fake_tensor(
+            make_meta_t: Callable[[], object], device: torch.device
+        ) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -386,7 +388,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback=mk_fake_tensor,  # type: ignore[arg-type]
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
