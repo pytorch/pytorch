@@ -1543,9 +1543,6 @@ class CSE:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
 
-        # if torch.float16 == dtype:
-        #     breakpoint()
-
         return var
 
     def newvar(
