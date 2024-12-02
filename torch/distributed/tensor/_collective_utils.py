@@ -8,13 +8,11 @@ from typing import List, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
-from torch._C._distributed_c10d import _resolve_process_group
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
     get_global_rank,
-    get_group_rank,
     get_rank,
     GroupMember,
     ProcessGroup,
