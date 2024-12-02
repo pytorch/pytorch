@@ -3057,11 +3057,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("dynamic", [True, False])
     def test_da8w8_sym_act_sym_wgt_with_int_mm(self, has_bias, dtype, dynamic):
         r"""
-        This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from Torchao.
+        This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
+        when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
         The pattern is:
-            (no bias) _int_mm -> convert_element_type -> (expand -> mul) -> mul
+            (no bias) _int_mm -> convert_element_type -> (expand_a) -> mul -> mul
         or
             (with bias) pattern_no_bias -> add
+        Expansion of the scale of activation is optional.
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return

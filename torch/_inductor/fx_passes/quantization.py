@@ -2598,13 +2598,13 @@ def _register_smooth_quant_int_mm_pattern():
         KeywordArg("out_shape_with_bias"),
     )
 
-    pattern1_with_no_reshape = get_pattern_no_bias(expand_a_scale=False)
-    pattern1_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=True)
-    pattern1_with_bias_no_outer_reshape = CallFunction(
-        aten.add.Tensor,
-        pattern1_with_no_outer_reshape,
-        KeywordArg("bias"),
-    )
+    # The following patterns are for torchao int8_dynamic_activation_int8_weight linear,
+    # when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically).
+    # In practice, though, they may also match smooth-quant pattern if there wouldn't be a reshape for the output.
+    # Since add is not currently being used as a oneDNN post-op, but is unfused, we don't need these patterns with bias.
+    # Ideally, we should add mul + add post-op support in ATen int8 oneDN  linear op.
+    pattern1_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=False)
+    pattern2_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=True)
 
     def _validate_pattern(match: Match):
         if len(match.nodes) not in [5, 6, 7, 10]:
@@ -2630,9 +2630,8 @@ def _register_smooth_quant_int_mm_pattern():
         pattern_with_bias_2: 0,
         pattern_no_bias_1: 1,
         pattern_with_bias_1: 1,
+        pattern2_with_no_outer_reshape: 2,
         pattern1_with_no_outer_reshape: 2,
-        pattern1_with_bias_no_outer_reshape: 2,
-        pattern1_with_no_reshape: 2,
     }
     for pattern, pass_number in pattern_to_pass_number.items():
 
