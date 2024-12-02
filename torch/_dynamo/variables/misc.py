@@ -1467,7 +1467,7 @@ class LoggingLoggerVariable(VariableTracker):
             # For export cases, we can just make debugging functions no-ops
             return
         method = getattr(self.value, name, None)
-        function = method.__func__
+        function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
                 return variables.ConstantVariable.create(None)
         unimplemented("Logger not supported for non-export cases. "

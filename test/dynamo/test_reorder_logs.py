@@ -42,7 +42,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         (logger.isEnabledFor, f_isEnabledFor, True),
         (logging.Logger.isEnabledFor, f_isEnabledFor, True),
     ])
-    def test_dont_ignore_logger(self, ignore_method, fn, should_ignore_logger):
+    def test_ignore_logger(self, ignore_method, fn, should_ignore_logger):
         counters.clear()
         x = torch.randn(3, 3)
         orig_out = fn(x)
