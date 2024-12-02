@@ -84,8 +84,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .compile_fx import _CompileFxKwargs
-    from .output_code import CompiledFxGraph
+    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .output_code import OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -1322,7 +1322,7 @@ class FxGraphCache:
     @staticmethod
     def _save_graph(
         key: str,
-        compiled_graph: CompiledFxGraph,
+        compiled_graph: OutputCode,
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
@@ -1330,6 +1330,11 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
+        from .compile_fx import CompiledFxGraph
+
+        assert isinstance(
+            compiled_graph, CompiledFxGraph
+        ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
