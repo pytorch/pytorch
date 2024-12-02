@@ -1056,7 +1056,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed()) {
       lock.unlock();
-      invokeCallback(std::move(callback), uses_future);
+      invokeCallback(callback, uses_future);
       return;
     }
     callbacks_.emplace_back(std::move(callback), uses_future);
@@ -1079,7 +1079,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
     auto childFut = createInstance(::std::move(type));
     addCallback([childFut,
-                 cb = std::move(callback)](Future& parentFut) mutable {
+                 cb = std::move(callback)](Future& parentFut) {
       try {
         if constexpr (::std::is_convertible_v<typename std::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
           auto [ivalue, storages] = cb(parentFut);
@@ -1236,7 +1236,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     lock.unlock();
 
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
+    for (const auto& callback : cbs) {
       invokeCallback(callback.callback, callback.uses_future);
     }
   }
