@@ -364,10 +364,12 @@ def dynamo_timed(
     )
 
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"), _WaitCounter(
-            f"pytorch.dynamo_timed.{key}"
-        ).guard():
-            yield
+        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+            if log_waitcounter:
+                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
+                    yield
+            else:
+                yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
