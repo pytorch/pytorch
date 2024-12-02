@@ -75,7 +75,7 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
               std::get<1>(seeds),
               &state);
 
-  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+  int64_t rounded_size = ((numel - 1)/(((int64_t) blockDim.x) * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
   for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
     auto rand = dist_func(&state);
