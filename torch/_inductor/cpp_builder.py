@@ -322,10 +322,10 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
+        subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -341,7 +341,6 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
             )
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
-    return status
 
 
 def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
@@ -405,8 +404,8 @@ class BuildOptionsBase:
         self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def _finalize_options(self) -> None:
-        self._process_compile_only_options
-        self._remove_duplicate_options
+        self._process_compile_only_options()
+        self._remove_duplicate_options()
 
     def get_compiler(self) -> str:
         return self._compiler
@@ -530,7 +529,7 @@ def _get_ffast_math_flags() -> List[str]:
     return flags
 
 
-def _get_optimization_cflags() -> List[str]:
+def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
@@ -545,7 +544,7 @@ def _get_optimization_cflags() -> List[str]:
 
         if sys.platform != "darwin":
             # on macos, unknown argument: '-fno-tree-loop-vectorize'
-            if is_gcc():
+            if _is_gcc(cpp_compiler):
                 cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
@@ -593,7 +592,7 @@ def get_cpp_options(
 
     cflags = (
         _get_shared_cflag(compile_only)
-        + _get_optimization_cflags()
+        + _get_optimization_cflags(cpp_compiler)
         + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_os_related_cpp_cflags(cpp_compiler)
@@ -629,9 +628,10 @@ class CppOptions(BuildOptionsBase):
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
+        compiler: str = "",
     ) -> None:
         super().__init__()
-        self._compiler = get_cpp_compiler()
+        self._compiler = compiler if compiler else get_cpp_compiler()
         self._use_absolute_path = use_absolute_path
         self._compile_only = compile_only
 
@@ -1116,12 +1116,14 @@ class CppTorchOptions(CppOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        compiler: str = "",
     ) -> None:
         super().__init__(
             compile_only=compile_only,
             warning_all=warning_all,
             extra_flags=extra_flags,
             use_absolute_path=use_absolute_path,
+            compiler=compiler,
         )
 
         self._aot_mode = aot_mode
@@ -1205,7 +1207,6 @@ def get_cpp_torch_device_options(
 
     include_dirs = cpp_extension.include_paths(device_type)
     libraries_dirs = cpp_extension.library_paths(device_type)
-
     if device_type == "cuda":
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
 
@@ -1223,7 +1224,12 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
-        cflags += ["fsycl"]
+        # Add "-Wno-unsupported-floating-point-opt" here to
+        # suppress compiler warning:
+        # "warning: overriding currently unsupported use of floating point
+        # exceptions on this target [-Wunsupported-floating-point-opt]".
+        # Since the compiler has not support some features.
+        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
     if aot_mode:
@@ -1275,6 +1281,12 @@ class CppTorchDeviceOptions(CppTorchOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
     ) -> None:
+        if device_type == "xpu":
+            from torch.utils.cpp_extension import _join_sycl_home
+
+            compiler = _join_sycl_home("bin", "icpx")
+        else:
+            compiler = ""
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
@@ -1283,11 +1295,8 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            compiler=compiler,
         )
-        if device_type == "xpu":
-            from torch.utils.cpp_extension import _join_sycl_home
-
-            self._compiler = _join_sycl_home("bin", "icpx")
 
         device_definations: List[str] = []
         device_include_dirs: List[str] = []
@@ -1511,7 +1520,7 @@ class CppBuilder:
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
 
-    def build(self) -> Tuple[bytes, str]:
+    def build(self) -> None:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1523,8 +1532,5 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-
-        status = run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
-
+        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
