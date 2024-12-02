@@ -4766,15 +4766,12 @@ class CPUReproTests(TestCase):
             prepared_model(**example_batch)
             converted_model = convert_pt2e(prepared_model)
             torch.ao.quantization.move_exported_model_to_eval(converted_model)
-            model = torch.compile(converted_model)
-            _, code = run_and_get_cpp_code(
-                torch.compile(converted_model), **example_batch
+            metrics.reset()
+            self.common(
+                converted_model,
+                (example_batch["context_layer"], example_batch["hidden_states"]),
             )
-            FileCheck().check_count(
-                "Welford<float> tmp_acc0 = Welford<float>()",
-                1,
-                exactly=True,
-            ).run(code)
+            check_metrics_vec_kernel_count(3)
 
 
 if __name__ == "__main__":
