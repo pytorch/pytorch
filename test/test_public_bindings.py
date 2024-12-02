@@ -278,8 +278,6 @@ class TestPublicBindings(TestCase):
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
             try:
-                # TODO: fix "torch/utils/model_dump/__main__.py"
-                # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
                 importlib.import_module(modname)
