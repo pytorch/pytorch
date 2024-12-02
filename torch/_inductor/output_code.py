@@ -30,7 +30,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
@@ -47,16 +46,10 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
-from torch._inductor.utils import (
-    align_inputs_from_check_idxs,
-    BoxedBool,
-    InputType,
-    output_node,
-    set_tracing_context_output_strides,
-)
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
+from .utils import BoxedBool, InputType, output_node
 
 
 if TYPE_CHECKING:
@@ -68,9 +61,18 @@ if TYPE_CHECKING:
     from .triton_bundler import TritonKernelArtifacts
 
 
-class OutputCode(Protocol):
+@dataclasses.dataclass
+class OutputCode:
+    # TODO: Remove underscores here
+
+    # None if the output is not remote cacheable
+    _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        ...
+        raise NotImplementedError(type(self))
 
     def post_compile(
         self,
@@ -78,22 +80,11 @@ class OutputCode(Protocol):
         cudagraphs: BoxedBool,
         gm: GraphModule,
     ) -> None:
-        ...
-
-    # TODO: Not sure if I really want these to be properties, this is easy
-    # though
-    #
-    # TODO: Remove leading underscores
-
-    # None if the output is not remote cacheable
-    _fx_graph_cache_key: Optional[str]
-
-    # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: Optional[int]
+        raise NotImplementedError(type(self))
 
     # TODO: Get rid of this
     def set_triton_bundle(self, triton_bundle: Any) -> None:
-        ...
+        raise NotImplementedError(type(self))
 
 
 _StrideExprStr: TypeAlias = str
@@ -141,119 +132,8 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
     return False
 
 
-def cudagraph_post_compile(
-    example_inputs: Sequence[InputType],
-    compiled_graph: CompiledFxGraph,
-    cudagraphs: BoxedBool,
-    gm: Optional[torch.fx.GraphModule],
-) -> None:
-    """
-    Checks for any reasons not to run cudagraphs and then
-    runs it on compiled_graph.
-    Mutates the `compiled_graph.current_callable` and `cudagraphs`
-    """
-    assert compiled_graph.current_callable is not None
-    assert compiled_graph.cudagraph_info is not None
-    cached_info = compiled_graph.cudagraph_info
-    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
-    inputs_to_check = compiled_graph.inputs_to_check
-    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
-    is_inference = compiled_graph.fx_kwargs["is_inference"]
-    is_backward = compiled_graph.fx_kwargs["is_backward"]
-
-    if not cudagraph_fail_reasons:
-        fx_kwargs = compiled_graph.fx_kwargs
-        static_input_idxs = fx_kwargs["static_input_idxs"]
-
-        placeholders = cached_info.placeholders
-        stack_traces = cached_info.stack_traces
-        if not config.triton.cudagraph_trees:
-            # Force specialize all inputs so that CUDA graphs will work
-            for t in example_inputs:
-                if isinstance(t, torch.SymInt):
-                    int(t)  # guard
-
-        if (
-            boxed_forward_device_index is not None
-            and not is_inference
-            and not is_backward
-        ):
-            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
-
-        from .compile_fx import cudagraphify
-
-        current_callable = compiled_graph.current_callable
-        assert current_callable is not None
-        compiled_graph.current_callable = cudagraphify(
-            current_callable,
-            static_input_idxs=static_input_idxs or (),
-            device_index=next(iter(compiled_graph.device_idxs)),
-            stack_traces=stack_traces,
-            is_backward=is_backward,
-            is_inference=is_inference,
-            constants=tuple(compiled_graph.get_constants(gm).values()),
-            placeholders=placeholders,
-            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
-        )
-
-    else:
-        BoxedBool.disable(cudagraphs)
-
-        # See [Backward Generation Handling]
-        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-        # know we are we running the backward even if we will not run it in cudagraphs
-        if is_backward and config.triton.cudagraph_trees:
-            assert boxed_forward_device_index is not None
-            assert boxed_forward_device_index.value is not None
-            compiled_graph_callable = compiled_graph.current_callable
-
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                boxed_forward_device_index.value, create_if_none_exists=False
-            )
-            # should already exist from forward
-            assert manager is not None
-
-            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
-                manager.set_to_running_backward()  # type: ignore[union-attr]
-                return compiled_graph_callable(new_inputs)
-
-            compiled_graph.current_callable = compiled_artifact
-
-        if "cuda" in compiled_graph.device_types:
-            # prefer better disable_cudagraphs_reason bc stack trace
-            # TODO: migrate all disable reasons to stack trace, refactor
-            if compiled_graph.disabled_cudagraphs_reason:
-                log_cudagraph_skip_and_bump_counter(
-                    compiled_graph.disabled_cudagraphs_reason
-                )
-            else:
-                log_cudagraph_skip_and_bump_counter(
-                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
-                )
-
-
-def maybe_realign_inputs(
-    ran_cudagraphs: BoxedBool,
-    compiled_graph: CompiledFxGraph,
-    inputs_to_check: Sequence[int],
-) -> None:
-    """
-    Realigns input strides from inputs_to_check if
-    we didn't end up running cudagraphs. Mutates
-    `compiled_graph.current_callable` if cudagraphs
-    was run. Otherwise, does nothing.
-    """
-    if not ran_cudagraphs:
-        assert compiled_graph.current_callable is not None
-        new_callable = align_inputs_from_check_idxs(
-            compiled_graph.current_callable, inputs_to_check
-        )
-        if new_callable is not compiled_graph.current_callable:
-            compiled_graph.current_callable = new_callable
-
-
 @dataclasses.dataclass
-class CompiledFxGraph:
+class CompiledFxGraph(OutputCode):
     """
     Class holding a compiled FX graph. This is the object serialized on disk
     to support FxGraph caching.
@@ -293,9 +173,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
-    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
     _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
@@ -411,9 +289,6 @@ class CompiledFxGraph:
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
-        # aot autograd needs to know to pass in inputs as a list
-        self._boxed_call = True
-
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
@@ -427,44 +302,14 @@ class CompiledFxGraph:
         cudagraphs: BoxedBool,
         gm: GraphModule,
     ) -> None:
-        """
-        Run a set of post processing steps after loading from the cache. These involve:
-         - Setting the tracing context output strides
-         - Running cudagraphs if enabled
-         - Realigning inputs
+        # TODO: maybe move this here?  Not sure.
+        from torch._inductor.codecache import FxGraphCache
 
-        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
-        The results of this function are *not* saved in the cache itself.
-        """
-        set_tracing_context_output_strides(example_inputs, self)
+        FxGraphCache.post_compile(self, example_inputs, cudagraphs, gm)
 
-        if cudagraphs:
-            # It's possible that cudagraphs is enabled, but was disabled
-            # during a previous compilation we're loading from the cache.
-            # If so, we need to disable it on this new process too.
-            if self.disabled_cudagraphs_reason:
-                if "cuda" in self.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                cudagraph_post_compile(
-                    example_inputs,
-                    self,
-                    cudagraphs,
-                    gm,
-                )
-        inputs_to_check = self.inputs_to_check
-        # cudagraphs could have been disabled from the earlier conditions
-        # so we still need to realign inputs if that happens
-        maybe_realign_inputs(
-            cudagraphs,
-            self,
-            inputs_to_check,
-        )
+        # aot autograd needs to know to pass in inputs as a list
+        # TODO: Not sure why this isn't just set by default on CompiledFxGraph
+        self._boxed_call = True
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
@@ -495,16 +340,12 @@ def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
 
 
 @dataclasses.dataclass
-class CompiledAOTI:
+class CompiledAOTI(OutputCode):
     """
     Class holding an AOTInductor compiled so.
     """
 
     filename: Union[str, List[str]]
-
-    # TODO: Figure out if these make sense or not here
-    _fx_graph_cache_key: Optional[str] = None
-    _time_taken_ns: Optional[int] = None
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")

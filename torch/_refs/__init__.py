@@ -410,7 +410,7 @@ def _broadcast_shapes(*_shapes):
         assert isinstance(shape, Sequence)
 
     # Computes common shape
-    common_shape: List[Union[int, torch.SymInt]] = [
+    common_shape = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
