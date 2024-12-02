@@ -1079,7 +1079,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int coordCheckIntervalMilSec_;
 
   // Size of ring buffer where we store NCCL Traces for debugging.
-  int ncclTraceBufferSize_;
+  int traceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_{};
