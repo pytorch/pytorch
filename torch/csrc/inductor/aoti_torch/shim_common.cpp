@@ -1,6 +1,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -157,6 +158,17 @@ int32_t aoti_torch_layout_strided() {
 int32_t aoti_torch_layout__mkldnn() {
   return (int32_t)at::kMkldnn;
 }
+
+#define AOTI_TORCH_MEMORY_FORMAT_IMPL(name, enum) \
+  int32_t aoti_torch_memory_format_##name() {     \
+    return (int32_t)at::MemoryFormat::enum;       \
+  }
+
+AOTI_TORCH_MEMORY_FORMAT_IMPL(contiguous_format, Contiguous)
+AOTI_TORCH_MEMORY_FORMAT_IMPL(channels_last, ChannelsLast)
+AOTI_TORCH_MEMORY_FORMAT_IMPL(channels_last_3d, ChannelsLast3d)
+AOTI_TORCH_MEMORY_FORMAT_IMPL(preserve_format, Preserve)
+#undef AOTI_TORCH_MEMORY_FORMAT_IMPL
 
 #define AOTI_TORCH_ITEM_IMPL(dtype, ctype)                     \
   AOTITorchError aoti_torch_item_##dtype(                      \
