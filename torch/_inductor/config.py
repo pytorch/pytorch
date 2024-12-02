@@ -710,6 +710,8 @@ padding_alignment_bytes = 128
 #
 # This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
 # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+#
+# XPU devices will not pad stride.
 padding_stride_threshold = 1024
 
 # Enable padding outputs, even if they would not be padded in eager mode.

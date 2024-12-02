@@ -3255,7 +3255,7 @@ class Layout(OutputSpec):
         return self.is_stride_ordered(order)
 
     @staticmethod
-    def _pad_strides(in_strides, size, dtype):  # type: ignore[no-untyped-def]
+    def _pad_strides(in_strides, size, dtype, device):  # type: ignore[no-untyped-def]
         """
         The padding does not change stride order but makes sure all strides larger
         than the threshold are multiple of align.
@@ -3299,7 +3299,12 @@ class Layout(OutputSpec):
             prev_idx = fill_order[rank - 1]
             stride = new_strides[prev_idx] * size[prev_idx]
 
-            if stride > config.padding_stride_threshold and stride % align != 0:
+            # There is no benefit to pad stride on xpu devices.
+            if (
+                stride > config.padding_stride_threshold
+                and stride % align != 0
+                and device.type != "xpu"
+            ):
                 stride = ceildiv(stride, align) * align
                 padded = True
             new_strides[idx] = stride
@@ -3316,7 +3321,7 @@ class Layout(OutputSpec):
     def pad_strides(self):  # type: ignore[no-untyped-def]
         assert isinstance(self, FlexibleLayout)
         assert self.stride is not None
-        self.stride = self._pad_strides(self.stride, self.size, self.dtype)
+        self.stride = self._pad_strides(self.stride, self.size, self.dtype, self.device)
 
     def should_pad_strides(self):  # type: ignore[no-untyped-def]
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
@@ -3457,7 +3462,9 @@ class FlexibleLayout(Layout):
     def as_stride_order(self, order, allow_padding=False):  # type: ignore[no-untyped-def]
         new_stride = self.stride_ordered(self.size, order)
         if self.should_pad_strides() and allow_padding:
-            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+            new_stride = self._pad_strides(
+                new_stride, self.size, self.dtype, self.device
+            )
 
         return FixedLayout(
             self.device,
@@ -3470,7 +3477,9 @@ class FlexibleLayout(Layout):
     def as_exact_strides(self, exact_strides, allow_padding=False):  # type: ignore[no-untyped-def]
         new_stride = exact_strides
         if self.should_pad_strides() and allow_padding:
-            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+            new_stride = self._pad_strides(
+                new_stride, self.size, self.dtype, self.device
+            )
 
         return FixedLayout(
             self.device,
@@ -3483,7 +3492,9 @@ class FlexibleLayout(Layout):
     def as_fill_order(self, order):  # type: ignore[no-untyped-def]
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+            new_stride = self._pad_strides(
+                new_stride, self.size, self.dtype, self.device
+            )
         return FixedLayout(
             self.device,
             self.dtype,
@@ -3495,7 +3506,9 @@ class FlexibleLayout(Layout):
     def as_same_order(self, stride):  # type: ignore[no-untyped-def]
         new_stride = self.same_ordered(self.size, stride)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+            new_stride = self._pad_strides(
+                new_stride, self.size, self.dtype, self.device
+            )
         return FixedLayout(
             self.device,
             self.dtype,
