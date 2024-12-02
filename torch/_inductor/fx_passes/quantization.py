@@ -2738,12 +2738,12 @@ def _register_smooth_quant_int_mm_pattern():
                     )
                     # Add bias and reshape
 
-                    has_outer_reshape = (
+                    no_outer_reshape = (
                         kwargs.get("out_shape_with_bias", None) is None
                         and kwargs.get("out_shape_no_bias", None) is None
                     )
 
-                    if has_outer_reshape:
+                    if no_outer_reshape:
                         out_shape = kwargs.get(
                             "out_shape_with_bias", kwargs["out_shape_no_bias"]
                         )
@@ -2751,13 +2751,13 @@ def _register_smooth_quant_int_mm_pattern():
                         new_out_node = match.graph.call_function(
                             aten.add.Tensor, args=(new_out_node, bias)
                         )
-                        if has_outer_reshape:
+                        if no_outer_reshape:
                             new_out_node = match.graph.call_function(
                                 aten.reshape.default,
                                 args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
                             )
                     else:
-                        if has_outer_reshape:
+                        if no_outer_reshape:
                             new_out_node = match.graph.call_function(
                                 aten.reshape.default,
                                 args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
