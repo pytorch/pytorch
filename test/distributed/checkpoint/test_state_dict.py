@@ -153,19 +153,16 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self,
         *,
         use_orig_params: bool,
-        use_composable: bool,
         use_dtensor: bool,
         wrapping: Tuple[nn.Module] = (),
         compile_model: bool = False,
         optimizer_class: Type[Optimizer],
     ) -> None:
-        if use_composable:
-            raise AssertionError("Composable FSDP1 is no longer supported")
-        if not use_orig_params and use_composable:
+        if not use_orig_params:
             return
 
         # TODO: remove this return after we complete the composable API side change for device_mesh
-        if use_composable and use_dtensor:
+        if use_dtensor:
             return
 
         def init_model_optim():
@@ -179,25 +176,20 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 strategy = set(wrapping)
             else:
                 strategy = {UnitModule}
-            if use_composable:
-                dist_model = fully_shard(
-                    copy.deepcopy(orig_model), policy=ModuleWrapPolicy(strategy)
+            if use_dtensor:
+                device_mesh = init_device_mesh("cuda", (self.world_size,))
+                dist_model = FSDP(
+                    copy.deepcopy(orig_model),
+                    auto_wrap_policy=ModuleWrapPolicy(strategy),
+                    use_orig_params=use_orig_params,
+                    device_mesh=device_mesh,
                 )
             else:
-                if use_dtensor:
-                    device_mesh = init_device_mesh("cuda", (self.world_size,))
-                    dist_model = FSDP(
-                        copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy(strategy),
-                        use_orig_params=use_orig_params,
-                        device_mesh=device_mesh,
-                    )
-                else:
-                    dist_model = FSDP(
-                        copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy(strategy),
-                        use_orig_params=use_orig_params,
-                    )
+                dist_model = FSDP(
+                    copy.deepcopy(orig_model),
+                    auto_wrap_policy=ModuleWrapPolicy(strategy),
+                    use_orig_params=use_orig_params,
+                )
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
