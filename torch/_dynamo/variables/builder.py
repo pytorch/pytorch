@@ -1545,7 +1545,7 @@ class VariableBuilder:
             is_static_input = True
 
         make_graph_attribute = is_static_input and (
-            not config.inline_inbuilt_nn_modules or is_parameter_freezing()
+            not config.inline_inbuilt_nn_modules or is_parameter_freezing() or torch._dynamo.config.prepare_freezing
         )
 
         if (
