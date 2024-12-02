@@ -17,8 +17,11 @@ from torch._functorch._aot_autograd.autograd_cache import (
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
+from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._subclasses import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -608,7 +611,12 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        return autograd_cache_key(fx_g, example_inputs, config, {})
+        shape_env = ShapeEnv()
+        ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
+        # Needs a shape env for FxGraphCache.check_can_cache to pass.
+        # Not needed for actual key calculation.
+        with torch._guards.tracing(ctx):
+            return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -800,21 +808,24 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             return w
 
         _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
-        fx_g.meta = {"foo": "bar"}
-        fx_g.compile_subgraph_reason = "Blah"
-        config = self.default_config()
-        with sanitize_gm_for_cache(fx_g):
-            c1 = autograd_cache_key(fx_g, example_inputs, config, {})
-        c3 = autograd_cache_key(fx_g, example_inputs, config, {})
 
-        fx_g.meta = {"foo": "baz"}
-        fx_g.compile_subgraph_reason = None
-        with sanitize_gm_for_cache(fx_g):
-            c2 = autograd_cache_key(fx_g, example_inputs, config, {})
-        c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+        ctx = TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        with torch._guards.tracing(ctx):
+            fx_g.meta = {"foo": "bar"}
+            fx_g.compile_subgraph_reason = "Blah"
+            config = self.default_config()
+            with sanitize_gm_for_cache(fx_g):
+                c1 = autograd_cache_key(fx_g, example_inputs, config, {})
+            c3 = autograd_cache_key(fx_g, example_inputs, config, {})
 
-        self.assertEqual(c1, c2)
-        self.assertNotEqual(c3, c4)
+            fx_g.meta = {"foo": "baz"}
+            fx_g.compile_subgraph_reason = None
+            with sanitize_gm_for_cache(fx_g):
+                c2 = autograd_cache_key(fx_g, example_inputs, config, {})
+            c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+
+            self.assertEqual(c1, c2)
+            self.assertNotEqual(c3, c4)
 
 
 if __name__ == "__main__":
