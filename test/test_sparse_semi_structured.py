@@ -1132,20 +1132,26 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    def test_cslt_sparse_mm_alpha_compile_autotune(self, device):
-        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).cuda()
-        B = torch.ones((128, 256), device=device).to(torch.int8).t()
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
+    def test_cslt_sparse_mm_alpha_compile_autotune(self, device, out_dtype):
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).to(device)
+        B = torch.ones((128, 256), device=device, dtype=torch.int8).t()
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
         A_compressed = torch._cslt_compress(A)
-        compiled_sparse_mm = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")
-        sparse_result = compiled_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.int32)
 
-        alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
-        dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
-        dense_result = dense_result.to(torch.int32)
+        cslt_sparse_mm_c = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")
+        sparse_result = cslt_sparse_mm_c(A_compressed, B, alpha=alpha, out_dtype=out_dtype)
 
-        torch.testing.assert_close(sparse_result.cpu(), dense_result, rtol=1e-3, atol=1e-3)
+        # disable this otherwise inductor will attempt to reorder strides and pass a contiguous B
+        @torch.compiler.disable
+        def get_dense_result():
+            alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
+            dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
+            dense_result = dense_result.to(out_dtype)
+            return dense_result
+
+        torch.testing.assert_close(sparse_result.cpu(), get_dense_result(), rtol=1e-3, atol=1e-3)
 
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):
