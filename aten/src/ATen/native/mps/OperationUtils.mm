@@ -923,8 +923,17 @@ MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   return l;
 }
 
+// DynamicMetalShaderLibrary implementation
+DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
+  [library release];
+}
+
 // MetalKernelFunction implementation
-MetalKernelFunction::~MetalKernelFunction() {}
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+
+MetalKernelFunction::~MetalKernelFunction() {
+  [cps release];
+}
 
 void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
   dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
