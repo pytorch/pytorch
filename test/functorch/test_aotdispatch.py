@@ -44,6 +44,7 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
+from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
@@ -6732,25 +6733,18 @@ class MockFXGraphCache:
         self.cache[key] = gm
 
     def load(self, gm, inputs):
-        key, _ = compiled_fx_graph_hash(gm, inputs, {}, {})
-        if key in self.cache:
-            gm = make_boxed_func(gm)
-            gm._fx_graph_cache_key = key
-            return gm
-        else:
-            self.save(key, gm)
-            gm = make_boxed_func(gm)
-            gm._fx_graph_cache_key = key
-            return gm
+        key, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
+        if key not in self.cache:
+            self.cache[key] = gm
+        gm, _ = self.load_with_key(key, [], inputs, None, None, None)
+        return gm
 
     def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
+            gm = MockFXGraphCacheOutput(gm, key)
         return gm, {}
-
-    def post_compile(self, gm, inputs, cudagraphs):
-        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6823,9 +6817,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         with patch(
             "torch._inductor.codecache.FxGraphCache.load_with_key",
             new=self.inductor_cache.load_with_key,
-        ), patch(
-            "torch._inductor.codecache.FxGraphCache.post_compile",
-            new=self.inductor_cache.post_compile,
         ):
             return super().verify_aot_autograd(
                 f,
