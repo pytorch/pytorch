@@ -17,7 +17,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-#include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
@@ -807,8 +806,8 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
-    auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
-    return val.has_value() && val != "0";
+    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
+    return val && std::stoi(val) != 0;
   }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
@@ -852,6 +851,21 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 
   cplMap[key] = std::make_pair(cpl, func);
   return cplMap[key];
+}
+
+std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  if (C10_UNLIKELY(!library && nparams > 0)) {
+    throw std::runtime_error("Library must be initialized first");
+  }
+  std::vector<std::string> rc;
+  @autoreleasepool {
+    NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
+    for (auto idx : c10::irange([names count])) {
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
+    }
+  }
+  return rc;
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {

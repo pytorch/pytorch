@@ -1497,6 +1497,50 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_empty_autotune_config_dict(self, backend):
+        @triton.autotune(
+            configs=[
+                triton.Config({}, num_stages=2),
+                triton.Config({}, num_stages=3),
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        f(x, x)
+
+    @requires_gpu
     @common_utils.parametrize("autotune", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_params(self, autotune, backend):
@@ -3265,7 +3309,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
@@ -3388,13 +3431,15 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
+    # Triton 3.2.0 adds the required flags to the Autotuner object for this test
+    # PR: https://github.com/triton-lang/triton/pull/5092
     @requires_gpu
-    def test_autotune_no_pre_or_post_hook(self):
+    def test_autotune_no_pre_or_post_hook_user_defined(self):
+        from triton.runtime.autotuner import Autotuner
+
         def init_to_zero(name):
             return lambda nargs: nargs[name].zero_()
 
-        # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
-        # https://github.com/pytorch/pytorch/issues/139059
         @triton.autotune(
             configs=[
                 triton.Config(
@@ -3404,6 +3449,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                     pre_hook=init_to_zero("output_ptr"),
                 )
             ],
+            pre_hook=init_to_zero("output_ptr"),
+            post_hook=init_to_zero("output_ptr"),
             key=["n_elements"],
         )
         @triton.jit
@@ -3431,6 +3478,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         # should always pass
         assert add(x, y).mean() == 2, "Problem with add kernel"
+
+        # assert that the user_defined_* flags are properly set on the kernel before compilation
+        self.assertEqual(isinstance(add_kernel, Autotuner), True)
+        if not hasattr(add_kernel, "user_defined_pre_hook") or not hasattr(
+            add_kernel, "user_defined_post_hook"
+        ):
+            raise unittest.SkipTest(
+                "test requires Triton version >= 3.2.0 for Autotuner.user_defined* hooks"
+            )
+
+        self.assertEqual(add_kernel.user_defined_pre_hook, True)
+        self.assertEqual(add_kernel.user_defined_post_hook, True)
 
         # this should cause an exception, since pre_hook is not allowed
         msg = "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
