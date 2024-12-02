@@ -264,6 +264,7 @@ class PagedAttention:
 
         new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
 
+        seq_lengths = (block_mask.seq_lengths[0], self.n_pages * self.page_size)
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
@@ -271,6 +272,7 @@ class PagedAttention:
             new_full_kv_indices,
             block_mask.BLOCK_SIZE,
             new_mask_mod,
+            seq_lengths=seq_lengths,
         )
 
     def get_mask_mod(

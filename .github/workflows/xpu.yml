@@ -40,12 +40,12 @@ jobs:
         ]}
 
   linux-jammy-xpu-2025_0-py3_9-build:
-    name: linux-jammy-xpu-2025_0-py3.9
+    name: linux-jammy-xpu-2025.0-py3.9
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-xpu-py3.9
+      build-environment: linux-jammy-xpu-2025.0-py3.9
       docker-image-name: pytorch-linux-jammy-xpu-2025.0-py3
       runner: linux.12xlarge
       test-matrix: |
@@ -57,14 +57,14 @@ jobs:
         ]}
 
   linux-jammy-xpu-2025_0-py3_9-test:
-    name: linux-jammy-xpu-2025_0-py3.9
+    name: linux-jammy-xpu-2025.0-py3.9
     uses: ./.github/workflows/_xpu-test.yml
     needs: linux-jammy-xpu-2025_0-py3_9-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: linux-jammy-xpu-py3.9
+      build-environment: linux-jammy-xpu-2025.0-py3.9
       docker-image: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.test-matrix }}
 
