@@ -1059,6 +1059,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_get_pg_attr(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            pg = dist.distributed_c10d._get_default_group()
+
+            device = f"cuda:{self.rank}"
+
+            @torch.compile(fullgraph=True)
+            def f(x):
+                if dist.distributed_c10d._rank_not_in_group(pg):
+                    return x + 1
+                else:
+                    return x - 1
+
+            x = torch.ones(4, device=device)
+            self.assertEqual(f(x), x - 1)
+
+            pg = dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+            self.assertEqual(f(x), x + 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     def test_asymmetric_compilation(self):
