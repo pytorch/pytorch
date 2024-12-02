@@ -4299,9 +4299,9 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
 
             data_ptrs = {
-                nt.values().data_ptr(),
-                nt.offsets().data_ptr(),
-                nt.lengths().data_ptr(),
+                nt._values.data_ptr(),
+                nt._offsets.data_ptr(),
+                nt._lengths.data_ptr(),
              }
             return nt, data_ptrs
 
