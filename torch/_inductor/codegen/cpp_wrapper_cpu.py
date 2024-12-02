@@ -1872,11 +1872,6 @@ if (custom_op_wrapper.get() == NULL) {
                     raise NotImplementedError(
                         f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
                     )
-            elif isinstance(raw_arg, torch.device):
-                # device
-                self.include_extra_header("torch/csrc/Device.h")
-                device_str, device_index = self.codegen_device(raw_arg).split(", ")
-                return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
             elif isinstance(raw_arg, torch.dtype):
                 # dtype
                 if sys.version_info < (3, 10):
@@ -1884,13 +1879,6 @@ if (custom_op_wrapper.get() == NULL) {
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
-            elif isinstance(raw_arg, torch.layout):
-                # memory layout
-                if sys.version_info < (3, 10):
-                    # Py_NewRef is only available since Python 3.10
-                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
-                self.include_extra_header("torch/csrc/DynamicTypes.h")
-                return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
                 # memory_format
                 if sys.version_info < (3, 10):
@@ -1966,9 +1954,6 @@ PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
 // Call the custom op in Python
 RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
 if (py_{buf_name}.get() == NULL) {{
-if (PyErr_Occurred()) {{
-return;
-}}
 throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
 }}"""
 
@@ -2087,8 +2072,6 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
-        elif isinstance(val, torch.layout):
-            return self.codegen_layout(val)
         elif isinstance(val, torch.memory_format):
             return self.codegen_memory_format(val)
         elif isinstance(val, float):
