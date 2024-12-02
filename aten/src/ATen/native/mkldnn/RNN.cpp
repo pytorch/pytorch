@@ -517,7 +517,6 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
               bidirectional,
               batch_first,
               train);
-     }
     }
     layer_input = num_directions == 1 ? layer_output[0]
                                       : at::cat(layer_output, /*output_channels*/-1);
