@@ -1171,9 +1171,9 @@ class RANGE_ITERATOR_MATCH : public LeafGuard {
     PyObject* start_obj = start.ptr();
     PyObject* stop_obj = stop.ptr();
     PyObject* step_obj = step.ptr();
-    _start = PyLong_AsLong(start_obj);
-    _stop = PyLong_AsLong(stop_obj);
-    _step = PyLong_AsLong(step_obj);
+    _start = THPUtils_unpackLong(start_obj);
+    _stop = THPUtils_unpackLong(stop_obj);
+    _step = THPUtils_unpackLong(step_obj);
     TORCH_CHECK(
         !PyErr_Occurred(), "values of start/stop/step must fit in a long type");
   }
