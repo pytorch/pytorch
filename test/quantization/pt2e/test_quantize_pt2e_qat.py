@@ -726,8 +726,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             assert isinstance(bias_node, torch.fx.Node)
             return (qweight_node, bias_node)
 
-        first_conv_qweight, first_conv_bias = get_conv_weight_and_bias(first_conv)
-        second_conv_qweight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+        _, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        _, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
         # Assert that each set of conv, conv weight, and conv bias are in the same partition
         def get_source_fn(node: torch.fx.Node):
@@ -1222,10 +1222,10 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
 
         self._prepare_qat_linears(model)
 
-        after_prepare_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
         # must be fixed model.eval()
         self._convert_qat_linears(model)
-        quant_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
 
         model_pt2e = export_for_training(
             model,
@@ -1237,9 +1237,9 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantization_config = get_symmetric_quantization_config()
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
-        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
         model_pt2e = convert_pt2e(model_pt2e)
-        quant_result_pt2e = model_pt2e(*example_inputs)
+        quant_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
 
         exported_model = torch.export.export(model_pt2e, example_inputs)
 

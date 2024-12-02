@@ -1275,7 +1275,7 @@ class TestOptimRenewed(TestCase):
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)
         ]
-        old_params = [p.detach().clone() for p in params]
+        [p.detach().clone() for p in params]
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1632,7 +1632,6 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
-            kwargs = optim_input.kwargs
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)

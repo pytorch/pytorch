@@ -153,18 +153,18 @@ class TestMkldnn(TestCase):
         # unsupported types and unsupported types with gpu
         for dtype in [torch.double, torch.uint8, torch.int8,
                       torch.short, torch.int, torch.long]:
-            with self.assertRaises(RuntimeError) as context:
+            with self.assertRaises(RuntimeError):
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
             if torch.cuda.is_available():
-                with self.assertRaises(RuntimeError) as context:
+                with self.assertRaises(RuntimeError):
                     torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cuda')).to_mkldnn()
         # supported type with gpu
         if torch.cuda.is_available():
-            with self.assertRaises(RuntimeError) as context:
+            with self.assertRaises(RuntimeError):
                 torch.randn(1, 2, 3, 4, dtype=torch.float, device=torch.device('cuda')).to_mkldnn()
         # some factory functions
         for creator in [torch.ones, torch.randn, torch.rand]:
-            with self.assertRaises(RuntimeError) as context:
+            with self.assertRaises(RuntimeError):
                 creator(1, 2, 3, 4, dtype=torch.float, device=torch.device('cpu'), layout=torch._mkldnn)
 
     def test_mkldnn_conv_shapecheck(self):
@@ -1016,7 +1016,7 @@ class TestMkldnn(TestCase):
         # TODO: support training
         for train in [False]:
             bn = bn_module[dim](channels).float().train(train)
-            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))  # noqa: F841
             if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 y = bn(input.to_mkldnn().to_dense())
                 y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))

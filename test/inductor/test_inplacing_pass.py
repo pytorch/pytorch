@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 
 from typing import List
 
@@ -198,7 +199,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            torch.ops.aten.select.int(arg0_1, 0, 0)
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
                 _x_base_index=0,
@@ -208,7 +209,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return ()
 
         x1 = torch.randn(3, device=device)

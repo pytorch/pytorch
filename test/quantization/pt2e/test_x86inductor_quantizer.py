@@ -582,7 +582,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         convert_model = copy.deepcopy(m)
         if debug:
             convert_model.print_readable(True)
-        pt2_quant_output = m(*example_inputs)
+        m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
         }

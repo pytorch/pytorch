@@ -61,7 +61,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -3643,7 +3643,8 @@ as the input tensor excluding its innermost dimension'):
                 out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
             xb = x.to(dtype)
-            yb = x.to(dtype)
+            yb = x.to(dtype)  # noqa: F841
+
             # any
             self.assertEqual((2, 0), xb.any(2).shape)
             self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)

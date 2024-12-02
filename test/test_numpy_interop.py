@@ -34,7 +34,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_numpy_unresizable(self, device) -> None:
         x = np.zeros((2, 2))
-        y = torch.from_numpy(x)
+        y = torch.from_numpy(x)  # noqa: F841
         with self.assertRaises(ValueError):
             x.resize((5, 5))
 
