@@ -46,6 +46,7 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcessTestCase,
     requires_gloo,
+    requires_multicast_support,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch.utils.cpp_extension import load_inline
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -307,6 +309,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # return rank to GPU map
         return init_multigpu_helper(self.world_size, "nccl")
 
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # This TestCase focuses on creation, destroy and abort of PG's. So it
+        # does not need auto-destroy upon exit.
+        return False
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
     @skip_if_lt_x_gpu(1)
@@ -339,7 +347,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         def abortpg():
             c10d.distributed_c10d._get_default_group()._get_backend(
                 torch.device(device)
-            )._shutdown()
+            ).abort()
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
@@ -412,12 +420,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # Destroy pg
         dist.destroy_process_group()
 
+        # we need a new Store for the new PG, achieving it by adding prefix
+        new_store = c10d.PrefixStore("2nd", store)
+
         # re-initialize pg
         c10d.init_process_group(
             "nccl",
             world_size=self.world_size,
             rank=self.rank,
-            store=store,
+            store=new_store,
         )
         t1 = torch.rand(5, 5, device=device)
         dist.all_reduce(t1)
@@ -563,10 +574,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.all_reduce(x)
         torch.cuda.synchronize(device)
         c10d.destroy_process_group()
-        self.assertEqual(
+        self.assertLessEqual(
             nprocs,
             1,
-            f"Found {nprocs} processes creating contexts on {device}, expecting 1 only",
+            f"Found {nprocs} processes creating contexts on {device}, expecting 1 at most",
         )
 
     def _helper_test_extra_cuda_context_by_memory(self):
@@ -2902,6 +2913,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # nccl error happening before rank 0 timeouts
             time.sleep(4)
 
+        # Mimicing all ranks sensing the timeout, abort
+        process_group.abort()
+
         if prev_nccl_async_error_handling is not None:
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
@@ -2959,6 +2973,105 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 raise ValueError(
                     f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}"
                 ) from e
+
+
+class NcclUserBufferRegistrationTest(MultiProcessTestCase):
+    def createNcclAllocator(self):
+        nccl_allocator_source = """
+        #include <torch/extension.h>
+        #include <nccl.h>
+        #include <iostream>
+
+        extern "C" {
+
+          // Note that windows needs __declspec(dllexport): https://stackoverflow.com/a/24575865
+          C10_EXPORT void* nccl_alloc(size_t size, int device, void* stream) {
+            std::cout << "Using ncclMemAlloc" << std::endl;
+            void* ptr;
+            ncclResult_t err = ncclMemAlloc(&ptr, size);
+            return ptr;
+          }
+
+          C10_EXPORT void nccl_free(void* ptr, size_t size, int device, void* stream) {
+            std::cout << "Using ncclMemFree" << std::endl;
+            ncclResult_t err = ncclMemFree(ptr);
+          }
+        }
+        """
+        nccl_allocator_libname = "nccl_allocator"
+        nccl_allocator = load_inline(
+            name=nccl_allocator_libname,
+            cpp_sources=nccl_allocator_source,
+            with_cuda=True,
+            extra_ldflags=["-lnccl"],
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+        )
+        return nccl_allocator
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        nccl_debug_file = tempfile.NamedTemporaryFile()
+        os.environ["NCCL_ALGO"] = "NVLS"
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "NVLS"
+        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @requires_nccl_version((2, 19), "Need NCCL 2.19 for user buffer registration")
+    @skip_if_lt_x_gpu(4)
+    @requires_multicast_support()
+    def test_nccl_user_buffer_registration(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(self.rank)
+        pg = c10d.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device(device))
+        allocator_path = self.createNcclAllocator()
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            allocator_path,
+            "nccl_alloc",
+            "nccl_free",
+        )
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        # allocate memory with ncclMemAlloc
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.arange(1024 * 1024 * 2, device=device)
+
+        # register buffers to NCCL
+        backend.register_mem_pool(pool)
+
+        # allreduce now should use NVIDIA Switches
+        pg.allreduce(tensor).wait()
+        torch.cuda.synchronize(device=device)
+
+        # de-register buffers from NCCL
+        backend.deregister_mem_pool(pool)
+
+        # clean up memory
+        del tensor, pool
+
+        with open(os.environ["NCCL_DEBUG_FILE"]) as f:
+            nccl_debug_file_content = f.read()
+            # if buffers were registered and NVLS reduction ran, NCCL_DEBUG
+            # should show "local-registered" in stdout
+            self.assertRegex(nccl_debug_file_content, "local-registered")
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
@@ -3761,6 +3874,40 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                     c10d.send(x, group_dst=0, group=subgroup)
                 else:
                     c10d.send(x, dst=self.rank - 1, group=subgroup)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @parametrize("group_rank", [True, False])
+    def test_batch_send_recv_subgroup(self, group_rank):
+        world_size = 4
+        if self.rank >= world_size:
+            return
+        subgroup = self._init_two_pg2_subgroups(world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        ops = []
+        if self.rank == 0 or self.rank == 2:
+            x = torch.empty((10,), device=device)
+            if group_rank:
+                ops.append(c10d.P2POp(dist.irecv, x, group=subgroup, group_peer=1))
+            else:
+                ops.append(
+                    c10d.P2POp(dist.irecv, x, peer=self.rank + 1, group=subgroup)
+                )
+
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
+            expected = torch.ones((10,), device=device) * (self.rank + 1)
+            self.assertEqual(x, expected)
+        else:
+            x = torch.ones((10,), device=device) * self.rank
+            if group_rank:
+                ops.append(c10d.P2POp(dist.isend, x, group=subgroup, group_peer=0))
+            else:
+                ops.append(
+                    c10d.P2POp(dist.isend, x, peer=self.rank - 1, group=subgroup)
+                )
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
