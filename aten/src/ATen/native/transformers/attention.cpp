@@ -366,7 +366,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto [q,k,v]= _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
