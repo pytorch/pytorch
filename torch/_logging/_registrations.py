@@ -13,6 +13,9 @@ DISTRIBUTED = [
     "torch.nn.parallel.distributed",
 ]
 
+register_log(
+    "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
+)
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
 register_log("fake_tensor", ["torch._subclasses.fake_tensor"])
 register_log("aot", ["torch._functorch.aot_autograd", "torch._functorch._aot_autograd"])

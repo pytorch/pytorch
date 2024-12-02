@@ -16,6 +16,7 @@ torch.cuda
     default_stream
     device
     device_count
+    device_memory_used
     device_of
     get_arch_list
     get_device_capability
@@ -123,6 +124,15 @@ Memory management
      MemPool
      MemPoolContext
 
+.. currentmodule:: torch.cuda.memory
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    caching_allocator_enable
+
+.. currentmodule:: torch.cuda
 .. autoclass:: torch.cuda.use_mem_pool
 
 .. FIXME The following doesn't seem to exist. Is it supposed to?

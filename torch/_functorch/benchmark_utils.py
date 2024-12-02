@@ -222,7 +222,7 @@ def benchmark_utilization(
         optimize_ctx,
         [ProfilerActivity.CUDA],
         num_runs=num_runs,
-        devices="cuda",
+        devices=["cuda"],
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length

@@ -6,7 +6,7 @@ What to use torch.profiler for:
 
 torch.profiler is helpful for understanding the performance of your program at a kernel-level granularity - for example, it can show graph breaks and GPU utilization at the level of the program. The data provided by the profiler can often help users understand where to investigate further to understand model performance.
 
-To understand kernel-level performance, other toosl exist. NVIDIA's ncu tool can be used, or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>`.
+To understand kernel-level performance, other tools exist. NVIDIA's ncu tool can be used, or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>`.
 
 See also the `general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`_.
 
@@ -66,7 +66,7 @@ Alternatively, turn on *all* flows with the “Flow events” dropdown at the to
 Working around CUDA Graph profiling issues
 ------------------------------------------
 
-When CUDA graphs are enabled, some cuda configurations (driver version under 525.85.12 or CUDA < 12)  can encounter issues between the profiling tools and CUDA graphs. To fix these issues, add an empty profiling context at the top of your program:
+When CUDA graphs are enabled, some CUDA configurations (driver version under 525.85.12 or CUDA < 12)  can encounter issues between the profiling tools and CUDA graphs. To fix these issues, add an empty profiling context at the top of your program:
 
 .. code-block:: python
 

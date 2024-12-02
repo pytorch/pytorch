@@ -38,6 +38,7 @@ struct UsageStream {
   UsageStream(UsageStream&& us) noexcept = default;
   UsageStream& operator=(const UsageStream& other) = default;
   UsageStream& operator=(UsageStream&& other) noexcept = default;
+  ~UsageStream() = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -400,7 +401,7 @@ void mallocAsync(
 
 } // anonymous namespace
 
-void local_raw_delete(void* ptr);
+static void local_raw_delete(void* ptr);
 
 // Same pattern as CUDACachingAllocator.cpp.
 struct CudaMallocAsyncAllocator : public CUDAAllocator {
@@ -494,6 +495,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolTrimTo(mempool, 0);
       }
     }
+  }
+
+  void enable(bool) override {
+    // cannot disable
+  }
+
+  bool isEnabled() const override {
+    return true;
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {
@@ -892,7 +901,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 };
 
-CudaMallocAsyncAllocator device_allocator;
+static CudaMallocAsyncAllocator device_allocator;
 
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
@@ -903,7 +912,7 @@ CUDAAllocator* allocator() {
 
 #else
 CUDAAllocator* allocator() {
-  TORCH_CHECK(false, "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
+  TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;
 }
 

@@ -55,6 +55,64 @@ class WrapperTensor(torch.Tensor):
                                    "not be reflected to c++ callers.")
 
 
+class WrapperTensorWithCustomSizes(WrapperTensor):
+    @classmethod
+    def get_wrapper_properties(cls, t, requires_grad=False):
+        return t, {"requires_grad": requires_grad, "dispatch_sizes_strides_policy": "sizes"}
+
+    def __init__(self, t, requires_grad=False):
+        self.t = t
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if not all(issubclass(cls, t) for t in types):
+            return NotImplemented
+
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(e):
+            return e.t if isinstance(e, WrapperTensorWithCustomSizes) else e
+
+        def wrap(e):
+            return WrapperTensorWithCustomSizes(e) if isinstance(e, torch.Tensor) else e
+
+        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
+        return rs
+
+    def __repr__(self):
+        return super().__repr__(tensor_contents=f"t={self.t}")
+
+
+class WrapperTensorWithCustomStrides(WrapperTensor):
+    @classmethod
+    def get_wrapper_properties(cls, t, requires_grad=False):
+        return t, {"requires_grad": requires_grad, "dispatch_sizes_strides_policy": "strides"}
+
+    def __init__(self, t, requires_grad=False):
+        self.t = t
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if not all(issubclass(cls, t) for t in types):
+            return NotImplemented
+
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(e):
+            return e.t if isinstance(e, WrapperTensorWithCustomStrides) else e
+
+        def wrap(e):
+            return WrapperTensorWithCustomStrides(e) if isinstance(e, torch.Tensor) else e
+
+        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
+        return rs
+
+    def __repr__(self):
+        return super().__repr__(tensor_contents=f"t={self.t}")
+
+
 class DiagTensorBelow(WrapperTensor):
     @classmethod
     def get_wrapper_properties(cls, diag, requires_grad=False):
@@ -196,6 +254,18 @@ class SubclassInfo:
         self.closed_under_ops = closed_under_ops
 
 
+# Helper function to create a subclass of the given class and possibly cache sizes / strides.
+def _create_and_access_shape(cls, shape):
+    sub = cls(torch.randn(shape))
+    # NB: Wrapper subclasses with custom dispatched sizes / strides cache this info
+    # on the first call via non-serializable PyCapsules. We purposefully trigger cache
+    # population here for serialization / deepcopy tests to verify that the presence of this
+    # cache info doesn't cause problems.
+    sub.size()
+    sub.stride()
+    return sub
+
+
 subclass_db = {
     torch.Tensor: SubclassInfo(
         'base_tensor', create_fn=torch.randn
@@ -216,6 +286,16 @@ subclass_db = {
         'diag_tensor_below',
         create_fn=lambda shape: DiagTensorBelow(torch.randn(shape)),
         closed_under_ops=False  # sparse semantics
+    ),
+    WrapperTensorWithCustomSizes: SubclassInfo(
+        'wrapper_with_custom_sizes',
+        create_fn=lambda shape: _create_and_access_shape(WrapperTensorWithCustomSizes, shape),
+        closed_under_ops=False,
+    ),
+    WrapperTensorWithCustomStrides: SubclassInfo(
+        'wrapper_with_custom_strides',
+        create_fn=lambda shape: _create_and_access_shape(WrapperTensorWithCustomStrides, shape),
+        closed_under_ops=False,
     ),
 }
 

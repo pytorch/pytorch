@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorIndexing.h>
@@ -444,11 +445,12 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(backend);
 }
 
-REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp);
-REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
-REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp);
+REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp)
+REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 
 int64_t _fused_sdp_choice_meta(
     const Tensor& query_,
@@ -523,19 +525,31 @@ inline void validate_sdpa_input(
 // the math and memory efficient attn_mask implementation
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype, double neg_inf) {
   // Pass through
-  if(!attn_mask.has_value()){
+  if (!attn_mask.has_value()) {
     return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
+    return at::where(*attn_mask, 0.0, at::scalar_tensor(neg_inf, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
 }
+
+std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  return convert_boolean_attn_mask_(attn_mask, dtype, -std::numeric_limits<double>::infinity());
+}
+
+// alternate version to workaround -inf issue with cuDNN
+// TODO(eqy): delete this when cuDNN -inf issue is resolved
+std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  // TODO Use the max type of the input and output
+  return convert_boolean_attn_mask_(attn_mask, dtype, -65504.0);
+}
+
 // Memory Efficient Attention requires a padded attn mask bias
 // This function pads the attn_mask bias to be a multiple of 16
 // Then slices the padded bias to the original size
@@ -647,11 +661,11 @@ Tensor _safe_softmax(
     int64_t dim,
     std::optional<ScalarType> dtype) {
   auto out = at::softmax(self, dim, dtype);
-  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  const auto masked = self.eq(neg_inf);
+  const auto masked = self.isneginf();
   const auto masked_rows = all(masked, dim, true);
   const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  return at::where(masked_rows, zero, out);
+  // reuse storage for out
+  return at::where_out(out, masked_rows, zero, out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
@@ -691,23 +705,26 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
+  using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
           query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
-  sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
-  std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
+  const auto query_device_type = query_.device().type();
+  const auto backend = static_cast<SDPBackend>(choice_int);
+  const auto convert_attn_func = backend != SDPBackend::cudnn_attention ? convert_boolean_attn_mask : convert_boolean_attn_mask_cudnn;
+  auto attn_mask = convert_attn_func(attn_mask_, query_.dtype());
   switch (backend) {
-    case sdp::SDPBackend::cudnn_attention: {
+    case SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
-          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
-    case sdp::SDPBackend::flash_attention: {
-      if(query_.device().type() == DeviceType::CUDA){
+    case SDPBackend::flash_attention: {
+      if(query_device_type == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
         Tensor query_padded = pad_last_dim<8, false>(query_);
         Tensor key_padded = pad_last_dim<8, false>(key);
@@ -722,7 +739,7 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
-    case sdp::SDPBackend::efficient_attention: {
+    case SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
@@ -731,16 +748,20 @@ Tensor scaled_dot_product_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
-    case sdp::SDPBackend::overrideable: {
+    case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
-    case sdp::SDPBackend::math:
-      if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
-          && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
-          && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
-          && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
+    case SDPBackend::math: {
+#ifdef USE_MPS
+      const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
+      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
+      const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
+      if (query_device_type == DeviceType::MPS && dropout_p == 0.0
+          && !(GradMode::is_enabled() && any_inputs_require_grad)
+          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
+          && !any_nested) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
@@ -751,6 +772,7 @@ Tensor scaled_dot_product_attention(
             std::nullopt, /*dropout_mask*/
             scale));
       }
+#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
@@ -761,6 +783,7 @@ Tensor scaled_dot_product_attention(
           std::nullopt, /*dropout_mask*/
           scale,
           enable_gqa));
+    }
     default:
       TORCH_CHECK(
           false,
@@ -780,22 +803,26 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
             value.is_contiguous(),
         "scaled_dot_product_attention: If inputs are nested tensors they must be contiguous");
   }
+  auto& ctx = at::globalContext();
   auto origin_dtype = query_.scalar_type();
   // Keep query, key, value in high precision for accuracy
   // NestedTensor reports issues for backward with autograd so disabled: must be
   // contiguous to get buffer.
-  auto query_acc = (query_.scalar_type() == at::kHalf ||
-                    query_.scalar_type() == at::kBFloat16) &&
+  auto query_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (query_.scalar_type() == at::kHalf ||
+           query_.scalar_type() == at::kBFloat16) &&
           !query_.is_nested()
       ? query_.to(at::kFloat)
       : query_;
-  auto key_acc =
-      (key.scalar_type() == at::kHalf || key.scalar_type() == at::kBFloat16) &&
+  auto key_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (key.scalar_type() == at::kHalf ||
+           key.scalar_type() == at::kBFloat16) &&
           !key.is_nested()
       ? key.to(at::kFloat)
       : key;
-  auto value_acc = (value.scalar_type() == at::kHalf ||
-                    value.scalar_type() == at::kBFloat16) &&
+  auto value_acc = !ctx.allowFP16BF16ReductionMathSDP() &&
+          (value.scalar_type() == at::kHalf ||
+           value.scalar_type() == at::kBFloat16) &&
           !value.is_nested()
       ? value.to(at::kFloat)
       : value;

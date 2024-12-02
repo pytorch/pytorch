@@ -106,11 +106,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -138,11 +142,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])
@@ -173,11 +181,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -231,11 +243,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -259,11 +275,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -294,11 +314,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [3, 3])
@@ -326,11 +350,15 @@ Example(s):
         commit = _Commit(
             result=src,
             checksum_result="",
-            path="",
+            yaml_path="",
             additions=additions,
             subtractions=subtractions,
             base=dst,
             checksum_base="",
+            cpp_header="",
+            cpp_header_path="",
+            thrift_schema="",
+            thrift_schema_path="",
         )
         next_version, _ = check(commit)
         self.assertEqual(next_version, [4, 1])

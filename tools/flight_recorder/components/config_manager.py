@@ -5,7 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import logging
 from typing import Optional, Sequence
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -17,9 +23,10 @@ class JobConfig:
         self.parser = argparse.ArgumentParser(
             description="PyTorch Flight recorder analyzing script."
         )
-
         self.parser.add_argument(
-            "-d", "--dir", required=True, help="Directory with flight recorder dumps"
+            "trace_dir",
+            nargs="?",
+            help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
         )
         self.parser.add_argument(
             "--selected-ranks",
@@ -29,18 +36,33 @@ class JobConfig:
             help="List of ranks we want to show traces for.",
         )
         self.parser.add_argument(
+            "--allow-incomplete-ranks",
+            action="store_true",
+            help=(
+                "FR trace require all ranks to have dumps for analysis. "
+                "This flag allows best-effort partial analysis of results "
+                "and printing of collected data."
+            ),
+        )
+        self.parser.add_argument(
             "--pg-filters",
             default=None,
             nargs="+",
             type=str,
-            help="List of filter strings",
+            help=(
+                "List of filter strings, it could be pg name or pg desc. "
+                "If specified, only show traces for the given pg."
+            ),
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
             "-p",
             "--prefix",
-            help="prefix to strip such that rank can be extracted",
-            default="rank_",
+            help=(
+                "Common filename prefix to strip such that rank can be extracted. "
+                "If not specified, will attempt to infer a common prefix."
+            ),
+            default=None,
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
@@ -57,4 +79,6 @@ class JobConfig:
             assert (
                 args.just_print_entries
             ), "Not support selecting pg filters without printing entries"
+        if args.verbose:
+            logger.set_log_level(logging.DEBUG)
         return args

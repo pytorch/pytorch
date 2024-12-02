@@ -5,12 +5,6 @@ import os
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
-from torch.distributed._tensor._collective_utils import (
-    mesh_broadcast,
-    mesh_scatter,
-    unpad_tensor,
-)
-from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
     _get_default_group,
@@ -22,6 +16,12 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
+)
+from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -88,7 +88,29 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaises(ValueError):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
-    @with_comms
+    @with_comms()
+    def test_2d_mesh_non_eager_init_subgroup(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+
+        self.assertEqual(mesh_2d.get_group(0).bound_device_id, None)
+        self.assertEqual(mesh_2d.get_group(1).bound_device_id, None)
+
+    # TODO: need to refactor the other tests in this file to test both
+    # eager_init=True and eager_init=False scenarios.
+    @with_comms(eager_init=True)
+    def test_2d_mesh_eager_init_subgroup(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+
+        # when eager init is used, the subgroup is created from nccl comm split and
+        # there would be bound_device_id immediately assigned for the subgroup.
+        if self.backend == "nccl":
+            curr_device = torch.cuda.current_device()
+            self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
+            self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
+
+    @with_comms()
     def test_get_group_and_get_all_groups(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -200,6 +222,15 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(
             ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
         )
+        # Check when `mesh` is passed as well
+        global_mesh = DeviceMesh.from_group(
+            mesh_pg, self.device_type, mesh=torch.arange(self.world_size)
+        )
+        self.assertEqual(ref_global_mesh, global_mesh)
+        self.assertEqual(ref_global_mesh._dim_group_infos, global_mesh._dim_group_infos)
+        self.assertEqual(
+            ref_global_mesh._coordinate_on_dim, global_mesh._coordinate_on_dim
+        )
 
     @with_comms
     def test_from_group_with_invalid_mesh(self):
@@ -236,7 +267,8 @@ class DeviceMeshTest(DTensorTestBase):
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
         mesh = DeviceMesh(device_type, mesh_tensor)
-        self.assertEqual(mesh.get_group(1)._get_backend_name(), "fake")
+        # Fake pg only have BackendType as BackendType::CUSTOM.
+        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
@@ -572,7 +604,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
     @with_comms
-    def test_flatten_mesh(self):
+    def test_flatten_mesh_3d(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
@@ -613,6 +645,23 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
+
+    @with_comms(eager_init=True)
+    def test_flatten_mesh_4d(self):
+        mesh_shape = (2, 2, 2, 1)
+        mesh_dim_names = ("dp_replicate", "dp_shard", "cp", "tp")
+        mesh_4d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        # flatten HSDP and CP into one mesh
+        dp_cp_mesh = mesh_4d[mesh_dim_names[:3]]._flatten("dp_cp")
+        # check flattened mesh integrity
+        self.assertEqual(mesh_4d["dp_cp"].mesh.flatten(), dp_cp_mesh.mesh)
+        # check flattened mesh dim names is correct
+        self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
+        # check flattened mesh dependency
+        self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_4d)
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):

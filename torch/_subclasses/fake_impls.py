@@ -142,6 +142,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
@@ -396,6 +409,11 @@ def local_scalar_dense(fake_mode, func, arg):
     return r
 
 
+@register_op_impl(torch.ops.aten.nonzero_numpy.default)
+def nonzero_numpy(fake_mode, func, arg):
+    return torch.ops.aten.nonzero.default(arg).unbind(1)
+
+
 @register_op_impl(torch.ops.aten.nonzero.default)
 def nonzero(fake_mode, func, arg):
     if (
@@ -411,6 +429,8 @@ def nonzero(fake_mode, func, arg):
             _constrain_range_for_size,
             has_free_symbols,
         )
+        from torch.utils._sympy.numbers import IntInfinity
+        from torch.utils._sympy.value_ranges import bound_sympy
 
         if not has_free_symbols(arg.numel()) and arg.numel() == 0:
             # If numel is zero, then the output size must be zero.
@@ -429,12 +449,53 @@ def nonzero(fake_mode, func, arg):
 
             if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
+            else:
+                prod_node = math.prod(arg.shape).node
+                prod_range = bound_sympy(
+                    prod_node.expr, prod_node.shape_env.var_to_range
+                )
+                if isinstance(prod_range.upper, IntInfinity):
+                    maxval = sys.maxsize - 1
+                else:
+                    maxval = prod_range.upper
 
             _constrain_range_for_size(nnz, max=maxval)
 
         arg.nonzero_memo = nnz
 
     return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
+
+
+@register_op_impl(torch.ops.aten._padded_dense_to_jagged_forward.default)
+def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=None):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            # Without symints/symfloats, cannot handle this
+            raise DynamicOutputShapeException(func)
+
+        total_L = fake_mode.shape_env.create_unbacked_symint()
+
+        maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(padded.numel()):
+            maxval = int(padded.numel())
+
+        _constrain_range_for_size(total_L, min=0, max=maxval)
+
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -524,14 +585,13 @@ def has_meta(func):
     lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
@@ -598,7 +658,7 @@ def multi_device_op_default(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.slice_scatter.out)
 def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True

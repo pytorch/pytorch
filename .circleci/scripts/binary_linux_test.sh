@@ -27,12 +27,11 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   source activate testenv >/dev/null
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  # Prior to Python 3.8 paths were suffixed with an 'm'
-  if [[ -d  "\${python_path}/bin" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  elif [[ -d "\${python_path}m/bin" ]]; then
-    export PATH="\${python_path}m/bin:\$PATH"
+  if [[ "\$python_nodot" = *t ]]; then
+    python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
+    python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 EXTRA_CONDA_FLAGS=""
@@ -118,6 +117,11 @@ fi
 
 # Test the package
 /builder/check_binary.sh
+
+if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
+  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
+  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+fi
 
 # Clean temp files
 cd /builder && git clean -ffdx

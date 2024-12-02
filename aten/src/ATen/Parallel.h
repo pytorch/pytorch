@@ -133,7 +133,7 @@ TORCH_API std::string get_parallel_info();
 TORCH_API void set_num_interop_threads(int);
 
 // Returns the number of threads used for inter-op parallelism
-TORCH_API int get_num_interop_threads();
+TORCH_API size_t get_num_interop_threads();
 
 // Launches inter-op parallel task
 TORCH_API void launch(std::function<void()> func);
@@ -142,7 +142,7 @@ void launch_no_thread_state(std::function<void()> fn);
 } // namespace internal
 
 // Launches intra-op parallel task
-TORCH_API void intraop_launch(std::function<void()> func);
+TORCH_API void intraop_launch(const std::function<void()>& func);
 
 // Returns number of intra-op threads used by default
 TORCH_API int intraop_default_num_threads();

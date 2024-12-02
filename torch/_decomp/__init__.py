@@ -1,15 +1,26 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
-from functools import wraps
+from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import Callable, Dict, List, Sequence, TypeVar, Union
+from typing import (
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 
 import torch
 import torch.library
-from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
+from torch._ops import HigherOrderOperator, OperatorBase, OpOverload, OpOverloadPacket
 from torch._prims_common import CustomOutParamAnnotation
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.utils import _pytree as pytree
 
 
@@ -20,6 +31,7 @@ __all__ = [
     "register_decomposition",
     "get_decompositions",
     "core_aten_decompositions",
+    "_should_decompose_because_unsafe_op",
 ]
 
 _T = TypeVar("_T")
@@ -34,6 +46,24 @@ global_decomposition_table: Dict[
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
+
+
+def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
+    """
+    Returns True if the op must always decompose in export/compile tracing system
+
+    In export, we always decompose certain CIA ops that are tagged with
+    maybe_aliasing_or_mutating because we statically need to know if the op is
+    mutating or not. But these CIA ops could have different behaviour in runtime.
+
+    native_batch_norm is a prim op which has a wrong schema and it needs to be replaced
+    with correct schema. But until then, we will force decompose it via this tag.
+    """
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+    if torch.Tag.maybe_aliasing_or_mutating in op.tags:
+        return True
+    return op == torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -256,6 +286,22 @@ import torch._refs
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
+    # If it is fbcode change, we return the old decomposition list
+    from torch._export.utils import (
+        _collect_all_valid_cia_ops_for_aten_namespace,
+        _get_decomp_for_cia,
+    )
+
+    # Entry without functional CIA ops
+    decomp_table = _core_aten_decompositions_post_autograd()
+    for op in _collect_all_valid_cia_ops_for_aten_namespace():
+        decomp_table[op] = _get_decomp_for_cia(op)
+    return decomp_table
+
+
+def _core_aten_decompositions_post_autograd() -> (
+    Dict[torch._ops.OperatorBase, Callable]
+):
     aten = torch.ops.aten
     return get_decompositions(
         [
@@ -276,6 +322,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
             aten.block_diag,
+            aten.bernoulli.p,
+            aten.bernoulli.default,
             aten.celu,
             aten.celu_,
             aten.channel_shuffle,
@@ -292,6 +340,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.detach,
             aten.diag_embed,
             aten.diagonal_backward,
+            aten.diagonal_copy,
             aten.dot,
             aten.vdot,
             aten.elu,
@@ -328,11 +377,16 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.huber_loss,
             aten.huber_loss_backward,
             aten.im2col,
-            aten.index_add,
+            aten.index_add.out,
+            aten.index_add.default,
             aten.index_add_,
-            aten.index_copy,
+            aten.index_copy.out,
+            aten.index_copy.default,
             aten.index_copy_,
-            aten.index_fill,
+            aten.index_fill.int_Scalar,
+            aten.index_fill.int_Tensor,
+            aten.index_fill.int_Scalar_out,
+            aten.index_fill.int_Tensor_out,
             aten.index_fill_,
             aten.isin,
             aten.isneginf,
@@ -357,6 +411,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.logsumexp.default,
             aten.masked_fill,
             aten.masked_fill_,
+            aten.max_unpool2d,
+            aten.max_unpool3d,
             aten.mish,
             aten.mish_,
             aten.mse_loss,
@@ -382,7 +438,16 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.nll_loss2d_backward,
             aten.nll_loss_backward,
             aten.nll_loss_forward,
-            aten.norm,
+            aten.norm.ScalarOpt_dtype,
+            aten.norm.Scalar,
+            aten.norm.ScalarOpt_dim_dtype,
+            aten.norm.ScalarOpt_dim,
+            aten.norm.dtype_out,
+            aten.norm.out,
+            aten.norm.names_dtype_out,
+            aten.norm.names_out,
+            aten.norm.ScalarOpt_dtype_out,
+            aten.norm.Scalar_out,
             aten.ones,
             aten.ones_like,
             aten.pixel_shuffle,
@@ -419,7 +484,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.sigmoid_backward,
             aten.silu,
             aten.silu_,
-            aten.silu_backward,
+            aten.silu_backward.grad_input,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
@@ -436,10 +501,16 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.special_xlog1py,
             aten.split.Tensor,
             aten.split_with_sizes_copy,
+            aten.squeeze_copy,
             aten.squeeze.default,
             aten.squeeze.dim,
-            aten.std,
-            aten.std_mean,
+            aten.std.correction,
+            aten.std.out,
+            aten.std.correction_out,
+            aten.std.names_out,
+            aten.std.correction_names_out,
+            aten.std_mean.correction,
+            aten.std_mean.correction_out,
             aten.stack,
             aten.sum.default,
             aten.sum.out,
@@ -452,6 +523,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.threshold_backward,
             aten.trace,
             aten.transpose.int,
+            aten.transpose_copy,
             aten.tril,
             aten.tril_,
             aten.triu,
@@ -468,8 +540,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unsqueeze_copy,
             aten._unsafe_view,
             aten.upsample_linear1d,
-            aten.upsample_bilinear2d,
-            aten.upsample_trilinear3d,
+            aten.upsample_bilinear2d.out,
+            aten.upsample_trilinear3d.out,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
             aten.xlogy,

@@ -77,9 +77,7 @@ def _lazy_init() -> None:
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -164,6 +162,22 @@ def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
     if not is_initialized():
         return {}
     return torch._C._mtia_memoryStats(_get_device_index(device, optional=True))
+
+
+def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+    r"""Return capability of a given device as a tuple of (major version, minor version).
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceCapability(_get_device_index(device, optional=True))
+
+
+def empty_cache() -> None:
+    r"""Empty the MTIA device cache."""
+    return torch._C._mtia_emptyCache()
 
 
 def set_stream(stream: Stream):
@@ -323,6 +337,8 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "get_device_capability",
+    "empty_cache",
     "set_device",
     "set_stream",
     "stream",

@@ -31,7 +31,7 @@ static std::vector<Generator> default_gens_cuda;
  * Warning: this function must only be called once!
  */
 static void initCUDAGenVector() {
-  num_gpus = c10::cuda::device_count();
+  num_gpus = static_cast<int32_t>(c10::cuda::device_count());
   cuda_gens_init_flag.resize(num_gpus);
   default_gens_cuda.resize(num_gpus);
 }

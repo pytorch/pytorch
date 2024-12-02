@@ -8,6 +8,7 @@ export VC_YEAR=2019
 
 if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
     export VC_YEAR=2022
+    export XPU_VERSION=2025.0
 fi
 
 pushd "$BUILDER_ROOT"
