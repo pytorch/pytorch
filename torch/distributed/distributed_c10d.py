@@ -4477,9 +4477,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
 
 @_exception_logger
-def barrier(
-    group: Optional[ProcessGroup] = GroupMember.WORLD, async_op=False, device_ids=None
-):
+def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
     """
     Synchronize all processes.
 
@@ -4521,11 +4519,7 @@ def barrier(
         work.wait()
 
 
-def monitored_barrier(
-    group: Optional[ProcessGroup] = GroupMember.WORLD,
-    timeout=None,
-    wait_all_ranks=False,
-):
+def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
     """
     Synchronize processes similar to ``torch.distributed.barrier``, but consider a configurable timeout.
 
@@ -4595,9 +4589,7 @@ def monitored_barrier(
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
-        timeout, wait_all_ranks=wait_all_ranks
-    )
+    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
 
 
 def _create_process_group_wrapper(
