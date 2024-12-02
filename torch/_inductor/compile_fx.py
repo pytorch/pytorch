@@ -58,6 +58,7 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
+    CompiledFxGraphConstantsWithGm,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -636,7 +637,7 @@ def _compile_fx_inner(
         key_info = None
         cache_info = None
         remote_cache = None
-
+        constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
         # in prepare_key/load_with_key, dump those settings of "cache_event_time"
         start_time = time.time_ns()
@@ -658,7 +659,7 @@ def _compile_fx_inner(
                     local,
                     remote_cache,
                     is_backward=graph_kwargs.get("is_backward", False),
-                    gm=gm,
+                    constants=constants,
                 )
 
         # CACHE BYPASS: Compile the graph, don't save it to the cache
@@ -739,9 +740,11 @@ def _compile_fx_inner(
             cache_event_time=start_time,
             key=cache_info.get("key") if cache_info else None,
             components=cache_info.get("components") if cache_info else None,
-            cache_bypass_reason=cache_info.get("cache_bypass_reason")
-            if cache_info
-            else "cache not enabled",
+            cache_bypass_reason=(
+                cache_info.get("cache_bypass_reason")
+                if cache_info
+                else "cache not enabled"
+            ),
             remote_cache_enabled=remote,
             local_cache_enabled=local,
         )
@@ -757,7 +760,7 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
 
-        compiled_graph.post_compile(example_inputs, cudagraphs, gm)
+        compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -1209,11 +1212,13 @@ def cudagraphify_impl(
 
     # allocate static tensor inputs
     static_inputs = [
-        x
-        if not isinstance(x, torch.Tensor)
-        else static_input(x)
-        if idx not in static_input_idxs
-        else x.detach()
+        (
+            x
+            if not isinstance(x, torch.Tensor)
+            else static_input(x)
+            if idx not in static_input_idxs
+            else x.detach()
+        )
         for idx, x in enumerate(inputs)
     ]
 
@@ -1442,9 +1447,11 @@ def fw_compiler_freezing(
 def get_cpp_wrapper_config() -> Dict[str, object]:
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-        if config.triton.autotune_at_compile_time is not None
-        else True,
+        "triton.autotune_at_compile_time": (
+            config.triton.autotune_at_compile_time
+            if config.triton.autotune_at_compile_time is not None
+            else True
+        ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
@@ -1752,9 +1759,11 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 fixed = count_tangents(model)
-                with config.patch(
-                    get_cpp_wrapper_config()
-                ) if config.cpp_wrapper else contextlib.nullcontext():
+                with (
+                    config.patch(get_cpp_wrapper_config())
+                    if config.cpp_wrapper
+                    else contextlib.nullcontext()
+                ):
                     return inner_compile(
                         model,
                         example_inputs,

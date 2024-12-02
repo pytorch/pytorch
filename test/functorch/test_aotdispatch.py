@@ -6743,14 +6743,13 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
+    def load_with_key(
+        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
+    ):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
         return gm, {}
-
-    def post_compile(self, gm, inputs, cudagraphs):
-        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
