@@ -1483,7 +1483,7 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+        torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
@@ -1496,7 +1496,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
+            original_fully_shard = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")

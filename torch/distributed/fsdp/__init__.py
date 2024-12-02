@@ -6,6 +6,7 @@ from .fully_shard import (
     MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
+    UnshardHandle,
 )
 from .fully_sharded_data_parallel import (
     BackwardPrefetch,
@@ -52,4 +53,5 @@ __all__ = [
     "MixedPrecisionPolicy",
     "OffloadPolicy",
     "register_fsdp_forward_method",
+    "UnshardHandle",
 ]

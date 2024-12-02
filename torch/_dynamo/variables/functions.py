@@ -40,7 +40,7 @@ from .constant import ConstantVariable
 
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp.fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
 

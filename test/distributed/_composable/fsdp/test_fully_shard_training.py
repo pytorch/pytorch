@@ -671,7 +671,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         module_grouping: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
-        testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
+        testing_compile = fully_shard != torch.distributed.fsdp.fully_shard.fully_shard
         if testing_compile and checkpoint_impl == "composable":
             return
         torch.manual_seed(42)

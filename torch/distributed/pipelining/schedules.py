@@ -24,7 +24,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-from torch.distributed._composable.fsdp.fully_shard import FSDPModule, UnshardHandle
+from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
