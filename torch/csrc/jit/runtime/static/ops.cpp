@@ -1044,16 +1044,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  std::optional<float> clamp = std::nullopt;
+  std::optional<double> clamp = std::nullopt;
   if (n->inputs()[1]->node()->kind() == prim::Constant) {
     auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
-    clamp = clamp_d
-        ? std::make_optional<float>(static_cast<float>(clamp_d.value()))
-        : std::nullopt;
+    clamp = clamp_d;
   }
   auto te = clamp ? createLogit() : nullptr;
-  float clamp_value = clamp ? *clamp : 0.0f;
-  return [te, clamp_value](ProcessedNode* p_node) {
+  return [te, clamp](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
@@ -1068,7 +1065,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     }
     at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     int64_t nn = in0_t.numel();
-    float c = clamp_value;
+    float c = clamp.value() ? static_cast<float>(clamp.value()) : 0;
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
   };
 })
