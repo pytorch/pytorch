@@ -123,7 +123,7 @@ def triton_op(
 
         # We require that the user pass us a function that is make_fx traceable,
         # so we can just register it as the Fake/meta kernel.
-        result.register_fake(fn)  # type: ignore[attr-defined]
+        result.register_fake(fn)
 
         # We decompose the operator when FunctionalTensorMode is active.
         # The goal is to decompose the operator in AOTDispatcher.
@@ -139,7 +139,7 @@ def triton_op(
             with mode:
                 return fn(*args, **kwargs)
 
-        result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)  # type: ignore[attr-defined]
+        result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result
 
     if fn is None:
