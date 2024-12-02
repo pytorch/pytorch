@@ -265,7 +265,7 @@ class CommonTemplate:
             return x.expand(y_size).clone()
 
         def get_input(size: Tuple[int]) -> torch.Tensor:
-            device = torch.device(GPU_TYPE)
+            device = torch.device(self.device)
             full = torch.randn(size).to(device)
             view = torch.as_strided(full, size, full.stride())
             return view
@@ -282,7 +282,7 @@ class CommonTemplate:
             if i != 1:
                 self.assertEqual(i, j)
 
-        result, (triton_code,) = self.run_and_compare(foo, x, y)
+        result, (triton_code,) = run_and_compare(self, foo, x, y)
 
     @parametrize("prefer_nd_tiling", [False, True])
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
