@@ -597,6 +597,7 @@ def to_dtype(func, *args, **kwargs):
 def to_copy_default(func, *args, **kwargs):
     from torch.nested._internal.wrappers import make_cached_tensor, make_offload_tensor
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
+    from torch.nested._internal.nested_tensor import source_fields, extra_fields
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -645,6 +646,8 @@ def to_copy_default(func, *args, **kwargs):
 
     new_metadata = make_cached_tensor(
         metadata=new_raw_metadata,
+        source_fields=source_fields,
+        extra_fields=extra_fields,
     )
 
     new_non_contig_offsets = None
