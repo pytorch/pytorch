@@ -125,8 +125,6 @@ class InterpreterModule(torch.nn.Module):
     and makes it easier to debug execution.
     """
 
-    graph_module: Optional[torch.fx.GraphModule]
-
     def __init__(
         self,
         graph: torch.fx.Graph,
@@ -145,7 +143,7 @@ class InterpreterModule(torch.nn.Module):
             # GraphModule codegen in this instance.
             # Patch the codegened forward to run with this InterpreterModule,
             # so attribute accesses, etc. are on this module instead.
-            return type(self.graph_module).forward(self, *args, **kwargs)
+            return type(self.graph_module).forward(self, *args, **kwargs)  # type: ignore[operator, union-attr]
         else:
             if kwargs:
                 # Handle **kwargs. FX only natively supports positional
@@ -818,26 +816,22 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
     return name
 
 
-def _generate_flatten(gm: torch.fx.GraphModule, node) -> torch.fx.Node:
-    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))
-    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))
+def _generate_flatten(gm: torch.nn.Module, node) -> torch.fx.Node:
+    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))  # type: ignore[operator, union-attr]
+    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))  # type: ignore[operator, union-attr]
     return getitem_0
 
 
-def _generate_flatten_spec(
-    gm: Union[torch.fx.GraphModule, InterpreterModule, UnflattenedModule], node, spec
-) -> torch.fx.Node:
+def _generate_flatten_spec(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
-    spec_node = gm.graph.get_attr(name)
-    return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
+    spec_node = gm.graph.get_attr(name)  # type: ignore[union-attr, operator]
+    return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))  # type: ignore[union-attr, operator]
 
 
-def _generate_unflatten(
-    gm: Union[torch.fx.GraphModule, InterpreterModule, UnflattenedModule], nodes, spec
-) -> torch.fx.Node:
+def _generate_unflatten(gm: torch.nn.Module, nodes, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
-    spec_node = gm.graph.get_attr(name)
-    return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))
+    spec_node = gm.graph.get_attr(name)  # type: ignore[union-attr, operator]
+    return gm.graph.call_function(pytree.tree_unflatten, (nodes, spec_node))  # type: ignore[union-attr, operator]
 
 
 def _get_submodule(mod: torch.nn.Module, target: str):
@@ -898,7 +892,7 @@ class _ModuleFrame:
         module_stack: List[Tuple[str, int]],
         module_id,
         module_call_graph: Dict[str, ModuleCallSignature],
-        module: Optional[Union[torch.fx.GraphModule, UnflattenedModule]] = None,
+        module: Optional[torch.nn.Module] = None,
     ):
         self.flat_graph = flat_graph
         self.nodes = nodes
@@ -916,7 +910,6 @@ class _ModuleFrame:
         # generate call name for self.fqn
         self.child_fqn = _call_name(self.fqn, num_calls + 1)
 
-        self.module: Union[torch.fx.GraphModule, UnflattenedModule, InterpreterModule]
         if module is not None:
             self.module = module
             self.ivals = module.ivals if hasattr(module, "ivals") else {}  # type: ignore[var-annotated]
@@ -954,21 +947,21 @@ class _ModuleFrame:
             assert args_spec.context is None
             assert kwargs_spec.context is not None
 
-            with self.graph.inserting_after(None):
+            with self.graph.inserting_after(None):  # type: ignore[union-attr, operator]
                 arg_nodes = [
-                    self.graph.placeholder(f"_positional_arg_{idx}")
+                    self.graph.placeholder(f"_positional_arg_{idx}")  # type: ignore[union-attr, operator]
                     for idx in range(args_spec.num_children)
                 ]
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
-                    kwarg_nodes[name] = self.graph.placeholder(name)
+                    kwarg_nodes[name] = self.graph.placeholder(name)  # type: ignore[union-attr, operator]
                 flat_args = _generate_flatten_spec(
                     self.module,
                     (tuple(arg_nodes), kwarg_nodes),
                     signature.in_spec,
                 )
                 for idx, arg in enumerate(signature.inputs):
-                    flat_arg_node = self.graph.create_node(
+                    flat_arg_node = self.graph.create_node(  # type: ignore[union-attr, operator]
                         op="call_function",
                         target=operator.getitem,
                         args=(flat_args, idx),
@@ -1026,15 +1019,15 @@ class _ModuleFrame:
                 }
             assert self.parent_call_module is not None
             self.parent_call_module.args = tuple(arg_nodes)
-            self.parent_call_module.kwargs = kwarg_nodes  # type: ignore[assignment]
+            self.parent_call_module.kwargs = kwarg_nodes
 
     def add_placeholder(self, x):
         assert self.fqn != "", f"Cannot add placeholder {x} to root module"
         assert x.graph is self.flat_graph
         # x is not in subgraph, create a new placeholder for subgraph
-        with self.graph.inserting_before(None):
-            placeholder_node = self.graph.placeholder(x.name, type_expr=x.type)
-        # copy all meta fields, even if some fields might be irrelevant for
+        with self.graph.inserting_before(None):  # type: ignore[union-attr, operator]
+            placeholder_node = self.graph.placeholder(x.name, type_expr=x.type)  # type: ignore[union-attr, operator]
+        # copy all meta fields, even if some fields might be irrelvant for
         # the placeholder node
         placeholder_node.meta = copy.copy(x.meta)
         self.node_to_placeholder[x] = placeholder_node
@@ -1048,7 +1041,7 @@ class _ModuleFrame:
         # should not be deduplicated in the first place.
         args = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.args)
         kwargs = pytree.tree_map_only(torch.fx.Node, self.remap_input, x.kwargs)
-        node = self.graph.call_function(x.target, args, kwargs)
+        node = self.graph.call_function(x.target, args, kwargs)  # type: ignore[operator, union-attr]
         node.meta = copy.copy(x.meta)
         self.node_map[x] = node
         return node
@@ -1155,7 +1148,7 @@ class _ModuleFrame:
 
         assert isinstance(graph_outputs, (list, torch.fx.Node))
 
-        self.graph.output(graph_outputs)
+        self.graph.output(graph_outputs)  # type: ignore[union-attr, operator]
 
         # Rewrite outputs in parent module
         if parent_out is None:
@@ -1180,7 +1173,7 @@ class _ModuleFrame:
 
     def copy_node(self, node):
         self.print("copying", node.format_node())
-        self.node_map[node] = self.graph.node_copy(node, self.remap_input)
+        self.node_map[node] = self.graph.node_copy(node, self.remap_input)  # type: ignore[union-attr, operator]
         self.seen_nodes[node.name] = node
 
     def run_outer(self):
@@ -1522,7 +1515,7 @@ def _sink_params(
     To replicate eager's semantics, we need to get them from the module state
     via get_attr instead.
 
-    module: GraphModule, potentially containing nested submodules.
+    module: GraphModule, potentially containining nested submodules.
     inputs_to_state: mapping graph input names to the corresponding key in the state_dict.
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
@@ -1545,13 +1538,11 @@ def _sink_params(
         return module_id_to_inputs_removed
 
     graph = module.graph
-    assert isinstance(graph, torch.fx.Graph)
-
-    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
+    inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))  # type: ignore[arg-type, union-attr, var-annotated]
     the_last_input = inputs[-1]
 
     # Also remove from call_module nodes
-    call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
+    call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)  # type: ignore[arg-type, union-attr, var-annotated]
     for node in call_module_nodes:
         submodule = _get_attr(module, node.target)
         # remove placeholder from call_module node arguments, only if we've
@@ -1577,8 +1568,8 @@ def _sink_params(
                 state_name = sn_split
                 break
 
-        # If there's a mismatch between scope name and state name, then
-        # there must be multiple scopes pointing to the same state name,
+        # If there's a mismatch beteewn scope name and state name, then
+        # there must be multuple scopes pointing to the same state name,
         # meaning some modules are shared. In such case, we can simply skip
         # updating the current node because another later iteration will
         # take care of this input node when the unique match between scope
@@ -1601,12 +1592,12 @@ def _sink_params(
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
 
             # Make sure the newly created get_attr node is placed after the last placeholder node
-            with graph.inserting_after(the_last_input):
-                new_node = graph.create_node("get_attr", ".".join(attr_path))
+            with graph.inserting_after(the_last_input):  # type: ignore[union-attr, operator]
+                new_node = graph.create_node("get_attr", ".".join(attr_path))  # type: ignore[union-attr, operator]
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
 
-        graph.erase_node(node)
+        graph.erase_node(node)  # type: ignore[union-attr, operator]
         inputs_removed.append(node.name)
 
     if isinstance(module, InterpreterModule):
