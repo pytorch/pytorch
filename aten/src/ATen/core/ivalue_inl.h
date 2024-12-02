@@ -1175,7 +1175,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // set up before running the callback, as in, it will set up the CUDA streams,
   // synchronize them with the value, and so on (if needed).
   template<typename T>
-  void invokeCallback(const T& callback, bool uses_future) {
+  void invokeCallback(T& callback, bool uses_future) {
     static_assert(
         std::is_invocable_r_v<void, T, Future&>,
         "The callback must have signature void(Future&)");
