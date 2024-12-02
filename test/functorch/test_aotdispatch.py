@@ -45,11 +45,11 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
+from torch._inductor.output_code import OutputCode
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.utils.rnn import PackedSequence
-from torch._inductor.output_code import OutputCode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -6721,6 +6721,7 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(out, optout)
 
+
 @dataclasses.dataclass
 class MockFXGraphCacheOutput(OutputCode):
     gm: Callable
@@ -6733,7 +6734,6 @@ class MockFXGraphCacheOutput(OutputCode):
 
     def post_compile(self, example_inputs, cudagraphs, constants):
         pass
-
 
     def set_triton_bundle(self, triton_bundle: Any):
         pass
@@ -6756,7 +6756,7 @@ class MockFXGraphCache:
             self.cache[key] = gm
         gm, _ = self.load_with_key(key, [], inputs, None, None, None, None)
         return gm
-        
+
     def load_with_key(
         self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
     ):
@@ -6765,7 +6765,6 @@ class MockFXGraphCache:
             gm = MockFXGraphCacheOutput(gm, key, 0)
             gm = make_boxed_func(gm)
         return gm, {}
-
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
