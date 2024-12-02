@@ -1,13 +1,33 @@
-import functools
+import copyreg
+import io
 import math
 import pickle
 from collections import defaultdict, deque
-from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple, Union
+from dataclasses import fields
+from typing import (
+    Any,
+    Callable,
+    Deque,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+)
 
 import torch._logging
 import torch.fx
-from torch._subclasses.fake_tensor import TensorMetadata
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
+
+
+T = TypeVar("T")
+
+
+if TYPE_CHECKING:
+    from .symbolic_convert import InstructionTranslatorBase
 
 
 Node = torch.fx.Node
@@ -24,28 +44,61 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
     graph_expansion_log.debug(msg, *args)
 
 
-def get_metadata(node: Node) -> Optional[Union[str, TensorMetadata]]:
-    from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+def _extract_tensor_metadata_for_node_hash(
+    x: torch.Tensor,
+) -> Tuple[Callable[[T], T], Tuple[Any, ...]]:
+    from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
-    if isinstance(node, torch.fx.Node):
-        value = node.meta.get("example_value", None)
-        if isinstance(value, torch.Tensor):
-            return extract_tensor_metadata_for_cache_key(value)
-        elif isinstance(value, torch.SymInt):
-            return str(value)
-    return None
+    out = []
+    metadata = extract_tensor_metadata_for_cache_key(x)
+    for field in fields(metadata):
+        out.append(getattr(metadata, field.name))
+
+    return (_ident, tuple(out))
 
 
-@functools.lru_cache(128)
-def _extract_node_metadata(
+class InputPickler(pickle.Pickler):
+    def __init__(self) -> None:
+        stream = io.BytesIO()
+        self._stream = stream
+        super().__init__(stream)
+        self.dispatch_table = copyreg.dispatch_table.copy()
+        self.dispatch_table.update(
+            {
+                FakeTensor: _extract_tensor_metadata_for_node_hash,
+                torch.SymInt: lambda x: str(x),
+            }
+        )
+        self.fast = True
+
+    def dumps(self, obj: Any) -> bytes:
+        """
+        Pickle an object and return a byte string.
+        """
+        try:
+            self.dump(obj)
+            return self._stream.getvalue()
+        finally:
+            self._stream.seek(0)
+            self._stream.truncate(0)
+
+
+def _extract_tensor_arg(arg: Any) -> Any:
+    if isinstance(arg, Node):
+        return arg.meta.get("example_value")
+    else:
+        return None
+
+
+def _normalize_args(
     node: Node,
-) -> Tuple[Tuple[str, ...], Tuple[Optional[Union[str, TensorMetadata]], ...]]:
+) -> Tuple[Tuple[str, ...], Tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
     sorted_keys = tuple(sorted(node.kwargs.keys()))
     flat_kwargs, _ = tree_flatten(sorted_kwargs)
     all_args = flat_args + flat_kwargs
-    return (sorted_keys, tuple(get_metadata(arg) for arg in all_args))
+    return (sorted_keys, tuple(_extract_tensor_arg(arg) for arg in all_args))
 
 
 def get_global_state_key() -> GlobalStateKey:
@@ -113,34 +166,27 @@ class GraphRegionTracker:
         self.loc_to_duplicates: Dict[str, IdenticalNodes] = defaultdict(list)
         self.node_to_duplicates: Dict[Node, IdenticalNodes] = {}
         self.node_to_global_state_hash: Dict[Node, int] = {}
+        self.input_pickler = InputPickler()
 
-    @staticmethod
-    def _get_loc_str(filename: str, lineno: int, instruction_pointer: int) -> str:
-        return f"{filename}:{lineno}:{instruction_pointer}"
-
-    @staticmethod
-    def _get_key(
-        filename: str, lineno: int, instruction_pointer: int, node: Node
+    def _hash_node(
+        self, filename: str, lineno: int, instruction_pointer: Optional[int], node: Node
     ) -> str:
         from torch._inductor.codecache import sha256_hash
 
-        return sha256_hash(
-            pickle.dumps(
-                (
-                    get_global_state_key(),
-                    GraphRegionTracker._get_loc_str(
-                        filename, lineno, instruction_pointer
-                    ),
-                    _extract_node_metadata(node),
-                )
-            )
+        key = (
+            get_global_state_key(),
+            filename,
+            lineno,
+            instruction_pointer,
+            _normalize_args(node),
         )
+        return sha256_hash(self.input_pickler.dumps(key))
 
-    def track_node(
-        self, filename: str, lineno: int, instruction_pointer: int, node: Node
-    ) -> None:
+    def track_node(self, tx: "InstructionTranslatorBase", node: Node) -> None:
         duplicates = self.loc_to_duplicates[
-            GraphRegionTracker._get_key(filename, lineno, instruction_pointer, node)
+            self._hash_node(
+                tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+            )
         ]
         duplicates.append(node)
         self.node_to_duplicates[node] = duplicates
@@ -218,7 +264,6 @@ def fully_expand_region_group(
     # arg_name is set for kwargs, None for args
     current_arg_name, current_node = region_iters[0].next()
     assert current_node is not None
-    seen_nodes.add(current_node)
     # Loop incrementally adding new nodes to each region
     # regions are only expanded if the node to add is valid
     # for ALL regions
@@ -226,6 +271,7 @@ def fully_expand_region_group(
         add_node = True
         nodes_to_add.clear()
         nodes_to_add.append(current_node)
+        nodes_to_add_set = set(nodes_to_add)
         for region_it in region_iters[1:]:
             arg_name, node = region_it.next()
 
@@ -238,10 +284,11 @@ def fully_expand_region_group(
                 add_node &= (
                     current_arg_name == arg_name
                     and node not in seen_nodes
+                    and node not in nodes_to_add_set
                     and is_identical_fn(node, current_node)
                 )
                 nodes_to_add.append(node)
-                seen_nodes.add(node)
+                nodes_to_add_set.add(node)
             else:
                 add_node = False
 
@@ -253,6 +300,7 @@ def fully_expand_region_group(
                 debug_log("adding %s's children", node)
                 debug_log("%s %s", node.args, list(node.kwargs.items()))
                 region_it.add_children(node)
+                seen_nodes.add(node)
 
         current_arg_name, current_node = region_iters[0].next()
 
