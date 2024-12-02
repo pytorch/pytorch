@@ -71,10 +71,10 @@ batch_norm_batch_rule(
   if (!input_bdim && !running_mean_bdim && !running_var_bdim) {
     const auto dummy_weight = at::ones(input.size(1), input.options());  // cudnn and miopen require a weight
     const auto dummy_bias = at::zeros(input.size(1), input.options());   // without this, get "strides() called on undefined Tensor" on cuda
-    const auto result = Func(input, dummy_weight, dummy_bias, running_mean_opt, running_var_opt, training, momentum, eps);
+    auto result = Func(input, dummy_weight, dummy_bias, running_mean_opt, running_var_opt, training, momentum, eps);
     result0 = std::get<0>(result).transpose(0, 1);          // [C, B, *]
-    mean = std::get<1>(result);
-    rstd = std::get<2>(result);
+    mean = std::move(std::get<1>(result));
+    rstd = std::move(std::get<2>(result));
   } else {
     bdim_size = get_bdim_size3(input, input_bdim, running_mean, running_mean_bdim, running_var, running_var_bdim);
     auto input_ = moveBatchDimToFront(input, input_bdim);
@@ -96,12 +96,12 @@ batch_norm_batch_rule(
 
     const auto dummy_weight = at::ones(input_.size(1), input_.options());  // cudnn and miopen require a weight
     const auto dummy_bias = at::zeros(input_.size(1), input_.options());   // without this, get "strides() called on undefined Tensor" on cuda
-    const auto result = Func(input_, dummy_weight, dummy_bias, running_mean_, running_var_, training, momentum, eps);
+    auto result = Func(input_, dummy_weight, dummy_bias, running_mean_, running_var_, training, momentum, eps);
     result0 = std::get<0>(result).transpose(0, 1);                // [(B0, C), B, *]
+    mean = std::move(std::get<1>(result));
+    rstd = std::move(std::get<2>(result));
     result0 = reshape_dim_outof(0, bdim_size.value(), result0);   // [B0, C, B, *]
-    mean = std::get<1>(result);
     mean = reshape_dim_outof(0, bdim_size.value(), mean);         // [B0, C]
-    rstd = std::get<2>(result);
     rstd = reshape_dim_outof(0, bdim_size.value(), rstd);         // [B0, C]
   }
 
@@ -507,9 +507,7 @@ native_layer_norm_batch_rule(
 
   const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
   const auto result = at::native_layer_norm_symint(input_, normalized_shape, std::nullopt, std::nullopt, eps);
-  auto result0 = std::get<0>(result);
-  const auto mean = std::get<1>(result);
-  const auto rstd = std::get<2>(result);
+  auto [result0, mean, rstd] = result;
   const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
 
   if (weight.defined()) {
@@ -636,7 +634,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto results = native_layer_norm_backward_no_weight_bias_batch_rule(
+    auto results = native_layer_norm_backward_no_weight_bias_batch_rule(
         grad_normalized_input_value, grad_normalized_input_bdim,
         input_value, input_bdim,
         normalized_shape,
