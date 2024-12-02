@@ -47,6 +47,7 @@ class SymT(Enum):
     # Inductor: iteration domain for blockIdx.x/blockIdx.y
     XBLOCK = auto()
     YBLOCK = auto()
+    ZBLOCK = auto()
     # Inductor: this is used solely for dynamic_reshape_indexer
     VIEW = auto()
     # Alternate (non-modular) indexing used in halide kernels
@@ -70,6 +71,7 @@ prefix_str = {
     SymT.TEMPLATE_INDEX: "idx",
     SymT.XBLOCK: "x",
     SymT.YBLOCK: "y",
+    SymT.ZBLOCK: "z",
     SymT.INDIRECT: "indirect",  # false aliasing?
     SymT.VIEW: "view",
     SymT.HALIDE: "h",
