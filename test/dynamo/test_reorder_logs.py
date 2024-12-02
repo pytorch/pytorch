@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import io
+import logging
 import warnings
 from unittest.mock import patch
 
@@ -9,13 +10,15 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 from torch._dynamo.utils import counters
-import logging
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
 logger = logging.getLogger(__name__)
 logger_test = logging.getLogger("test")
+
 
 def f_info(x):
     x = x + x
@@ -23,25 +26,30 @@ def f_info(x):
     x = x * x
     return x
 
+
 def f_isEnabledFor(x):
     x = x + x
     if logger.isEnabledFor(logging.INFO):
         logger.info("moo")
     x = x * x
     return x
+
+
 @instantiate_parametrized_tests
 class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
-
-    @parametrize("ignore_method, fn, should_ignore_logger",[
-        (None, f_info, False),
-        (logger_test.info, f_info, False),
-        (None, f_isEnabledFor, False),
-        (logger_test.isEnabledFor, f_isEnabledFor, False),
-        (logger.info, f_info, True),
-        (logging.Logger.info, f_info, True),
-        (logger.isEnabledFor, f_isEnabledFor, True),
-        (logging.Logger.isEnabledFor, f_isEnabledFor, True),
-    ])
+    @parametrize(
+        "ignore_method, fn, should_ignore_logger",
+        [
+            (None, f_info, False),
+            (logger_test.info, f_info, False),
+            (None, f_isEnabledFor, False),
+            (logger_test.isEnabledFor, f_isEnabledFor, False),
+            (logger.info, f_info, True),
+            (logging.Logger.info, f_info, True),
+            (logger.isEnabledFor, f_isEnabledFor, True),
+            (logging.Logger.isEnabledFor, f_isEnabledFor, True),
+        ],
+    )
     def test_ignore_logger(self, ignore_method, fn, should_ignore_logger):
         counters.clear()
         x = torch.randn(3, 3)

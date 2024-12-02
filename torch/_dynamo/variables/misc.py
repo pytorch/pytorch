@@ -1469,10 +1469,12 @@ class LoggingLoggerVariable(VariableTracker):
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
-                return variables.ConstantVariable.create(None)
-        unimplemented("Logger not supported for non-export cases. "
-                      "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
-                               " disable logging by adding logging methods to config.ignore_logger_methods")
+            return variables.ConstantVariable.create(None)
+        unimplemented(
+            "Logger not supported for non-export cases. "
+            "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
+            " disable logging by adding logging methods to config.ignore_logger_methods"
+        )
 
 
 class ConstantLikeVariable(VariableTracker):
