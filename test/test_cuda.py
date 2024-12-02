@@ -324,6 +324,25 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    @serialTest()
+    def test_get_per_process_memory_fraction(self):
+        # get the initial memory fraction
+        init_fraction = torch.cuda.get_per_process_memory_fraction()
+
+        # set and get the limiting cases
+        torch.cuda.set_per_process_memory_fraction(1.0)
+        self.assertEqual(torch.cuda.get_per_process_memory_fraction(), 1.0)
+        torch.cuda.set_per_process_memory_fraction(0.0)
+        self.assertEqual(torch.cuda.get_per_process_memory_fraction(), 0.0)
+
+        # test a few random cases
+        for val in torch.rand(3):
+            torch.cuda.set_per_process_memory_fraction(float(val))
+            self.assertEqual(torch.cuda.get_per_process_memory_fraction(), float(val))
+
+        # restore the initial memory fraction
+        torch.cuda.set_per_process_memory_fraction(init_fraction)
+
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
     def test_uuid(self):
         uuid = torch.cuda.get_device_properties(0).uuid
