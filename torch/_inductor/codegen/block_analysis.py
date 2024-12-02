@@ -1,7 +1,7 @@
 import collections
 import functools
 import textwrap
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import sympy
 from sympy import Expr, Symbol

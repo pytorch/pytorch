@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict
 
 import sympy
 

@@ -5,8 +5,8 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, List, Optional, Protocol
 from collections.abc import Iterable
+from typing import Any, Protocol
 
 import sympy
 

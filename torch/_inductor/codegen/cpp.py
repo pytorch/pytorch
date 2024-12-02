@@ -7,9 +7,9 @@ import math
 import re
 import sys
 import warnings
-from enum import Enum
-from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 from collections.abc import Sequence
+from enum import Enum
+from typing import Callable, cast, Optional, Union
 
 import sympy
 

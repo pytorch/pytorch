@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import collections
 import itertools
-from typing import Any, Dict, List, Type, Union
 from collections.abc import Iterable
+from typing import Any, Union
 
 import sympy
 

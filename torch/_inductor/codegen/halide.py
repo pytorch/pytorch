@@ -7,18 +7,9 @@ import itertools
 import logging
 import re
 from collections import defaultdict
-from math import inf
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
 from collections.abc import Sequence
+from math import inf
+from typing import Any, Callable, TYPE_CHECKING
 
 import sympy
 

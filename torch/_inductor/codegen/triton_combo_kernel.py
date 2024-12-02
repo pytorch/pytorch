@@ -2,19 +2,9 @@ import itertools
 import logging
 import textwrap
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any, Callable, cast, Optional, Union
 
 import sympy
 from sympy import Integer, Symbol
@@ -440,10 +430,7 @@ class ComboKernel(Kernel):
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.dispatch_class: Optional[
-            Union[
-                type[ComboKernel.SequentialDispatch],
-                type[ComboKernel.RoundRobinDispatch],
-            ]
+            type[Union[ComboKernel.SequentialDispatch, ComboKernel.RoundRobinDispatch]]
         ] = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled

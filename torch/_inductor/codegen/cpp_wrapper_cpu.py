@@ -3,9 +3,9 @@ import functools
 import math
 import os
 import sys
-from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
 from collections.abc import Sequence
+from itertools import count
+from typing import Callable, Optional
 
 import sympy
 from sympy import Expr

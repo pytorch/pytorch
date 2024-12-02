@@ -10,17 +10,7 @@ import operator
 import re
 from enum import auto, Enum
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, ClassVar, NamedTuple, Optional, Union
 
 import sympy
 

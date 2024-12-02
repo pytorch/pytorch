@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Optional, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 

@@ -12,19 +12,9 @@ import operator
 import random
 import re
 import tempfile
-from itertools import count
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
 from collections.abc import Iterator, Sequence
+from itertools import count
+from typing import Any, Callable, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr

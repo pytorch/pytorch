@@ -2,7 +2,7 @@
 import copy
 import logging
 import random
-from typing import List, Optional
+from typing import Optional
 
 import sympy
 

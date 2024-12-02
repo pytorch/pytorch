@@ -3,7 +3,7 @@ import functools
 import logging
 import os
 import pathlib
-from typing import Any, List
+from typing import Any
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet

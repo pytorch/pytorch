@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import os
-from typing import List, Optional
+from typing import Optional
 
 from torch._inductor import config
 from torch._inductor.utils import is_linux

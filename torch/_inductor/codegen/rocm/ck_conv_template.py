@@ -2,7 +2,6 @@
 import copy
 import logging
 import random
-from typing import Tuple
 
 from torch._inductor.virtualized import V
 

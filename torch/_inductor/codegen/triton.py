@@ -10,20 +10,9 @@ import logging
 import os
 import re
 import textwrap
-from functools import lru_cache
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    Union,
-)
 from collections.abc import Iterable, Sequence
+from functools import lru_cache
+from typing import Any, Callable, cast, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE

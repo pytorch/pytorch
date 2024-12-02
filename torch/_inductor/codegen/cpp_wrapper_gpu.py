@@ -2,7 +2,7 @@
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import sympy
 

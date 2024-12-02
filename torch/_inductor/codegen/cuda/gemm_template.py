@@ -4,7 +4,7 @@ import enum
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from ... import ir
 from ...config import cuda as inductor_cuda_config

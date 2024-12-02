@@ -9,18 +9,9 @@ import itertools
 import logging
 import math
 import operator
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    no_type_check,
-    Optional,
-    Tuple,
-    Union,
-)
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from typing import Any, Callable, no_type_check
 
 import sympy
 

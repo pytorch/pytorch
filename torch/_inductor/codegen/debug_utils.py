@@ -5,7 +5,6 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import List, Optional
 
 import torch
 from torch import dtype as torch_dtype

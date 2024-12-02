@@ -4,7 +4,7 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 from unittest.mock import patch
 
 import sympy

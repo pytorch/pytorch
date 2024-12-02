@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta

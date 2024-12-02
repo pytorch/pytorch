@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 import sympy
 

@@ -1,17 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr
 

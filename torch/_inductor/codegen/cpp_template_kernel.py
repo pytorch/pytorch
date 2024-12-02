@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr

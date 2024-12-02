@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import functools
 import logging
-from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable, List, Optional, Union
 from collections.abc import Iterable
+from ctypes import byref, c_int, c_size_t, c_void_p
+from typing import Any, Callable
 
 import torch
 from torch._inductor import config

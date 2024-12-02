@@ -2,7 +2,7 @@
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Optional
 
 import sympy
 
