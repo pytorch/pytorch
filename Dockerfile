@@ -148,6 +148,7 @@ ARG CUDA_VERSION
 LABEL com.nvidia.volumes.needed="nvidia_driver"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
+    g++ \
     libjpeg-dev \
     libpng-dev \
     && rm -rf /var/lib/apt/lists/*
