@@ -42,6 +42,7 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
 }
 
 template<typename F, F Func>
+static 
 std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 batch_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
@@ -124,6 +125,7 @@ batch_norm_batch_rule(
 }
 
 template<typename F, F Func>
+static 
 std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
@@ -142,9 +144,9 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
     TORCH_INTERNAL_ASSERT(!mean_bdim);
     TORCH_INTERNAL_ASSERT(!rstd_bdim);
     const auto dummy_weight = at::ones(input.size(1), input.options());
-    const auto result = Func(
+    auto result =Func(
         grad_out, input, dummy_weight, running_mean_opt, running_var_opt, mean, rstd, training, eps, {true, false, false});
-    return std::make_tuple(std::get<0>(result), std::nullopt);
+    return {std::move(std::get<0>(result)), std::nullopt};
   }
 
   auto grad_out_ = moveBatchDimToFront(grad_out, grad_out_bdim);
@@ -196,6 +198,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
 }
 
 template<typename F, F Func>
+static 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
     const at::Tensor & grad_out,
     const at::Tensor & input,
@@ -318,10 +321,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     rstd = makeBatched(reshape_dim_outof(0, bdim_size, std::get<2>(result)), 0, cur_level);
   } else {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = at::native_group_norm(input_value, std::nullopt, std::nullopt, N, C, HxW, group, eps);
-    result0 = std::get<0>(result);
-    mean = std::get<1>(result);
-    rstd = std::get<2>(result);
+    std::tie(result0, mean, rstd) = at::native_group_norm(input_value, std::nullopt, std::nullopt, N, C, HxW, group, eps);
   }
 
   if (weight.defined()) {
@@ -434,7 +434,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-C10_ALWAYS_INLINE bool has_same_shape(
+static bool has_same_shape(
     const Tensor& tensor, std::optional<int64_t> tensor_bdim,
     c10::SymIntArrayRef normalized_shape) {
   if (!tensor.defined()) {
@@ -457,7 +457,7 @@ C10_ALWAYS_INLINE bool has_same_shape(
   return true;
 }
 
-C10_ALWAYS_INLINE void check_same_shape(
+static C10_ALWAYS_INLINE void check_same_shape(
     const Tensor& tensor, std::optional<int64_t> tensor_bdim,
     c10::SymIntArrayRef normalized_shape, const std::string& name) {
   TORCH_CHECK(has_same_shape(tensor, tensor_bdim, normalized_shape),
@@ -469,7 +469,7 @@ C10_ALWAYS_INLINE void check_same_shape(
 }
 
 // Ugh, hard to deduplicate
-C10_ALWAYS_INLINE void _check_layer_norm_inputs(
+static C10_ALWAYS_INLINE void _check_layer_norm_inputs(
     SymIntArrayRef normalized_shape,
     const Tensor& weight, std::optional<int64_t> weight_bdim,
     const Tensor& bias, std::optional<int64_t> bias_bdim) {
@@ -493,11 +493,9 @@ native_layer_norm_batch_rule(
     double eps) {
   auto input_ = moveBatchDimToFront(input, input_bdim);
   if (!weight_bdim && !bias_bdim) {
-    const auto result = at::native_layer_norm_symint(input_, normalized_shape, weight_opt, bias_opt, eps);
-    const auto mean = std::get<1>(result);
-    const auto rstd = std::get<2>(result);
+    auto [result0, mean, rstd] = at::native_layer_norm_symint(input_, normalized_shape, weight_opt, bias_opt, eps);
     const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
-    return std::make_tuple(std::get<0>(result), 0, mean, stats_bdim, rstd, stats_bdim);
+    return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
   }
 
   // See [Note: hacky wrapper removal for optional tensor]
