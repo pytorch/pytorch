@@ -1271,6 +1271,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.narrow_copy: lambda self, dim, start, length: -1,
         torch.permute_copy: lambda self, dims: -1,
         torch._reshape_alias_copy: lambda self, size, stride: -1,
+        torch.just_raise_error: lambda self: -1,
         torch.select_copy: lambda self, dim, index: -1,
         torch.detach_copy: lambda self: -1,
         torch.slice_copy: lambda self, dim=0, start=None, end=None, step=1: -1,
