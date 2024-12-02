@@ -1505,6 +1505,22 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
+            # In export, we ignore any op that is related to
+            # eager mode profiling call. The expectation is
+            # that either runtimes provide their own profiling
+            # OR user wrap the compiled region on a profiling in
+            # later stage.
+            def _is_impure(node):
+                if node.op == "call_function" and node.target in (
+                    torch.ops.profiler._record_function_enter.default,
+                    torch.ops.profiler._record_function_enter_new.default,
+                    torch.ops.profiler._record_function_exit.default,
+                ):
+                    return False
+                return True
+
+            gm.graph.eliminate_dead_code(_is_impure)
+
         # create graph signature
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
@@ -1778,7 +1794,6 @@ def _non_strict_export(
     )
 
 
-# TODO (tmanlaibaatar) We need to preserve aten.to here somehow
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export_for_training(
@@ -1930,16 +1945,6 @@ def _export(
 
     from torch._utils_internal import export_training_ir_rollout_check
 
-    if export_training_ir_rollout_check():
-        return _export_for_training(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
-
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
@@ -1949,6 +1954,23 @@ def _export(
     _EXPORT_FLAGS = flags
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
+
+    # NOTE Export training IR rollout
+    # Old export calls export._trace(pre_dispatch=True)
+    # and there are still lot of internal/OSS callsites that
+    # use export._trace(pre_dispatch=True) directly. Therefore,
+    # it makes more sense to do the switch here.
+    # export_training_ir_rollout_check returns True in OSS
+    # while internally it returns False UNLESS otherwise specified.
+    if pre_dispatch and export_training_ir_rollout_check():
+        return _export_for_training(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
     (
         args,

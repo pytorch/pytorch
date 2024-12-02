@@ -1,3 +1,4 @@
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 
@@ -17,8 +18,8 @@ namespace torch::lazy {
 namespace {
 
 std::string GetEnvString(const char* name, const std::string& defval) {
-  const char* env = std::getenv(name);
-  return env != nullptr ? env : defval;
+  const auto env = c10::utils::get_env(name);
+  return env.has_value() ? env.value() : defval;
 }
 
 DebugUtil::GraphFormat DefaultGraphFormat() {

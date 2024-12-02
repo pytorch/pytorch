@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -12,6 +12,7 @@ from sympy import Expr
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 
 from .. import config, ir
@@ -776,12 +777,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        if V.graph.aot_mode and not V.graph.is_const_graph:
-            self.codegen_model_kernels()
-            self.codegen_model_constructor()
-            self.codegen_const_run_driver()
-        self.write_wrapper_decl()
-        return super().generate(is_inference)
+        with dynamo_timed("CppWrapperCpu.generate", log_pt2_compile_event=True):
+            if V.graph.aot_mode and not V.graph.is_const_graph:
+                self.codegen_model_kernels()
+                self.codegen_model_constructor()
+                self.codegen_const_run_driver()
+            self.write_wrapper_decl()
+            return super().generate(is_inference)
 
     def finalize_prefix(self):
         cached_dtypes_buffer = IndentedBuffer()
@@ -1099,15 +1101,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x))
+        return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
+        parts = [*map(self.codegen_sizevar, shape)]
         if len(parts) == 0:
             return "{}"
         if len(parts) == 1:
@@ -1136,7 +1141,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
@@ -1297,7 +1302,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
-        final_tmp_name_is_RAIIAtenTensorHandle = False
 
         def create_reinterpret_call() -> Tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
@@ -1352,7 +1356,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 tmp_output_name, tmp_call_strs = create_dtypeview_call(data.get_name())
                 call_strs.extend(tmp_call_strs)
                 final_tmp_name = tmp_output_name
-                final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
                 return data.get_name()
         else:
@@ -1362,8 +1365,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
                 call_strs.extend(tmp_call_strs)
+            else:
+                call_strs.append(
+                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
+                )
+                final_tmp_name = f"{final_tmp_name}_raii"
 
         for line in call_strs:
             writeline(line)
@@ -1397,10 +1405,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         #     }.data()
         # );
         # ```
-        if not final_tmp_name_is_RAIIAtenTensorHandle:
-            return f"wrap_with_raii_handle_if_needed({final_tmp_name})"
-        else:
-            return final_tmp_name
+        return final_tmp_name
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
         self.writeline(
@@ -1904,7 +1909,7 @@ if (custom_op_wrapper.get() == NULL) {
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
         lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
 if ({py_args_var}.get() == NULL) {{
 throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
