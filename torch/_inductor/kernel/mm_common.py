@@ -2,8 +2,8 @@
 import functools
 import itertools
 import logging
-from typing import cast, Tuple
 from collections.abc import Sequence
+from typing import cast
 
 import sympy
 

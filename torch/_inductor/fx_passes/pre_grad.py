@@ -2,8 +2,8 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn

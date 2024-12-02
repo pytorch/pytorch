@@ -12,7 +12,7 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
+from typing import Any, BinaryIO, Callable, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read

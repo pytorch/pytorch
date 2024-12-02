@@ -3,9 +3,9 @@
 
 import logging
 import math
-from dataclasses import dataclass
-from typing import Any, List, Optional, Tuple, Union
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Optional, Union
 
 import sympy
 

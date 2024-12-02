@@ -2,7 +2,7 @@
 import collections
 import typing
 from enum import auto, Enum
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 
 # The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values

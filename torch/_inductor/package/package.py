@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._inductor

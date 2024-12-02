@@ -5,7 +5,7 @@ import functools
 import itertools
 import math
 import operator
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters

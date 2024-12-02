@@ -1,6 +1,6 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
 from collections.abc import Sequence
+from typing import Any, Optional
 
 import sympy
 

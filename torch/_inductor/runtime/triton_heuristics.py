@@ -15,8 +15,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
-from collections.abc import Container
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -48,6 +47,10 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Container
 
 
 try:

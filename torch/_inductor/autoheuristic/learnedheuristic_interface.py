@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,

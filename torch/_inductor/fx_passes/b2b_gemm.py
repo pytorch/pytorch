@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Set, Tuple
 
 import torch
 from torch.utils._pytree import tree_map

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import List
 
 import torch
 from torch import Tensor

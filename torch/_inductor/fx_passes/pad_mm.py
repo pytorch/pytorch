@@ -3,7 +3,7 @@ import functools
 import itertools
 import operator
 import typing
-from typing import Callable, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils

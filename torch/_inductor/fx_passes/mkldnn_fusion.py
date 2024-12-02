@@ -2,7 +2,7 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch.fx.experimental.symbolic_shapes import has_free_symbols

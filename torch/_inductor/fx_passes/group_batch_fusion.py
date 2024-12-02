@@ -3,17 +3,8 @@ import collections
 import logging
 import operator
 from collections import OrderedDict
-from typing import (
-    Any,
-    DefaultDict,
-    Deque,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-)
 from collections.abc import Iterable, Iterator
+from typing import Any, DefaultDict, Deque, Optional
 
 import torch
 from torch._dynamo.utils import counters, optimus_scuba_log

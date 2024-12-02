@@ -6,7 +6,7 @@ import os
 import sys
 import warnings
 from types import ModuleType
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):

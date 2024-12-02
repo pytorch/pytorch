@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
