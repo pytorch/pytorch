@@ -21,7 +21,7 @@ import torch
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
-from .utils import upcast_compute_type
+from .utils import pointwise_overrides_data, upcast_compute_type
 from .virtualized import OpsValue
 
 
@@ -98,39 +98,38 @@ class DtypePropagationOpsHandler:
     Propagate dtype from args to output
     """
 
-    def __init__(self) -> None:
+    @classmethod
+    def _init_cls(cls) -> None:
         for op, rule in torch._inductor.utils.op_dtype_propagation_rules.items():
             fn = (
-                functools.partial(self.return_dtype, dtype=rule.override_return_dtype)
+                functools.partial(cls.return_dtype, dtype=rule.override_return_dtype)
                 if rule.override_return_dtype
                 else functools.partial(
-                    self.op_dtype_rule, type_promotion_kind=rule.type_promotion_kind
+                    cls.op_dtype_rule, type_promotion_kind=rule.type_promotion_kind
                 )
             )
-            setattr(self, op, fn)
+            setattr(cls, op, fn)
 
         # Set pointwise operation rules
-        for op in torch._inductor.codegen.common.pointwise_overrides_data.values():
-            if not hasattr(self, op.name):
+        for op in pointwise_overrides_data.values():
+            if not hasattr(cls, op.name):
                 setattr(
-                    self,
+                    cls,
                     op.name,
                     functools.partial(
-                        self.op_dtype_rule, type_promotion_kind=op.type_promotion_kind
+                        cls.op_dtype_rule, type_promotion_kind=op.type_promotion_kind
                     ),
                 )
 
         # Set boolean operation rules
         for op in torch._inductor.utils.boolean_ops():
-            if not hasattr(self, op):
-                setattr(
-                    self, op, functools.partial(self.return_dtype, dtype=torch.bool)
-                )
+            if not hasattr(cls, op):
+                setattr(cls, op, functools.partial(cls.return_dtype, dtype=torch.bool))
 
         from torch._inductor.ops_handler import OpsHandler
 
         ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
-        unimplemented_ops = ops_set - set(dir(self))
+        unimplemented_ops = ops_set - set(dir(cls))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
