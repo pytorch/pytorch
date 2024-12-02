@@ -269,7 +269,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f16, f32, f64, b8, i32, i64},
+    "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
     "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
@@ -320,6 +320,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.qr": {f64},
     "linalg.pinv": {f64},
     ("linalg.pinv", "hermitian"): {f64},
+    ("linalg.pinv", "singular"): {f64},
     "linalg.norm": {f64},
     ("linalg.norm", "subgradients_at_zero"): {f64},
     "linalg.matrix_rank": {f64},
@@ -349,8 +350,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # frexp not supported on XPU now
-    "frexp": {f16, f32, f64},
     # not implemented for 'Half'
     "sort": {b8},
     "argsort": {b8},
@@ -990,6 +989,7 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
+    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
