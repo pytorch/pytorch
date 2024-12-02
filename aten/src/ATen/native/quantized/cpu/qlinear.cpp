@@ -214,7 +214,6 @@ at::Tensor& PackedLinearWeight::apply_impl(
                 packA.getRowOffsetBuffer(),
                 col_offsets.data(),
                 bias_ptr,
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 N, /*nCol=*/
                 1, /* groups*/
                 act_times_w_scale.data());
