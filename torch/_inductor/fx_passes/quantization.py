@@ -2577,29 +2577,25 @@ def _register_smooth_quant_int_mm_pattern():
 
     # for torch.compile(dynamic=False)
     pattern_no_bias_1 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=False))
-    pattern_with_bias_1 = _with_outer_reshape(
-        CallFunction(
-            aten.add.Tensor,
-            pattern_no_bias_1,
-            KeywordArg("bias"),
-        )
+    pattern_with_bias_1 = CallFunction(
+        aten.add.Tensor,
+        pattern_no_bias_1,
+        KeywordArg("bias"),
     )
     # for torch.compile(dynamic=True)
     pattern_no_bias_2 = _with_outer_reshape(get_pattern_no_bias(expand_a_scale=True))
-    pattern_with_bias_2 = _with_outer_reshape(
+    pattern_with_bias_2 = CallFunction(
+        aten.reshape.default,
         CallFunction(
             aten.reshape.default,
             CallFunction(
-                aten.reshape.default,
-                CallFunction(
-                    aten.add.Tensor,
-                    pattern_no_bias_2,
-                    KeywordArg("bias"),
-                ),
-                Arg(),
+                aten.add.Tensor,
+                pattern_no_bias_2,
+                KeywordArg("bias"),
             ),
-            KeywordArg("out_shape_with_bias"),
-        )
+            Arg(),
+        ),
+        KeywordArg("out_shape_with_bias"),
     )
 
     pattern1_with_no_outer_reshape = get_pattern_no_bias(expand_a_scale=True)
@@ -2631,10 +2627,10 @@ def _register_smooth_quant_int_mm_pattern():
     pattern_to_pass_number = {
         pattern_no_bias_2: 0,
         pattern_with_bias_2: 0,
-        pattern1_with_no_outer_reshape: 1,
-        pattern1_with_bias_no_outer_reshape: 1,
         pattern_no_bias_1: 1,
         pattern_with_bias_1: 1,
+        pattern1_with_no_outer_reshape: 2,
+        pattern1_with_bias_no_outer_reshape: 2,
     }
     for pattern, pass_number in pattern_to_pass_number.items():
 
