@@ -49,22 +49,7 @@ import warnings
 import weakref
 from collections import defaultdict
 from enum import auto, Enum
-from typing import (
-    Any,
-    Callable,
-    cast,
-    ContextManager,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from collections.abc import Generator, Iterator, Sequence
+from typing import Any, Callable, cast, ContextManager, Optional, TYPE_CHECKING, TypeVar
 
 import torch.fx
 from torch import Tensor
@@ -98,6 +83,8 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Iterator, Sequence
+
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -2267,9 +2254,7 @@ class CUDAGraphTreeManager:
         return self._current_node
 
     @current_node.setter
-    def current_node(
-        self, value: CUDAGraphNode | CUDAWarmupNode | None
-    ) -> None:
+    def current_node(self, value: CUDAGraphNode | CUDAWarmupNode | None) -> None:
         self._current_node = value
         if value is None:
             self.path_state = ExecutionState.NONE

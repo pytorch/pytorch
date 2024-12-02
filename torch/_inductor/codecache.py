@@ -32,20 +32,7 @@ from functools import partial
 from pathlib import Path
 from time import time, time_ns
 from types import ModuleType
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    NoReturn,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from collections.abc import Generator, Sequence
+from typing import Any, Callable, cast, NoReturn, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -81,7 +68,7 @@ T = TypeVar("T")
 
 
 if TYPE_CHECKING:
-    from collections.abc import KeysView
+    from collections.abc import Generator, KeysView, Sequence
 
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
     from .output_code import OutputCode
@@ -424,9 +411,7 @@ def get_path(
     return basename, subdir, path
 
 
-def get_hash(
-    content: str | bytes, extra: str = "", hash_type: str = "code"
-) -> str:
+def get_hash(content: str | bytes, extra: str = "", hash_type: str = "code") -> str:
     if hash_type == "code":
         return code_hash(content, extra)
     if hash_type in ["cubin", "hsaco", "spv"]:
@@ -875,9 +860,7 @@ class FxGraphHashDetails:
             config.post_grad_custom_post_pass
         )
 
-    def _get_custom_pass_detail(
-        self, custom_pass: CustomGraphPassType
-    ) -> Any | None:
+    def _get_custom_pass_detail(self, custom_pass: CustomGraphPassType) -> Any | None:
         if not custom_pass:
             return None
         assert isinstance(custom_pass, CustomGraphPass)
@@ -2030,9 +2013,7 @@ def cpp_prefix() -> str:
 
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
-def compile_file(
-    input_path: str | list[str], output_path: str, cmd: list[str]
-) -> None:
+def compile_file(input_path: str | list[str], output_path: str, cmd: list[str]) -> None:
     with dynamo_timed("compile_file"):
         return _compile_file(input_path, output_path, cmd)
 

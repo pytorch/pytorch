@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Tuple
+from typing import cast
 
 import torch
 import torch.utils._pytree as pytree

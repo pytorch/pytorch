@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config

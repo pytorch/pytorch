@@ -4,19 +4,8 @@ import dataclasses
 import itertools
 import logging
 import re
-import typing
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
 from collections.abc import Sequence
+from typing import Any, Callable, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import sympy

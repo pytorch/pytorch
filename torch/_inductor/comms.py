@@ -7,7 +7,7 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef

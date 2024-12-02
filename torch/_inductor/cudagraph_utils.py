@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from collections.abc import Sequence
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")

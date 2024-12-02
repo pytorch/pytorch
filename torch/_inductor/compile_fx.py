@@ -10,19 +10,7 @@ import sys
 import time
 import warnings
 from itertools import count
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
-from collections.abc import Generator, Sequence
+from typing import Any, Callable, ContextManager, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -129,6 +117,8 @@ else:
     from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+
     from torch._functorch._aot_autograd.schemas import (
         FQN,
         GraphInputName,

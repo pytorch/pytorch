@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import typing
-from typing import Any, Dict, List, Type, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from . import config
 from .codecache import write_text
