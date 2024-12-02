@@ -241,7 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  at::Tensor out = std::get<0>(outputs).view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
   } else if (weight.defined()) {
