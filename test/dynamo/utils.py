@@ -3,6 +3,7 @@ import importlib
 import os
 import sys
 import types
+from contextlib import contextmanager
 
 import torch
 import torch._dynamo
@@ -49,3 +50,13 @@ def create_dummy_module_and_function():
     # and the skipfiles rules use filename when checking SKIP_DIRS.
     module.add = add
     return module, module.add
+
+
+@contextmanager
+def install_guard_manager_testing_hook(hook_fn):
+    old_value = torch._dynamo.guards.guard_manager_testing_hook_fn
+    try:
+        torch._dynamo.guards.guard_manager_testing_hook_fn = hook_fn
+        yield
+    finally:
+        torch._dynamo.guards.guard_manager_testing_hook_fn = old_value
