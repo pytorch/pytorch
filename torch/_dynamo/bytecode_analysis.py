@@ -21,6 +21,8 @@ else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 if sys.version_info >= (3, 12):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
+if sys.version_info >= (3, 13):
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD_NO_INTERRUPT"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
