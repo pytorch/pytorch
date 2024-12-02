@@ -1327,7 +1327,7 @@ def opcheck(
         >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
         >>> def numpy_mul(x: Tensor, y: float) -> Tensor:
         >>>     x_np = x.numpy(force=True)
-        >>>     z_np = x_np + y
+        >>>     z_np = x_np * y
         >>>     return torch.from_numpy(z_np).to(x.device)
         >>>
         >>> @numpy_mul.register_fake
