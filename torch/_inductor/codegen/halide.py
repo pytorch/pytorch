@@ -7,7 +7,6 @@ import itertools
 import logging
 import re
 from collections import defaultdict
-from collections.abc import Sequence
 from math import inf
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -50,6 +49,8 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)

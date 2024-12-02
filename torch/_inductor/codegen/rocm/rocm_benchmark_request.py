@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Iterable
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch._inductor import config
@@ -15,6 +14,10 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 log = logging.getLogger(__name__)

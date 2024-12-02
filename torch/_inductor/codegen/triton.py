@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import textwrap
-from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from typing import Any, Callable, cast, TYPE_CHECKING
 
@@ -87,6 +86,8 @@ from .triton_utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
     from ..ir import IRNode
 
 log = logging.getLogger(__name__)

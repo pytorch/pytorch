@@ -10,8 +10,7 @@ import logging
 import math
 import operator
 from collections import Counter
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, no_type_check
+from typing import Any, Callable, no_type_check, TYPE_CHECKING
 
 import sympy
 
@@ -55,6 +54,10 @@ from .simd_kernel_features import (
     NodeScheduleMarker,
     SIMDKernelFeatures,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 log = logging.getLogger(__name__)

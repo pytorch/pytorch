@@ -12,9 +12,8 @@ import operator
 import random
 import re
 import tempfile
-from collections.abc import Iterator, Sequence
 from itertools import count
-from typing import Any, Callable, TYPE_CHECKING, Union
+from typing import Any, Callable, Iterator, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -56,6 +55,7 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     import triton
 
     from ..graph import GraphLowering

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import collections
 import itertools
-from collections.abc import Iterable
-from typing import Any, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import sympy
 
@@ -15,6 +14,10 @@ from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class NodeScheduleMarker:

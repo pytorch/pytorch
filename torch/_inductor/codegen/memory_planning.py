@@ -5,8 +5,7 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from collections.abc import Iterable
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
 
 import sympy
 
@@ -23,6 +22,10 @@ from .wrapper import (
     NullLine,
     ReuseLine,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 @dataclasses.dataclass
