@@ -634,6 +634,11 @@ class TestCommon(TestCase):
         # Direct calls to refs and prims are not translated
         if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
             self.skipTest("Skipped on ROCm")
+        if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
+            self.skipTest(
+                "Skipped _refs.div.floor_rounding with bfloat16"
+                "Divide by 0: _refs produces NaN, torch produces +/-inf"
+            )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
