@@ -88,7 +88,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   bool indices_batched = any_has_value(indices_bdims);
 
   for (size_t i = 0; i < indices.size(); i++) {
-    auto index = indices[i];
+    auto const & index = indices[i];
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
