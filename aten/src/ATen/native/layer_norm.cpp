@@ -296,7 +296,7 @@ Tensor rms_norm_symint(
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
+    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
