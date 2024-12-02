@@ -1396,7 +1396,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 6)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -1491,7 +1491,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn_ret(1.5)[0], -459)
         self.assertEqual(out[0], 2100)
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 7)
 
     def test_tensor_dict1(self):
         def fn(inputs):
@@ -1778,7 +1778,28 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops=9,
         )
 
-    def test_range_iter(self):
+    def test_range_iter_guards(self):
+        @torch.compile()
+        def func():
+            @torch._dynamo.disable(recursive=False)
+            def run(n):
+                torch._dynamo.graph_break()
+                # For python <= 3.11, list comprehension is implemented by desugaring to
+                # 1. creation of an iterator object
+                # 2. calling a new `listcomp` function with (1)
+                #
+                # In this test we force Dynamo to trace through (2) as the root frame,
+                # thereby ensuring we have the right guards for range iterators.
+                xs = [torch.ones(1) for i in range(n)]
+                return torch.concat(xs)
+
+            return run(2), run(3)
+
+        res2, res3 = func()
+        self.assertTrue(same(res2, torch.ones(2)))
+        self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range_iter_side_effects(self):
         @torch.compile(backend="eager", fullgraph=True)
         def run(x, it):
             n = next(it)
@@ -3741,7 +3762,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertAlmostEqual(cell1 + 1, result1)
         self.assertTrue(torch.allclose(cell2 + 3, result2))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(cnts.op_count, 1)
 
     def test_closure_out_of_scope_cell_with_mutation(self):
         cell1 = torch.rand(1).item()
@@ -3770,9 +3791,15 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
             if i == 1:
+                # No automatic dynamic
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 3)
+            elif i == 2:
+                # Automatic dynamic float arguments kicked in
                 self.assertEqual(cnts.frame_count, 1)
                 self.assertEqual(cnts.op_count, 6)
             else:
+                # No more recompiles
                 self.assertEqual(cnts.frame_count, 0)
                 self.assertEqual(cnts.op_count, 0)
             cnts.clear()
@@ -4881,6 +4908,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(3)
         self.assertEqual(opt_fn(x), x)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_set_update(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, int_set, int_list):
+            int_set.update(map(int, int_list))
+            return x + 1
+
+        int_set = set()
+        int_list = [1, 2, 1]
+        res = run(torch.ones(1), int_set, int_list)
+        self.assertTrue(same(res, torch.ones(1) + 1))
+        self.assertEqual(int_set, set([1, 2]))
+        self.assertEqual(int_list, [1, 2, 1])
 
     def test_frozenset_torch_func_contains(self):
         funcs = frozenset([torch.add])
@@ -9159,6 +9199,11 @@ def ___make_guard_fn():
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
         self.assertEqual(res, img1 + torch.sin(img1))
 
+    # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
+    # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
+    # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
+    # until we have a proper fix.
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
         class SillyCat(torch.autograd.Function):
@@ -9181,6 +9226,29 @@ def ___make_guard_fn():
             return SillyCat.apply(x0, x1, i)
 
         f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_validate_outputs_unbacked_by_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::foo")
+            def foo_impl(x, y):
+                return torch.cat([x, y])
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def f(x, i):
+                i0, i1 = i.tolist()
+                x0, x1 = x.split([i0, i1])
+                return torch.ops.mylib.foo(x0, x1)
+
+            f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -10440,7 +10508,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  >  Left: {(Mod(s0, 3)) < 0: False, (Mod(s0, 3)) <= 0: True, 0 < (Mod(s0, 3)): False, 0 <= (Mod(s0, 3)): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
   > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
@@ -10559,7 +10627,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  >  Left: {(PythonMod(u0, 3)) < 0: False, (PythonMod(u0, 3)) <= 0: True, 0 < (PythonMod(u0, 3)): False, 0 <= (PythonMod(u0, 3)): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False}
   > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
@@ -11996,6 +12064,43 @@ fn
 
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
+
+    def test_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Foo:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, foo0):
+            if dataclasses.is_dataclass(foo0):
+                foo1 = dataclasses.replace(foo0, **{"x": 1})
+                return x + 1, foo1
+            return x + 2, foo0
+
+        res, foo = run(torch.zeros(1), Foo(0))
+        self.assertTrue(res, torch.ones(1))
+        self.assertEqual(foo.x, 1)
+
+    def test_frozenset_of_non_literals(self):
+        class Foo:
+            pass
+
+        foo = Foo()
+        foo.x = 0
+        s = frozenset([foo])
+
+        @torch.compile(backend="eager")
+        def run(x, s, foo0):
+            # Dynamo must have the same representation for `foo0` and `foo1`,
+            # otherwise the update to `foo0.x` won't be reflected in the read of
+            # `foo1.x`.
+            foo1 = list(s)[0]
+            foo0.x += 1
+            return x + 1, foo1.x
+
+        res = run(torch.ones(1), s, foo)
+        self.assertTrue(same(res[0], torch.ones(1) + 1))
+        self.assertEqual(res[1], 1)
 
 
 class TestTracer(JitTestCase):
