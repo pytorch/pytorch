@@ -1184,6 +1184,9 @@ def trace_structured(
             if (
                 trace_id := torch._guards.CompileContext.current_trace_id()
             ) is not None:
+                record[
+                    "compiled_autograd_id"
+                ] = trace_id.compile_id.compiled_autograd_id
                 record["frame_id"] = trace_id.compile_id.frame_id
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
