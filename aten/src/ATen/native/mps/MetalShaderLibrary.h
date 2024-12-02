@@ -45,9 +45,9 @@ constexpr bool has_size_type_v = has_size_type<T>::value;
 
 class MetalKernelFunction {
  public:
-  MetalKernelFunction(MTLComputePipelineState_t cps_) : cps(cps_) {}
-  MetalKernelFunction(MetalKernelFunction&) = delete;
+  MetalKernelFunction(MTLComputePipelineState_t cps_);
   ~MetalKernelFunction();
+  MetalKernelFunction(MetalKernelFunction&) = delete;
   // Shader properties
   uint64_t getMaxThreadsPerThreadgroup() const;
   uint64_t getThreadExecutionWidth() const;
@@ -152,6 +152,7 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
     // Compile right away
     getLibrary();
   }
+  ~DynamicMetalShaderLibrary();
 };
 
 } // namespace at::native::mps
