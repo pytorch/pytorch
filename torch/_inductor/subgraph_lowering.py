@@ -13,7 +13,6 @@ import torch
 from . import ir
 from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
-from .sizevars import SizeVarAllocator
 from .virtualized import ops, V, WrapperHandler
 
 
@@ -22,6 +21,11 @@ _P = ParamSpec("_P")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
+    """
+    Lowers a pointwise subgraph to a single set of buffers with a separate
+    lowering object. Errors if buffers are created unexpectedly
+    """
+
     graph_outputs: Optional[List[ir.IRNode]]
 
     def __init__(
@@ -33,17 +37,18 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
 
-    @property
-    def sizevars(self) -> SizeVarAllocator:
-        return self.root_graph.sizevars
-
     def mark_buffer_mutated(self, name: str) -> None:
         raise SubgraphLoweringException("Mutations are not supported in this context")
 
     def register_buffer(self, buffer: ir.Buffer) -> str:
         raise SubgraphLoweringException(
-            "Buffer creation is not supported in this context"
+            "Buffers cannot be created while lowering a pointwise subgraph. "
+            "This could be for a good reason (e.g. you're calling an op we can't codegen as a pointwise op), "
+            "but it could also be a bug. Please file a bug report if you think this should be supportable."
         )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.root_graph, name)
 
     def call_function(
         self,
@@ -56,16 +61,9 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
-        assert isinstance(target, torch._ops.OpOverload)
-
         if target not in lowerings:
             raise SubgraphLoweringException(
                 f"{target} not supported in subgraph, (missing lowering)"
-            )
-
-        if torch.Tag.pointwise not in target.tags:
-            raise SubgraphLoweringException(
-                f"Only pointwise operators are supported in this context, but got {target}"
             )
 
         return lowerings[target](*args, **kwargs)

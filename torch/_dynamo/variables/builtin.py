@@ -1740,6 +1740,7 @@ class BuiltinVariable(VariableTracker):
             (
                 variables.CustomizedDictVariable,
                 variables.PlacementVariable,
+                variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
             ),
         ):
@@ -1764,10 +1765,9 @@ class BuiltinVariable(VariableTracker):
                     # tracked fakes to produce incorrect guards. This is sound because the TensorVariable
                     # coming out of set_() below will be a new one, and get
                     # installed in tracked fakes.
-                    to_remove = []
-                    for tf in tx.output.tracked_fakes:
-                        if tf.source == obj.source:
-                            to_remove.append(tf)
+                    to_remove = [
+                        tf for tf in tx.output.tracked_fakes if tf.source == obj.source
+                    ]
                     for tf in to_remove:
                         tx.output.tracked_fakes.remove(tf)
 
@@ -1887,32 +1887,37 @@ class BuiltinVariable(VariableTracker):
             items = list(reversed(obj.unpack_var_sequence(tx)))
             return variables.TupleVariable(items)
 
-    def call_sorted(self, tx: "InstructionTranslator", obj: VariableTracker, **kwargs):
+    def call_sorted(
+        self,
+        tx: "InstructionTranslator",
+        obj: VariableTracker,
+        **kwargs: VariableTracker,
+    ):
         if obj.has_force_unpack_var_sequence(tx) and not isinstance(
             obj, variables.TensorVariable
         ):
             unpacked = obj.force_unpack_var_sequence(tx)
             if not all(x.is_python_constant() for x in unpacked):
-                return
-            function = kwargs.pop("key", None)
+                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
+                #       be a pure function and should not have any side effects.
+                return  # try next handler
+            key_fn = kwargs.pop("key", ConstantVariable.create(None))
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
             assert len(kwargs) == 0
-            if function:
-                items = sorted(
-                    unpacked,
-                    key=lambda x: function.call_function(
-                        tx, [x], {}
-                    ).as_python_constant(),
-                    reverse=reverse,
-                )
+
+            if key_fn.is_python_constant() and key_fn.as_python_constant() is None:
+
+                def key(x):
+                    return x.as_python_constant()
+
             else:
-                items = sorted(
-                    unpacked,
-                    key=lambda x: x.as_python_constant(),
-                    reverse=reverse,
-                )
+
+                def key(x):
+                    return key_fn.call_function(tx, [x], {}).as_python_constant()
+
+            items = sorted(unpacked, key=key, reverse=reverse)
             return variables.ListVariable(items)
 
     # neg is a constant fold function, so we only get here if constant fold is not valid

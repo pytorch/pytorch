@@ -1045,7 +1045,6 @@ class TestReductions(TestCase):
             a[:, (shape[1] - 1) // 2:] = True
             values, indices = a.mode(-1)
             self.assertEqual(values, torch.ones(shape[0], dtype=torch.bool))
-            print(indices)
             indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
             self.assertEqual(values, indexed)
 

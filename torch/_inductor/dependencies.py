@@ -5,7 +5,18 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -127,9 +138,7 @@ class MemoryDep(Dep):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
-        order = []
-        for s in other_strides:
-            order.append(stride_to_index[s])
+        order = [stride_to_index[s] for s in other_strides]
 
         assert set(order) == set(range(0, self.num_vars))
         return order
@@ -221,10 +230,13 @@ class MemoryDep(Dep):
             )
         return self
 
-    def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+    def numbytes_hint(self) -> int:
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:  # NoneLayout
+            return 0
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0
@@ -247,7 +259,7 @@ class MemoryDep(Dep):
 
         last_sym = self.var_names[-1]
         for term in terms:
-            if term is last_sym:
+            if term == last_sym:
                 return True
 
             # Having a >1 stride for the last dimension is bad for perf
@@ -255,7 +267,7 @@ class MemoryDep(Dep):
             if (
                 isinstance(term, sympy.Mul)
                 and len(term.args) == 2
-                and term.args[1] is last_sym
+                and term.args[1] == last_sym
                 and isinstance(term.args[0], (int, sympy.Integer))
                 and term.args[0] > 1
             ):
@@ -291,9 +303,12 @@ class StarDep(Dep):
         return self
 
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:
+            return 0  # NoneLayout, MultiOutputLayout, etc
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0
@@ -545,15 +560,13 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     return var_ranges, add_var
 
 
-def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
+def index_vars_no_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = []
-    for size in argsizes:
-        args.append(list(map(add_var, size)))
+    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
 
 
-def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
+def index_vars_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str = "d"):
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
@@ -568,7 +581,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 def extract_read_writes(
     fn: Callable[..., Any],
-    *argsizes: Tuple[sympy.Expr, ...],
+    *argsizes: Sequence[sympy.Expr],
     normalize: bool = False,
     prefix: str = "d",
     hidden_args=(),
@@ -628,7 +641,7 @@ def extract_read_writes(
 
 
 def extract_input_node_reduction_ranges(
-    input_node: "torch._inductor.ir.TensorBox",
+    input_node: "torch._inductor.ir.IRNode",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -637,12 +650,15 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, Loops
+    from .ir import ComputedBuffer, ExternKernel, Loops
 
-    if isinstance(input_node.data, ComputedBuffer):
+    size: Optional[List[sympy.Expr]]
+    reduction_size: Optional[List[sympy.Expr]]
+
+    if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = input_node.get_size()
-        reduction_size = input_node.get_reduction_size()
+        size = [*input_node.get_size()]
+        reduction_size = [*input_node.get_reduction_size()]
         if len(reduction_size) > 0:
             return (size, reduction_size)
         else:
@@ -656,11 +672,11 @@ def extract_input_node_reduction_ranges(
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
-    reduction_size = None
-    size = None
+    reduction_size: Optional[List[sympy.Expr]] = None
+    size: Optional[List[sympy.Expr]] = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads = []
+        new_reads: List[Dep] = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -671,21 +687,23 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None:
+            if op is None or isinstance(op, ExternKernel):
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
                 if reduction_size is None:
-                    reduction_size = op.get_reduction_size()
-                    size = op.get_size()
-                elif reduction_size != op.get_reduction_size() or size != op.get_size():
+                    reduction_size = [*op.get_reduction_size()]
+                    size = [*op.get_size()]
+                elif reduction_size != [*op.get_reduction_size()] or size != [
+                    *op.get_size()
+                ]:
                     return (None, None)
             else:
                 new_reads.extend(op.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
         else:
-            reads = new_reads
+            reads = OrderedSet(new_reads)
     return (size, reduction_size)
 
 

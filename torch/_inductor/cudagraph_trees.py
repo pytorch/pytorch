@@ -621,13 +621,12 @@ class CUDAWarmupNode:
         }
 
         def get_non_cudagraph_inps() -> List[weakref.ReferenceType[UntypedStorage]]:
-            non_cudagraph_inps = []
-            for t in itertools.chain(new_inputs, self.wrapped_function.constants):
-                if (
-                    isinstance(t, torch.Tensor)
-                    and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
-                ):
-                    non_cudagraph_inps.append(weakref.ref(t.untyped_storage()))
+            non_cudagraph_inps = [
+                weakref.ref(t.untyped_storage())
+                for t in itertools.chain(new_inputs, self.wrapped_function.constants)
+                if isinstance(t, torch.Tensor)
+                and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
+            ]
             return non_cudagraph_inps
 
         non_cudagraph_inps_storages = get_non_cudagraph_inps()
@@ -1709,12 +1708,10 @@ def get_block_addrs(pool_id: Tuple[int, int], live_only: bool = True) -> List[in
 
 
 def format_tb(frames: List[Any]) -> str:
-    formatted_traceback = []
-
-    for entry in frames:
-        formatted_traceback.append(
-            traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
-        )
+    formatted_traceback = [
+        traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
+        for entry in frames
+    ]
 
     return "".join(traceback.format_list(formatted_traceback))
 
