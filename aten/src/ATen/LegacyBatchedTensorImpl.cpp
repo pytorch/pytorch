@@ -76,7 +76,7 @@ void BatchedTensorImpl::checkInvariants() const {
   }
 }
 
-// The following are publically exposed as methods of Tensor
+// The following are publicly exposed as methods of Tensor
 
 IntArrayRef BatchedTensorImpl::strides_custom() const {
   return strides_default();
