@@ -740,11 +740,9 @@ def _compile_fx_inner(
             cache_event_time=start_time,
             key=cache_info.get("key") if cache_info else None,
             components=cache_info.get("components") if cache_info else None,
-            cache_bypass_reason=(
-                cache_info.get("cache_bypass_reason")
-                if cache_info
-                else "cache not enabled"
-            ),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason")
+            if cache_info
+            else "cache not enabled",
             remote_cache_enabled=remote,
             local_cache_enabled=local,
         )
@@ -1212,13 +1210,11 @@ def cudagraphify_impl(
 
     # allocate static tensor inputs
     static_inputs = [
-        (
-            x
-            if not isinstance(x, torch.Tensor)
-            else static_input(x)
-            if idx not in static_input_idxs
-            else x.detach()
-        )
+        x
+        if not isinstance(x, torch.Tensor)
+        else static_input(x)
+        if idx not in static_input_idxs
+        else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
@@ -1447,11 +1443,9 @@ def fw_compiler_freezing(
 def get_cpp_wrapper_config() -> Dict[str, object]:
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": (
-            config.triton.autotune_at_compile_time
-            if config.triton.autotune_at_compile_time is not None
-            else True
-        ),
+        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
+        if config.triton.autotune_at_compile_time is not None
+        else True,
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
