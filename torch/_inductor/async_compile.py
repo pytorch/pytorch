@@ -233,7 +233,7 @@ class AsyncCompile:
                 ),
             )
         else:
-            with _WaitCounter("pytorch.async_compile.wait").guard():
+            with _WaitCounter("pytorch.async_compile.precompile").guard():
                 kernel.precompile()
             return kernel
 
