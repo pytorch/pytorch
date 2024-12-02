@@ -47,6 +47,7 @@ def replace_node_with_constant(
         node.replace_all_uses_with(new_input_node)
         new_input_node.meta.update(node.meta)
         g.erase_node(node)
+        new_input_node.name = node.name
 
     if constant is not None:
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
