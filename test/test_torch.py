@@ -8723,6 +8723,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
                 self.assertSequenceEqual(dim_order_target, t.dim_order())
 
+    def test_raise_error(self):
+        with self.assertRaises(RuntimeError):
+            torch.empty((2,3,4,5)).just_raise_error()
+
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
         with self.assertRaisesRegex(TypeError, "type 'torch.FloatTensor' is not an acceptable base type"):
