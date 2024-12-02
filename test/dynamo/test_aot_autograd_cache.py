@@ -745,6 +745,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
 
+    @torch._inductor.config.patch({"freezing": True})
+    def test_freezing(self):
+        def fn(x):
+            return x.cos().sin()
+
+        config = self.default_config()
+        self.assertRaises(
+            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+        )
+
     def test_private_builtin(self):
         # _foreach_add is a private torch function, but
         # it's also a builtin_function_or_method, so it should be allowed to be cached

@@ -30,6 +30,7 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     write_atomic,
 )
+from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -204,6 +205,8 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+    if torch._inductor.config.freezing:
+        raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
@@ -329,6 +332,7 @@ class FXGraphCacheLoadable:
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
         remote_cache = None
+        constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
 
@@ -339,6 +343,7 @@ class FXGraphCacheLoadable:
             local=True,
             remote_cache=remote_cache,
             is_backward=self.is_backward(),
+            constants=constants,
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
@@ -354,8 +359,9 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
-        result._boxed_call = True
+        # TODO: How come cudagraphs could be None here?
+        # TODO: How come gm is None here?
+        result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
         return result
 
 
