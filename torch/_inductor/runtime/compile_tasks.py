@@ -6,7 +6,7 @@ import os
 import sys
 import warnings
 from types import ModuleType
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
@@ -62,7 +62,7 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas_path} exists but is not an executable")
 
 
-def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: Dict[str, str]):
+def _worker_compile_triton(load_kernel: Callable[[], Any], extra_env: dict[str, str]):
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
     load_kernel().precompile(warm_cache_only=True)

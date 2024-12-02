@@ -3,7 +3,7 @@ import functools
 import itertools
 import operator
 import typing
-from typing import Callable, List, Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -44,7 +44,7 @@ aten = torch.ops.aten
 _skip_do_bench_times = False
 
 
-def fetch_fake_tensors(match, kwarg_names) -> List[Tensor]:
+def fetch_fake_tensors(match, kwarg_names) -> list[Tensor]:
     kwargs = match.kwargs
     return [kwargs[name].meta["val"] for name in kwarg_names]
 

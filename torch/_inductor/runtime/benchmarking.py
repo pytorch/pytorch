@@ -2,7 +2,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -77,8 +77,8 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Tuple[Any, ...],
-        fn_kwargs: Dict[str, Any],
+        fn_args: tuple[Any, ...],
+        fn_kwargs: dict[str, Any],
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -144,7 +144,7 @@ class Benchmarker:
         - The median runtime of `_callable`, in milliseconds.
         """
 
-        def run_for(ms: int) -> List[float]:
+        def run_for(ms: int) -> list[float]:
             timings = []
             run_start_t = time.perf_counter()
             while True:
