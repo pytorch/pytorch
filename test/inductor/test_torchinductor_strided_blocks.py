@@ -230,6 +230,50 @@ class TritonBlockPointerTest(InductorTestCase):
             config_patches={"triton.prefer_nd_tiling": prefer_nd_tiling},
         )
 
+    @parametrize(
+        "x_size,y_size",
+        [
+            ((32, 1), (32, 32)),
+            ((1, 8), (8, 8)),
+            # ((4, 1, 3), (4, 5, 3)), # TODO: T207754224
+            ((4, 1, 3), (4, 4, 3)),
+            ((1, 5, 5), (5, 5, 5)),
+            ((5, 5, 1), (5, 5, 5)),
+            ((5, 1, 1), (5, 5, 5)),
+            ((1, 1, 5), (5, 5, 5)),
+            ((1, 5, 1), (5, 5, 5)),
+            ((7, 1, 1, 4), (7, 3, 4, 4)),
+            ((5, 6, 1, 1), (5, 6, 4, 3)),
+        ],
+    )
+    def test_expand_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
+        """
+        When the load and store have different shapes, we should use broadcast.
+        """
+
+        def foo(x, y_size):
+            return x.expand(y_size).clone()
+
+        def get_input(size: Tuple[int]) -> torch.Tensor:
+            device = torch.device(GPU_TYPE)
+            full = torch.randn(size).to(device)
+            view = torch.as_strided(full, size, full.stride())
+            return view
+
+        x = get_input(x_size)
+        y = y_size
+
+        # Check that input sizes are not the same
+        self.assertNotEqual(x_size, y_size)
+
+        # Check that is valid broadcast
+        self.assertEqual(len(x_size), len(y_size))
+        for i, j in zip(x_size, y_size):
+            if i != 1:
+                self.assertEqual(i, j)
+
+        result, (triton_code,) = self.run_and_compare(foo, x, y)
+
     @parametrize("prefer_nd_tiling", [False, True])
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
         """
@@ -268,18 +312,18 @@ class TritonBlockPointerTest(InductorTestCase):
             )
             self.assertExpectedInline(
                 "\n".join(store_lines),
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), tmp2.to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[8, 8], strides=[1, 8], block_shape=[XBLOCK, YBLOCK], order=[1, 0], offsets=[xoffset, yoffset]), tl.broadcast_to(tmp2, [XBLOCK, YBLOCK]).to(tl.float32), boundary_check=[0, 1])""",  # noqa: B950
             )
         else:
             self.assertExpectedInline(
                 "\n".join(load_lines),
                 """\
     tmp0 = tl.load(tl.make_block_ptr(in_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), boundary_check=[0])
-    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[((7 + XBLOCK) // 8)], order=[0], offsets=[(xoffset // 8)]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [((7 + XBLOCK) // 8), ((1) * ((1) <= (((7 + XBLOCK) // 8))) + (((7 + XBLOCK) // 8)) * ((((7 + XBLOCK) // 8)) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
+    tmp1 = tl.reshape(tl.broadcast_to(tl.load(tl.make_block_ptr(in_ptr1, shape=[8], strides=[8], block_shape=[(7 + XBLOCK) // 8], order=[0], offsets=[xoffset // 8]), boundary_check=[0], eviction_policy='evict_last')[:, None, None], [(7 + XBLOCK) // 8, ((1) * ((1) <= ((7 + XBLOCK) // 8)) + ((7 + XBLOCK) // 8) * (((7 + XBLOCK) // 8) < (1))), ((8) * ((8) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (8)))]), [XBLOCK])""",  # noqa: B950
             )
             self.assertExpectedInline(
                 "\n".join(store_lines),
-                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tmp2.to(tl.float32), boundary_check=[0])""",  # noqa: B950
+                """    tl.store(tl.make_block_ptr(out_ptr0, shape=[64], strides=[1], block_shape=[XBLOCK], order=[0], offsets=[xoffset]), tl.broadcast_to(tmp2, [XBLOCK]).to(tl.float32), boundary_check=[0])""",  # noqa: B950
             )
 
     @parametrize("prefer_nd_tiling", [False, True])
