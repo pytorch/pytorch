@@ -76,6 +76,7 @@ import urllib.parse
 import zipfile
 from pathlib import Path
 from typing import Dict
+import warnings
 
 import torch.utils.show_pickle
 
@@ -389,6 +390,7 @@ def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
 
 
 def main(argv, *, stdout=None):
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")

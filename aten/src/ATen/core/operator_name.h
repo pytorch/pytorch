@@ -30,7 +30,7 @@ struct OperatorName final {
     if (pos == std::string::npos) {
       return std::nullopt;
     } else {
-      return std::make_optional(std::string_view(name.data(), pos));
+      return std::string_view(name.data(), pos);
     }
   }
 
