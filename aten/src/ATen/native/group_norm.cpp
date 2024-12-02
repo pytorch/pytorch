@@ -236,7 +236,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
       /*training=*/true,
       /*momentum=*/0,
       eps);
-  at::Tensor out = std::get<0>(outputs).view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   std::vector<int64_t> affine_param_shape(input.dim(), 1);
   affine_param_shape[1] = C;
   if (weight.defined() && bias.defined()) {
