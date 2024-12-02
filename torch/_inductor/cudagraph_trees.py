@@ -71,7 +71,12 @@ from typing import (
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
+from torch._dynamo.utils import (
+    counters,
+    dynamo_timed,
+    get_metrics_context,
+    preserve_rng_state,
+)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -100,6 +105,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
+    from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -416,25 +422,40 @@ def cudagraphify(
     constants: Tuple[torch.Tensor, ...] = (),
     placeholders: Tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
+    compile_id: Optional[CompileId] = None,
 ) -> Tuple[ModelType, OutputType]:
-    manager = get_container(device_index).get_tree_manager()
-    assert not (is_backward and is_inference)
-    mode = (
-        CompilationMode.BACKWARD
-        if is_backward
-        else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
-    )
+    # Even though this is technically runtime, we want to capture some overheads for
+    # "compilation metrics" loggingl
+    metrics_context = get_metrics_context()
+    with metrics_context, dynamo_timed(
+        "cudagraphify",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="runtime_cudagraphify_time_us",
+    ):
+        metrics_context.update_outer(
+            {"compile_id": compile_id, "is_forward": not is_backward}
+        )
 
-    return manager.add_function(
-        model,
-        inputs,
-        static_input_idxs,
-        stack_traces,
-        mode,
-        constants,
-        placeholders,
-        mutated_input_idxs,
-    )
+        manager = get_container(device_index).get_tree_manager()
+        assert not (is_backward and is_inference)
+        mode = (
+            CompilationMode.BACKWARD
+            if is_backward
+            else (
+                CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD
+            )
+        )
+
+        return manager.add_function(
+            model,
+            inputs,
+            static_input_idxs,
+            stack_traces,
+            mode,
+            constants,
+            placeholders,
+            mutated_input_idxs,
+        )
 
 
 class StorageWeakRefWrapper:

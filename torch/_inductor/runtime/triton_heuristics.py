@@ -880,7 +880,9 @@ class CachingAutotuner(KernelInterface):
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed(
-            "CachingAutotuner.benchmark_all_configs", log_pt2_compile_event=True
+            "CachingAutotuner.benchmark_all_configs",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="runtime_triton_autotune_time_us",
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
