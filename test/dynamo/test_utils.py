@@ -345,9 +345,9 @@ class TestDynamoTimed(TestCase):
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': None,
  'specialize_float': None,
- 'start_time': None,
+ 'start_time': 0.0001,
  'start_time_us': 100,
- 'structured_logging_overhead_s': None,
+ 'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
  'triton_compile_time_us': None,
  'triton_version': None}""",  # noqa: B950

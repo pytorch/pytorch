@@ -531,15 +531,13 @@ auto handle_torch_function_no_python_arg_parser(
   if (is_mode_active()) {
     // Step 1: Try to dispatch on any user TorchDispatchModes (including infra
     // modes, which will always be at the bottom of the mode stack).
-    auto ret_ = dispatch_on_mode(
+    std::tie(ret, mode_obj) = dispatch_on_mode(
         args,
         kwargs,
         py_types,
         torch_api_function,
         is_torch_function,
         torch_function_name_str);
-    ret = std::get<0>(ret_);
-    mode_obj = std::get<1>(ret_);
   }
 
   // Step 2: Try to dispatch based on any user subclasses,
