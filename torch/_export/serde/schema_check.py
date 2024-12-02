@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -27,50 +27,91 @@ def _staged_schema():
     cpp_class_defs: Dict[str, str] = {}
     cpp_type_decls: List[str] = []
     cpp_json_defs: List[str] = []
+    thrift_enum_defs: List[str] = []
+    thrift_type_defs: Dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t) -> Tuple[str, str]:
-            TYPE_MAP = {
+    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        def dump_type(t) -> Tuple[str, str, str]:
+            CPP_TYPE_MAP = {
                 str: "std::string",
                 int: "int64_t",
                 float: "double",
                 bool: "bool",
             }
+            THRIFT_TYPE_MAP = {
+                str: "string",
+                int: "i64",
+                float: "double",
+                bool: "bool",
+            }
             if isinstance(t, type):
                 if t.__name__ in cpp_enum_defs:
-                    return t.__name__, "int64_t"
+                    return t.__name__, "int64_t", t.__name__
                 else:
-                    return t.__name__, TYPE_MAP.get(t, t.__name__)
+                    return (
+                        t.__name__,
+                        CPP_TYPE_MAP.get(t, t.__name__),
+                        THRIFT_TYPE_MAP.get(t, t.__name__),
+                    )
             elif isinstance(t, str):
                 assert t in defs
                 assert t not in cpp_enum_defs
                 assert "[" not in t
-                return t, f"ForwardRef<{t}>"
+                return t, f"ForwardRef<{t}>", t
+            elif isinstance(t, ForwardRef):
+                return (
+                    t.__forward_arg__,
+                    f"ForwardRef<{t.__forward_arg__}>",
+                    t.__forward_arg__,
+                )
             elif o := typing.get_origin(t):
                 # Lemme know if there's a better way to do this.
                 if o == list:
-                    yaml_head, cpp_head = "List", "std::vector"
+                    yaml_head, cpp_head, thrift_head, thrift_tail = (
+                        "List",
+                        "std::vector",
+                        "list<",
+                        ">",
+                    )
                 elif o == dict:
-                    yaml_head, cpp_head = "Dict", "std::unordered_map"
+                    yaml_head, cpp_head, thrift_head, thrift_tail = (
+                        "Dict",
+                        "std::unordered_map",
+                        "map<",
+                        ">",
+                    )
                 elif o == tuple:
                     if typing.get_args(t) == ():
-                        return "Tuple[()]", "std::tuple<>"
-                    yaml_head, cpp_head = "Tuple", "std::tuple"
+                        return "Tuple[()]", "std::tuple<>", "bool"
+                    yaml_head, cpp_head, thrift_head, thrift_tail = (
+                        "Tuple",
+                        "std::tuple",
+                        "bool",
+                        "",
+                    )
                 elif o == Union:
                     args = typing.get_args(t)
                     assert len(args) == 2 and args[1] == type(None)
-                    yaml_type, cpp_type = dump_type(args[0])
-                    return f"Optional[{yaml_type}]", f"std::optional<{cpp_type}>"
+                    yaml_type, cpp_type, thrift_type = dump_type(args[0])
+                    return (
+                        f"Optional[{yaml_type}]",
+                        f"std::optional<{cpp_type}>",
+                        f"optional {thrift_type}",
+                    )
+                elif o == Annotated:
+                    return dump_type(t.__origin__)
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")
-                yaml_arg_types, cpp_arg_types = zip(
+                yaml_arg_types, cpp_arg_types, thrift_arg_types = zip(
                     *[dump_type(x) for x in typing.get_args(t)]
                 )
-                return (f"{yaml_head}[{', '.join(yaml_arg_types)}]"), (
-                    f"{cpp_head}<{', '.join(cpp_arg_types)}>"
+                return (
+                    (f"{yaml_head}[{', '.join(yaml_arg_types)}]"),
+                    (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
+                    f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
             elif t == ():
-                return "()", ""
+                return "()", "", ""
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
@@ -94,11 +135,17 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str]]:
-            t, cpp = dump_type(f.type)
+        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
+            t, cpp_type, thrift_type = dump_type(f.type)
             ret = {"type": t}
-            cpp_type = cpp
             cpp_default: Optional[str] = None
+            assert (
+                typing.get_origin(f.type) == Annotated
+            ), f"Field {f.name} must be annotated with an integer id."
+            thrift_id = f.type.__metadata__[0]
+            assert (
+                type(thrift_id) is int
+            ), f"Field {f.name} must be annotated with an integer id."
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -116,15 +163,23 @@ def _staged_schema():
                         f"Optional field {ty.__name__}.{f.name} must have default value to be None."
                     )
 
-            return ret, cpp_type, cpp_default
+            return ret, cpp_type, cpp_default, thrift_type, thrift_id
 
         yaml_ret = {}
         cpp_ret = {}
+        thrift_ret = {}
+        thrift_ids = set()
         for f in dataclasses.fields(ty):
-            yaml_res, cpp_type, cpp_default = dump_field(f)
+            yaml_res, cpp_type, cpp_default, thrift_type, thrift_id = dump_field(f)
             yaml_ret[f.name] = yaml_res
             cpp_ret[f.name] = {"cpp_type": cpp_type, "cpp_default": cpp_default}
-        return yaml_ret, cpp_ret
+            thrift_ret[f.name] = {"thrift_type": thrift_type, "thrift_id": thrift_id}
+            if thrift_id in thrift_ids:
+                raise AssertionError(
+                    f"Duplicate thrift id {thrift_id} for field {f.name} in {ty.__name__}."
+                )
+            thrift_ids.add(thrift_id)
+        return yaml_ret, cpp_ret, thrift_ret
 
     def _handle_int_enum(name, ty):
         yaml_ret[name] = {"kind": "enum", "fields": {x.name: x.value for x in ty}}
@@ -135,9 +190,16 @@ enum class {name} {{
 {chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
 }};
 """
+        thrift_enum_defs.append(
+            f"""
+enum {name} {{
+{chr(10).join([f"  {x.name} = {x.value}," for x in ty])}
+}}
+"""
+        )
 
     def _handle_struct(name, ty):
-        fields, cpp_fields = _handle_aggregate(ty)
+        fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "struct", "fields": fields}
         field_decls = "\n".join(
             f"  {f['cpp_type']} {name}{' = ' + f['cpp_default'] if f['cpp_default'] is not None else ''};"
@@ -189,8 +251,15 @@ class {name} {{
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
 
+        thrift_type_defs[
+            name
+        ] = f"""
+struct {name} {{
+{chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
+}}"""
+
     def _handle_union(name, ty):
-        fields, cpp_fields = _handle_aggregate(ty)
+        fields, cpp_fields, thrift_fields = _handle_aggregate(ty)
         yaml_ret[name] = {"kind": "union", "fields": fields}
 
         def accessor(name, ty, idx):
@@ -252,6 +321,13 @@ class {name} {{
 }};
 """
         cpp_type_decls.append(f"class {name};")
+
+        thrift_type_defs[
+            name
+        ] = f"""
+union {name} {{
+{chr(10).join(f"  {f['thrift_id']}: {f['thrift_type']} {n};" for n, f in thrift_fields.items())}
+}}"""
 
     for name in dir(schema):
         if name.startswith("_"):
@@ -378,7 +454,13 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
 }} // namespace _export
 }} // namespace torch
 """
-    return yaml_ret, cpp_header
+    thrift_schema = f"""
+namespace py3 torch._export.schema
+namespace cpp2 torch._export.schema
+{chr(10).join(thrift_enum_defs)}
+{chr(10).join(dict(sorted(thrift_type_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
+"""
+    return yaml_ret, cpp_header, thrift_schema
 
 
 def _diff_schema(dst, src):
@@ -461,6 +543,8 @@ class _Commit:
     checksum_base: Optional[str]
     cpp_header: str
     cpp_header_path: str
+    thrift_schema: str
+    thrift_schema_path: str
 
 
 def update_schema():
@@ -480,11 +564,13 @@ def update_schema():
         checksum_base = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
-    src, cpp_header = _staged_schema()
+    src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
+    thrift_schema_path = __package__.replace(".", "/") + "/schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check
+    assert thrift_schema_path.startswith(torch_prefix)  # sanity check
 
     return _Commit(
         result=src,
@@ -496,6 +582,8 @@ def update_schema():
         checksum_base=checksum_base,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        thrift_schema=thrift_schema,
+        thrift_schema_path=thrift_schema_path,
     )
 
 

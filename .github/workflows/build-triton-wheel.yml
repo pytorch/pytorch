@@ -45,7 +45,13 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
-        device: ["cuda", "rocm"]
+        device: ["cuda", "rocm", "xpu"]
+        docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
+        exclude:
+          - device: "rocm"
+            docker-image: "pytorch/manylinux2_28-builder:cpu"
+          - device: "xpu"
+            docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
             rocm_version: "6.2"
@@ -53,9 +59,10 @@ jobs:
             rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || 'pytorch/manylinux2_28-builder:cpu' }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
+      PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -114,24 +121,37 @@ jobs:
           esac
 
           RELEASE=""
+          WITH_CLANG_LDD=""
           if [[ "${IS_RELEASE_TAG}" == true ]]; then
             RELEASE="--release"
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1
-          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
+          if [[ "${{ matrix.device }}" == "cuda" &&  "${PLATFORM}" == "manylinux_2_28_x86_64" ]]; then
             # With this install, it gets clang 16.0.6.
             docker exec -t "${container_name}" dnf install clang lld -y
+            WITH_CLANG_LDD="--with-clang-ldd"
           fi
-          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
+          if [[ "${BUILD_DEVICE}" == xpu ]]; then
+            docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
+            docker exec -t "${container_name}" bash -c "source /opt/rh/devtoolset-11/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
+          else
+            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
+          fi
+          if [[ "${{ matrix.device }}" == "cuda" ]]; then
+            docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
+          else
+            docker exec -t "${container_name}"  bash -c "mkdir //artifacts/wheelhouse"
+            docker exec -t "${container_name}"  bash -c "mv //artifacts/*.whl //artifacts/wheelhouse/"
+          fi
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts/wheelhouse
 
       - uses: actions/upload-artifact@v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/artifacts/*
+          path: ${{ runner.temp }}/artifacts/wheelhouse/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
