@@ -1395,16 +1395,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("device", test_devices)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
+        dtype = test_dtypes_fast[device]
+
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        self.run_test(score_mod, device=device)
-        self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test(score_mod, dtype=dtype, device=device)
+        self.run_test_with_paged_attention(score_mod, dtype=dtype, device=device)
 
     @supported_platform
     @common_utils.parametrize("device", test_devices)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self, device):
+        dtype = test_dtypes_fast[device]
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
         tok_scale = torch.randn(S, device=device)
@@ -1417,8 +1420,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             score = score + head_scale[head]
             return score
 
-        self.run_test(bias_mod, device=device)
-        self.run_test_with_paged_attention(bias_mod, device=device)
+        self.run_test(bias_mod, dtype=dtype, device=device)
+        self.run_test_with_paged_attention(bias_mod, dtype=dtype, device=device)
 
     @skipIfRocm
     @supported_platform
@@ -1776,6 +1779,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("device", test_devices)
     def test_larger_block_mask_bug(self, device):
+        dtype = test_dtypes_fast[device]
+
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -1793,9 +1798,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # Create input tensors
         shape = (2, 1, 2, 16)
-        q = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
-        k = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
-        v = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
+        q = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
+        k = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
+        v = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
         eager = flex_attention(q, k, v, block_mask=mask_2)
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)

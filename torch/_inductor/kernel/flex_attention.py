@@ -835,23 +835,29 @@ def flex_attention(
             create_placeholder(name, dtype, query.get_device())
             for name, dtype in [
                 ("score", torch.float),
-                ("b", torch.int32),
-                ("h", torch.int32),
-                ("q_idx", torch.int32),
-                ("kv_idx", torch.int32),
+                ("b", torch.int64),
+                ("h", torch.int64),
+                ("q_idx", torch.int64),
+                ("kv_idx", torch.int64),
             ]
         ]
         subgraph_buffer = build_subgraph_buffer(
             placeholder_inps + list(score_mod_other_buffers), subgraph
         )
-        subgraph_buffer.freeze_layout()
+        if subgraph_buffer is not None:
+            if isinstance(subgraph_buffer, list):
+                for _buf in subgraph_buffer:
+                    if _buf is not None:
+                        _buf.freeze_layout()
+            else:
+                subgraph_buffer.freeze_layout()
         mask_graph_placeholder_inps = [
             create_placeholder(name, dtype, query.get_device())
             for name, dtype in [
-                ("b", torch.int32),
-                ("h", torch.int32),
-                ("q_idx", torch.int32),
-                ("kv_idx", torch.int32),
+                ("b", torch.int64),
+                ("h", torch.int64),
+                ("q_idx", torch.int64),
+                ("kv_idx", torch.int64),
             ]
         ]
         mask_graph_buffer = build_subgraph_buffer(
@@ -916,7 +922,7 @@ def flex_attention(
             query.get_device(),
             query.get_dtype(),
             [B, Hq, seq_len_q, v_head_dim],
-            stride=out_strides,
+            stride=[sympy.sympify(s) for s in out_strides],
         )
         _choices: List[Any] = []
         input_nodes = [query, key, value, kv_num_blocks, kv_indices]

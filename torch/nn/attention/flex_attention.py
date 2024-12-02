@@ -1080,7 +1080,8 @@ def _apply_kernel_options(
             or value.device.type == "cpu"
         )
         if any_inputs_on_cpu_device:
-            # CPU with torch.compile only supports infernece, and will not return lse
+            # CPU with torch.compile now supports infernece, and will not return lse
+            # TODO: support CPU for training and return lse
             kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     return kernel_options
