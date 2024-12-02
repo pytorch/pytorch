@@ -3109,13 +3109,16 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper("out of memory")
     def test_large_tensor_reduction(self):
-        if not _has_sufficient_memory(self.device, 4.5 * 1024**3):  # 4.5 GiB
-            raise unittest.SkipTest("insufficient memory")
-
         if self.device == "cpu":
             raise unittest.SkipTest("Fails on CPU")
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**33 if config.cpp_wrapper else 2**32 + 2**16
+        if not _has_sufficient_memory(self.device, required_memory):
+            raise unittest.SkipTest("insufficient memory")
 
         # Test 64-bit indexing works correctly
         def fn(a):
@@ -3125,7 +3128,7 @@ class CommonTemplate:
         t[-1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
         expect = torch.tensor(2, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
@@ -3147,22 +3150,27 @@ class CommonTemplate:
         t2[-1, -1] = 2
 
         # self.common OOMs here because it copies inputs to check for mutations
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t1, t2)
         expect = torch.tensor(4, dtype=torch.int8, device=self.device)
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_cpp_wrapper("out of memory")
     def test_large_pointwise(self):
-        if not _has_sufficient_memory(self.device, 2 * (2**31 + 1)):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = (
+            2**32 + 2**31 + 2**15 if config.cpp_wrapper else 2**31 + 2**15
+        )
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
             return a + 1
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t)
 
         # Can't use assertEqual as it expands broadcasted inputs
@@ -3177,7 +3185,10 @@ class CommonTemplate:
         # Test 64-bit indexing is used when input views a tensor that can be
         # indexed with 32-bit strides but the storage offset pushes it over
         # INT_MAX
-        if not _has_sufficient_memory(self.device, (2**31 + 1) + (2**30 + 1)):
+
+        # Memory requirements derived experimentally.
+        required_memory = 2**32 + 2**16
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
@@ -3185,7 +3196,7 @@ class CommonTemplate:
 
         t = torch.ones(2**31 + 1, dtype=torch.int8, device=self.device)
         t[2**30 :] = 0
-        compiled_fn = torch._dynamo.optimize()(fn)
+        compiled_fn = torch.compile(fn)
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
@@ -3193,7 +3204,12 @@ class CommonTemplate:
     def test_large_strided_reduction(self):
         # Test 64-bit indexing is used when input numel is less than INT_MAX
         # but stride calculations go above INT_MAX
-        if not _has_sufficient_memory(self.device, 2**31 + 2):
+
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = 2**32 + 2**16 if config.cpp_wrapper else 2**31 + 2**16
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         def fn(a):
@@ -5201,6 +5217,32 @@ class CommonTemplate:
             self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    def test_matmul_layer_norm(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 256
+
+        inp = torch.randn(
+            batch_size,
+            seq_length,
+            hidden_size,
+            requires_grad=True,
+            device=self.device,
+        )
+        weight = torch.randn(
+            hidden_size, hidden_size, requires_grad=True, device=self.device
+        )
+
+        layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+
+        def foo(inp, weight):
+            matmul_output = inp @ weight
+            final_output = layer_norm(matmul_output)
+            return final_output
+
+        self.common(foo, (inp, weight), check_lowp=False)
 
     def test_transpose_add(self):
         def fn(a, b):
@@ -11268,7 +11310,15 @@ class CommonTemplate:
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = (
+            2**34 + 2**32 + 2**31
+            if config.cpp_wrapper
+            else 2**33 + 2**32 + 2**31
+        )
+        if not _has_sufficient_memory(self.device, required_memory):
             raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
@@ -11415,7 +11465,6 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
-    @xfail_if_triton_cpu
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -11695,6 +11744,15 @@ class CommonTemplate:
 
     @skip_if_triton_cpu("Triton CPU: Cannot xfail because it crashes process")
     def test_large_grid(self):
+        # If this is running with cpp_wrapper, the auto-tuning step will generate an
+        # additional array of the same size as the input.  Numbers derived
+        # experimentally.
+        required_memory = (
+            2**30 + 2**29 + 2**15 if config.cpp_wrapper else 2**30 + 2**15
+        )
+        if not _has_sufficient_memory(self.device, required_memory):
+            raise unittest.SkipTest("insufficient memory")
+
         # https://github.com/pytorch/pytorch/issues/123210
         def fn(primals_5):
             view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
@@ -12867,6 +12925,44 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue(len(re.findall(r"in_out_ptr\d+", code)) > 0)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        @torch._functorch.config.patch("donated_buffer", True)
+        def test_donated_buffer_inplace(self):
+            batch_size = 32
+            seq_length = 50
+            hidden_size = 256
+
+            inp = torch.randn(
+                batch_size,
+                seq_length,
+                hidden_size,
+                requires_grad=True,
+                device=self.device,
+            )
+            weight = torch.randn(
+                hidden_size, hidden_size, requires_grad=True, device=self.device
+            )
+
+            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+
+            def fn(inp, weight):
+                matmul_output = inp @ weight
+                final_output = layer_norm(matmul_output)
+                return final_output
+
+            fn_opt = torch.compile(fn)
+
+            def wrapper(inp, weight):
+                return fn_opt(inp, weight).sum().backward()
+
+            _, code = run_and_get_code(wrapper, inp, weight)
+
+            if config.cpp_wrapper:
+                # when using cpp_wrapper, backward triton code is in code[2]
+                self.assertTrue("in_out_ptr" in code[2])
+            else:
+                # when not using cpp_wrapper, backward triton code is in code[1]
+                self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
