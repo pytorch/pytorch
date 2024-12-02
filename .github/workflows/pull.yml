@@ -487,11 +487,11 @@ jobs:
       cuda-arch-list: 8.9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
