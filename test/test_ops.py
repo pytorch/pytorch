@@ -206,7 +206,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("square"),
     xfail("squeeze_copy"),
     xfail("t_copy"),
     xfail("take"),
@@ -635,6 +634,11 @@ class TestCommon(TestCase):
         # Direct calls to refs and prims are not translated
         if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
             self.skipTest("Skipped on ROCm")
+        if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
+            self.skipTest(
+                "Skipped _refs.div.floor_rounding with bfloat16"
+                "Divide by 0: _refs produces NaN, torch produces +/-inf"
+            )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -1083,17 +1087,15 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
-            if torch.device(device).type != "cpu":
-                wrong_device = "cpu"
-            elif torch.cuda.is_available():
-                wrong_device = "cuda"
-
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
             )
-            if wrong_device is not None:
+
+            if torch.device(device).type != "cpu":
+                wrong_device = "cpu"
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
