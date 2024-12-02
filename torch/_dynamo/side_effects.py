@@ -748,7 +748,7 @@ class SideEffects:
                         cg(value)
                         cg(var.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-            elif isinstance(var, variables.TupleIteratorVariable):
+            elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
