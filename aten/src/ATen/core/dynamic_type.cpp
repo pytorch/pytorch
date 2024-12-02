@@ -60,7 +60,7 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
 }
 
 DynamicType::Arguments::Arguments(
-    const std::vector<std::string_view>& names,
+    const std::vector<c10::string_view>& names,
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
   TORCH_INTERNAL_ASSERT(names.size() == args.size());
@@ -80,7 +80,8 @@ DynamicType::~DynamicType() {
 
 std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -92,7 +93,8 @@ std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
 
 DynamicTypePtr DynamicType::create(Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -105,7 +107,7 @@ DynamicTypePtr DynamicType::create(Type& other) {
 DynamicType::DynamicType(Tag tag, Arguments arguments)
     : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
-DynamicType::DynamicType(Tag tag, std::string_view name, Arguments arguments)
+DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
     : SharedType(Kind),
       tag_(tag),
       name_(std::string{name}),

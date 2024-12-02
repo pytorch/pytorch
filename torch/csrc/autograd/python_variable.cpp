@@ -184,7 +184,7 @@ void pushPyOutToStack(
 namespace {
 
 c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
-    std::string_view arg) {
+    c10::string_view arg) {
   if (arg == "strides") {
     return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
   }
