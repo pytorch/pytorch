@@ -2087,6 +2087,15 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
+    def _convert_value(self, value, flag):
+        if flag == 1:
+            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 2:
+            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 3:
+            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+        return value
+
     def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
@@ -2100,12 +2109,8 @@ class InstructionTranslatorBase(
             )
             self.push(value)
             return
-        if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+
+        value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -2503,6 +2508,9 @@ class InstructionTranslatorBase(
             fn.defaults = attr
 
         self.push(fn)
+
+    def CONVERT_VALUE(self, inst):
+        self.push(self._convert_value(self.pop(), inst.argval))
 
     def FORMAT_SIMPLE(self, inst):
         self._format_value(ConstantVariable.create(""), 0)
