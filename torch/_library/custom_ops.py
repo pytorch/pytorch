@@ -494,6 +494,10 @@ class CustomOpDef:
         not depend on or mutate global state. If you need a non-traceable backward,
         you can make it a separate custom_op that you call inside ``backward_fn``.
 
+        If you need different autograd behavior on different devices, then we
+        recommend creating two different custom operators, one for each device
+        that needs different behavior, and switching between them at runtime.
+
         Examples:
             >>> import torch
             >>> import numpy as np
