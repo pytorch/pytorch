@@ -295,8 +295,8 @@ void _validate_compressed_sparse_indices_kernel(
     const auto idx_ndims = idx.dim();
 
     const auto idx_geometry_holder = at::sparse::TensorGeometryHolder<static_shape_max_len>(idx);
-    const auto& idx_sizes = std::get<0>(*idx_geometry_holder);
-    const auto& idx_strides = std::get<1>(*idx_geometry_holder);
+    const auto idx_sizes = std::get<0>(*idx_geometry_holder);
+    const auto idx_strides = std::get<1>(*idx_geometry_holder);
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
