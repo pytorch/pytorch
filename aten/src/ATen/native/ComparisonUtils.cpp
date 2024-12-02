@@ -19,15 +19,27 @@ void _assert_match(const O& original, const C& compared, const std::string& name
     if (!equal) {
       std::stringstream msg;
       msg << "Tensor " << name << " mismatch!";
-      AT_ASSERT(equal, msg.str());
+      if (!equal) {
+        throw std::runtime_error(msg.str());
+      }
     }
   }
 }
 
-void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef sizes, at::OptionalIntArrayRef strides, std::optional<c10::ScalarType> dtype) {
+void _assert_tensor_metadata_meta_symint(at::Tensor const& tensor, at::OptionalSymIntArrayRef sizes, at::OptionalSymIntArrayRef strides, std::optional<c10::ScalarType> dtype, std::optional<c10::Device> device, std::optional<c10::Layout> layout) {
+  _assert_match(tensor.sym_sizes(), sizes, "sizes");
+  _assert_match(tensor.sym_strides(), strides, "strides");
+  _assert_match(tensor.dtype(), dtype, "dtype");
+  _assert_match(tensor.device(), device, "device");
+  _assert_match(tensor.layout(), layout, "layout");
+}
+
+void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef sizes, at::OptionalIntArrayRef strides, std::optional<c10::ScalarType> dtype, std::optional<c10::Device> device, std::optional<c10::Layout> layout) {
   _assert_match(tensor.sizes(), sizes, "sizes");
   _assert_match(tensor.strides(), strides, "strides");
   _assert_match(tensor.dtype(), dtype, "dtype");
+  _assert_match(tensor.device(), device, "device");
+  _assert_match(tensor.layout(), layout, "layout");
 }
 
 }

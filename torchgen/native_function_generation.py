@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import string
 from collections import defaultdict
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -30,6 +30,10 @@ from torchgen.model import (
 from torchgen.utils import concatMap
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # This has a functional variant, but it's currently marked private.
@@ -53,6 +57,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_assert_tensor_metadata",  # no return
     "_cslt_sparse_mm_search",  # returns an int
     "_assert_scalar",  # no return
     "_dimI",  # returns an int

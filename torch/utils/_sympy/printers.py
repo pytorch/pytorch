@@ -24,6 +24,12 @@ class ExprPrinter(StrPrinter):
     def _print_Relational(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, f" {expr.rel_op} ", precedence(expr))
 
+    def _print_BitwiseFn_bitwise_and(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " & ", PRECEDENCE["Atom"] - 0.5)
+
+    def _print_BitwiseFn_bitwise_or(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " | ", PRECEDENCE["Atom"] - 0.5)
+
     # NB: this is OK to put here, because Mod is only defined for positive
     # numbers, and so across C/Python its behavior is consistent
     def _print_Mod(self, expr: sympy.Expr) -> str:
