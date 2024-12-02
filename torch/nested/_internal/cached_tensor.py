@@ -1,5 +1,5 @@
-from typing import *  # noqa: F403
 from contextlib import contextmanager
+from typing import *  # noqa: F403
 
 import torch
 from torch.utils import _pytree as pytree
@@ -12,7 +12,9 @@ def _get_source_field(
 
 
 def _get_source(
-    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str, ...], target_field: Optional[str]
+    metadata: Dict[str, torch.Tensor],
+    source_fields: Tuple[str, ...],
+    target_field: Optional[str],
 ) -> torch.Tensor:
     # Unless specified via target_field, CachedTensor's source is the first non-None entry in source_fields
     if target_field is not None:
@@ -63,7 +65,9 @@ class CachedTensor(torch.Tensor):
         self.nested_int_ref: Any = None
 
     def __repr__(self) -> str:  # type: ignore[override]
-        source_repr = repr(_get_source(self.metadata, self.source_fields, self.target_field))
+        source_repr = repr(
+            _get_source(self.metadata, self.source_fields, self.target_field)
+        )
         return f"CachedTensor({source_repr})"
 
     def __getattr__(self, name: str) -> torch.Tensor:
@@ -103,10 +107,14 @@ class CachedTensor(torch.Tensor):
             return _func_registry[op](op, *args, **kwargs)
 
         unwrapped_args = pytree.tree_map_only(
-            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields, x.target_field), args
+            CachedTensor,
+            lambda x: _get_source(x.metadata, x.source_fields, x.target_field),
+            args,
         )
         unwrapped_kwargs = pytree.tree_map_only(
-            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields, x.target_field), kwargs
+            CachedTensor,
+            lambda x: _get_source(x.metadata, x.source_fields, x.target_field),
+            kwargs,
         )
         return op(*unwrapped_args, **unwrapped_kwargs)
 
@@ -118,7 +126,7 @@ _func_registry: Dict[Any, Callable] = {}
 
 
 @contextmanager
-def set_func_registry(registry):
+def set_func_registry(registry: Dict[Any, Callable]) -> Generator:
     global _func_registry
     # Save the current registry to restore it later
     old_registry = _func_registry
