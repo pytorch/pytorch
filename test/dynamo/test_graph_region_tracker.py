@@ -151,8 +151,8 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 10),
                 torch.ones(10, 20),
             ),
-            """[[['y1_1', 'x1_1', 'sum_5', 'sum_4', 'z_1'], ['y1_2', 'x1_2', 'sum_8', 'sum_7', 'z_2']], \
-[['b', 'cos_1', 'sum_1'], ['b_1', 'cos_2', 'sum_6']]]""",
+            """[[['y1_1', 'sum_5'], ['y1_2', 'sum_8']], [['x1', 'sum_2', 'z'], ['x1_1', 'sum_4', 'z_1'], \
+['x1_2', 'sum_7', 'z_2']], [['b', 'cos_1', 'sum_1'], ['b_1', 'cos_2', 'sum_6']]]""",
         )
 
     def test_mismatched_dtypes(self):
