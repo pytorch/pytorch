@@ -386,9 +386,11 @@ class Op:
         }, f"{type} is not a supported operation"
         self.type = type
         if type == "send":
+            assert isinstance(meta, str)
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
+            assert isinstance(meta, str)
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:

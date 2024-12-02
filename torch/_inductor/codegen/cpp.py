@@ -292,7 +292,7 @@ def reduction_prefix_array(
     acc_type: str,
     reduction_type: str,
     dtype: torch.dtype,
-    len: int,
+    len: Union[str, int],
     init_fn,
 ):
     """

@@ -2425,7 +2425,7 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment]
+        obj = cls(**data)  # type: ignore[assignment,operator]
         type_hints = typing.get_type_hints(cls)
         for f in dataclasses.fields(cls):
             name = f.name
