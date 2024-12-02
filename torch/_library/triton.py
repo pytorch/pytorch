@@ -1,6 +1,6 @@
 import contextlib
 import threading
-from typing import Any, Callable, Generator, Iterable, Optional, Protocol, Union
+from typing import Any, Callable, Generator, Iterable, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
@@ -106,7 +106,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Callable:
+    def dec(fn: Callable) -> Any:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
@@ -173,21 +173,13 @@ def is_wrap_triton_enabled() -> bool:
     return getattr(wrap_triton_enabled, "value", wrap_triton_enabled_default)
 
 
-class TritonKernelLike(Protocol):
-    def __getitem__(self, grid: Any) -> "TritonKernelLike":
-        pass
-
-    def __call__(self, *args: Any, **kwargs: Any) -> None:
-        pass
-
-
-def capture_triton(triton_kernel: Callable, /) -> TritonKernelLike:
+def capture_triton(triton_kernel: Callable, /) -> Any:
     """This API has been renamed to wrap_triton"""
     return wrap_triton(triton_kernel)
 
 
 @exposed_in("torch.library")
-def wrap_triton(triton_kernel: Callable, /) -> TritonKernelLike:
+def wrap_triton(triton_kernel: Callable, /) -> Any:
     """Allows capture of a triton kernel into a graph via make_fx or
     non-strict ``torch.export``.
 
