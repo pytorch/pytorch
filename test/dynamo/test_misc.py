@@ -1778,6 +1778,27 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops=9,
         )
 
+    def test_range_iter_guards(self):
+        @torch.compile()
+        def func():
+            @torch._dynamo.disable(recursive=False)
+            def run(n):
+                torch._dynamo.graph_break()
+                # For python <= 3.11, list comprehension is implemented by desugaring to
+                # 1. creation of an iterator object
+                # 2. calling a new `listcomp` function with (1)
+                #
+                # In this test we force Dynamo to trace through (2) as the root frame,
+                # thereby ensuring we have the right guards for range iterators.
+                xs = [torch.ones(1) for i in range(n)]
+                return torch.concat(xs)
+
+            return run(2), run(3)
+
+        res2, res3 = func()
+        self.assertTrue(same(res2, torch.ones(2)))
+        self.assertTrue(same(res3, torch.ones(3)))
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
