@@ -557,10 +557,6 @@ class RuntimeEstimator(TorchDispatchMode):
         return self
 
     def __exit__(self, *args: Any) -> None:
-        print(
-            f"Estimated ({self._estimate_mode_type})"
-            f" Compute Time: {self.total_compute_time:.3f} ms"
-        )
         if len(self._no_fallback_kernel) > 0:
             print("no_fallback_kernel: ", list(self._no_fallback_kernel))
         super().__exit__(*args)

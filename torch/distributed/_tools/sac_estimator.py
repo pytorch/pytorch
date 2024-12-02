@@ -601,7 +601,7 @@ class SACEstimator(TorchDispatchMode):
         self,
         sac_stats: SACStats,
         greedy_order_meta: SACGreedyOrderMeta,
-        n_segments: int = 3,
+        n_segments: int = 2,
         save_tradeoff_graph: bool = False,
         filename: str = "ac_tradeoff",
     ) -> SACTradeOffStats:
@@ -631,6 +631,16 @@ class SACEstimator(TorchDispatchMode):
         # 2. Initialize the max recomputation time and total recomputation memory
         sac_runtime = sum(sac_stats.runtimes)
         sac_memory = sum(sac_stats.memory)
+        if sac_memory == 0 or len(sac_stats.memory) == 0:
+            return SACTradeOffStats(
+                n_segments=0,
+                slopes=[],
+                intercepts=[],
+                fit_breaks=[],
+                tradeoff_curve=OrderedDict(),
+                sac_memory=0,
+                sac_runtime=sac_runtime,
+            )
         # 3. Tradeoff curve stores the KV pair of the dicarded memory to total memory and,
         # recomputation time to total runtime incurred.
         delta = 1e-2
@@ -650,13 +660,36 @@ class SACEstimator(TorchDispatchMode):
 
         x_ = list(tradeoff_curve.keys())
         y_ = list(tradeoff_curve.values())
+
+        if len(x_) < 3:
+            # Handle trivial linear curve when there are fewer than 3 points
+            if len(x_) == 1:
+                # If there's only one point, make a flat line
+                slope = 0.0
+                intercept = y_[0]
+                fit_breaks = [x_[0], x_[0] + 1e-3]  # Add a small range for consistency
+            elif len(x_) == 2:
+                # If there are two points, compute the line connecting them
+                slope = (y_[1] - y_[0]) / (x_[1] - x_[0])
+                intercept = y_[0] - slope * x_[0]
+                fit_breaks = [x_[0], x_[1]]
+
+            return SACTradeOffStats(
+                n_segments=1,
+                slopes=[slope],
+                intercepts=[intercept],
+                fit_breaks=fit_breaks,
+                tradeoff_curve=tradeoff_curve,
+                sac_memory=sac_memory,
+                sac_runtime=sac_runtime,
+            )
         # 7. We shift the y values to left and x values to right to upperbound the trade-off function
         # TODO: Write a better explanation why this needs to be done
         x = x_[: len(x_) - 1]
         y = y_[1:]
-        tradeoff_pwlf = pwlf.PiecewiseLinFit(x, y)
+        tradeoff_pwlf = pwlf.PiecewiseLinFit(x, y, seed=42)
         # 8. Fit a piecewise linear function with the specified number of segments to the trade-off curve.
-        n_segments = max(min(len(x) - 2, n_segments), 1)
+        n_segments = max(min(len(x) - 1, n_segments), 1)
         tradeoff_pwlf.fit(n_segments=n_segments)
 
         # save prediction graph
@@ -687,7 +720,7 @@ class SACEstimator(TorchDispatchMode):
                 f"Total Memory = {sac_memory} B Total Runtime = {sac_runtime:.4f} ms",
                 fontsize=10,
             )
-            folder_name = "tradeoff_graphs"
+            folder_name = "debug_auto_sac/tradeoff_graphs"
             if not os.path.exists(folder_name):
                 os.makedirs(folder_name)
             # Save the plots in the folder
@@ -864,7 +897,7 @@ class SACEstimator(TorchDispatchMode):
             op_indices = {cand.op_idx}
             if cand.op_idx in inplace_op_groups:
                 op_indices.update(inplace_op_groups[cand.op_idx])
-            if op_idx in random_inplace_ops:
+            if cand.op_idx in random_inplace_ops:
                 op_indices.update(random_inplace_ops)
             append_row(op_indices, cand.func_names, msps=cand.msps)
 
@@ -907,7 +940,7 @@ class SACEstimator(TorchDispatchMode):
 
     def pwlf_sac_tradeoff_curve(
         self,
-        n_segments: int = 3,
+        n_segments: int = 2,
         save_tradeoff_graphs: bool = False,
     ) -> None:
         """
@@ -950,7 +983,7 @@ class SACEstimator(TorchDispatchMode):
         """
         for mod_fqn, sac_stats in self.sac_mod_stats.items():
             mod_depth = mod_fqn.count(".") + 1
-            if mod_depth > depth:
+            if mod_depth > depth or mod_depth == 1:
                 continue
             print(f"Module: {mod_fqn}")
             self.display_sac_stats(sac_stats, print_tabular)

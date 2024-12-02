@@ -711,6 +711,7 @@ class MemTracker(TorchDispatchMode):
             mod_stats = self.memory_tracking[module]
             state = _ModState.PRE_FW
             input_mem = self._track_inputs_or_outputs(inputs)
+            mod_stats.mod_fqn = mod_name
             mod_stats.input_mem = input_mem
 
         mem_snapshot = self.get_tracker_snapshot()
@@ -843,6 +844,8 @@ class MemTracker(TorchDispatchMode):
                 self._track_module_params_and_buffers(obj, install_grad_hooks=False)
             elif isinstance(obj, optim.Optimizer):
                 self._track_optimizer_states(_MemRefType.OPT, obj)
+            elif obj is None:
+                continue
             else:
                 raise TypeError(
                     f"Object of type {type(obj)} is not supported for tracking. "

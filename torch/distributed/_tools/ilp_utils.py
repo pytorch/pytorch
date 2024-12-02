@@ -1,5 +1,9 @@
 import copy
+import logging
 import math
+import os
+import warnings
+from collections import defaultdict
 from typing import (
     Any,
     Callable,
@@ -30,6 +34,17 @@ from torch.distributed._tools.sac_estimator import (
     SACStats,
     SACTradeOffStats,
 )
+
+
+_DEBUG_ILP_UTILS = int(os.environ.get("DEBUG_AUTO_SAC", 0))
+# Create a logger object
+logger = logging.getLogger()
+
+# Set the logging level to according to env variable
+if _DEBUG_ILP_UTILS == 1:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
 
 
 def collect_stats(
@@ -123,6 +138,11 @@ def collect_stats(
     ):
         train_step(models, optimizers, inputs)
 
+    if _DEBUG_ILP_UTILS:
+        runtime_estimator.display_modulewise_stats(depth=3)
+        mem_tracker.display_modulewise_snapshots(depth=3, units="GiB", tabulate=True)
+        sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
+
     return mem_tracker, runtime_estimator, sac_estimator
 
 
@@ -214,28 +234,53 @@ def aggregate_stats(
     Returns:
         ModuleInfo: A dictionary with module order and module stats.
     """
+    # Display Runtime and Memory Estimations
+    peak_memory = mem_tracker.get_tracker_snapshot("peak")[dev]["Total"]
+    logger.info(
+        "Estimated Peak Memory (Before Auto-SAC): %.2f GiB", peak_memory / 2**30
+    )
+    logger.info(
+        "Estimated Total Compute Time (Before Auto-SAC): %.2f ms",
+        runtime_estimator.total_compute_time,
+    )
 
     # Memory stats
     mod_mem_stats: Dict[torch.nn.Module, _ModMemStats] = dict(
         copy.deepcopy(mem_tracker.memory_tracking)
     )
-
-    def get_optstate_mem(opt: torch.optim.Optimizer) -> int:
-        opt_state_bytes = 0
-        for state in opt.state.values():
-            for v in state.values():
-                if isinstance(v, torch.Tensor) and v.device == dev:
-                    opt_state_bytes += (
-                        math.ceil(v.untyped_storage().nbytes() / _PYTORCH_MIN_ALLOCATE)
-                        * _PYTORCH_MIN_ALLOCATE
-                    )
-        return opt_state_bytes
-
+    root_mods = {
+        mod for mod, m_stat in mod_mem_stats.items() if m_stat.mod_fqn.count(".") == 0
+    }
     root_opt_mem = {}
-    for root_mod, opt in zip(models, optimizers):
-        root_fqn = mod_mem_stats[root_mod].mod_fqn
-        opt_mem = get_optstate_mem(opt) if opt else 0
-        root_opt_mem[root_fqn] = opt_mem
+    for root_mod in root_mods:
+        root_mem_stat = mod_mem_stats[root_mod]
+        root_fqn = root_mem_stat.mod_fqn
+        opt_state_bytes = 0
+        for param in root_mod.parameters():
+            for opt in optimizers:
+                if state := opt.state.get(param, None):
+                    for v in state.values():
+                        if isinstance(v, torch.Tensor) and v.device == dev:
+                            opt_state_bytes += (
+                                math.ceil(
+                                    v.untyped_storage().nbytes() / _PYTORCH_MIN_ALLOCATE
+                                )
+                                * _PYTORCH_MIN_ALLOCATE
+                            )
+
+        root_opt_mem[root_fqn] = opt_state_bytes
+        if root_mod not in models:
+
+            def custom_formatwarning(msg, category, filename, lineno, line=None):  # type: ignore[no-untyped-def]
+                return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
+
+            warnings.formatwarning = custom_formatwarning
+            warnings.warn(
+                f"Found Root Module {root_fqn} but was not provided to Auto-SAC as an input.\n"
+                f" The Module FQNs in AC decisions will include {root_fqn} as one of the root modules."
+                f" If {root_fqn} is a sub-module then its ancestor modules were not called during the forward pass."
+                " This may result in sub-optimal solution."
+            )
     total_opt_memory = mem_tracker.get_tracker_snapshot("peak")[dev][_MemRefType.OPT]
     assert (
         sum(root_opt_mem.values()) == total_opt_memory
@@ -254,9 +299,8 @@ def aggregate_stats(
         "fw_post_order": list(runtime_estimator.mod_fw_post_order),
         "bw_post_order": list(runtime_estimator.mod_bw_post_order),
     }
-
     # Selective Activation Checkpointing stats
-    sac_estimator.pwlf_sac_tradeoff_curve()
+    sac_estimator.pwlf_sac_tradeoff_curve(save_tradeoff_graphs=False)
     mod_sac_tradeoff_stats: Dict[str, SACTradeOffStats] = copy.deepcopy(
         sac_estimator.sac_mod_tradeoff_stats
     )
@@ -271,104 +315,85 @@ def aggregate_stats(
         "mod_stats": [],
         "root_opt_mem": root_opt_mem,
     }
-    for model in models:
-        for mod in model.modules():
-            if mod_mem_stat := mod_mem_stats.get(mod, None):
-                if tradeoff_stats := mod_sac_tradeoff_stats.get(
-                    mod_mem_stat.mod_fqn, None
-                ):
-                    sac_runtime = tradeoff_stats.sac_runtime
-                    sac_memory = tradeoff_stats.sac_memory
-                    n_segments = tradeoff_stats.n_segments
-                    slopes = tradeoff_stats.slopes
-                    intercepts = tradeoff_stats.intercepts
-                    breakpoints = tradeoff_stats.fit_breaks
-                    tradeoff_curve = tradeoff_stats.tradeoff_curve
-                    is_leaf = False
 
-                    sac_stats_memory = mod_sac_stats[mod_mem_stat.mod_fqn].memory
-                    greedy_meta = mod_sac_greedy_stats[mod_mem_stat.mod_fqn]
-                    stored_ops, inplace_op_groups, random_inplace_ops = (
-                        greedy_meta.stored_ops,
-                        greedy_meta.inplace_op_groups,
-                        greedy_meta.random_inplace_ops,
-                    )
-                    stored_indices: Set[int] = set()
-                    for s_idx in stored_ops:
-                        stored_indices.add(s_idx)
-                        if s_idx in inplace_op_groups:
-                            stored_indices.update(inplace_op_groups[s_idx])
-                        if s_idx in random_inplace_ops:
-                            stored_indices.update(random_inplace_ops)
-                    saved_memory = sum(
-                        sac_stats_memory[op_idx] for op_idx in stored_indices
-                    )
-                else:
-                    sac_runtime = sac_memory = n_segments = saved_memory = 0
-                    slopes = intercepts = breakpoints = []
-                    tradeoff_curve: OrderedDict[float, float] = OrderedDict()  # type: ignore[no-redef]
-                    is_leaf = True
-                has_bw = _ModState.PRE_BW in mod_mem_stat.snapshots
-                mod_stat: ModStats = {
-                    "fqn": mod_mem_stat.mod_fqn,
-                    "param_per_module": mod_mem_stat.parameter_mem,
-                    "requires_grad": has_bw,
-                    "grad_per_module": mod_mem_stat.parameter_mem if has_bw else 0,
-                    "grad_total": mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
-                        _MemRefType.GRAD
-                    ]
-                    if has_bw
-                    else 0,
-                    "act_fw_per_module": max(
-                        0,
-                        mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][
-                            _MemRefType.ACT
-                        ]
-                        - mod_mem_stat.snapshots[_ModState.PRE_FW][-1][dev][
-                            _MemRefType.ACT
-                        ]
-                        - mod_mem_stat.output_mem,
-                    ),
-                    "act_bw_per_module": mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][
-                        dev
-                    ][_MemRefType.ACT]
-                    if has_bw
-                    else 0,
-                    "act_grad_per_module": max(
-                        mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][
-                            _MemRefType.TEMP
-                        ]
-                        - mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
-                            _MemRefType.TEMP
-                        ],
-                        mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
-                            _MemRefType.TEMP
-                        ],
-                    )
-                    if has_bw
-                    else 0,
-                    "act_total": mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][
-                        _MemRefType.ACT
-                    ],
-                    "input_per_module": mod_mem_stat.input_mem,
-                    "output_per_module": mod_mem_stat.output_mem,
-                    "fw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn][
-                        "fw"
-                    ],
-                    "bw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn][
-                        "bw"
-                    ],
-                    "is_leaf": is_leaf,
-                    "sac_runtime": sac_runtime,
-                    "sac_memory": sac_memory,
-                    "saved_memory": saved_memory,
-                    "n_segments": n_segments,
-                    "slopes": slopes,
-                    "intercepts": intercepts,
-                    "breakpoints": breakpoints,
-                    "tradeoff_curve": tradeoff_curve,
-                }
-                module_info["mod_stats"].append(mod_stat)
+    for mod_mem_stat in mod_mem_stats.values():
+        if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn, None):
+            sac_runtime = tradeoff_stats.sac_runtime
+            sac_memory = tradeoff_stats.sac_memory
+            n_segments = tradeoff_stats.n_segments
+            slopes = tradeoff_stats.slopes
+            intercepts = tradeoff_stats.intercepts
+            breakpoints = tradeoff_stats.fit_breaks
+            tradeoff_curve = tradeoff_stats.tradeoff_curve
+            is_leaf = False
+
+            sac_stats_memory = mod_sac_stats[mod_mem_stat.mod_fqn].memory
+            greedy_meta = mod_sac_greedy_stats[mod_mem_stat.mod_fqn]
+            stored_ops, inplace_op_groups, random_inplace_ops = (
+                greedy_meta.stored_ops,
+                greedy_meta.inplace_op_groups,
+                greedy_meta.random_inplace_ops,
+            )
+            stored_indices: Set[int] = set()
+            for s_idx in stored_ops:
+                stored_indices.add(s_idx)
+                if s_idx in inplace_op_groups:
+                    stored_indices.update(inplace_op_groups[s_idx])
+                if s_idx in random_inplace_ops:
+                    stored_indices.update(random_inplace_ops)
+            saved_memory = sum(sac_stats_memory[op_idx] for op_idx in stored_indices)
+        else:
+            sac_runtime = sac_memory = n_segments = saved_memory = 0
+            slopes = intercepts = breakpoints = []
+            tradeoff_curve: OrderedDict[float, float] = OrderedDict()  # type: ignore[no-redef]
+            is_leaf = True
+        has_bw = _ModState.PRE_BW in mod_mem_stat.snapshots
+        mod_stat: ModStats = {
+            "fqn": mod_mem_stat.mod_fqn,
+            "param_per_module": mod_mem_stat.parameter_mem,
+            "requires_grad": has_bw,
+            "grad_per_module": mod_mem_stat.parameter_mem if has_bw else 0,
+            "grad_total": mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][
+                _MemRefType.GRAD
+            ]
+            if has_bw
+            else 0,
+            "act_fw_per_module": max(
+                0,
+                mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][_MemRefType.ACT]
+                - mod_mem_stat.snapshots[_ModState.PRE_FW][-1][dev][_MemRefType.ACT]
+                - mod_mem_stat.output_mem,
+            ),
+            "act_bw_per_module": mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][
+                _MemRefType.ACT
+            ]
+            if has_bw
+            else 0,
+            "act_grad_per_module": max(
+                mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][_MemRefType.TEMP]
+                - mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][_MemRefType.TEMP],
+                mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][_MemRefType.TEMP],
+            )
+            if has_bw
+            else 0,
+            "act_total": mod_mem_stat.snapshots[_ModState.POST_FW][-1][dev][
+                _MemRefType.ACT
+            ],
+            "input_per_module": mod_mem_stat.input_mem,
+            "output_per_module": mod_mem_stat.output_mem,
+            "fw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn]["fw"],
+            "bw_runtime_per_module": mod_runtime_stats[mod_mem_stat.mod_fqn]["bw"],
+            "is_leaf": is_leaf,
+            "sac_runtime": sac_runtime,
+            "sac_memory": sac_memory,
+            "saved_memory": saved_memory,
+            "n_segments": n_segments,
+            "slopes": slopes,
+            "intercepts": intercepts,
+            "breakpoints": breakpoints,
+            "tradeoff_curve": tradeoff_curve,
+        }
+        module_info["mod_stats"].append(mod_stat)
 
     return module_info
 
@@ -403,8 +428,15 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     mod_stats = module_info["mod_stats"]
     root_opt_mem = module_info["root_opt_mem"]
     fw_pre_order = module_info["mod_order"]["fw_pre_order"]
-    # assertion and number of nodes
-    assert len(mod_stats) == len(fw_pre_order)
+    pre_order_fqns = set(fw_pre_order)
+    mod_stats_fqns = {m["fqn"] for m in mod_stats}
+    missing_fqns = pre_order_fqns - mod_stats_fqns
+    if len(missing_fqns) > 0:
+        raise AssertionError(
+            f"FQNs {missing_fqns} are present in pre-order but missing in"
+            " memory staistics. A module maybe reused across multiple root modules."
+            " This may result in incorrectness."
+        )
     n_nodes = len(mod_stats)
 
     # create graph
@@ -434,6 +466,18 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
         root_idx = g.name2node[root_fqn]["index"]
         num_ancestors = g.ad_matrix[:, root_idx].sum()
         assert num_ancestors == 1, f"Expected {root_fqn} to be a root module."
+
+    mod_call_cnt: Dict[str, int] = defaultdict(int)
+    for fqn in fw_pre_order:
+        mod_call_cnt[fqn] += 1
+    for (
+        fqn,
+        count,
+    ) in mod_call_cnt.items():
+        if count > 1:
+            raise AssertionError(
+                f"Module {fqn} is called {count} times." f" This is not supported yet."
+            )
 
     return g
 

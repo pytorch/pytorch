@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 from collections import defaultdict
 from enum import IntEnum
 from typing import Dict, List, Optional, Set, Tuple
@@ -27,10 +28,14 @@ except ImportError as err:
     ) from err
 
 # Create a logger object
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
-# Set the logging level to INFO
-logger.setLevel(logging.INFO)
+# Set the logging level to according to env variable
+_DEBUG_ILP = int(os.environ.get("DEBUG_AUTO_SAC", 0))
+if _DEBUG_ILP == 1:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
 
 
 def sac_milp(
@@ -138,14 +143,14 @@ def sac_milp(
             fqn
         ) in graph.fw_post_order:  # using post order so that children are visited first
             if fqn in fsdp_units:
-                node = graph.name2node[fqn]
-                j = node["index"]
-                # its ancestor nodes will no longer need to take care of these parameters, so subtracting for them
-                for i in range(node["index"]):
-                    if graph.ad_matrix[i][j]:
-                        node_to_param_size[graph.nodes[i]["fqn"]] -= node_to_param_size[
-                            fqn
-                        ]
+                if node := graph.name2node.get(fqn, None):
+                    j = node["index"]
+                    # its ancestor nodes will no longer need to take care of these parameters, so subtracting for them
+                    for i in range(j):
+                        if graph.ad_matrix[i][j]:
+                            node_to_param_size[
+                                graph.nodes[i]["fqn"]
+                            ] -= node_to_param_size[fqn]
 
         # Find maximum parameter count among FSDP units for each root module
         for root_fqn in graph.root_opt_mem:
@@ -183,17 +188,14 @@ def sac_milp(
         if (not graph.nodes[i]["is_leaf"]) and graph.nodes[i][
             "sac_memory"
         ] < graph.nodes[i]["act_fw_per_module"]:
-            logger.warning("For module {%s}: ", graph.nodes[i]["fqn"])
-            logger.warning(
-                "activation memory from memory tracker is {%d},",
-                graph.nodes[i]["act_fw_per_module"],
-            )
-            logger.warning(
-                "activation memory from SAC estimator is {%d}.",
-                graph.nodes[i]["sac_memory"],
-            )
-            logger.warning("Something is wrong. Please check!")
-            logger.warning("Overriding the latter with the former.")
+            if _DEBUG_ILP:
+                logger.info(
+                    "For module {%s}: activation memory from memory tracker is {%d}, activation memory from SAC estimator is {%d}. "
+                    "Something is wrong. Please check! Overriding the latter with the former.",
+                    graph.nodes[i]["fqn"],
+                    graph.nodes[i]["act_fw_per_module"],
+                    graph.nodes[i]["sac_memory"],
+                )
             graph.nodes[i]["sac_memory"] = graph.nodes[i]["act_fw_per_module"]
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
@@ -213,8 +215,11 @@ def sac_milp(
         SAV_i = graph.nodes[i]["saved_memory"] / MEM_MULTIPLIER
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
-        prob += r[i] >= (ACM_i - IA_i) / ACM_i * y[i]
-        prob += r[i] <= (ACM_i - SAV_i) / ACM_i
+        if ACM_i > 0:
+            prob += r[i] >= (ACM_i - IA_i) / ACM_i * y[i]
+            prob += r[i] <= (ACM_i - SAV_i) / ACM_i
+        else:
+            prob += y[i] == 0
 
     # [Constraint] Express total activation memory in the backward pass
     for i in range(num_nodes):
@@ -224,12 +229,12 @@ def sac_milp(
         pos = graph.nodes[i]["pos_fw_post_order"]
         coeff = [0] * num_nodes
         for p in range(pos):
-            j = graph.name2node[graph.fw_post_order[p]]["index"]
-            coeff[j] = 1
+            if fw_po_node := graph.name2node.get(graph.fw_post_order[p], None):
+                j = fw_po_node["index"]
+                coeff[j] = 1
         prob += a[i] == TA_i + AG_i - lpDot(coeff, d)
 
     # [Constraint] Express the total amount of memory at each module
-    # G_i represents the grad memory of module i
     # TG_i represents the grad memory accumulated so far for the root module of i
     # ACC_i represents the accumulated grad memory of other root modules the have completed their backward
     # total_param_memory/total_opt_memory represents the total sharded + non-sharded param/opt memory for
@@ -237,16 +242,16 @@ def sac_milp(
     for i in range(num_nodes):
         root_node = graph.nodes[graph.get_root_idx(i)]
         TG_i = (graph.nodes[i]["grad_total"] - root_node["grad_total"]) / MEM_MULTIPLIER
-        G_i = graph.nodes[i]["grad_per_module"] / MEM_MULTIPLIER
+        grad_shard_degree = (
+            shard_degree if fsdp_units and root_node["fqn"] in fsdp_units else 1
+        )
         ACC_i = 0.0
         for other_root_fqn in root_grad_mem:
             if graph.name2node[other_root_fqn]["index"] > root_node["index"]:
                 ACC_i += root_grad_mem[other_root_fqn]
-        prob += m[i] == a[i] + 3 * max_fsdp_unit_memory[
+        prob += m[i] == a[i] + 4 * max_fsdp_unit_memory[
             root_node["fqn"]
-        ] + G_i + total_opt_memory + total_param_memory + ACC_i + (TG_i) / (
-            shard_degree if fsdp_units and root_node["fqn"] in fsdp_units else 1
-        )
+        ] + total_opt_memory + total_param_memory + ACC_i + (TG_i / grad_shard_degree)
 
     # [Constraint] Express peak memory
     for i in range(num_nodes):
@@ -274,7 +279,7 @@ def sac_milp(
     prob += lpSum(rct)
 
     # Solve
-    solver = PULP_CBC_CMD(gapRel=0.05, timeLimit=180, msg=0)
+    solver = PULP_CBC_CMD(gapRel=0.05, timeLimit=180, msg=0, options=[f"RandomS {42}"])
     status = prob.solve(solver)
 
     # If solver fails, print status and return empty solution
@@ -359,7 +364,7 @@ def get_optimal_checkpointing_policy_per_module(
     prob += lpDot(x, sac_stats.runtimes)
 
     # Solve
-    solver = PULP_CBC_CMD(gapRel=0.05, timeLimit=10, msg=0)
+    solver = PULP_CBC_CMD(gapRel=0.05, timeLimit=20, msg=0, options=[f"RandomS {42}"])
     status = prob.solve(solver)
 
     # If solver fails, print status and return empty solution

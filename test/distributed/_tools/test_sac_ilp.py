@@ -9,7 +9,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tools.auto_sac import (
-    apply_auto_sac,
+    apply_auto_sac_policies,
     get_auto_sac_policies,
     get_greedy_checkpointing_policy_per_module,
     SACAlgorithm,
@@ -214,20 +214,20 @@ class TestSACILP(TestCase):
             expected_peak_mem,
             compute_time,
             recomputation_time,
-        ) = self._test_sac_ilp(memory_budget=2)
+        ) = self._test_sac_ilp(memory_budget=2.0)
         modules_to_ac = set(ac_decisions.keys())
         sorted_discard_ratio = sorted(ac_decisions.values())
         self.assertEqual(
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.2445, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.5546, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[2], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.0267, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[0], 0.2447, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[1], 0.4979, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[2], 0.4979, delta=0.05)
+        self.assertAlmostEqual(sum(sorted_discard_ratio), 1.7384, delta=0.05)
 
         self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (2.4 / 42.016), 1, delta=0.1
+            (recomputation_time / compute_time) / (1.31 / 42.016), 1, delta=0.1
         )
         GiB = 2**30
         self.assertLessEqual(expected_peak_mem / GiB, 2.01)
@@ -262,13 +262,13 @@ class TestSACILP(TestCase):
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.5838, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[2], 0.6138, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.4252, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[0], 0.4979, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[1], 0.4979, delta=0.05)
+        self.assertAlmostEqual(sorted_discard_ratio[2], 0.4979, delta=0.05)
+        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.1946, delta=0.05)
 
         self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (3.23 / 42.016), 1, delta=0.1
+            (recomputation_time / compute_time) / (2.37 / 42.016), 1, delta=0.1
         )
         GiB = 2**30
         self.assertLessEqual(expected_peak_mem / GiB, 1.61)
@@ -459,7 +459,7 @@ class TestAutoSAC(TestCase):
                 },
             )
             for model in models:
-                apply_auto_sac(
+                apply_auto_sac_policies(
                     model, auto_sac_result.sac_policies, preserve_rng_state=False
                 )
 

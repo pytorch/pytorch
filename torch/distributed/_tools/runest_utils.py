@@ -183,7 +183,6 @@ def _get_device_lines() -> List[str]:
         return []
 
 
-
 def _parse_device_line(line: str) -> Tuple[str, str, str]:
     if "H100" in line:
         if "NVL" in line:
