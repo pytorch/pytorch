@@ -312,7 +312,9 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.clone(items=self.items.copy(), mutation_type=ValueMutationNew())
+            return self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
