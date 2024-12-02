@@ -82,10 +82,10 @@ from torch._utils_internal import (
     signpost_event,
 )
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
-from torch.monitor import _WaitCounter
 
 
 try:
@@ -364,7 +364,9 @@ def dynamo_timed(
     )
 
     try:
-        with torch.profiler.record_function(f"{key} (dynamo_timed)"), _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
+        with torch.profiler.record_function(f"{key} (dynamo_timed)"), _WaitCounter(
+            f"pytorch.dynamo_timed.{key}"
+        ).guard():
             yield
     finally:
         end_ns = time.time_ns()
