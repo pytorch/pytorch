@@ -36,7 +36,7 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        copts = ["-fexceptions"],
+        copts = ["-fexceptions", "-DFBCODE_CAFFE2"],
         tags = [
             "-fbcode",
             "supermodule:android/default/pytorch",
@@ -47,7 +47,7 @@ def define_targets(rules):
         deps = [
             ":caffe2_headers",
             "//c10",
-            "//third_party/miniz-2.1.0:miniz",
+            "//third_party/miniz-3.0.2:miniz",
             "@com_github_glog//:glog",
         ],
     )

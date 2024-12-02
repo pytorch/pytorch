@@ -183,8 +183,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(index)
       .build();
@@ -215,7 +214,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== buffer.dim() - 1) {
-            for (const auto nelem C10_UNUSED : c10::irange(n)) {
+            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               loop_func.template operator()<scalar_t, func_t>(
@@ -232,7 +231,7 @@ struct cpu_scatter_gather_base_kernel {
             for (const auto i : c10::irange(index_dim_size)) {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              for (const auto nelem C10_UNUSED : c10::irange(n)) {
+              for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -270,8 +269,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -306,7 +304,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== buffer.dim() - 1) {
-            for (const auto nelem C10_UNUSED : c10::irange(n)) {
+            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               loop_func.template operator()<scalar_t, func_t>(
@@ -327,7 +325,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem C10_UNUSED : c10::irange(n)) {
+              for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -366,8 +364,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -402,7 +399,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== buffer.dim() - 1) {
-            for (const auto nelem C10_UNUSED : c10::irange(n)) {
+            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               loop_func.template operator()<scalar_t, ReduceMean>(
@@ -423,7 +420,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem C10_UNUSED : c10::irange(n)) {
+              for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -461,8 +458,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -497,7 +493,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== buffer.dim() - 1) {
-            for (const auto nelem C10_UNUSED : c10::irange(n)) {
+            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               loop_func.template operator()<scalar_t, ReduceMaximum>(
@@ -518,7 +514,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem C10_UNUSED : c10::irange(n)) {
+              for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -557,8 +553,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -593,7 +588,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== buffer.dim() - 1) {
-            for (const auto nelem C10_UNUSED : c10::irange(n)) {
+            for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               loop_func.template operator()<scalar_t, ReduceMinimum>(
@@ -614,7 +609,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem C10_UNUSED : c10::irange(n)) {
+              for ([[maybe_unused]] const auto nelem : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -955,17 +950,17 @@ void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, con
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
-REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
-REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
-REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
-REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
-REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
-REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
+REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel)
+REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel)
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel)
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel)
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel)
+REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel)
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel)
 
 // fast paths for GNN usage
-REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
-REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
-REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
+REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel)
+REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel)
+REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel)
 
 } // namespace at::native

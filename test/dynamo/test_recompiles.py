@@ -17,7 +17,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             x = torch.randn([2])
             y = torch.randn([2])
-            opt = torch._dynamo.optimize(cnt, dynamic=dynamic)(foo)
+            opt = torch.compile(foo, backend=cnt, dynamic=dynamic)
             opt(x, y)
             x = torch.randn([3])
             y = torch.randn([3])
@@ -78,7 +78,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def run_foo_6_times_and_count_recompiles():
             cnt = torch._dynamo.testing.CompileCounter()
 
-            opt = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
             x = True
             y = torch.randn([2])
@@ -126,7 +126,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             x = torch.randn([2])
             y = torch.randn([2])
-            opt = torch._dynamo.optimize(cnt)(foo)
+            opt = torch.compile(foo, backend=cnt)
             opt(x, y)
             x = torch.randn([3])
             y = 3
@@ -169,30 +169,30 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return c + 1
 
         cnt = torch._dynamo.testing.CompileCounter()
-        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+        compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         x = torch.randn([3])
         y = torch.randn([3])
         z = torch.randn([3])
         cmp_result = compiled_foo(
-            x.clone().detach(), y.clone().detach(), z.clone().detach()
+            x.detach().clone(), y.detach().clone(), z.detach().clone()
         )
-        eager_result = foo(x.clone().detach(), y.clone().detach(), z.clone().detach())
+        eager_result = foo(x.detach().clone(), y.detach().clone(), z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
         cmp_result = compiled_foo(
-            z.clone().detach(), y.clone().detach(), x.clone().detach()
+            z.detach().clone(), y.detach().clone(), x.detach().clone()
         )
-        eager_result = foo(z.clone().detach(), y.clone().detach(), x.clone().detach())
+        eager_result = foo(z.detach().clone(), y.detach().clone(), x.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         # No recompile, alias preserved
         self.assertEqual(cnt.frame_count, 1)
 
-        x_clone = x.clone().detach()
-        cmp_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
-        x_clone = x.clone().detach()
-        eager_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
+        x_clone = x.detach().clone()
+        cmp_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
+        x_clone = x.detach().clone()
+        eager_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
@@ -206,17 +206,17 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return g2 + 1
 
         cnt = torch._dynamo.testing.CompileCounter()
-        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+        compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         z = torch.randn([3])
-        cmp_result = compiled_foo(z.clone().detach())
-        eager_result = foo(z.clone().detach())
+        cmp_result = compiled_foo(z.detach().clone())
+        eager_result = foo(z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         cmp_result = compiled_foo(g1)
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         eager_result = compiled_foo(g1)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
@@ -235,7 +235,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def run_foo_6_times_and_count_recompiles():
             cnt = torch._dynamo.testing.CompileCounter()
 
-            opt = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
             x = torch.nn.Parameter(torch.randn(1, 3))
             opt(x)
@@ -332,6 +332,23 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend=counter, dynamic=False)
         for i in range(10):
             opt_f(torch.ones(3), i)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_automatic_dynamic_on_closed_ints(self):
+        def f(x):
+            def g(y):
+                return y + x
+
+            return g
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def h(x, g):
+            return g(x)
+
+        for i in range(10):
+            h(torch.randn(5), f(i))
         self.assertEqual(counter.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "cache_size_limit", 2)

@@ -10,7 +10,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
-from torch._dynamo.testing import CompileCounter, same
+from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -601,6 +601,33 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_no_replacement(self):
+        # See https://github.com/pytorch/pytorch/pull/139250 for more context
+        # The high level idea is if we don't want to set a replacement where a
+        # symbol is on both the right and left side, otherwise we'll end up
+        # in an infinite self._find recursion.
+        def fn(t, m):
+            return 2 * t if m.is_integer() else t
+
+        t = torch.tensor([1])
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager")
+        self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspec_roundtrip_float_input(self):
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+            return (x, y)
+
+        cf = torch.compile(backend="eager", fullgraph=True)(f)
+        x = 1.1234567891234568
+        y = 1.1234567891234569
+        self.assertAlmostEqual(f(x, y), cf(x, y))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -614,13 +641,41 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cf = torch.compile(backend=cnts, fullgraph=True)(f)
 
         x = torch.randn(3)
-        self.assertEqual(f(x, 3.0), cf(x, 3.0))
+        self.assertEqual(f(x, 2.0), cf(x, 2.0))
+        self.assertEqual(f(x, 3.0), cf(x, 3.0))  # automatic dynamic kicks in here
         self.assertEqual(f(x, 4.0), cf(x, 4.0))
-        self.assertExpectedInline(cnts.frame_count, """1""")  # no recompile
+        self.assertExpectedInline(cnts.frame_count, """2""")  # no recompile
         self.assertEqual(f(x, 5.0), cf(x, 5.0))
-        self.assertExpectedInline(cnts.frame_count, """2""")  # guard worked
+        self.assertExpectedInline(cnts.frame_count, """3""")  # guard worked
         self.assertEqual(f(x, math.nan), cf(x, math.nan))
-        self.assertExpectedInline(cnts.frame_count, """3""")  # nan always recompiles
+        self.assertExpectedInline(cnts.frame_count, """4""")  # nan always recompiles
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_multiply_precision(self):
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for i, dtype in enumerate(dtypes):
+
+            def fn(x, y):
+                return x * y
+
+            cnt = CompileCounterWithBackend("aot_eager")
+            fn_opt = torch._dynamo.optimize(cnt)(fn)
+            x = torch.randn(5, dtype=dtype, requires_grad=True)
+            y1 = 1.00048828125
+            y2 = 1.00048828126
+            y3 = 1.00048828127
+
+            self.assertEqual(fn_opt(x, y1), fn(x, y1))
+            self.assertEqual(fn_opt(x, y2), fn(x, y2))
+            self.assertEqual(fn_opt(x, y3), fn(x, y3))
+            if i == 0:
+                # This is kind of quirky part of automatic dynamic,
+                # since it just uses source name + tx.f_code as the key
+                # subsequent recompilations will actually reuse the automatic
+                # dynamic choices.
+                self.assertEqual(cnt.frame_count, 2)
+            else:
+                self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):

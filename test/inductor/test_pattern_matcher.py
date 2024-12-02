@@ -3,6 +3,7 @@ import copy
 import itertools
 import os
 import unittest
+from typing import Callable, List, Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -10,11 +11,13 @@ import torch._inductor.config as inductor_config
 import torch._inductor.fx_passes.post_grad
 import torch.nn.functional as F
 from torch._dynamo.utils import count_calls, counters
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
+    fwd_only,
     gen_pattern,
     is_mutation_op,
     KeywordArg,
@@ -22,19 +25,32 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     PatternPrettyPrinter,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA, IS_A100, IS_BIG_GPU
+from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    IS_A100,
+    IS_BIG_GPU,
+)
 from torch.utils import _pytree as pytree
 
 
+aten = torch.ops.aten
+
+
 class TestPatternMatcher(TestCase):
+    device_type = GPU_TYPE
+
     def common(
         self,
         fn,
@@ -74,16 +90,16 @@ class TestPatternMatcher(TestCase):
         # when m1 == n1 and m2 == n2, mm_plus_mm can be matched to fused op
         fusible_args_list = [
             (
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
             ),
             (
-                torch.randn(1, 4, device="cuda"),
-                torch.randn(4, 2, device="cuda"),
-                torch.randn(1, 5, device="cuda"),
-                torch.randn(5, 2, device="cuda"),
+                torch.randn(1, 4, device=GPU_TYPE),
+                torch.randn(4, 2, device=GPU_TYPE),
+                torch.randn(1, 5, device=GPU_TYPE),
+                torch.randn(5, 2, device=GPU_TYPE),
             ),
         ]
         for args in fusible_args_list:
@@ -93,16 +109,16 @@ class TestPatternMatcher(TestCase):
         unfusible_args_list = [
             # https://github.com/pytorch/pytorch/issues/100670.
             (
-                torch.randn(1, 4, device="cuda"),
-                torch.randn(4, 2, device="cuda"),
-                torch.randn(1, 2, device="cuda"),
-                torch.randn(2, 1, device="cuda"),
+                torch.randn(1, 4, device=GPU_TYPE),
+                torch.randn(4, 2, device=GPU_TYPE),
+                torch.randn(1, 2, device=GPU_TYPE),
+                torch.randn(2, 1, device=GPU_TYPE),
             ),
             (
-                torch.randn(1, 2, device="cuda"),
-                torch.randn(2, 1, device="cuda"),
-                torch.randn(1, 4, device="cuda"),
-                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 2, device=GPU_TYPE),
+                torch.randn(2, 1, device=GPU_TYPE),
+                torch.randn(1, 4, device=GPU_TYPE),
+                torch.randn(4, 2, device=GPU_TYPE),
             ),
         ]
         for args in unfusible_args_list:
@@ -121,7 +137,8 @@ class TestPatternMatcher(TestCase):
             )  # also checks that dtype is correct
 
     @skipIfRocm
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @skipIfXpu
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul(self):
         def fn1(a, b, c):
@@ -134,19 +151,19 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
-                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-                torch.randn((32, 1), dtype=torch.float16, device="cuda") * 0 + 0.5,
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE) * 0 + 0.5,
             ),
             (
-                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
-                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-                torch.randn((1, 8), dtype=torch.bfloat16, device="cuda"),
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.bfloat16, device=GPU_TYPE),
             ),
             (
-                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
-                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-                torch.randn((1, 8), dtype=torch.float32, device="cuda"),
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.float32, device=GPU_TYPE),
             ),
         ]
 
@@ -155,22 +172,23 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     @skipIfRocm
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @skipIfXpu
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
     def test_fused_int_mm_mul_gating(self):
         def fn1(a, b, c):
             return out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c
 
         args1 = (
-            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
-            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-            torch.randn((8), dtype=torch.float32, device="cuda"),
+            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+            torch.randn((8), dtype=torch.float32, device=GPU_TYPE),
         )
 
         args2 = (
-            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device="cuda"),
-            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device="cuda"),
-            torch.randn((32, 1), dtype=torch.float16, device="cuda"),
+            torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+            torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+            torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE),
         )
         self._test_fused_int_mm_mul_impl(fn1, args1, False)
         self._test_fused_int_mm_mul_impl(fn1, [arg.cpu() for arg in args2], False)
@@ -194,7 +212,8 @@ class TestPatternMatcher(TestCase):
         self.assertEqual("mixed_mm" in code, mixed_mm_expected)
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
@@ -202,27 +221,28 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
-                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, 2, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 5, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
+                torch.randn(8, 5, device=GPU_TYPE, dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 8, device="cuda", dtype=torch.float32),
-                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.float32),
+                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.bfloat16),
             ),
         ]
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_exhaustive_dtypes(self):
         def fn(a, b):
@@ -234,8 +254,10 @@ class TestPatternMatcher(TestCase):
         for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
             low, high = dtype_ranges[dtype_right]
             args = (
-                torch.randn(256, 256, dtype=dtype_left, device="cuda"),
-                torch.randint(low, high, (256, 256), dtype=dtype_right, device="cuda"),
+                torch.randn(256, 256, dtype=dtype_left, device=GPU_TYPE),
+                torch.randint(
+                    low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE
+                ),
             )
             fallback_mixed_mm_expected = (
                 dtype_left == torch.bfloat16 and dtype_right == torch.uint8
@@ -244,7 +266,8 @@ class TestPatternMatcher(TestCase):
                 fn, args, True, fallback_mixed_mm_expected, rtol=0.16, atol=1e-4
             )
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
@@ -253,14 +276,14 @@ class TestPatternMatcher(TestCase):
         # when b is transposed and not contiguous, we skip triton and use fallback
         args_list = [
             (
-                torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda").t()[
+                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.float16),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device=GPU_TYPE).t()[
                     :, ::2
                 ],
             ),
             (
-                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda").t()[
+                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE).t()[
                     :, ::2
                 ],
             ),
@@ -269,7 +292,8 @@ class TestPatternMatcher(TestCase):
         for args in args_list:
             self._test_mixed_impl(fn, args, True, True)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
@@ -277,31 +301,32 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
-                torch.randn(8, device="cuda"),
-                torch.randn(8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn(8, device=GPU_TYPE),
+                torch.randn(8, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
-                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
-                torch.randn(8, device="cuda", dtype=torch.bfloat16),
-                torch.randn(8, device="cuda", dtype=torch.bfloat16),
+                torch.randn(8, 2, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn(8, device=GPU_TYPE, dtype=torch.bfloat16),
+                torch.randn(8, device=GPU_TYPE, dtype=torch.bfloat16),
             ),
             (
-                torch.randn(8, 5, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
-                torch.randn(2, device="cuda", dtype=torch.float16),
-                torch.randn(2, device="cuda", dtype=torch.float16),
+                torch.randn(8, 5, device=GPU_TYPE, dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device=GPU_TYPE),
+                torch.randn(2, device=GPU_TYPE, dtype=torch.float16),
+                torch.randn(2, device=GPU_TYPE, dtype=torch.float16),
             ),
         ]
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
+    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
     @inductor_config.patch(
         mixed_mm_choice="heuristic",
         autoheuristic_use="",
@@ -315,53 +340,64 @@ class TestPatternMatcher(TestCase):
 
         # examples that should not be selected by handwritten heuristic
         mat1_dtype = torch.float16
-        dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device="cuda")
+        dyn_tensor = torch.randn(4, 4096, dtype=mat1_dtype, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(dyn_tensor, 0)
         args_list = [
             (
-                torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4097, 4096), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4097), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(8, 8, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (2048, 2048), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
+                torch.randn(1, 4097, dtype=mat1_dtype, device=GPU_TYPE),
                 torch.randint(
-                    -128, 127, (2048, 2048), dtype=torch.int8, device="cuda"
+                    -128, 127, (4097, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(1, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4097), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(8, 8, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (2048, 2048), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(8, 2048, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (2048, 2048), dtype=torch.int8, device=GPU_TYPE
                 ).t(),
             ),
             (
-                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda")[
-                    :, ::2
-                ],
+                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                )[:, ::2],
             ),
             (
-                torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+                torch.randn(1, 4096, dtype=torch.float32, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
             ),
             (
                 dyn_tensor,
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
             ),
         ]
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, True)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @unittest.skipIf(not IS_A100, "heuristic only run on Linux A100")
-    @unittest.skipIf(not IS_BIG_GPU, "tests fail on small GPU")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @skipCUDAIf(not IS_A100, "heuristic only run on Linux A100")
+    @skipCUDAIf(not IS_BIG_GPU, "tests fail on small GPU")
     @inductor_config.patch(
         mixed_mm_choice="heuristic",
         autoheuristic_use="",
@@ -377,50 +413,61 @@ class TestPatternMatcher(TestCase):
         # examples that should be selected by handwritten heuristic
         args_list = [
             (
-                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(4, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randn(1, 4096, dtype=mat1_dtype, device=GPU_TYPE),
                 torch.randint(
-                    -128, 127, (4096, 4096), dtype=torch.int8, device="cuda"
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(4, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
+            ),
+            (
+                torch.randn(8, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
                 ).t(),
             ),
             (
-                torch.randn(16, 4096, dtype=mat1_dtype, device="cuda"),
+                torch.randn(16, 4096, dtype=mat1_dtype, device=GPU_TYPE),
                 torch.randint(
-                    -128, 127, (8192, 4096), dtype=torch.int8, device="cuda"
+                    -128, 127, (8192, 4096), dtype=torch.int8, device=GPU_TYPE
                 ).t(),
             ),
             (
-                torch.randn(32, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 8192), dtype=torch.int8, device="cuda"),
+                torch.randn(32, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 8192), dtype=torch.int8, device=GPU_TYPE
+                ),
             ),
             (
-                torch.randn(64, 4096, dtype=mat1_dtype, device="cuda"),
-                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+                torch.randn(64, 4096, dtype=mat1_dtype, device=GPU_TYPE),
+                torch.randint(
+                    -128, 127, (4096, 4096), dtype=torch.int8, device=GPU_TYPE
+                ),
             ),
         ]
 
         for args in args_list:
             self._test_mixed_impl(fn, args, True, False, rtol=0.01, atol=0.04)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     def test_mixed_mm_gating(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
         args = (
-            torch.randn(8, 8, device="cuda"),
-            torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+            torch.randn(8, 8, device=GPU_TYPE),
+            torch.randint(-128, 127, (8, 8), dtype=torch.int8, device=GPU_TYPE),
         )
         # will ignore the mixed_mm code (including fallback)
         with inductor_config.patch(
@@ -469,7 +516,8 @@ class TestPatternMatcher(TestCase):
         )
         self._test_mixed_impl(fn, args, False, False)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
         def fn(a, b):
@@ -491,12 +539,12 @@ class TestPatternMatcher(TestCase):
 
         args_expect_mixed_mm = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda")
+                torch.randn(8, 8, device=GPU_TYPE, dtype=torch.float16),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE)
                 .t()
                 .contiguous()
                 .t(),
@@ -509,19 +557,20 @@ class TestPatternMatcher(TestCase):
         # mixed mm is only enabled when casting from a lower-bitwidth dtype to a higher one
         args_expect_no_mixed_mm = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(0, 255, (4, 8), dtype=torch.int32, device=GPU_TYPE),
             ),
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(0, 255, (4, 8), dtype=torch.int64, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(0, 255, (4, 8), dtype=torch.int64, device=GPU_TYPE),
             ),
         ]
 
         for args in args_expect_no_mixed_mm:
             check_uint4x2_mixed_mm(args, False)
 
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @expectedFailureXPU
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm_epi(self):
         def fn(a, b, c, d):
@@ -539,10 +588,10 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
-                torch.randn(8, device="cuda"),
-                torch.randn(8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
+                torch.randn(8, device=GPU_TYPE),
+                torch.randn(8, device=GPU_TYPE),
             ),
         ]
 
@@ -572,8 +621,8 @@ class TestPatternMatcher(TestCase):
                 torch.randint(0, 255, (4, 8), dtype=torch.uint8),
             ),
             (  # int8
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device=GPU_TYPE),
             ),  # we don't match for int8 since numerics
         ]  # for int8 bitshifts don't match between triton and pytorch
 
@@ -599,8 +648,8 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(8, 8, device="cuda"),
-                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+                torch.randn(8, 8, device=GPU_TYPE),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device=GPU_TYPE),
             ),
         ]
 
@@ -618,33 +667,33 @@ class TestPatternMatcher(TestCase):
 
         args_list = [
             (
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
                 True,
             ),
             (
-                torch.randn(8, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 8, device="cuda"),
+                torch.randn(8, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 8, device=GPU_TYPE),
                 True,
             ),
             (
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(1, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(1, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
                 False,
             ),
             (
-                torch.randn(1, 16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
+                torch.randn(1, 16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
                 False,
             ),
             (
                 4,
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device=GPU_TYPE),
+                torch.randn(16, 16, device=GPU_TYPE),
                 False,
             ),
         ]
@@ -665,8 +714,8 @@ class TestPatternMatcher(TestCase):
             bias = m1.size(0)
             return torch.add(bias, torch.mm(m1, m2)), torch.mm(m1, m2) + bias
 
-        m1 = torch.randn(16, 16, device="cuda")
-        m2 = torch.randn(16, 16, device="cuda")
+        m1 = torch.randn(16, 16, device=GPU_TYPE)
+        m2 = torch.randn(16, 16, device=GPU_TYPE)
 
         counters.clear()
         expect = fn(m1, m2)
@@ -679,16 +728,16 @@ class TestPatternMatcher(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.functional.linear
-                self.linear_weight = torch.randn(4, 4).cuda()
-                self.bias = torch.randn(1, 4).cuda()
+                self.linear_weight = torch.randn(4, 4).to(GPU_TYPE)
+                self.bias = torch.randn(1, 4).to(GPU_TYPE)
 
             def forward(self, x):
                 x = self.linear(x, self.linear_weight, self.bias)
                 return x
 
-        input_tensor = torch.randn(1, 3, 4).cuda()
+        input_tensor = torch.randn(1, 3, 4).to(GPU_TYPE)
 
-        func = Model().cuda()
+        func = Model().to(GPU_TYPE)
 
         res1 = func(input_tensor)
         jit_func = torch.compile(func)
@@ -708,11 +757,13 @@ class TestPatternMatcher(TestCase):
             )
 
         args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -726,11 +777,13 @@ class TestPatternMatcher(TestCase):
             )
 
         args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
         ]
-        self.common(fn, args, 1, 4)
+        out, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(out, fn(*args))
+        FileCheck().check("call").check_not(".run").run(code[0])
 
     def test_cat_slice_cat_cuda(self):
         def fn(a, b):
@@ -740,14 +793,14 @@ class TestPatternMatcher(TestCase):
             return torch.ops.aten.cat.default([cat_1, slice_2], 1)
 
         args = [
-            torch.randn(2, 32, device="cuda"),
-            torch.randn(2, 16, device="cuda"),
+            torch.randn(2, 32, device=GPU_TYPE),
+            torch.randn(2, 16, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 3)
 
         args = [
-            torch.randn(2, 8, device="cuda"),
-            torch.randn(2, 16, device="cuda"),
+            torch.randn(2, 8, device=GPU_TYPE),
+            torch.randn(2, 16, device=GPU_TYPE),
         ]
         torch._dynamo.reset()
         counters.clear()
@@ -767,10 +820,76 @@ class TestPatternMatcher(TestCase):
             return torch.ops.aten.cat.default([cat_1, slice_2], 1)
 
         args = [
-            torch.randn(2, 8, device="cuda"),
-            torch.randn(2, 16, device="cuda"),
+            torch.randn(2, 8, device=GPU_TYPE),
+            torch.randn(2, 16, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 3)
+
+    def test_pointless_view_pair(self):
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [15, 7])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.view.default(x, [3, 5, 7])
+            x2 = aten.view.default(x1, [15, 7])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0])
+            x = aten.permute.default(x, [1, 0])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0])
+            x2 = aten.permute.default(x1, [1, 0])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair_3d(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0, 2])
+            x = aten.permute.default(x, [1, 0, 2])
+            return x
+
+        x = torch.randn(3, 5, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0, 2])
+            x2 = aten.permute.default(x1, [1, 0, 2])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -843,7 +962,7 @@ class TestPatternMatcher(TestCase):
             return cat**2
 
         args = [
-            torch.randn(2, 32, device="cuda"),
+            torch.randn(2, 32, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 4)
 
@@ -857,7 +976,7 @@ class TestPatternMatcher(TestCase):
             return cat**2 + getitem_2
 
         args = [
-            torch.randn(2, 32, device="cuda"),
+            torch.randn(2, 32, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -870,7 +989,7 @@ class TestPatternMatcher(TestCase):
             return cat**2
 
         args = [
-            torch.randn(2, 32, device="cuda"),
+            torch.randn(2, 32, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -881,7 +1000,7 @@ class TestPatternMatcher(TestCase):
             return cat
 
         args = [
-            torch.randn(1, 8, device="cuda"),
+            torch.randn(1, 8, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -895,9 +1014,9 @@ class TestPatternMatcher(TestCase):
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 3, device="cuda"),
-            torch.randn(2, 5, device="cuda"),
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 1, 2)
 
@@ -910,9 +1029,9 @@ class TestPatternMatcher(TestCase):
             return [s**2 for s in split_with_sizes] + [cat**3]
 
         args = [
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 3, device="cuda"),
-            torch.randn(2, 5, device="cuda"),
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -925,9 +1044,9 @@ class TestPatternMatcher(TestCase):
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(10, 2, device="cuda"),
-            torch.randn(10, 3, device="cuda"),
-            torch.randn(10, 5, device="cuda"),
+            torch.randn(10, 2, device=GPU_TYPE),
+            torch.randn(10, 3, device=GPU_TYPE),
+            torch.randn(10, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -938,9 +1057,9 @@ class TestPatternMatcher(TestCase):
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 3, device="cuda"),
-            torch.randn(2, 5, device="cuda"),
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -953,9 +1072,9 @@ class TestPatternMatcher(TestCase):
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(2, 2, device="cuda"),
-            torch.randn(2, 3, device="cuda"),
-            torch.randn(2, 5, device="cuda"),
+            torch.randn(2, 2, device=GPU_TYPE),
+            torch.randn(2, 3, device=GPU_TYPE),
+            torch.randn(2, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
 
@@ -1064,7 +1183,7 @@ class TestPatternMatcher(TestCase):
 
         def fn3(x, y):
             a = torch.sin(x)
-            with torch.autocast("cuda"):
+            with torch.autocast(GPU_TYPE):
                 b = torch.add(x, a)
             return b
 
@@ -1081,8 +1200,8 @@ class TestPatternMatcher(TestCase):
             return b
 
         args = [
-            torch.randn(5, 5, device="cuda"),
-            torch.randn(5, 5, device="cuda"),
+            torch.randn(5, 5, device=GPU_TYPE),
+            torch.randn(5, 5, device=GPU_TYPE),
         ]
 
         with unittest.mock.patch(
@@ -1113,11 +1232,12 @@ class TestPatternMatcher(TestCase):
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
 
+    @expectedFailureXPU
     def test_unfuse_bias_addmm(self):
         args = [
-            torch.randn(20, device="cuda"),
-            torch.randn(10, 15, device="cuda"),
-            torch.randn(15, 20, device="cuda"),
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
         ]
 
         @torch.compile()
@@ -1188,15 +1308,46 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @skipIfXpu
+    @inductor_config.patch(
+        {
+            "triton.unique_kernel_names": "original_aten",
+            "fx_graph_remote_cache": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_original_aten_preserved_split_addmm(self):
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        def fn(x, y, z):
+            return torch.addmm(z, x, y).sin()
+
+        args = [
+            torch.randn(16, 24, device=GPU_TYPE),
+            torch.randn(24, 32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
+        ]
+
+        counters.clear()
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+        ret, code = run_and_get_code(opt_fn, *args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
+        # Its name should contain `addmm` because `addmm` was the original aten op where the mm came from.
+        FileCheck().check_not("extern_kernels.addmm(").check(
+            "def triton_tem_fused_addmm"
+        ).run(code[0])
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
         counter = 0
         test_pass = PatternMatcherPass()
 
         args = [
-            torch.randn(20, device="cuda"),
-            torch.randn(10, 15, device="cuda"),
-            torch.randn(15, 20, device="cuda"),
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
         ]
 
         def f0(inp, a, b):
@@ -1251,9 +1402,9 @@ class TestPatternMatcher(TestCase):
         test_pass = PatternMatcherPass()
 
         args = [
-            torch.randn(20, device="cuda"),
-            torch.randn(10, 15, device="cuda"),
-            torch.randn(15, 20, device="cuda"),
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
         ]
 
         def f0(inp, a, b):
@@ -1297,9 +1448,9 @@ class TestPatternMatcher(TestCase):
         test_pass = PatternMatcherPass()
 
         args = [
-            torch.randn(20, device="cuda"),
-            torch.randn(10, 15, device="cuda"),
-            torch.randn(15, 20, device="cuda"),
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
         ]
 
         def f0(inp, a, b):
@@ -1425,7 +1576,7 @@ class TestPatternMatcher(TestCase):
         check(
             "call_function",
             torch.amp.autocast_mode._enter_autocast,
-            ("cuda", None, True, None),
+            (GPU_TYPE, None, True, None),
             {},
         )
         check("call_function", torch.amp.autocast_mode._exit_autocast, (None,), {})
@@ -1460,7 +1611,161 @@ class TestPatternMatcher(TestCase):
             expect=False,
         )
 
+        @torch.library.custom_op("vllm::fused_rms_norm_quant_static", mutates_args=[])
+        def fused_rms_norm_quant_static(out: torch.Tensor, input: torch.Tensor) -> None:
+            pass
+
+        check(
+            "call_function",
+            torch.ops.vllm.fused_rms_norm_quant_static,
+            (t, t),
+            {},
+            expect=False,
+        )
+
+    def test_multioutput_register_replacement(self):
+        @torch.library.custom_op(
+            "vllm::fused_rms_norm_quant_static", mutates_args=["result", "scale"]
+        )
+        def fused_rms_norm_quant_static(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+            azp: torch.Tensor,
+            epsilon: float,
+        ) -> None:
+            print("vllm::fused_rms_norm_quant_static")
+            result_rms = torch.mul(input, weight) + epsilon
+            result = torch.mul(result_rms, scale).to(torch.int8)
+            scale.fill_(0.5)
+
+        @torch.library.custom_op("vllm::rms_norm", mutates_args=["result"])
+        def rms_norm(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            epsilon: float,
+        ) -> None:
+            # bogus implementation doesn't matter
+            result = torch.mul(input, weight) + epsilon
+
+        @torch.library.custom_op(
+            "vllm::static_scaled_int8_quant", mutates_args=["result", "scale"]
+        )
+        def static_scaled_int8_quant(
+            result: torch.Tensor,
+            input: torch.Tensor,
+            scale: torch.Tensor,
+            azp: Optional[torch.Tensor] = None,
+        ) -> None:
+            # bogus implementation doesn't matter
+            result = torch.mul(input, scale).to(torch.int8)
+            scale.fill_(0.5)
+
+        def rms_pattern_static(
+            result: torch.Tensor,
+            result_rms: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+        ):
+            at1 = auto_functionalized(
+                torch.ops.vllm.rms_norm.default,
+                result=result_rms,
+                input=input,
+                weight=weight,
+                epsilon=1e-6,
+            )
+            at2 = auto_functionalized(
+                torch.ops.vllm.static_scaled_int8_quant.default,
+                result=result,
+                input=at1[1],
+                scale=scale,
+                azp=None,
+            )
+
+            return at2[1], at2[2]
+
+        def rms_replacement_static(
+            result: torch.Tensor,
+            result_rms: torch.Tensor,
+            input: torch.Tensor,
+            weight: torch.Tensor,
+            scale: torch.Tensor,
+        ):
+            at = auto_functionalized(
+                torch.ops.vllm.fused_rms_norm_quant_static.default,
+                result=result,
+                input=input,
+                weight=weight,
+                epsilon=1e-6,
+                scale=scale,
+                azp=None,
+            )
+            return at[1], at[2]
+
+        def empty_bf16(*args, **kwargs):
+            return torch.empty(*args, **kwargs, dtype=torch.bfloat16)
+
+        def empty_int8(*args, **kwargs):
+            return torch.empty(*args, **kwargs, dtype=torch.int8)
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            empty_int8(5, 4),
+            empty_bf16(5, 4),
+            empty_bf16(5, 4),
+            empty_bf16(5, 1),
+            torch.empty(1, 1),
+        ]
+        register_replacement(
+            rms_pattern_static, rms_replacement_static, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            count = my_patterns.apply(graph)
+            # print(f"Count: {count}")
+            graph.eliminate_dead_code()
+            # graph.print_tabular()
+            return graph
+
+        def custom_backend(
+            graph: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable:
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(backend=custom_backend)
+        def my_func_static(x, w, epsilon):
+            quant_result = torch.empty_like(x, dtype=torch.int8)
+            result_rms = torch.empty_like(x, dtype=torch.bfloat16)
+            scale = torch.ones((1, 1))
+
+            x = x.to(torch.bfloat16)
+            w = w.to(torch.bfloat16)
+
+            quant_result, scale = rms_pattern_static(
+                result=quant_result,
+                result_rms=result_rms,
+                input=x,
+                weight=w,
+                scale=scale,
+            )
+
+            return quant_result, scale
+
+        inputs = [torch.empty((5, 4)), torch.empty((5, 1)), 1e-6]
+        # print(my_func_static(*inputs))
+        test, (code,) = run_and_get_code(my_func_static, *inputs)
+        self.assertTrue("static_scaled_int8_quant" not in code)
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_GPU:
         run_tests()

@@ -85,7 +85,9 @@ struct TORCH_API ClassType : public NamedType {
       return true;
     }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto& lhs_name = name().value();
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       const auto& rhs_name = user_rhs->name().value();
 
       return lhs_name == rhs_name &&
@@ -390,7 +392,8 @@ struct TORCH_API ClassType : public NamedType {
       std::string doc_string = "",
       std::vector<std::string> unresolved_class_attributes = {});
 
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }

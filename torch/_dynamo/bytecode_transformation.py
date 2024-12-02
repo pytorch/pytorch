@@ -13,6 +13,7 @@ from .bytecode_analysis import (
     remove_extra_line_nums,
     stacksize_analysis,
 )
+from .utils import is_safe_constant
 
 
 @dataclasses.dataclass
@@ -137,6 +138,17 @@ def create_instruction(
 def create_jump_absolute(target) -> Instruction:
     inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
     return create_instruction(inst, target=target)
+
+
+def create_load_const(val, checked=True) -> Instruction:
+    """
+    In general we should only create `LOAD_CONST` for immutable objects, but
+    sometimes it's convenient _and safe_ for Dynamo create `LOAD_CONST` for
+    mutable objects. In such cases, use `checked=False`.
+    """
+    if checked:
+        assert is_safe_constant(val), f"unsafe constant {val}"
+    return create_instruction("LOAD_CONST", argval=val)
 
 
 def create_dup_top() -> Instruction:
@@ -980,9 +992,11 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
 
             if sys.version_info < (3, 12):
                 jump_op = create_instruction(
-                    "POP_JUMP_FORWARD_IF_TRUE"
-                    if "FORWARD" in inst.opname
-                    else "POP_JUMP_BACKWARD_IF_TRUE",
+                    (
+                        "POP_JUMP_FORWARD_IF_TRUE"
+                        if "FORWARD" in inst.opname
+                        else "POP_JUMP_BACKWARD_IF_TRUE"
+                    ),
                     target=inst.target,
                 )
             else:
@@ -1037,7 +1051,7 @@ def remove_fused_load_store(instructions: List[Instruction]) -> None:
                 create_instruction(inst0, argval=argval0),
                 create_instruction(inst1, argval=argval1),
             ]
-            new_insts.append(overwrite_instruction(inst, replace_insts))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
         else:
             new_insts.append(inst)
     instructions[:] = new_insts
@@ -1138,11 +1152,12 @@ def update_offsets(instructions) -> None:
 
 def debug_bytes(*args) -> str:
     index = range(max(map(len, args)))
-    result = []
-    for arg in (
-        [index] + list(args) + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
-    ):
-        result.append(" ".join(f"{x:03}" for x in arg))
+    result = [
+        " ".join(f"{x:03}" for x in arg)
+        for arg in [index]
+        + list(args)
+        + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
+    ]
 
     return "bytes mismatch\n" + "\n".join(result)
 
@@ -1244,6 +1259,15 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 + (cast(int, instructions[i].arg) % 2)
                 + 2
             )
+        elif instructions[i].opname in FUSED_INSTS:
+            assert sys.version_info >= (3, 13)
+            assert isinstance(instructions[i].argval, tuple)
+            assert len(instructions[i].argval) == 2
+            arg_tuple = tuple(
+                varnames[name] if name in varnames else freenames[name]
+                for name in instructions[i].argval
+            )
+            instructions[i].arg = (arg_tuple[0] << 4) + (arg_tuple[1] & 15)
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
                 if (
@@ -1385,6 +1409,8 @@ def populate_kw_names_argval(instructions, consts):
             inst.argval = consts[inst.arg]
 
 
+# If safe=True, we do not make any bytecode modifications.
+# Mainly used for debugging bytecode_transformation (see debug_checks)
 def cleaned_instructions(code, safe=False) -> List[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
@@ -1398,12 +1424,13 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
             remove_load_call_method(instructions)
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        if sys.version_info >= (3, 11):
+            remove_jump_if_none(instructions)
+            if sys.version_info >= (3, 12):
+                remove_binary_store_slice(instructions)
+            if sys.version_info >= (3, 13):
+                remove_fused_load_store(instructions)
     if sys.version_info >= (3, 11):
-        remove_jump_if_none(instructions)
-        if sys.version_info >= (3, 12):
-            remove_binary_store_slice(instructions)
-        if sys.version_info >= (3, 13):
-            remove_fused_load_store(instructions)
         update_offsets(instructions)
         devirtualize_jumps(instructions)
     return instructions

@@ -111,6 +111,6 @@ void channel_shuffle_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl);
+REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl)
 
 } // at::native

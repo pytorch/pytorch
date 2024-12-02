@@ -323,7 +323,7 @@ class CommonDistributedDataParallelTest:
         # Use this hack to remove files for that test
         try:
             os.remove(self.file_name)
-        except OSError:
+        except (OSError, AttributeError):
             pass
 
     @property
@@ -1008,15 +1008,19 @@ class CommonDistributedDataParallelTest:
         ddp_out = ddp(ddp_x)
 
         net_loss = F.mse_loss(
-            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
-            if not skip_o1
-            else net_out.o2["a"] + net_out.o2["b"],
+            (
+                net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+                if not skip_o1
+                else net_out.o2["a"] + net_out.o2["b"]
+            ),
             torch.ones_like(net_out.o2["a"], device=self.rank),
         )
         ddp_loss = F.mse_loss(
-            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
-            if not skip_o1
-            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            (
+                ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+                if not skip_o1
+                else ddp_out.o2["a"] + ddp_out.o2["b"]
+            ),
             torch.ones_like(ddp_out.o2["a"], device=self.rank),
         )
 
@@ -1771,11 +1775,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         with self.assertRaises(ValueError):
             dist.send(input_tensor, dist.get_rank())
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, group_dst=dist.get_rank())
+
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, dist.get_rank(), group_dst=dist.get_rank())
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor)
 
         # test recv
         input_tensor = torch.zeros(2, 2)
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
+        with self.assertRaises(ValueError):
+            dist.recv(input_tensor, src=0, group_src=0)
 
         dist.barrier()
         # intentionally not calling into `destroy_process_group` as not all
@@ -1802,16 +1815,15 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             pass
 
     def test_init_process_group_optional_backend(self):
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            store = dist.FileStore(f.name, self.world_size)
-            # creates both gloo and nccl backend
-            if dist.is_gloo_available() and dist.is_nccl_available():
-                dist.init_process_group(
-                    store=store,
-                    rank=self.rank,
-                    world_size=self.world_size,
-                )
-                dist.destroy_process_group()
+        store = dist.FileStore(self.file_name, self.world_size)
+        # creates both gloo and nccl backend
+        if dist.is_gloo_available() and dist.is_nccl_available():
+            dist.init_process_group(
+                store=store,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+            dist.destroy_process_group()
 
     def test_init_process_group_for_all_backends(self):
         for backend in dist.Backend.backend_list:
@@ -1837,20 +1849,19 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend != "threaded":
                 excepted_backend = "custom"
 
-            with tempfile.NamedTemporaryFile(delete=False) as f:
-                store = dist.FileStore(f.name, self.world_size)
-                dist.init_process_group(
-                    backend=backend,
-                    rank=self.rank,
-                    world_size=self.world_size,
-                    store=store,
-                )
-                pg = c10d._get_default_group()
-                self.assertEqual(pg.rank(), self.rank)
-                self.assertEqual(pg.size(), self.world_size)
-                self.assertEqual(pg.name(), str(excepted_backend))
+            store = dist.FileStore(self.file_name, self.world_size)
+            dist.init_process_group(
+                backend=backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+            )
+            pg = c10d._get_default_group()
+            self.assertEqual(pg.rank(), self.rank)
+            self.assertEqual(pg.size(), self.world_size)
+            self.assertEqual(pg.name(), str(excepted_backend))
 
-                dist.destroy_process_group()
+            dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are

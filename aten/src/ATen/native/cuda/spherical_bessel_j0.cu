@@ -20,7 +20,7 @@
 
 namespace at::native {
         namespace {
-            CONSTEXPR_EXCEPT_WIN_CUDA char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
+            constexpr char spherical_bessel_j0_name[] = "spherical_bessel_j0_forward";
 
             void spherical_bessel_j0_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -37,5 +37,5 @@ namespace at::native {
             }
         }
 
-        REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_cuda);
+        REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_cuda)
 } // namespace at::native

@@ -479,8 +479,8 @@ DEFINE_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub)
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub)
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -662,7 +662,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   // with the main difference being that the when the `mask` is false, the tensor
   // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
   // when `mask` is false. When `mask` is true, the `indices` are expected to be
-  // in bounds and is not checked.
+  // in bounds and is not checked. We also assume that the `indices` are non-negative
   //
   // This function is not meant to be executed on eager mode. An unoptimized version
   // is provided here.
@@ -875,12 +875,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     // See Note [Enabling Deterministic Operations]
     if (result.is_cuda() && globalContext().deterministicAlgorithms()){
         torch::List<std::optional<Tensor>> indices;
-        indices.reserve(dim + 1);
-        for (const auto i: c10::irange(dim)) {
-          (void)i;
-          indices.emplace_back();
-        }
-        indices.emplace_back(index);
+        indices.resize(dim + 1);
+        indices.set(dim, index);
         result.index_put_(indices, source, false);
         return;
     }
@@ -1435,8 +1431,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+      AT_DISPATCH_V2(
+        self.scalar_type(), "index_select", AT_WRAP([&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
@@ -1453,7 +1449,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
-      });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
     }
   }
 
@@ -1624,10 +1620,15 @@ static bool can_use_expanded_index_path(
   // and strides on other dims to be 0 or 1, e.g.
   //   shape [108365, 16]; strides [1, 0]
   //   shape [13264, 1, 7]; strides [1, 1, 0]
+  // Note: the size should not > 1 when the stride == 1
+  // See https://github.com/pytorch/pytorch/issues/129093
   auto index_strides = index.strides().vec();
+  auto index_sizes = index.sizes().vec();
   bool is_index_expanded = index_strides[0] == 1;
   for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1) { is_index_expanded = false; }
+    if (index_strides[dim] > 1 || (index_strides[dim] == 1 && index_sizes[dim] > 1)) {
+      is_index_expanded = false;
+    }
   }
 
   // index is expanded
@@ -1901,8 +1902,8 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
@@ -2413,7 +2414,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (C10_UNUSED const auto j : c10::irange(n1)) {
+          for ([[maybe_unused]] const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

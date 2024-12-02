@@ -220,7 +220,7 @@ def train_convnext_example():
     forward_time = 0.0
     backward_time = 0.0
     start = time.time()
-    for i in range(ITER_TIME):
+    for _ in range(ITER_TIME):
         t1 = time.time()
         y = model(x)
         torch.cuda.synchronize()

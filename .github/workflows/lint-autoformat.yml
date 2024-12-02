@@ -2,8 +2,9 @@ name: Apply lint suggestions
 
 on:
 
-  pull_request:
-    types: [opened, synchronize, reopened]
+  push:
+    tags:
+      - ciflow/autoformat/*
 
 jobs:
   lintrunner-autoformat:
@@ -11,8 +12,7 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: lf.linux.2xlarge
-    continue-on-error: true
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' && github.event.pull_request.user.login != 'ezyang' && github.event.pull_request.user.login != 'malfet' && !startsWith(github.head_ref, 'export-') }}
     steps:
       - name: Checkout pytorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -31,10 +31,12 @@ jobs:
           bash .github/scripts/lintrunner.sh
       - name: Check for changes
         id: git-check
+        continue-on-error: true
         run: |
           git diff --exit-code || echo "changes=true" >> "$GITHUB_OUTPUT"
       - name: Suggest changes
         if: steps.git-check.outputs.changes == 'true'
+        continue-on-error: true
         uses: parkerbxyz/suggest-changes@v1
         with:
           comment: "Please commit the suggested changes from pytorch's linter."

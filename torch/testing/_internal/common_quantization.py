@@ -14,7 +14,7 @@ from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch._export import capture_pre_autograd_graph
+from torch.export import export_for_training
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -67,7 +67,6 @@ except ImportError:
 import copy
 import io
 import functools
-import time
 import os
 
 import unittest
@@ -76,7 +75,9 @@ from torch.testing import FileCheck
 from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
 import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.quantizer.xpu_inductor_quantizer as xpuiq
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantizer.xpu_inductor_quantizer import XPUInductorQuantizer
 import contextlib
 
 class NodeSpec:
@@ -125,7 +126,7 @@ def test_only_eval_fn(model, calib_data):
     input Tensors and run the model on the dataset
     """
     for inp in calib_data:
-        output = model(*inp)
+        model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -135,7 +136,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     train_loss, correct, total = 0, 0, 0
-    for i in range(10):
+    for _ in range(10):
         model.train()
 
         for data, target in train_data:
@@ -194,7 +195,6 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     model.train()
     cnt = 0
     for image, target in data_loader:
-        start_time = time.time()
         print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
@@ -203,7 +203,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        accuracy(output, target, topk=(1, 5))
         if cnt >= ntrain_batches:
             return
     return
@@ -476,7 +476,8 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     assert torch.isnan(out).sum() == 0
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
-    out_uint8 = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
+    if out.device != torch.device('cpu'):
+        out = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
 
     # Scales and zeros for the same q-group should be contiguous, so we can
     # load as a 32-bit word
@@ -492,7 +493,7 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
         ).transpose(0, 1).contiguous()
     )
 
-    return out_uint8, scales_and_zeros
+    return out, scales_and_zeros
 
 
 def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
@@ -1183,7 +1184,8 @@ class QuantizationLiteTestCase(QuantizationTestCase):
         # Creates quantized model for testing mobile script modules
         qengine = "qnnpack"
         with override_quantized_engine(qengine):
-            qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+            # FIXME(rec): shouldn't qconfig be passed to quantize?
+            qconfig = torch.ao.quantization.get_default_qconfig(qengine)  # noqa: F841
             model = model_class(**kwargs)
             model = quantize(model, test_only_eval_fn, [self.calib_data])
 
@@ -1247,7 +1249,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         export_with_dynamic_shape=False,
         is_qat=False,
         is_debug_mode=False,
-        capture_pre_autograd_graph_node_occurrence=None,
+        training_ir_node_occurrence=None,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1259,11 +1261,11 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             {0: torch.export.Dim("dim")} if i == 0 else None
             for i in range(len(example_inputs))
         )
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
             dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
-        )
+        ).module()
 
         if is_qat:
             m = prepare_qat_pt2e(m, quantizer)
@@ -1297,18 +1299,18 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = _convert_to_reference_decomposed_fx(
                 m_fx, backend_config=backend_config
             )
-            m_fx = capture_pre_autograd_graph(
+            m_fx = export_for_training(
                 m_fx,
                 example_inputs,
                 dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
-            )
+            ).module()
             node_occurrence = {}
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
                 if k in expected_node_occurrence:
                     node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
-            if capture_pre_autograd_graph_node_occurrence is not None:
+            if training_ir_node_occurrence is not None:
                 node_occurrence = {
-                    ns.call_function(k): v for k, v in capture_pre_autograd_graph_node_occurrence.items()
+                    ns.call_function(k): v for k, v in training_ir_node_occurrence.items()
                 }
             self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
             fx_quant_output = m_fx(*example_inputs)
@@ -1319,10 +1321,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # resetting dynamo cache
         torch._dynamo.reset()
 
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
         if is_qat:
             m = prepare_qat_pt2e(m, quantizer)
         else:
@@ -1331,7 +1333,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         m = convert_pt2e(m)
         return m
 
-    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
+    def _get_pt2e_quantized_linear(self, is_per_channel=False, quantizer=None) -> torch.fx.GraphModule:
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1339,10 +1341,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
             def forward(self, x):
                 return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
-        quantizer.set_global(operator_config)
+        if quantizer is None:
+            quantizer = XNNPACKQuantizer()
+            operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+            quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         return self._quantize(m, quantizer, example_inputs)
@@ -2373,9 +2375,7 @@ class ModelWithSequentialFusion(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 3, 1)
         self.relu1 = nn.ReLU(inplace=False)
-        layers = []
-        for i in range(3):
-            layers.append(ConvBNReLU())
+        layers = [ConvBNReLU() for _ in range(3)]
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
         self.classifier = nn.Sequential(*head)
@@ -2942,23 +2942,30 @@ def _generate_qdq_quantized_model(
     mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
 ):
 
-    def get_default_quantizer(is_qat, is_dynamic):
-        quantizer = X86InductorQuantizer()
-        quantizer.set_global(
-            xiq.get_default_x86_inductor_quantization_config(
-                is_qat=is_qat, is_dynamic=is_dynamic
+    def get_default_quantizer(is_qat, is_dynamic, inputs):
+        has_xpu = any(isinstance(input, torch.Tensor) and input.device.type == "xpu"
+                      for input in inputs)
+        if has_xpu:
+            quantizer = XPUInductorQuantizer()
+            assert (not is_qat) and (not is_dynamic), "QAT and dynamic quantization is not supported at XPU backend currently"
+            quantizer.set_global(xpuiq.get_default_xpu_inductor_quantization_config())
+        else:
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(
+                xiq.get_default_x86_inductor_quantization_config(
+                    is_qat=is_qat, is_dynamic=is_dynamic
+                )
             )
-        )
         return quantizer
 
     maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
     with maybe_no_grad:
-        export_model = capture_pre_autograd_graph(
+        export_model = export_for_training(
             mod,
             inputs,
-        )
+        ).module()
         quantizer = (
-            quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic)
+            quantizer if quantizer else get_default_quantizer(is_qat, is_dynamic, inputs)
         )
         prepare_model = (
             prepare_qat_pt2e(export_model, quantizer)

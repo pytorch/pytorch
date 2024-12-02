@@ -83,7 +83,7 @@ bool file_exists(const std::string& path) {
 #ifdef _WIN32
   return std::filesystem::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }

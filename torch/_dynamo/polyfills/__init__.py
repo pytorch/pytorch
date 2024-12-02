@@ -21,9 +21,31 @@ if TYPE_CHECKING:
         builtins as builtins,
         functools as functools,
         itertools as itertools,
+        operator as operator,
         os as os,
+        pytree as pytree,
         sys as sys,
     )
+
+from torch.overrides import BaseTorchFunctionMode
+
+
+# These classes handle support for TorchFunctionModes across
+# graph breaks
+# Today the TorchFunctionMode enter (for the classes we support)
+# simply pushes the mode onto the stack. Since after this occurs
+# the stack is mutated, and we replay these mutations, we don't need
+# any cleanup logic to be run once the graph break occurs, we simply replay
+# these mutations to ensure at the graph break the torch function mode stack is correct
+#  and reconstruct the torch function mode stack normally
+# when we compile the resume function on the other side of the break.
+# However, to ensure we exit properly
+# in the resume function, we need to re-enter the contexts as we do other contexts.
+# These contexts do nothing on enter, but provide the correct exit logic to ensure
+# the stack state is correct.
+class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
+    def __enter__(self):
+        pass
 
 
 def index(iterator, item, start=0, end=None):
@@ -80,10 +102,15 @@ def set_intersection(set1, set2):
 
 def set_union(set1, set2):
     union_set = set1.copy()
-    for x in set2:
-        if x not in union_set:
-            union_set.add(x)
+    set_update(union_set, set2)
     return union_set
+
+
+def set_update(set1, set2):
+    for x in set2:
+        if x not in set1:
+            set1.add(x)
+    return set1
 
 
 def set_difference(set1, set2):
@@ -164,3 +191,11 @@ def foreach_pow_scalar(scalar, exps):
 
 def addcmul_inplace(self, tensor1, tensor2, value):
     return self.add_(tensor1 * tensor2 * value)
+
+
+def predicate(obj: Any) -> bool:
+    # This will cause the rest of dynamo to handle the if statement correctly, so we don't have to rewrite it here.
+    # We can't just use bool() here since we can't trace into that in general.
+    if obj:
+        return True
+    return False

@@ -121,7 +121,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
-      c10::IValue(seq),                                                        \
+      seq,                                                                     \
       pgName,                                                                  \
       rank,                                                                    \
       collName,                                                                \
@@ -163,7 +163,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
-      c10::IValue(seq),                                                        \
+      seq,                                                                     \
       pgName,                                                                  \
       rank,                                                                    \
       collName,                                                                \

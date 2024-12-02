@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
+#include <c10/util/error.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -10,17 +11,11 @@
 #include <fstream>
 #include <iostream>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #ifndef _WIN32
 #include <sys/stat.h>
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 // TODO: C++17 has the filesystem header, which may replace these
@@ -42,7 +37,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -55,11 +50,18 @@ std::string create_temp_dir() {
   if (mkdtemp(temp_dir.data()) == nullptr) {
     throw std::runtime_error(
         std::string("Failed to create temporary directory: ") +
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
   return temp_dir;
 #endif
 }
+
+#ifdef _WIN32
+const std::string k_separator = "\\";
+#else
+const std::string k_separator = "/";
+#endif
+
 } // namespace
 
 namespace torch::inductor {
@@ -201,19 +203,15 @@ std::string compile_so(
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
-  auto compile_result =
+  auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
-  std::string compile_cmd = std::get<0>(compile_result);
-  std::string output_o = std::get<1>(compile_result);
 
   std::string linker_flags_path =
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
+  auto [link_cmd, output_so] = get_cpp_compile_command(
       filename, {output_o, consts_filename}, linker_flags);
-  std::string link_cmd = std::get<0>(link_result);
-  std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -292,6 +290,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string cpp_filename = "";
   std::string consts_filename = "";
   std::string found_filenames = ""; // Saving for bookkeeping
+  std::string model_directory =
+      "data" + k_separator + "aotinductor" + k_separator + model_name;
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
@@ -309,11 +309,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += " ";
 
     // Only compile files in the specified model directory
-    std::string model_directory = "data/aotinductor/" + model_name;
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
       std::string output_path_str = temp_dir;
-      output_path_str += "/";
+      output_path_str += k_separator;
       output_path_str += filename_str;
 
       // Create the parent directory if it doesn't exist
@@ -325,7 +324,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path.c_str())) {
         throw std::runtime_error(fmt::format(
-            "Failed to create directory {}: {}", parent_path, strerror(errno)));
+            "Failed to create directory {}: {}",
+            parent_path,
+            c10::utils::str_error(errno)));
       }
 
       // Extracts file to the temp directory
@@ -384,7 +385,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  runner_ = registered_aoti_runner[device](so_path, 1, device, "");
+  std::string cubin_dir = temp_dir + k_separator + model_directory;
+  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
 
   std::remove(temp_dir.c_str());
 }
@@ -394,7 +396,7 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    std::vector<at::Tensor>& inputs) {
+    const std::vector<at::Tensor>& inputs) {
   return runner_->run(inputs);
 }
 

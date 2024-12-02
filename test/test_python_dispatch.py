@@ -2740,6 +2740,15 @@ class TestWrapperSubclassAliasing(TestCase):
         kwargs = {"out": torch.empty(4)}
         self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
+    def test_wrapper_subclass_aliasing_fft_fft2(self, device):
+        args = (torch.randn(4, 4),)
+        kwargs = {}
+        # fft_fft2 has a default arg 'int[1] dim=[-2,-1]',
+        # Make sure that _return_and_correct_aliasing can handle this case
+        # (I'm using inference_mode to make sure fft_fft2 doesn't decompose and goes to torch_dispatch)
+        with torch.inference_mode():
+            self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
+
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 

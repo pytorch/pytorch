@@ -51,7 +51,7 @@ static void layer_norm_with_mean_rstd_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -241,8 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  at::Tensor out = std::get<0>(outputs);
-  out = out.view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
   } else if (weight.defined()) {
@@ -256,7 +255,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);
@@ -297,7 +296,7 @@ Tensor rms_norm_symint(
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {

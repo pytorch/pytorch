@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -25,6 +27,7 @@
 #include <ATen/xpu/EmptyTensor.h>
 #endif
 
+#include <chrono>
 #include <sstream>
 #include <tuple>
 #include <utility>
@@ -46,7 +49,8 @@
 
 // Manually create _PyTupleIterObject struct
 typedef struct {
-  PyObject_HEAD Py_ssize_t it_index;
+  PyObject_HEAD
+  Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
@@ -225,7 +229,7 @@ namespace {
 typedef std::vector<TensorCheck> ChecksList;
 
 typedef struct {
-  PyObject_HEAD;
+  PyObject_HEAD
   ChecksList* checks;
 } TensorGuards;
 
@@ -499,13 +503,14 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GlobalStateGuard {
-  PyObject_HEAD;
+  PyObject_HEAD
 
   inline void init() {
     auto& ctx = at::globalContext();
@@ -616,7 +621,8 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
@@ -652,7 +658,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -750,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-inline static void unwrap_size_tuple(PyObject* obj, T& output) {
+static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -762,7 +768,7 @@ inline static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-inline static void _parse_empty_strided_args(
+static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -777,7 +783,7 @@ inline static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-inline static PyObject* _empty_strided_device(
+static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {
@@ -1463,8 +1469,8 @@ class DYNAMIC_INDICES : public LeafGuard {
     }
 
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodOneArg(
-        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    PyObject* call_result = PyObject_CallMethodObjArgs(
+        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);
@@ -1502,6 +1508,14 @@ std::unique_ptr<GuardManager> make_guard_manager(
     std::string source,
     py::handle example_value,
     py::handle guard_manager_enum);
+
+GuardManager* clone_guard_manager(
+    GuardManager* from,
+    RootGuardManager* root,
+    const py::function& clone_filter_fn);
+void add_relational_guard_resetter_to_cloned_root(
+    RootGuardManager* root,
+    std::shared_ptr<RelationalGuard> guard);
 
 /**
  * Base class representing a pair of accessor and the associated guard
@@ -1555,6 +1569,35 @@ class GuardAccessor {
   virtual std::string repr() const = 0;
 
   virtual ~GuardAccessor() = default;
+
+ public: // Cloning related functions
+  GuardAccessor(GuardManager* guard_manager, GuardAccessor* from)
+      : _guard_manager(std::unique_ptr<GuardManager>(guard_manager)) {
+    from->clone_visitor(this);
+  }
+
+  virtual GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) = 0;
+
+  void clone_visitor(GuardAccessor* to) {
+    to->_source = this->_source;
+    to->_accessor_key = this->_accessor_key;
+  }
+
+  template <typename DerivedGuardAccessor>
+  GuardAccessor* clone_common(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) {
+    GuardManager* cloned_mgr = clone_guard_manager(
+        get_guard_manager().get(), cloned_root, clone_filter_fn);
+    if (cloned_mgr == nullptr) {
+      return nullptr;
+    }
+    DerivedGuardAccessor* cloned_accessor =
+        new DerivedGuardAccessor(cloned_mgr, (DerivedGuardAccessor*)this);
+    return cloned_accessor;
+  }
 
  protected:
   // Guard manager corresponding to the retrieved value from the
@@ -1616,6 +1659,7 @@ class GuardAccessor {
  * entries.
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class GuardManager {
  public:
   GuardManager() = delete;
@@ -1648,6 +1692,45 @@ class GuardManager {
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
+  }
+
+ public:
+  // For cloning
+  GuardManager(RootGuardManager* root, std::string source, bool is_dict)
+      : _root(root), _source(std::move(source)), _is_dict(is_dict) {}
+
+  void clone_common(
+      RootGuardManager* cloned_root,
+      GuardManager* cloned_mgr,
+      const py::function& clone_filter_fn) {
+    for (const auto& guard : _leaf_guards) {
+      cloned_mgr->_leaf_guards.emplace_back(guard);
+      if (std::shared_ptr<RelationalGuard> relational_guard =
+              std::dynamic_pointer_cast<RelationalGuard>(guard)) {
+        add_relational_guard_resetter_to_cloned_root(
+            cloned_root, relational_guard);
+      }
+    }
+
+    for (const auto& accessor : _accessors) {
+      GuardAccessor* cloned_accessor =
+          accessor->clone(cloned_root, clone_filter_fn);
+      if (cloned_accessor != nullptr) {
+        cloned_mgr->_accessors.emplace_back(
+            std::unique_ptr<GuardAccessor>(cloned_accessor));
+      }
+    }
+  }
+
+  virtual GuardManager* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) {
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
+    GuardManager* cloned_mgr = new GuardManager(cloned_root, _source, _is_dict);
+    clone_common(cloned_root, cloned_mgr, clone_filter_fn);
+    return cloned_mgr;
   }
 
   /**
@@ -1690,6 +1773,15 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    return this->check_accessors_nopybind(value);
+  }
+
+  bool check_leaf_guards_nopybind(PyObject* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
@@ -1699,6 +1791,10 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_accessors_nopybind(PyObject* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
@@ -1751,6 +1847,7 @@ class GuardManager {
       // swapping).
       _dict_tag = new_tag;
     }
+
     return result;
   }
 
@@ -1759,6 +1856,19 @@ class GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
+
+    const GuardDebugInfo& debug_info =
+        check_leaf_guards_verbose_nopybind(value, num_guards_executed);
+    if (!debug_info.result) {
+      return debug_info;
+    }
+
+    return check_accessors_verbose_nopybind(value, num_guards_executed);
+  }
+
+  GuardDebugInfo check_leaf_guards_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
@@ -1769,6 +1879,12 @@ class GuardManager {
       }
     }
 
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_accessors_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
@@ -1876,6 +1992,21 @@ class GuardManager {
 };
 
 /**
+ Note on [Ownership with cloning] - GuardManagers have the facility to clone
+ itself. This is useful for cloning a subset of the guard manager in diff guard
+ manager.
+
+ As the ownership goes, the model is exactly same as before. We have unique_ptr
+ for GuardAccessor and GuardManagers. So, any state required for the accessors
+ and managers is copied over using constructors and clone_visitor functions.
+ The main thing to notice is leaf guards. The leaf guards are represented using
+ shared_ptr, and they are shared (not cloned) with the cloned managers.
+
+ So for leaf guard state to be released, both the original and cloned managers
+ have to be destructed.
+*/
+
+/**
  * RootGuardManager is the root of the guard tree. This is primarily
  * constructed to hold the relational guard pointers so that we can reset the
  * state of those guards on guard failure. All the other important
@@ -1918,7 +2049,22 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      _reset_relational_guard_state();
+      return false;
+    }
+
+    // Run accessor guards without TorchFunction enabled
+    // Dynamo should only be adding guards on values without
+    // torch function at this point, because if there
+    // was a torch function, we should've traced through it
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+    if (!GuardManager::check_accessors_nopybind(value)) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -1926,10 +2072,13 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
+
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -1950,13 +2099,33 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
-    if (!debug_info.result) {
+    int num_guards_executed = 0;
+
+    // Run leaf guards
+    // This includes the GlobalStateGuard and the Torch Function Mode stack
+    // guard, which require Torch Function to be in its unmodified state
+    const GuardDebugInfo& debug_info_leaf =
+        GuardManager::check_leaf_guards_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      return debug_info;
+      return debug_info_leaf;
     }
 
-    int num_guards_executed = debug_info.num_guards_executed;
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    const GuardDebugInfo& debug_info_accessors =
+        GuardManager::check_accessors_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_accessors.result) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      _reset_relational_guard_state();
+      return debug_info_accessors;
+    }
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -1964,11 +2133,13 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -1979,6 +2150,20 @@ class RootGuardManager : public GuardManager {
 
   void set_init_local_state_flag() {
     _init_local_state = true;
+  }
+
+  // See note on [Ownership with cloning]
+  RootGuardManager* clone_manager(const py::function& clone_filter_fn) {
+    // Use clone_filter_fn
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
+    RootGuardManager* cloned_root = new RootGuardManager();
+    clone_common(cloned_root, cloned_root, clone_filter_fn);
+    for (const auto& guard : _epilogue_lambda_guards) {
+      cloned_root->_epilogue_lambda_guards.emplace_back(guard);
+    }
+    return cloned_root;
   }
 
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
@@ -2014,7 +2199,9 @@ class RootGuardManager : public GuardManager {
   // implementation. For simplicity, we add these guards at the root. They
   // MUST be run after all other guard managers have finished to ensure that
   // the epilogue guards do not step on some nonexistent getattr or getitem.
-  std::vector<std::unique_ptr<LeafGuard>> _epilogue_lambda_guards;
+  // NB - shared_ptr is used to share the epilogue guards with the cloned guard
+  // manager.
+  std::vector<std::shared_ptr<LeafGuard>> _epilogue_lambda_guards;
 
   // [Note on GIL interaction with mutex lock]
   // We use std::mutex to prevent multiple threads from running
@@ -2268,6 +2455,71 @@ class DictGuardManager : public GuardManager {
     return _is_exact_dict_type;
   }
 
+ public: // cloning functions
+  DictGuardManager(
+      RootGuardManager* cloned_root,
+      std::string source,
+      Py_ssize_t size,
+      PyTypeObject* expected_type,
+      bool is_exact_dict_type,
+      std::vector<Py_ssize_t> indices)
+      : GuardManager(cloned_root, std::move(source), true),
+        _size(size),
+        _expected_type(expected_type),
+        _is_exact_dict_type(is_exact_dict_type),
+        _indices(std::move(indices)) {}
+
+  template <typename T>
+  GuardManager* clone_dict_guard_manager(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) {
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
+    T* cloned_mgr = new T(
+        cloned_root,
+        get_source(),
+        _size,
+        _expected_type,
+        _is_exact_dict_type,
+        _indices);
+
+    clone_common(cloned_root, cloned_mgr, clone_filter_fn);
+    for (auto index : _indices) {
+      KeyValueManager& key_value_manager = _key_value_managers[index];
+      std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
+      std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
+
+      cloned_mgr->_key_value_managers[index] = std::make_pair(nullptr, nullptr);
+
+      if (key_manager) {
+        GuardManager* cloned_key_manager =
+            key_manager->clone(cloned_root, clone_filter_fn);
+        if (cloned_key_manager) {
+          cloned_mgr->_key_value_managers[index].first =
+              std::unique_ptr<GuardManager>(cloned_key_manager);
+        }
+      }
+
+      if (value_manager) {
+        GuardManager* cloned_value_manager =
+            value_manager->clone(cloned_root, clone_filter_fn);
+        if (cloned_value_manager) {
+          cloned_mgr->_key_value_managers[index].second =
+              std::unique_ptr<GuardManager>(cloned_value_manager);
+        }
+      }
+    }
+    return cloned_mgr;
+  }
+
+  GuardManager* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_dict_guard_manager<DictGuardManager>(
+        cloned_root, clone_filter_fn);
+  }
+
  private:
   /**
    * Adds a new KeyDictGuardAccessor. If the accessor is already present, we
@@ -2455,7 +2707,43 @@ class DictSubclassGuardManager : public DictGuardManager {
     Py_DECREF(iterator);
     return GuardDebugInfo(true, num_guards_executed);
   }
+
+ public: // cloning functions
+  DictSubclassGuardManager(
+      RootGuardManager* cloned_root,
+      std::string source,
+      Py_ssize_t size,
+      PyTypeObject* _expected_type,
+      bool is_exact_dict_type,
+      std::vector<Py_ssize_t> indices)
+      : DictGuardManager(
+            cloned_root,
+            std::move(source),
+            size,
+            _expected_type,
+            is_exact_dict_type,
+            std::move(indices)) {}
+
+  GuardManager* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_dict_guard_manager<DictSubclassGuardManager>(
+        cloned_root, clone_filter_fn);
+  }
 };
+
+GuardManager* clone_guard_manager(
+    GuardManager* from,
+    RootGuardManager* cloned_root,
+    const py::function& clone_filter_fn) {
+  return from->clone(cloned_root, clone_filter_fn);
+}
+
+void add_relational_guard_resetter_to_cloned_root(
+    RootGuardManager* root,
+    std::shared_ptr<RelationalGuard> guard) {
+  root->add_relational_guard_resetter(std::move(guard));
+}
 
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
@@ -2537,90 +2825,40 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
  public:
   TORCH_FUNCTION_MODE_STACK(
       const py::list& initial_stack,
-      const py::list& ignored_types,
       py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)),
-        _ref_stack(),
-        _ignored_types() {
+      : LeafGuard(std::move(verbose_code_parts)), _ref_stack() {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
       this->_ref_stack.push_back(type);
     }
-
-    len = PyList_Size(ignored_types.ptr());
-    for (Py_ssize_t idx = 0; idx < len; idx++) {
-      PyObject* type_obj =
-          PyList_GetItem(ignored_types.ptr(), idx); // borrowed ref
-      if (PyType_Check(type_obj) == 0) {
-        PyErr_SetString(
-            PyExc_TypeError, "ignored_types should contain a list of types");
-        return;
-      }
-      PyTypeObject* type = (PyTypeObject*)type_obj;
-      this->_ignored_types.insert(type);
-    }
   }
 
   bool check_nopybind(PyObject* value) override {
     // Ignore value arg, only used to satisfy the interface
-    size_t ref_ind = 0;
-    const int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    int64_t idx = 0;
-    while ((idx < len) && (ref_ind < ref_stack_size)) {
+    if (len != ref_stack_size) {
+      return false;
+    }
+
+    for (int64_t idx = 0; (size_t)idx < len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      bool act_ignored = this->_ignored_types.count(mode_type) > 0;
-      bool ref_ignored =
-          this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0;
-      // skip ignored types
-      if (act_ignored && ref_ignored) {
-        idx++;
-        ref_ind++;
-        continue;
-      } else if (ref_ignored) {
-        ref_ind++;
-        continue;
-      } else if (act_ignored) {
-        idx++;
-        continue;
-      }
-      // if we already have more non-ignored modes than the ref stack
-      // or if the mode doesn't match at the current index, return false
-      else if (mode_type != _ref_stack.at(ref_ind)) {
-        return false;
-      }
-      ref_ind++;
-      idx++;
-    }
-
-    for (; ref_ind < ref_stack_size; ref_ind++) {
-      if (!(this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0)) {
+      if (mode_type != _ref_stack.at(idx)) {
         return false;
       }
     }
 
-    for (; idx < len; idx++) {
-      std::shared_ptr<c10::SafePyObject> mode =
-          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
-
-      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (!(this->_ignored_types.count(mode_type) > 0)) {
-        return false;
-      }
-    }
-
-    return ref_ind == ref_stack_size && idx == len;
+    return true;
   }
 
  private:
   std::vector<PyTypeObject*> _ref_stack;
-  std::set<PyTypeObject*> _ignored_types;
 };
 
 class TENSOR_MATCH : public LeafGuard {
@@ -2633,7 +2871,7 @@ class TENSOR_MATCH : public LeafGuard {
       py::object tensor_name,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
-        _tensor_name(py::cast<py::str>(std::move(tensor_name))) {
+        _tensor_name(py::cast<std::string>(std::move(tensor_name))) {
     root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -2762,6 +3000,23 @@ class GetAttrGuardAccessor : public GuardAccessor {
         ")";
   }
 
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetAttrGuardAccessor(GuardManager* guard_manager, GetAttrGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GetAttrGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(GetAttrGuardAccessor* to) {
+    to->_attr_name = _attr_name;
+  }
+
  private:
   // no need of py::object here because the attr_name is already passed on to
   // the base class as accessor_key which is a py::object.
@@ -2819,6 +3074,22 @@ class GetGenericDictGuardAccessor : public GuardAccessor {
     // Helpful when priting GuardManager tree structure.
     return "GetGenericDictGuardAccessor";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetGenericDictGuardAccessor(
+      GuardManager* guard_manager,
+      GetGenericDictGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GetGenericDictGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
 };
 
 /**
@@ -2870,6 +3141,23 @@ class GetItemGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     return "GetItemGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
         ")";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GetItemGuardAccessor(GuardManager* guard_manager, GetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GetItemGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(GetItemGuardAccessor* to) {
+    to->_attr_name = _attr_name;
   }
 
  private:
@@ -2931,8 +3219,28 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  DictGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      DictGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<DictGetItemGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(DictGetItemGuardAccessor* to) {
+    to->_key = _key;
+    to->_is_immutable_object = _is_immutable_object;
   }
 
  private:
@@ -2992,6 +3300,25 @@ class ListGetItemGuardAccessor : public GuardAccessor {
     return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
   }
 
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  ListGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      ListGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<ListGetItemGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(ListGetItemGuardAccessor* to) {
+    to->_index = _index;
+  }
+
  private:
   Py_ssize_t _index;
 };
@@ -3043,6 +3370,26 @@ class TupleGetItemGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TupleGetItemGuardAccessor(
+      GuardManager* guard_manager,
+      TupleGetItemGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<TupleGetItemGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(TupleGetItemGuardAccessor* to) {
+    to->_index = _index;
   }
 
  private:
@@ -3103,6 +3450,19 @@ class GradGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     // Helpful when priting GuardManager tree structure.
     return "GradGuardAccessor(grad)";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GradGuardAccessor(GuardManager* guard_manager, GradGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GradGuardAccessor>(cloned_root, clone_filter_fn);
   }
 };
 
@@ -3165,6 +3525,21 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     return "FuncDefaultsGuardAccessor";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  FuncDefaultsGuardAccessor(
+      GuardManager* guard_manager,
+      FuncDefaultsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<FuncDefaultsGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
 };
 
 /**
@@ -3226,6 +3601,22 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     return "FuncKwDefaultsGuardAccessor";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  FuncKwDefaultsGuardAccessor(
+      GuardManager* guard_manager,
+      FuncKwDefaultsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<FuncKwDefaultsGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
 };
 
 /**
@@ -3266,6 +3657,23 @@ class GlobalsGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     return "GlobalsGuardAccessor";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GlobalsGuardAccessor(GuardManager* guard_manager, GlobalsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GlobalsGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(GlobalsGuardAccessor* to) {
+    to->_globals_dict = _globals_dict;
   }
 
  private:
@@ -3310,6 +3718,21 @@ class TypeGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     return "TypeGuardAccessor";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TypeGuardAccessor(GuardManager* guard_manager, TypeGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<TypeGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(TypeGuardAccessor* to) {}
 };
 
 /**
@@ -3365,6 +3788,26 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
     return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
   }
 
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  TupleIteratorGetItemAccessor(
+      GuardManager* guard_manager,
+      TupleIteratorGetItemAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<TupleIteratorGetItemAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(TupleIteratorGetItemAccessor* to) {
+    to->_index = _index;
+  }
+
  private:
   Py_ssize_t _index;
 };
@@ -3408,8 +3851,19 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3429,13 +3883,44 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(weakref, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
     return "GlobalWeakRefGuardAccessor(" +
         py::str(_global_name).cast<std::string>() + ")";
+  }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  GlobalWeakRefGuardAccessor(
+      GuardManager* guard_manager,
+      GlobalWeakRefGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<GlobalWeakRefGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(GlobalWeakRefGuardAccessor* to) {
+    to->_global_name = _global_name;
   }
 
  private:
@@ -3468,8 +3953,19 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
       return false;
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return false;
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -3479,13 +3975,42 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
           false, std::string("Not a weakref obj ") + get_source(), 0);
     }
 
-    PyObject* x = PyWeakref_GetObject(obj); // borrowed ref
-    return _guard_manager->check_verbose_nopybind(x);
+    PyObject* x = nullptr;
+    if (PyWeakref_GetRef(obj, &x) == -1) { // strong reference
+      // error when attempting to call ref
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("Weakref_GetRef failed ") + get_source(), 0);
+    }
+    if (x == nullptr) {
+      // weakref is dead
+      x = Py_NewRef(Py_None);
+    }
+    auto result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string repr() const override {
     return "WeakRefCallGuardAccessor()";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  WeakRefCallGuardAccessor(
+      GuardManager* guard_manager,
+      WeakRefCallGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<WeakRefCallGuardAccessor>(cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(WeakRefCallGuardAccessor* to) {}
 };
 
 /**
@@ -3549,6 +4074,24 @@ class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
   std::string repr() const override {
     return "CallFunctionNoArgsGuardAccessor()";
   }
+
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CallFunctionNoArgsGuardAccessor(
+      GuardManager* guard_manager,
+      CallFunctionNoArgsGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<CallFunctionNoArgsGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(CallFunctionNoArgsGuardAccessor* to) {}
 };
 
 /**
@@ -3604,6 +4147,26 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
     return "PythonLambdaGuardAccessor";
   }
 
+ public: // cloning functions
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  PythonLambdaGuardAccessor(
+      GuardManager* guard_manager,
+      PythonLambdaGuardAccessor* from)
+      : GuardAccessor(guard_manager, from) {
+    from->clone_visitor(this);
+  }
+
+  GuardAccessor* clone(
+      RootGuardManager* cloned_root,
+      const py::function& clone_filter_fn) override {
+    return clone_common<PythonLambdaGuardAccessor>(
+        cloned_root, clone_filter_fn);
+  }
+
+  void clone_visitor(PythonLambdaGuardAccessor* to) {
+    to->_accessor_fn = _accessor_fn;
+  }
+
  private:
   py::object _accessor_fn;
 };
@@ -3647,6 +4210,38 @@ void install_no_tensor_aliasing_guard(
   }
 }
 
+double profile_guard_manager(RootGuardManager* root, py::object f_locals) {
+  PyObject* locals = f_locals.ptr();
+
+  // Warmup
+  for (int i = 0; i < 10; i++) {
+    root->check_nopybind(locals);
+  }
+
+  int count = 0;
+  auto start = std::chrono::high_resolution_clock::now();
+  float profile_duration = 1.0;
+
+  // Run the loop for profile_duration seconds
+  while (true) {
+    root->check_nopybind(locals);
+    count++;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    // Break the loop if 1 second has passed
+    if (elapsed.count() >= 1.0) {
+      break;
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> total_elapsed = end - start;
+
+  // Calculate the average time per iteration in microseconds
+  return (total_elapsed.count() * profile_duration * 1e6) / count;
+}
+
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
@@ -3660,11 +4255,19 @@ static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
 }
 
 void* convert_to_root_guard_manager(py::object root) {
+  // For invalidated guards, return nullptr
+  if (root.is(py::none())) {
+    return nullptr;
+  }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
   return (void*)root_mgr;
 }
 
 bool run_root_guard_manager(void* root, PyObject* f_locals) {
+  // for invalidated guards, return false
+  if (root == nullptr) {
+    return false;
+  }
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
@@ -3698,6 +4301,10 @@ PyObject* torch_c_dynamo_guards_init() {
   auto m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
+
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
 
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
@@ -3785,7 +4392,7 @@ PyObject* torch_c_dynamo_guards_init() {
       LeafGuard,
       std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
       py_m, "TORCH_FUNCTION_MODE_STACK")
-      .def(py::init<py::list, py::list, py::list>())
+      .def(py::init<py::list, py::list>())
       .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
@@ -3918,6 +4525,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
+      .def("fail_count", &GuardManager::fail_count)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
@@ -4022,10 +4630,9 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_torch_function_mode_stack_guard",
           [](GuardManager& self,
              const py::list& initial_stack,
-             const py::list& ignored_types,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
-                initial_stack, ignored_types, std::move(verbose_code_parts)));
+                initial_stack, std::move(verbose_code_parts)));
           })
       .def(
           "add_data_ptr_guard",
@@ -4325,6 +4932,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<>())
       .def("check", &RootGuardManager::check)
       .def("check_verbose", &RootGuardManager::check_verbose)
+      .def(
+          "clone_manager",
+          &RootGuardManager::clone_manager,
+          py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(
@@ -4469,6 +5080,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
       "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
+  py_m.def("profile_guard_manager", profile_guard_manager);
 
 // initialize dict_version_map watcher for 3.12
 #if IS_PYTHON_3_12_PLUS

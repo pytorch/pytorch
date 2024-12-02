@@ -65,7 +65,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
-    TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
@@ -95,7 +94,6 @@ except ModuleNotFoundError:
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
-@unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
@@ -337,6 +335,7 @@ class TestProfiler(TestCase):
     )
     @serialTest()
     @parametrize("work_in_main_thread", [True, False])
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
 
@@ -1452,6 +1451,7 @@ class TestProfiler(TestCase):
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_kineto_profiler_with_environment_variable(self):
         script = """
 import torch
@@ -1685,7 +1685,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" in args)
                         self.assertTrue("grid" in args)
@@ -1713,7 +1713,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 ]
                 for e in op_events:
                     if e["name"] == "add_test_kwinputs":
-                        print(e["args"])
+                        # print(e["args"])
                         args = e["args"]
                         self.assertTrue("stream" not in args)
                         self.assertTrue("grid" not in args)
@@ -1957,6 +1957,9 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             record_shapes=True,
             with_stack=True,
             schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                adjust_profiler_step=True
+            ),
         ) as prof:
             for i in range(5):
                 self._step_helper_func(prof)
@@ -2041,6 +2044,82 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         p.events()
         self.assertGreater(stats.function_events_build_tree_call_duration_us, 0)
         self.assertGreater(stats.number_of_events, 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(
+        torch.cuda.is_available(), "CUDA complains about forking after init"
+    )
+    @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    def test_forked_process(self):
+        # Induce a pid cache by running the profiler with payload
+        def validate_forked_json(profiler):
+            nonlocal cpu_op_found, parent_tid, child_pid
+            with TemporaryFileName(mode="w+") as fname:
+                profiler.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    for event in events:
+                        if "cat" in event and event["cat"] == "cpu_op":
+                            self.assertEqual(event["pid"], child_pid)
+                            self.assertNotEqual(event["tid"], parent_tid)
+                            cpu_op_found = True
+
+        cpu_op_found = False
+        parent_tid = threading.current_thread().ident
+        with profile() as p:
+            self.payload()
+        pid = os.fork()
+        if pid == 0:
+            child_pid = os.getpid()
+            with profile() as p:
+                self.payload()
+            validate_forked_json(p)
+            self.assertTrue(cpu_op_found)
+            os._exit(0)
+        else:
+            os.waitpid(pid, 0)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_skip_first_wait(self):
+        # Other tests test when skip_first_wait is false (default) so just test the true case
+        test_schedule = torch.profiler.schedule(
+            skip_first=3, wait=5, warmup=1, active=2, repeat=2, skip_first_wait=1
+        )
+        test_schedule_expected_outputs = [
+            # repeat No. 1 begin
+            # skip first 3
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
+            ProfilerAction.WARMUP,
+            # active 1 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            # active 1 end
+            # repeat No. 1 end
+            # ---
+            # repeat No. 2 begin
+            # wait 5
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            # warmup 1
+            ProfilerAction.WARMUP,
+            # active 2 begin
+            ProfilerAction.RECORD,
+            ProfilerAction.RECORD_AND_SAVE,
+            # active 2 end
+            # repeat No. 2 end
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+            ProfilerAction.NONE,
+        ]
+        for step in range(len(test_schedule_expected_outputs)):
+            self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
 
 class SimpleNet(nn.Module):

@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -34,6 +35,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
+from .types import DynamoFrameType
 from .utils import same
 
 
@@ -93,9 +95,7 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            for inp in example:
-                if isinstance(inp, torch.Tensor):
-                    results.append(inp.grad)
+            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)
@@ -163,7 +163,7 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 
 def debug_insert_nops(
-    frame: types.FrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
+    frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
 ) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
@@ -187,9 +187,10 @@ def debug_insert_nops(
         local_scope=locals(),
         global_scope=globals(),
         f_code=frame.f_code,
+        torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
+    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
 
 
 class CompileCounter:
@@ -242,6 +243,37 @@ class EagerAndRecordGraphs:
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
+
+
+class AotEagerAndRecordGraphs:
+    def __init__(self) -> None:
+        self.graphs: List[torch.fx.GraphModule] = []
+        self.fw_graphs: List[torch.fx.GraphModule] = []
+        self.bw_graphs: List[torch.fx.GraphModule] = []
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
+        self.graphs.append(gm)
+
+        def fw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.fw_graphs.append(gm)
+            return gm.forward
+
+        def bw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.bw_graphs.append(gm)
+            return gm.forward
+
+        return aot_eager(
+            gm,
+            example_inputs,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+        )
 
 
 def strip_comment(code: str) -> str:
@@ -347,6 +379,11 @@ def rand_strided(
 
 
 _T = TypeVar("_T")
+
+
+def check_dynamic_shape_capture() -> bool:
+    # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
+    return not config.assume_static_by_default
 
 
 def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:

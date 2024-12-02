@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: quantization"]
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import torch
 from torch import Tensor
-from torch._export import capture_pre_autograd_graph
-from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
 from torch.ao.quantization import observer, ObserverOrFakeQuantize, QConfigMapping
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qconfig,
@@ -20,6 +18,7 @@ from torch.ao.quantization.quantize_pt2e import (
 )
 from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
+    EdgeOrNode,
     FixedQParamsQuantizationSpec,
     QuantizationAnnotation,
     QuantizationSpec,
@@ -40,7 +39,9 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
     OP_TO_ANNOTATOR,
     QuantizationConfig,
 )
+from torch.export import export_for_training
 from torch.fx import Node
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -50,9 +51,10 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfHpu,
     TemporaryFileName,
     TEST_CUDA,
-    TEST_WITH_ROCM,
+    TEST_HPU,
 )
 
 
@@ -766,10 +768,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5))
 
         # program capture
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
         m = prepare_pt2e(m, BackendAQuantizer())
         # make sure the two observers for input are shared
         conv_output_obs = []
@@ -829,10 +831,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
         # program capture
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         # make sure the two input observers and output are shared
@@ -1151,10 +1153,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
         # program capture
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
         quantizer = BackendAQuantizer()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
@@ -1172,39 +1174,44 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
+    class DtypeActQuantizer(Quantizer):
+        def __init__(self, quant_dtype, op_name):
+            self.quant_dtype = quant_dtype
+            self.op_name = op_name
+
+        def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+            quant_dtype = self.quant_dtype
+            info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
+            activate_qspec = QuantizationSpec(
+                dtype=quant_dtype,
+                quant_min=int(info_fun(quant_dtype).min),
+                quant_max=int(info_fun(quant_dtype).max),
+                qscheme=torch.per_tensor_affine,
+                is_dynamic=False,
+                observer_or_fake_quant_ctr=observer.default_observer,
+            )
+            int8_qspec = QuantizationSpec(
+                dtype=torch.int8,
+                quant_min=-128,
+                quant_max=127,
+                qscheme=torch.per_tensor_symmetric,
+                is_dynamic=False,
+                observer_or_fake_quant_ctr=observer.default_weight_observer,
+            )
+            quantization_config = QuantizationConfig(
+                input_activation=activate_qspec,
+                weight=int8_qspec,
+                bias=None,
+                output_activation=activate_qspec,
+            )
+            OP_TO_ANNOTATOR[self.op_name](model, quantization_config)
+
+        def validate(self, model: torch.fx.GraphModule) -> None:
+            pass
+
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("quant_dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
     def test_quantization_dtype(self, dtype, quant_dtype):
-        class DtypeActQuantizer(Quantizer):
-            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                info_fun = torch.iinfo if quant_dtype == torch.int16 else torch.finfo
-                activate_qspec = QuantizationSpec(
-                    dtype=quant_dtype,
-                    quant_min=int(info_fun(quant_dtype).min),
-                    quant_max=int(info_fun(quant_dtype).max),
-                    qscheme=torch.per_tensor_affine,
-                    is_dynamic=False,
-                    observer_or_fake_quant_ctr=observer.default_observer,
-                )
-                int8_qspec = QuantizationSpec(
-                    dtype=torch.int8,
-                    quant_min=-128,
-                    quant_max=127,
-                    qscheme=torch.per_tensor_symmetric,
-                    is_dynamic=False,
-                    observer_or_fake_quant_ctr=observer.default_weight_observer,
-                )
-                quantization_config = QuantizationConfig(
-                    input_activation=activate_qspec,
-                    weight=int8_qspec,
-                    bias=None,
-                    output_activation=activate_qspec,
-                )
-                OP_TO_ANNOTATOR["conv"](model, quantization_config)
-
-            def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
         class M(torch.nn.Module):
             def __init__(self, dtype):
                 super().__init__()
@@ -1213,7 +1220,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        quantizer = DtypeActQuantizer()
+        quantizer = self.DtypeActQuantizer(quant_dtype=quant_dtype, op_name="conv")
         node_occurrence = {
             # one for input of the first conv, one for output for the first conv
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
@@ -1303,7 +1310,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = M().eval()
         example_inputs = torch.randn(1, 2, 3, 3)
-        m = capture_pre_autograd_graph(m, (example_inputs,))
+        m = export_for_training(m, (example_inputs,)).module()
         with self.assertRaises(Exception):
             m = prepare_pt2e(m, BackendAQuantizer())
 
@@ -1426,10 +1433,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = capture_pre_autograd_graph(
+        m = export_for_training(
             m,
             example_inputs,
-        )
+        ).module()
         weight_meta = None
         for n in m.graph.nodes:
             if (
@@ -1449,9 +1456,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 for key in n.meta:
                     self.assertEqual(n.meta[key], weight_meta[key])
 
-    def test_save_load(self):
+    @parametrize("quant_dtype", (torch.float32, torch.float8_e5m2, torch.float8_e4m3fn))
+    def test_save_load(self, quant_dtype=None):
         """Test save/load a quantized model"""
-        m = self._get_pt2e_quantized_linear()
+        quantizer = None
+        if quant_dtype != torch.float32:
+            quantizer = self.DtypeActQuantizer(quant_dtype=quant_dtype, op_name="conv")
+        m = self._get_pt2e_quantized_linear(quantizer=quantizer)
         example_inputs = (torch.randn(2, 2),)
         ref_res = m(*example_inputs)
 
@@ -1516,7 +1527,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         quantizer = TestQuantizer()
         example_inputs = (torch.randn(1, 2, 3, 3),)
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         node_occurrence = {
@@ -1567,7 +1578,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.randn(1, 2, 3, 3),
             torch.randn(1, 2, 3, 3),
         )
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         node_occurrence = {
@@ -1822,7 +1833,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1),)
         m = M().train()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         if inplace:
             target = torch.ops.aten.dropout_.default
         else:
@@ -1856,31 +1867,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_move_exported_model_dropout(inplace=True)
 
     def _get_bn_train_eval_ops(self):
-        if capture_pre_autograd_graph_using_training_ir():
-            return (
-                torch.ops.aten.batch_norm.default,
-                torch.ops.aten.batch_norm.default,
-            )
-        # TODO: This branch is going through a deprecated branch and should be deleted soon,
-        # after capture_pre_autograd_graph fully migrate to training IR
-        # T199018392
-        if TEST_WITH_ROCM:
-            return (
-                torch.ops.aten.miopen_batch_norm.default,
-                torch.ops.aten.miopen_batch_norm.default,
-            )
-        elif TEST_CUDA:
-            return (
-                torch.ops.aten.cudnn_batch_norm.default,
-                torch.ops.aten.cudnn_batch_norm.default,
-            )
-        else:
-            return (
-                torch.ops.aten._native_batch_norm_legit.default,
-                torch.ops.aten._native_batch_norm_legit_no_training.default,
-            )
+        return (
+            torch.ops.aten.batch_norm.default,
+            torch.ops.aten.batch_norm.default,
+        )
 
-    def test_move_exported_model_bn(self):
+    def test_move_exported_model_bn(self, device):
         """
         Test switching batch_norm behavior between train and eval modes using
         `move_exported_model_to_eval` and `move_exported_model_to_train` APIs.
@@ -1894,14 +1886,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        if TEST_CUDA:
-            m = M().train().cuda()
-            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+        if TEST_CUDA or TEST_HPU:
+            m = M().train().to(device)
+            example_inputs = (torch.randn((1, 3, 3, 3), device=device),)
+
         else:
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
         bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
 
         # Assert that batch norm op exists and is in train mode
         bn_node = self._get_node(m, bn_train_op)
@@ -1932,7 +1925,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
 
         # After export: this is not OK
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1953,6 +1946,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
+    @skipIfHpu
     def test_allow_exported_model_train_eval(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -1972,7 +1966,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
         bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
 
         def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
             targets = [n.target for n in m.graph.nodes]
@@ -2029,7 +2023,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
-        exported_gm = capture_pre_autograd_graph(m, example_inputs)
+        exported_gm = export_for_training(m, example_inputs).module()
         fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
         self.assertTrue(
             torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm)
@@ -2047,7 +2041,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
         )
-        m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
         m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
         m(*example_inputs)
         m.conv_bn_relu = convert_pt2e(m.conv_bn_relu)
@@ -2055,7 +2049,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer = XNNPACKQuantizer().set_module_type(
             torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False)
         )
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         m = prepare_pt2e(m, quantizer)
         m = convert_pt2e(m)
 
@@ -2227,7 +2221,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         def dynamic_quantize_pt2e(model, example_inputs):
             torch._dynamo.reset()
-            model = capture_pre_autograd_graph(model, example_inputs)
+            model = export_for_training(model, example_inputs).module()
             # Per channel quantization for weight
             # Dynamic quantization for activation
             # Please read a detail: https://fburl.com/code/30zds51q
@@ -2330,7 +2324,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1, 3, 5, 5),)
         m = M()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         quantizer = XNNPACKQuantizer().set_global(
             get_symmetric_quantization_config(),
         )
@@ -2354,5 +2348,104 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = convert_pt2e(m)
         m(*example_inputs)
 
+    def test_prepare_obs_or_fq_callback(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = torch.nn.functional.max_pool2d(x, 2, 2)
+                x = torch.nn.functional.pixel_shuffle(x, 2)
+                return x.permute(0, 2, 3, 1)
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = QuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                for node in model.graph.nodes:
+                    if node.op == "call_function" and node.target in (
+                        torch.ops.aten.max_pool2d.default,
+                        torch.ops.aten.permute.default,
+                        torch.ops.aten.pixel_shuffle.default,
+                    ):
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                node.args[0]: act_qspec,
+                            },
+                            output_qspec=SharedQuantizationSpec((node.args[0], node)),
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+            def prepare_obs_or_fq_callback(
+                self,
+                model: torch.fx.GraphModule,
+                edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+            ) -> None:
+                # hard code output quant by updating entire sharing group
+                output_node = next(n for n in model.graph.nodes if n.op == "output")
+                output_value = output_node.args[0][0]
+                old_observer = edge_or_node_to_obs_or_fq[output_value]
+                sharing_group = [
+                    k for k, v in edge_or_node_to_obs_or_fq.items() if v is old_observer
+                ]
+                new_observer = observer.FixedQParamsObserver(
+                    scale=0.125,
+                    zero_point=42,
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                )
+                for x in sharing_group:
+                    edge_or_node_to_obs_or_fq[x] = new_observer
+
+        example_inputs = (torch.rand(1, 32, 16, 16),)
+        gm = export_for_training(Model().eval(), example_inputs).module()
+        gm = prepare_pt2e(gm, BackendAQuantizer())
+        gm = convert_pt2e(gm)
+        for n in gm.graph.nodes:
+            if n.op == "call_function" and n.target in (
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ):
+                # Entire graph share the same qspec which was overriden by FixedQParamsObserver
+                self.assertEqual(n.args[1], 0.125)
+                self.assertEqual(n.args[2], 42)
+
+    def test_preserve_nn_module_stack(self):
+        """Test we can preserve nn_module_stack on replaced pattern's nodes"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
+        )
+
+        def check_nn_module(node):
+            self.assertTrue("nn_module_stack" in node.meta)
+            self.assertTrue(
+                "ConvWithBNRelu" in node.meta["nn_module_stack"]["L__self__"][1]
+            )
+
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.op not in ["placeholder", "output", "get_attr"]:
+                check_nn_module(node)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.name == "mul":
+                check_nn_module(node)
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
+
+devices = ["cpu", "cuda"]
+if TEST_HPU:
+    devices.append("hpu")
+instantiate_device_type_tests(TestQuantizePT2E, globals(), only_for=devices)

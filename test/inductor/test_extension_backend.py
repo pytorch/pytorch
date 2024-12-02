@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import os
-import shutil
 import sys
 import unittest
 
@@ -23,6 +22,8 @@ except ImportError:
         ExtensionWrapperCodegen,
     )
 
+from filelock import FileLock, Timeout
+
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
 from torch._inductor.codegen import cpp_utils
@@ -31,7 +32,7 @@ from torch._inductor.codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS, xfailIfS390X
 
 
 try:
@@ -49,25 +50,26 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
-def remove_build_path():
-    if sys.platform == "win32":
-        # Not wiping extensions build folder because Windows
-        return
-    default_build_root = torch.utils.cpp_extension.get_default_build_root()
-    if os.path.exists(default_build_root):
-        shutil.rmtree(default_build_root, ignore_errors=True)
-
-
-@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class ExtensionBackendTests(TestCase):
+@xfailIfS390X
+class BaseExtensionBackendTests(TestCase):
     module = None
+
+    # Use a lock file so that only one test can build this extension at a time
+    lock_file = "extension_device.lock"
+    lock = FileLock(lock_file)
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
 
+        try:
+            cls.lock.acquire(timeout=600)
+        except Timeout:
+            # This shouldn't happen, still attempt to build the extension anyway
+            pass
+
         # Build Extension
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
             source_file_path, "extension_backends/cpp/extension_device.cpp"
@@ -86,7 +88,11 @@ class ExtensionBackendTests(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
-        remove_build_path()
+        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+
+        if os.path.exists(cls.lock_file):
+            os.remove(cls.lock_file)
+        cls.lock.release()
 
     def setUp(self):
         torch._dynamo.reset()
@@ -105,6 +111,9 @@ class ExtensionBackendTests(TestCase):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+class ExtensionBackendTests(BaseExtensionBackendTests):
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
         torch._register_device_module("extension_device", self.module)

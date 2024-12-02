@@ -1,10 +1,12 @@
-# mypy: allow-untyped-defs
 import threading
 from contextlib import contextmanager
+from typing import Any, Generator, Tuple
 
 import torch
 
 
+# See [Note: Metadata mutation in proxy tracing] for why sacrificial parameter mutates
+# metadata during proxy tracing and we should remove the sacrificial parameter logic.
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
 with AOTAutograd.  We instead create a placeholder torch.nn.Parameter before the graph, which
@@ -17,22 +19,27 @@ allowed to compute gradients on).
 
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, tensor, placeholder):
+    def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
         assert not tensor.requires_grad
         return placeholder.set_(tensor)
 
     @staticmethod
-    def backward(ctx, grad):
+    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> Tuple[None, torch.Tensor]:
+        grad = grad_outputs[0]
         return None, grad  # grad flows to placeholder
 
 
-def tracable_create_parameter(tensor, placeholder):
+def tracable_create_parameter(
+    tensor: torch.Tensor, placeholder: torch.nn.Parameter
+) -> torch.nn.Parameter:
     with torch.set_grad_enabled(placeholder.requires_grad):
         out = TracableCreateParameter.apply(tensor, placeholder)
     return out
 
 
-def new_parameter_placeholder(size, dtype, device, requires_grad):
+def new_parameter_placeholder(
+    size: Tuple[int, ...], dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> torch.nn.Parameter:
     """Create a placeholder to be passed to the above functions"""
     result = torch.nn.Parameter(
         torch.empty(size, dtype=dtype, device=device), requires_grad=requires_grad
@@ -47,7 +54,7 @@ _TLS = threading.local()
 
 
 @contextmanager
-def do_not_convert_to_tracable_parameter():
+def do_not_convert_to_tracable_parameter() -> Generator[bool, None, None]:
     old_flag = getattr(_TLS, "convert_tracable_parameter", True)
     _TLS.convert_tracable_parameter = False
     try:
@@ -56,5 +63,5 @@ def do_not_convert_to_tracable_parameter():
         _TLS.convert_tracable_parameter = old_flag
 
 
-def can_convert_to_tracable_parameter():
+def can_convert_to_tracable_parameter() -> bool:
     return getattr(_TLS, "convert_tracable_parameter", True)

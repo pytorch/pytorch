@@ -13,7 +13,7 @@ from torch.library import impl, Library
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 
-_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.int16, torch.int32]
+_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.uint16, torch.int16, torch.int32]
 _FLOAT_DTYPES = [torch.float8_e5m2, torch.float8_e4m3fn]
 
 _DTYPE_TO_QVALUE_BOUNDS = {
@@ -1185,3 +1185,22 @@ def fake_quant_per_channel_meta(
     quant_max: int,
 ) -> torch.Tensor:
     return torch.empty_like(input)
+
+
+quantized_decomposed_lib.define(
+    "convert_element_type.no_fuse(Tensor input, ScalarType dtype) -> Tensor"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "convert_element_type.no_fuse",
+    "CompositeExplicitAutograd",
+)
+def convert_element_type(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.ops.prims.convert_element_type.default(input, dtype)
+
+
+@impl(quantized_decomposed_lib, "convert_element_type.no_fuse", "Meta")
+def convert_element_type_meta(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.empty_like(input, dtype=dtype)
