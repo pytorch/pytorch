@@ -378,15 +378,22 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     if (max_elements_per_tensor == 0)
       continue;
 
+    dim3 applyBlock, catGrid;
+
 #ifdef USE_ROCM
     // always base grid size on max_elements_per_tensor
-    auto [catGrid, applyBlock] = getCatGridRocm<scalar_t>(
+    {
+      std::tuple<dim3, dim3> launchParams = getCatGridRocm<scalar_t>(
           max_elements_per_tensor, batchCounter);
+      catGrid = std::get<0>(launchParams);
+      applyBlock = std::get<1>(launchParams);
+    }
 #else
-    dim3 applyBlock, catGrid;
     if (isContig && sizeof(scalar_t) > 2) {
-      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
+      std::tuple<dim3, dim3> launchParams = getCatGridContig<scalar_t>(
           max_elements_per_tensor, batchCounter);
+      catGrid = std::get<0>(launchParams);
+      applyBlock = std::get<1>(launchParams);
     } else {
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);

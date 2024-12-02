@@ -2709,7 +2709,8 @@ void lstm_cudnn(
       bidirectional,
       batch_first);
   output = result.first;
-  std::tie(hy, cy) = result.second;
+  hy = std::get<0>(result.second);
+  cy = std::get<1>(result.second);
 }
 
 void lstm_packed_cudnn(
@@ -2737,7 +2738,8 @@ void lstm_packed_cudnn(
       train,
       bidirectional);
   output = result.first;
-  std::tie(hy, cy) = result.second;
+  hy = std::get<0>(result.second);
+  cy = std::get<1>(result.second);
 }
 
 REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn)

@@ -3210,12 +3210,16 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   scalar_t x = ::abs(_x);
 
   if (x <= scalar_t{8.0}) {
-    auto [A, len] = chebyshev_coefficients_i0e_A<scalar_t>();
+    auto coeff_pair = chebyshev_coefficients_i0e_A<scalar_t>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
     scalar_t y = (x / scalar_t{2.0}) - scalar_t{2.0};
     return (::exp(x) * chbevl(y, A, len));
   }
 
-  auto [B, len] = chebyshev_coefficients_i0e_B<scalar_t>();
+  auto coeff_pair = chebyshev_coefficients_i0e_B<scalar_t>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
   return (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x));
 }
 
@@ -3330,13 +3334,17 @@ template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1(scalar_t _x) {
   const auto x = ::abs(_x);
   if (x <= scalar_t{8.0}) {
-    auto [A, len] = chebyshev_coefficients_i1e_A<scalar_t>();
+    auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
     scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
     const scalar_t out = ::exp(x) * x * chbevl(y, A, len);
     return (_x < scalar_t{0.0}) ? -out : out;
   }
 
-  auto [B, len] = chebyshev_coefficients_i1e_B<scalar_t>();
+  auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
   const scalar_t out = (::exp(x) * chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len)) / ::sqrt(x);
   return (_x < scalar_t{0.0}) ? -out : out;
 }
@@ -3345,13 +3353,17 @@ template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   const auto x = ::abs(_x);
   if (x <= scalar_t{8.0}) {
-    auto [A, len] = chebyshev_coefficients_i1e_A<scalar_t>();
+    auto coeff_pair = chebyshev_coefficients_i1e_A<scalar_t>();
+    auto A = std::get<0>(coeff_pair);
+    auto len = std::get<1>(coeff_pair);
     const scalar_t y = x / scalar_t{2.0} - scalar_t{2.0};
     const scalar_t out = chbevl(y, A, len) * x;
     return (_x < scalar_t{0.0}) ? -out : out;
   }
 
-  auto [B, len] = chebyshev_coefficients_i1e_B<scalar_t>();
+  auto coeff_pair = chebyshev_coefficients_i1e_B<scalar_t>();
+  auto B = std::get<0>(coeff_pair);
+  auto len = std::get<1>(coeff_pair);
   const scalar_t out = chbevl(scalar_t{32.0} / x - scalar_t{2.0}, B, len) / ::sqrt(x);
   return (_x < scalar_t{0.0}) ? -out : out;
 }

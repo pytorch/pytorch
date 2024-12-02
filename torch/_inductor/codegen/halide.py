@@ -673,10 +673,10 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        *groups,
         **kwargs,
     ) -> None:
-        super().__init__(tiling, **kwargs)
+        super().__init__(*groups, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -818,7 +818,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    if tree.is_reduction:
+                    if tree.prefix == "r":
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )

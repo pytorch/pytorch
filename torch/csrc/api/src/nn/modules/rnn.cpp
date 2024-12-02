@@ -507,7 +507,10 @@ std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
           torch::enumtype::get_enum_name(options_base.mode()));
     }
   }
-  return result;
+  auto output = std::get<0>(result);
+  auto hidden = std::get<1>(result);
+
+  return std::make_tuple(output, hidden);
 }
 
 std::tuple<Tensor, Tensor> RNNImpl::forward(const Tensor& input, Tensor hx) {
@@ -752,7 +755,10 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
         this->is_training(),
         options.bidirectional());
   }
-  return result;
+  auto output = std::get<0>(result);
+  auto hidden = std::get<1>(result);
+
+  return std::make_tuple(output, hidden);
 }
 
 std::tuple<Tensor, Tensor> GRUImpl::forward(const Tensor& input, Tensor hx) {
