@@ -252,7 +252,22 @@ def maybe_realign_inputs(
 
 
 class CompiledFxGraphConstants:
-    """Wrapper class that gets constants from a compiled fx graph"""
+    """Wrapper class that unwraps constants from a compiled fx graph. This
+    version of the class only supports directly grabbing the saved constants off of
+    a CompiledFxGraph.
+
+    With freezing, FxGraphCache doesn't store the constants of the input
+    GraphModule it gets from AOTAutograd. Instead, it saves just the **names**
+    of those constants, and grabs the constant values directly from the graph module
+    passed in at runtime.
+
+    Thing is, we don't always *have* the graph module available at runtime, hence
+    the existence of this class and its CompiledFxGraphConstantsWithGm counterpart.
+
+    To support freezing, FXGraphCache gets passed a CompiledFxGraphConstantsWithGm during
+    post compile. Otherwise, CompiledFxGraphConstants supports the basic case of loading
+    the value of constants directly off of the original saved object.
+    """
 
     def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
         assert g.constants is not None
@@ -261,9 +276,11 @@ class CompiledFxGraphConstants:
 
 class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     """
-    Wrapper class that gets constants from a compiled fx graph
-    In the case of freezing, we actually grab the constants from the
-    new fx graph at runtime, using the original allocated constant names.
+    This version of CompiledFxGraphConstants, instead of grabbing constants
+    directly saved on CompiledFxGraphs, will just grab their names. Then, it takes
+    a second GraphModule to grab the corresponding constant values out of.
+
+    This is necessary for supporting freezing in FxGraphCache.
     """
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
@@ -531,3 +548,26 @@ class CompiledAOTI:
 
 def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
     return h
+
+
+@dataclasses.dataclass
+class MockFXGraphCacheOutput(OutputCode):
+    gm: Any
+    _fx_graph_cache_key: Optional[str]
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int]
+
+    def __init__(self, gm: Any, key: Optional[str]) -> None:
+        self.gm = gm
+        self._fx_graph_cache_key = key
+        self._time_taken_ns = 0
+        self._boxed_call = True
+
+    def post_compile(self, example_inputs, cudagraphs, constants) -> None:
+        pass
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        return self.gm(inputs)
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
