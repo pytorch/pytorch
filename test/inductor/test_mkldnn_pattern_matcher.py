@@ -668,8 +668,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
+        if dim == 4:
+            input_shapes = [
+                (2, 3, 56, 56),
+            ]
+            other_shapes = [(2, 16, 1, 1), (1, 16, 1, 1), (1, 1, 1, 1)]
+        else:
+            input_shapes = [
+                (2, 3, 20, 56, 56),
+            ]
+            other_shapes = [(2, 16, 1, 1, 1), (1, 16, 1, 1, 1), (1, 1, 1, 1, 1)]
         options = itertools.product(
             binary_list,
+            input_shapes,
+            other_shapes,
             [True, False],
             test_memory_format,
             dtypes,
@@ -677,17 +689,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for (
             binary_fn,
+            x_shape,
+            other_shape,
             has_relu,
             memory_format,
             dtype,
         ) in options:
             metrics.reset()
-            if dim == 4:
-                x_shape = (1, 3, 56, 56)
-                other_shape = (1, 16, 1, 1)
-            else:
-                x_shape = (1, 3, 20, 56, 56)
-                other_shape = (1, 16, 1, 1, 1)
             mod = M(binary_fn, has_relu).eval()
             x = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
@@ -794,12 +802,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             [
                 [2, 10],
             ],
+            [[1, 30], [1, 1]],
             [True, False],
             dtypes,
         )
         out_feature = 30
 
-        for binary_fn, input_shape, bias, dtype in options:
+        for binary_fn, input_shape, other_shape, bias, dtype in options:
             metrics.reset()
             # addmm(mm) + (linear+add)
             match_count = 2
@@ -811,7 +820,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 match_nodes = match_nodes + 8 if is_inplace else match_nodes + 5
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
-            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
+            other = torch.randn(other_shape).to(dtype)
             self._test_common(
                 mod,
                 (
