@@ -309,7 +309,7 @@ def transpose_w(
 
 def expand_bias(
     B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
-) -> Union[ir.IRNode, torch.Tensor]:
+) -> Optional[Union[ir.IRNode, torch.Tensor]]:
     """
     Expand Bias to the same size of X.
     """
@@ -323,7 +323,6 @@ def expand_bias(
             assert isinstance(B, torch.Tensor)
             assert isinstance(X, torch.Tensor)
             B = B.expand(X.shape[0], B.shape[-1])
-    assert B is not None
     return B
 
 
