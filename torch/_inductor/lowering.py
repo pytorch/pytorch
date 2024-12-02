@@ -2340,6 +2340,13 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
+        # effn_attn_fwd does requires dense last dim, not just alignment
+        effn_attn_fwd_bias = (
+            fx_node.target
+            == torch.ops.aten._scaled_dot_product_efficient_attention.default
+            and idx == 3
+        )
+
         assert isinstance(arg, TensorBox)
         if len(arg.get_size()) not in (3, 4):
             return arg
@@ -2350,9 +2357,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 for i in range(len(x.get_stride()) - 1)
             )
             # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+            aligned_last_dim = V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1 or (
+                V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+                and not effn_attn_fwd_bias
             )
             return aligned_last_dim and aligned_strides
 
@@ -2362,8 +2369,12 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 return V.graph.try_match_insignificant_strides(
                     ir.ExternKernel.realize_input(arg), meta_stride
                 )
+
         except AttributeError:
             pass
+
+        if effn_attn_fwd_bias:
+            return ir.ExternKernel.require_stride1(arg)
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
