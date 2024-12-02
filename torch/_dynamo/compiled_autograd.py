@@ -5,6 +5,7 @@ import operator
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
@@ -26,7 +27,6 @@ from torch.fx.experimental.proxy_tensor import (
     PythonKeyTracer,
     track_tensor_tree,
 )
-import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._ordered_set import OrderedSet
@@ -56,7 +56,9 @@ def maybe_clone(x):
         return clone_preserve_strides(x)
     return x
 
+
 counter = 0
+
 
 class OpNamespace:
     def __init__(self):
@@ -72,6 +74,7 @@ class OpNamespace:
         torch._dynamo.allow_in_graph(result)
         setattr(self, name, result)
         return result
+
 
 class Op:
     def __init__(self, name, fn):
@@ -237,16 +240,17 @@ class AutogradCompilerInstance:
         if self.old_inline_behavior:
             result = fn(inputs, *stack)
             return result
-        # TODO: if the node is a python autograd.Function or a CompiledFunctionBackward,
+        # TODO: if the node is a python autograd.Function or a CompiledFunctionBackward
         # we should probably "plop" the subgraph into the graph instead
         # of allow_in_graph the node through Dynamo.
-        proxy_inputs, proxy_stack = pytree.tree_map(lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,  (inputs, stack))
+        proxy_inputs, proxy_stack = pytree.tree_map(
+            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            (inputs, stack),
+        )
         op = ops.add(debug_name, fn)
         proxy_out = self.fx_tracer.create_proxy(
-            "call_function",
-            op,
-            args=(proxy_inputs, *proxy_stack),
-            kwargs={})
+            "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
+        )
         result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
@@ -260,13 +264,14 @@ class AutogradCompilerInstance:
             # print("end validate outputs")
             # breakpoint()
             return result
-        proxy_outputs, proxy_stack = pytree.tree_map(lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t, (outputs, stack))
+        proxy_outputs, proxy_stack = pytree.tree_map(
+            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            (outputs, stack),
+        )
         op = ops.add("validate_outputs", fn)
         new_proxy_outputs = self.fx_tracer.create_proxy(
-            "call_function",
-            op,
-            args=(proxy_outputs, *proxy_stack),
-            kwargs={})
+            "call_function", op, args=(proxy_outputs, *proxy_stack), kwargs={}
+        )
         self.bind_tensors_to_proxies(outputs, new_proxy_outputs)
         return outputs
 
@@ -276,10 +281,8 @@ class AutogradCompilerInstance:
         old_var_proxy = self.to_proxy(old_var)
         new_var_proxy = self.to_proxy(new_var)
         proxy_out = self.fx_tracer.create_proxy(
-            "call_function",
-            torch.add,
-            args=(old_var_proxy, new_var_proxy),
-            kwargs={})
+            "call_function", torch.add, args=(old_var_proxy, new_var_proxy), kwargs={}
+        )
         result = self.allocate_dummy(old_var)
         self.bind_tensors_to_proxies([result], [proxy_out])
         return result

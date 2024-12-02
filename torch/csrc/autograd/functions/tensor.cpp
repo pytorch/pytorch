@@ -49,10 +49,12 @@ ivalue_list CopyBackwards::retrieve_saved(SwapSavedVariables& saved) {
   return state.stack;
 }
 
-c10::optional<functional_apply_t>
-CopyBackwards::get_functional() {
-  auto needs_input_grad = std::array<bool,2>{task_should_compute_output(0), task_should_compute_output(1)};
-  return [needs_input_grad](const variable_list& inputs, const ivalue_list& stack) -> variable_list {
+c10::optional<functional_apply_t> CopyBackwards::get_functional() {
+  auto needs_input_grad = std::array<bool, 2>{
+      task_should_compute_output(0), task_should_compute_output(1)};
+  return [needs_input_grad](
+             const variable_list& inputs,
+             const ivalue_list& stack) -> variable_list {
     SavedState state;
     state.stack = stack;
     at::TensorOptions src_options;
@@ -60,12 +62,9 @@ CopyBackwards::get_functional() {
     auto inputs_copy = inputs;
 
     return CopyBackwards_apply_functional(
-        std::move(inputs_copy),
-        needs_input_grad,
-        src_options);
+        std::move(inputs_copy), needs_input_grad, src_options);
   };
 }
-
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   return CopyBackwards_apply_functional(
@@ -283,9 +282,9 @@ ivalue_list CopySlices::retrieve_saved(SwapSavedVariables& saved) {
   return state.stack;
 }
 
-c10::optional<functional_apply_t>
-CopySlices::get_functional() {
-  TORCH_INTERNAL_ASSERT(!view_fn, "NYI: compiled autograd with CopySlices with view_fn");
+c10::optional<functional_apply_t> CopySlices::get_functional() {
+  TORCH_INTERNAL_ASSERT(
+      !view_fn, "NYI: compiled autograd with CopySlices with view_fn");
   auto num_out = num_outputs();
   std::vector<bool> needs_input_grad;
   for (const auto i : c10::irange(num_outputs())) {
@@ -293,8 +292,9 @@ CopySlices::get_functional() {
   }
   auto fn2 = fn;
 
-  return [fn2, num_out, needs_input_grad](const variable_list& inputs,
-            const std::vector<c10::IValue>& saved) -> variable_list {
+  return [fn2, num_out, needs_input_grad](
+             const variable_list& inputs,
+             const std::vector<c10::IValue>& saved) -> variable_list {
     SavedState state;
     state.stack = saved;
     at::TensorGeometry base;

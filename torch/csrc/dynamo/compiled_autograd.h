@@ -1219,7 +1219,7 @@ struct SavedState {
 };
 
 struct TORCH_API PyCompilerInterface {
-  virtual ~PyCompilerInterface() {};
+  virtual ~PyCompilerInterface(){};
   virtual variable_list call_function(
       PyObject* py_compiler,
       const char* name,
@@ -1233,7 +1233,8 @@ struct TORCH_API PyCompilerInterface {
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
-TORCH_API void setPyCompilerInterface(std::unique_ptr<PyCompilerInterface>&& impl);
+TORCH_API void setPyCompilerInterface(
+    std::unique_ptr<PyCompilerInterface>&& impl);
 TORCH_API void resetPyCompilerInterface();
 
 } // namespace torch::dynamo::autograd

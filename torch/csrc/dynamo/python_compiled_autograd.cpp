@@ -128,7 +128,7 @@ static variable_list call_function(
   return outputs;
 }
 
-struct PyCompilerInterfaceImpl: PyCompilerInterface {
+struct PyCompilerInterfaceImpl : PyCompilerInterface {
   variable_list call_function(
       PyObject* py_compiler,
       const char* name,
@@ -141,7 +141,6 @@ struct PyCompilerInterfaceImpl: PyCompilerInterface {
         py_compiler, name, fn, inputs, saved_state, num_outputs, debug);
   }
 };
-
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
@@ -178,18 +177,6 @@ static PyObject* check(PyObject* pyresult) {
 static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
-}
-
-static void dumpimv(const std::vector<c10::optional<InputMetadata>>& value) {
-  std::cout << "dumpimv start" << std::endl;
-  for (const auto& v: value) {
-    if (v.has_value()) {
-      std::cout << v->shape_as_dim_vector() << std::endl;
-    } else {
-      std::cout << "no_value" << std::endl;
-    }
-  }
-  std::cout << "dumpimv end" << std::endl;
 }
 
 static variable_list validate_outputs(

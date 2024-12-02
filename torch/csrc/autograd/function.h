@@ -612,8 +612,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     throw std::runtime_error(
         std::string("retrieve_saved not implemented: ") + name());
   }
-  virtual c10::optional<functional_apply_t>
-  get_functional() {
+  virtual c10::optional<functional_apply_t> get_functional() {
     throw std::runtime_error(
         std::string("get_functional not implemented: ") + name());
   }

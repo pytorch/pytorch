@@ -1003,7 +1003,6 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             "bool any_grad_defined = any_variable_defined(grads);",
         )
 
-
     if info.name in UNTRACEABLE_FUNCTIONS:
         superclass = "Node"
     else:
@@ -1021,8 +1020,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         f"{T} {x}" for T, x in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars)
     ]
     get_state = "\n".join(
-        f"saved_state.enqueue({name});"
-        for name in unpacked_saved_vars
+        f"saved_state.enqueue({name});" for name in unpacked_saved_vars
     )
     saved_var_dequeues = []
     for typ, name in zip(unpacked_saved_vars_ref_type, unpacked_saved_vars):

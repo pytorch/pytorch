@@ -65,7 +65,8 @@ ivalue_list UndefinedGradBackward::retrieve_saved(SwapSavedVariables&) {
   return {};
 }
 c10::optional<functional_apply_t> UndefinedGradBackward::get_functional() {
-  return [](const variable_list& inputs, const ivalue_list& stack) -> variable_list {
+  return [](const variable_list& inputs,
+            const ivalue_list& stack) -> variable_list {
     variable_list outputs;
     outputs.reserve(inputs.size());
     for (auto& grad : inputs) {

@@ -75,8 +75,7 @@ struct PyNode : public Node {
     }
   }
 
-  c10::optional<functional_apply_t>
-  get_functional() override;
+  c10::optional<functional_apply_t> get_functional() override;
   ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
 };
 

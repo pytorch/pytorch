@@ -433,8 +433,7 @@ ivalue_list PyNode::retrieve_saved(SwapSavedVariables& saved) {
 }
 
 // TODO(rzou): compiled autograd needs special handling of the following.
-c10::optional<functional_apply_t>
-PyNode::get_functional() {
+c10::optional<functional_apply_t> PyNode::get_functional() {
   return c10::nullopt;
   /*
   auto node = std::static_pointer_cast<PyNode>(shared_from_this());

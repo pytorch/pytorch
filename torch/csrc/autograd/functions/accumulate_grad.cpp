@@ -120,8 +120,7 @@ ivalue_list AccumulateGrad::retrieve_saved(SwapSavedVariables& saved) {
   return state.stack;
 }
 
-c10::optional<functional_apply_t>
-AccumulateGrad::get_functional() {
+c10::optional<functional_apply_t> AccumulateGrad::get_functional() {
   TORCH_INTERNAL_ASSERT(false, "use apply_with_saved");
   return [](const variable_list& inputs,
             const std::vector<c10::IValue>& saved) -> variable_list {

@@ -230,17 +230,19 @@ struct CppNode : public Node {
     saved.before(input_info_);
     saved.before(output_info_);
 
-    // auto results = apply(variable_list(inputs));
-    auto stack = retrieve_saved(saved);
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-    variable_list results = interface->call_function(
-        saved.get_py_compiler(),
-        "apply_functional",
-        get_functional().value(),
-        inputs,
-        stack,
-        num_outputs(),
-        name());
+    auto results = apply(variable_list(inputs));
+    // TODO(rzou): following is problematic
+    // auto stack = retrieve_saved(saved);
+    // const auto& interface =
+    // torch::dynamo::autograd::getPyCompilerInterface(); variable_list results
+    // = interface->call_function(
+    //     saved.get_py_compiler(),
+    //     "apply_functional",
+    //     get_functional().value(),
+    //     inputs,
+    //     stack,
+    //     num_outputs(),
+    //     name());
 
     saved.after(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
@@ -258,7 +260,9 @@ struct CppNode : public Node {
     auto name = this->name();
 
     // TODO(rzou): probably need to pre compute needs_input_grad
-    return [name](const variable_list& inputs, const std::vector<c10::IValue>& saved) {
+    return [name](
+               const variable_list& inputs,
+               const std::vector<c10::IValue>& saved) {
       SavedState state;
       state.stack = saved;
       auto ctx = AutogradContext();
