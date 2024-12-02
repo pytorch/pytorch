@@ -1405,7 +1405,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
-        self.use_count = 1  # track how many tims this expression is used
+        self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
 
     def __str__(self):
@@ -1553,6 +1553,17 @@ class CSE:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
+        return var
+
+    def namedvar(
+        self,
+        name: str,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
+        assert name not in self.varname_map, "duplicate name"
+        var = V.kernel.create_cse_var(name, bounds, dtype)
+        self.varname_map[name] = var
         return var
 
 
@@ -1794,10 +1805,29 @@ class Kernel(CodeGen):
                     output_idx = 0
 
                     def do_cse(v):
-                        output_dtype = getattr(
-                            dtype_handler,
-                            name,
-                        )(*args, **kwargs)
+                        # cpp backend doesnt set current device - TODO: fix
+                        if V.graph.current_device is not None:
+                            device_str = V.graph.get_current_device_or_throw().type
+                            triton_backend = (
+                                config.cpu_backend == "triton"
+                                if device_str == "cpu"
+                                else config.cuda_backend == "triton"
+                            )
+                        else:
+                            triton_backend = False
+
+                        # only triton backend tracks dtype currently
+                        if triton_backend:
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
+                        else:
+                            # cpp backend doesnt track dtype yet
+                            output_dtype = None
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
@@ -1807,9 +1837,9 @@ class Kernel(CodeGen):
                         )
 
                         nonlocal output_idx
-                        if config.test_configs.runtime_triton_dtype_assert and not (
-                            V.graph.get_current_device_or_throw().type == "cpu"
-                            and config.cpu_backend != "triton"
+                        if (
+                            config.test_configs.runtime_triton_dtype_assert
+                            and triton_backend
                         ):
                             from torch._inductor.codegen.triton import triton_type
 
