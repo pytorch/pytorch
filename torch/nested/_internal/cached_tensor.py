@@ -1,18 +1,22 @@
 from typing import *  # noqa: F403
+from contextlib import contextmanager
 
 import torch
 from torch.utils import _pytree as pytree
 
 
 def _get_source_field(
-    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str]
+    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str, ...]
 ) -> str:
     return next(k for k in source_fields if metadata.get(k) is not None)
 
 
 def _get_source(
-    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str]
+    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str, ...], target_field: Optional[str]
 ) -> torch.Tensor:
+    # Unless specified via target_field, CachedTensor's source is the first non-None entry in source_fields
+    if target_field is not None:
+        return metadata[target_field]
     source_field = _get_source_field(metadata, source_fields)
     return metadata[source_field]
 
@@ -22,20 +26,15 @@ class CachedTensor(torch.Tensor):
     def __new__(
         cls,
         metadata: Dict[str, torch.Tensor],
-        source_fields: Tuple[str],
-        extra_fields: Tuple[str],
+        source_fields: Tuple[str, ...],
+        extra_fields: Tuple[str, ...],
         target_field: Optional[str] = None,
     ) -> "CachedTensor":
         assert source_fields is not None
         assert any(
             metadata.get(k) is not None for k in source_fields
         ), f"CachedTensor: At least one of {source_fields} must be passed"
-
-        if target_field is None:
-            # Unless specified, CachedTensor's metadata is the first non-None source field
-            source = _get_source(metadata, source_fields)
-        else:
-            source = metadata[target_field]
+        source = _get_source(metadata, source_fields, target_field)
         shape = source.shape
         kwargs = {}
         kwargs["strides"] = source.stride()
@@ -50,20 +49,21 @@ class CachedTensor(torch.Tensor):
     def __init__(
         self,
         metadata: Dict[str, torch.Tensor],
-        source_fields: Tuple[str],
-        extra_fields: Tuple[str],
+        source_fields: Tuple[str, ...],
+        extra_fields: Tuple[str, ...],
         target_field: Optional[str] = None,
     ):
         self.source_fields = source_fields
         self.extra_fields = extra_fields
         self.all_fields = source_fields + extra_fields
+        self.target_field = target_field
         self.metadata = metadata
 
         # Compile only
         self.nested_int_ref: Any = None
 
     def __repr__(self) -> str:  # type: ignore[override]
-        source_repr = repr(_get_source(self.metadata, self.source_fields))
+        source_repr = repr(_get_source(self.metadata, self.source_fields, self.target_field))
         return f"CachedTensor({source_repr})"
 
     def __getattr__(self, name: str) -> torch.Tensor:
@@ -103,10 +103,10 @@ class CachedTensor(torch.Tensor):
             return _func_registry[op](op, *args, **kwargs)
 
         unwrapped_args = pytree.tree_map_only(
-            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), args
+            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields, x.target_field), args
         )
         unwrapped_kwargs = pytree.tree_map_only(
-            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields), kwargs
+            CachedTensor, lambda x: _get_source(x.metadata, x.source_fields, x.target_field), kwargs
         )
         return op(*unwrapped_args, **unwrapped_kwargs)
 
@@ -115,6 +115,20 @@ torch.serialization.add_safe_globals([CachedTensor])
 
 
 _func_registry: Dict[Any, Callable] = {}
+
+
+@contextmanager
+def set_func_registry(registry):
+    global _func_registry
+    # Save the current registry to restore it later
+    old_registry = _func_registry
+    # Set the new registry
+    _func_registry = registry
+    try:
+        yield
+    finally:
+        # Restore the old registry
+        _func_registry = old_registry
 
 
 # Note: [ CacheTensor open registry ]
@@ -132,8 +146,8 @@ def register_cached_tensor_func(aten_op: Any) -> Callable:
 
 def _make_cached_tensor(
     metadata: Dict[str, torch.Tensor],
-    source_fields: Tuple[str],
-    extra_fields: Tuple[str],
+    source_fields: Tuple[str, ...],
+    extra_fields: Tuple[str, ...],
     target_field: Optional[str] = None,
 ) -> CachedTensor:
     return CachedTensor(
