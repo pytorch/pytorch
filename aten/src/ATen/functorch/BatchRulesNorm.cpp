@@ -42,7 +42,7 @@ static Tensor padRight(const Tensor& tensor, std::optional<int64_t> has_bdim, in
 }
 
 template<typename F, F Func>
-static 
+static
 std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
 batch_norm_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
@@ -125,7 +125,7 @@ batch_norm_batch_rule(
 }
 
 template<typename F, F Func>
-static 
+static
 std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, std::optional<int64_t> grad_out_bdim,
     const at::Tensor & input, std::optional<int64_t> input_bdim,
@@ -198,7 +198,7 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
 }
 
 template<typename F, F Func>
-static 
+static
 std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
     const at::Tensor & grad_out,
     const at::Tensor & input,
