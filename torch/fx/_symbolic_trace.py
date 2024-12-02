@@ -872,7 +872,7 @@ class Tracer(TracerBase):
                 nonlocal cnt
                 cnt += 1
                 param = sig.parameters[name]
-                default: Tuple[Any, ...] = (
+                default = (
                     () if param.default is inspect.Parameter.empty else (param.default,)
                 )
                 out = self.create_proxy(
@@ -913,7 +913,7 @@ class Tracer(TracerBase):
 
             return pytree.tree_map(replace_ph, concrete_args[name])
         if name[0] == "*":
-            default: Tuple[Any, ...] = ()
+            default = ()
         else:
             param = sig.parameters[name]
             default = (  # type: ignore[assignment]
