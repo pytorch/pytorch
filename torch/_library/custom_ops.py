@@ -26,7 +26,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable:
+) -> Any:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
