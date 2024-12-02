@@ -53,12 +53,13 @@ and no guard installation notions here.
 
 
 class CompileId(NamedTuple):
-    frame_id: int
+    compiled_autograd_id: Optional[int]
+    frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: int
+    frame_compile_id: Optional[int]
     # TODO: consider also tracking the recompilation count
 
     def __str__(self):
