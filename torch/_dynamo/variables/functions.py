@@ -365,7 +365,8 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         inline_tracer = InliningInstructionTranslator.build_inline_tracer(
             tx,
             self,
-            [*self.vt.self_args(), *args],
+            # [*self.vt.self_args(), *args],
+            [*args],
             kwargs,
         )
 
@@ -475,12 +476,12 @@ class GeneratorObjectVariable(VariableTracker):
             raise exc.SkipFrame from e
 
     def has_unpack_var_sequence(self, tx):
-        # the base class method runs unpack_var_sequence to determine if
-        # GeneratorObjectVariable implements it. We should avoid this as
-        # it would exhaust the generator.
+        return False
+
+    def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
         return True
 
-    def unpack_var_sequence(self, tx) -> List[VariableTracker]:
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
         result = []
         while True:
             try:
@@ -489,9 +490,6 @@ class GeneratorObjectVariable(VariableTracker):
                 handle_observed_exception(tx)
                 break
         return result
-
-    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
-        return self.unpack_var_sequence(tx)
 
     def call_method(
         self,

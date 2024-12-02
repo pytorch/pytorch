@@ -919,7 +919,9 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        if is_generator(fn.get_code()):
+        # TODO: figure it out why dynamo produces the wrong result when fn is
+        # a UserMethodVariable
+        if is_generator(fn.get_code()) and not isinstance(fn, variables.UserMethodVariable):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -3453,7 +3455,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         else:
             self.push(val)
             # Add the value to yield into generated_items and replace the top of the stack with None
-            self.YIELD_VALUE(inst)
+            try:
+                self.YIELD_VALUE(inst)
+            except YieldValueOp:
+                pass
 
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (

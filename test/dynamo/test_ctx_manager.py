@@ -2974,6 +2974,38 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_islice_chain(self):
+        eager = EagerAndRecordGraphs()
+        import itertools
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn(t):
+            tmp1 = [t+1, t+2]
+            tmp2 = [t+3, t+4]
+            return list(itertools.chain(tmp1, tmp2))
+
+        t = torch.tensor([1.0])
+        y = fn(t)
+        self.assertEqual(y, [t+1, t+2, t+3, t+4])
+
+    def test_subgenerator(self):
+        def subgen(t):
+            yield t+1
+            yield t+2
+
+        def main_gen(t):
+            yield from subgen(t)
+            yield t+3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = main_gen(t)
+            return list(gen)
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, [t+1, t+2, t+3])
+
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
