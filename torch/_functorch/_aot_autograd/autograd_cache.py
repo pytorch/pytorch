@@ -360,7 +360,6 @@ class FXGraphCacheLoadable:
         )
 
         # TODO: How come cudagraphs could be None here?
-        # TODO: How come gm is None here?
         result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
         return result
 
