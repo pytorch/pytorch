@@ -563,7 +563,7 @@ class MockFXGraphCacheOutput(OutputCode):
         self._time_taken_ns = 0
         self._boxed_call = True
 
-    def post_compile(self, example_inputs, cudagraphs, constants) -> None:
+    def post_compile(self, example_inputs, cudagraphs, gm) -> None:
         pass
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
