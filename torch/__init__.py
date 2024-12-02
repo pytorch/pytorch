@@ -945,6 +945,11 @@ def sym_ite(b, t, f):
     return t if b else f
 
 
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
+
+
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
 try:
