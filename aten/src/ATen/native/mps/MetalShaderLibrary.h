@@ -15,14 +15,33 @@ typedef void* MTLComputeCommandEncoder_t;
 
 #include <functional>
 #include <optional>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+// Forward declaration of TensorBase
 namespace at {
 class TensorBase;
 }
 
 namespace at::native::mps {
+
+namespace detail {
+template <typename T>
+class has_size_type {
+  template <typename U>
+  static constexpr std::true_type check(typename U::size_type*);
+  template <typename>
+  static constexpr std::false_type check(...);
+
+ public:
+  static constexpr bool value = decltype(check<T>(nullptr))::value;
+};
+
+template <typename T>
+constexpr bool has_size_type_v = has_size_type<T>::value;
+
+} // namespace detail
 
 class MetalKernelFunction {
  public:
@@ -38,6 +57,25 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  template <
+      typename T,
+      typename = std::enable_if_t<
+          std::is_integral_v<T> || std::is_same_v<T, float> ||
+          (std::is_class_v<T> && std::is_trivially_copyable_v<T> &&
+           !detail::has_size_type_v<T>)>>
+  inline void setArg(unsigned idx, const T val) {
+    setArg(idx, &val, sizeof(T));
+  }
+
+  template <
+      typename Container,
+      typename = std::enable_if_t<detail::has_size_type_v<Container>>>
+  inline void setArg(unsigned idx, const Container& values) {
+    setArg(
+        idx,
+        values.data(),
+        values.size() * sizeof(typename Container::value_type));
+  }
   void dispatch(
       uint64_t length,
       std::optional<uint64_t> groupSize = std::nullopt);
