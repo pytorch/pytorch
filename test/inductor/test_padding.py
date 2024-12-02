@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
 )
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -467,9 +468,11 @@ class PaddingTest(TestCaseBase):
         self.do_profiling(f1, f2)
 
     @serialTest()
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_nobias_LinearAndSoftmax_codegen(self):
         self.test_LinearAndSoftmax_codegen(bias=False)
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_LinearAndSoftmax_codegen(self, bias=True):
         m_bad_shape = LinearAndSoftmax(vocab_size=30523, bias=bias)
         inputs_bad_shape = m_bad_shape.get_example_inputs()
@@ -539,6 +542,7 @@ class PaddingTest(TestCaseBase):
         x = torch.randn(3, 9)
         self.common_numeric_check(f, x)
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_pad_strides(self):
         """
         Note that dim0's stride is also padded even though its previous value
@@ -553,6 +557,7 @@ class PaddingTest(TestCaseBase):
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
         )
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_pad_strides_skip(self):
         """
         The padding is skipped to avoid too much memory overhead.
@@ -565,6 +570,7 @@ class PaddingTest(TestCaseBase):
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
         )
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_pad_3d_tensor(self):
         """
         Constructing this test case guided by the fact that we don't pad
@@ -584,6 +590,7 @@ class PaddingTest(TestCaseBase):
         self.common_numeric_check(f, x, y, tol=1e-2)
         self.assertTrue(metrics.num_comprehensive_padding > 0)
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_conv(self):
         """
         Padding the input for convolution may cause extra copy kernel being called.
@@ -651,6 +658,7 @@ class PaddingTest(TestCaseBase):
         )
         self.do_profiling(lambda: f(x), lambda: opt_f(x), "Eager Cat", "Compiled Cat")
 
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_pad_channels_last(self):
         t = torch.randn(2, 3, 5, 1025)
         in_strides = t.stride()
@@ -665,6 +673,7 @@ class PaddingTest(TestCaseBase):
     @parametrize("alignment_bytes", (32, 128))
     @parametrize("shape", [(21, 19), (3, 5, 71)])
     @parametrize("dtype", (torch.float16, torch.float32))
+    @skipIfXpu(msg="XPU will not pad strides")
     def test_pad_outputs(
         self, dtype: torch.dtype, shape: Tuple[int], alignment_bytes: int
     ):
