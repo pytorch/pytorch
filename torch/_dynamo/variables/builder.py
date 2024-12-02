@@ -140,6 +140,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
@@ -591,7 +592,7 @@ class VariableBuilder:
             # key order.
             self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
+                TypingVariable(k): UserDefinedObjectVariable(
                     v,
                     source=GetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
@@ -679,13 +680,23 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+        elif istype(value, frozenset) and all(
+            (
+                # For DBR quantization, we could get a frozenset of torch funcs.
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                or
+                # Another commonly used frozenset of types.
+                x in torch.utils._pytree.BUILTIN_TYPES
+            )
+            for x in value
         ):
-            # For frozenset, we can guard by object ID instead of value
-            # equality, this allows us to handle non-literal values
+            # For the limited cases of frozenset here, we know the items won't
+            # change across runs, so we can safely create sourceless VTs for
+            # them and only guard on the frozenset id.
+            # TODO support source for sets and remove the special logics here.
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable.create(value=value, source=self.source)
+            return FrozensetVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
@@ -878,9 +889,6 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, torch._C._SDPBackend):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -1338,8 +1346,9 @@ class VariableBuilder:
         return self.set_source_and_track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator):
-        self.install_guards(GuardBuilder.TYPE_MATCH)
-        # Get all the values from the range iterator
+        self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
+        # Get all the values from the range iterator; no need to install guards
+        # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
         return ListIteratorVariable(items, mutation_type=ValueMutationNew())
 
@@ -1894,6 +1903,13 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
+
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
         if (
@@ -1908,6 +1924,7 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
