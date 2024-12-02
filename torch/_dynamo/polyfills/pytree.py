@@ -60,6 +60,17 @@ if python_pytree._cxx_pytree_exists:
         del __func
     del __name
 
+    @substitute_in_graph(cxx_pytree.tree_is_leaf, can_constant_fold_through=True)
+    def tree_is_leaf(
+        tree: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> bool:
+        if tree is None or (is_leaf is not None and is_leaf(tree)):
+            return True
+        if optree.register_pytree_node.get(type(tree), namespace="torch") is None:  # type: ignore[attr-defined]
+            return True
+        return False
+
     @substitute_in_graph(cxx_pytree.tree_iter, can_constant_fold_through=False)
     def tree_iter(
         tree: PyTree,
@@ -68,10 +79,7 @@ if python_pytree._cxx_pytree_exists:
         stack = [tree]
         while stack:
             node = stack.pop()
-            if node is None or (is_leaf is not None and is_leaf(node)):
-                yield node
-                continue
-            if optree.register_pytree_node.get(type(node), namespace="torch") is None:  # type: ignore[attr-defined]
+            if tree_is_leaf(node, is_leaf=is_leaf):
                 yield node
                 continue
 
@@ -232,12 +240,7 @@ if python_pytree._cxx_pytree_exists:
         is_leaf: Callable[[PyTree], bool] | None = None,
     ) -> tuple[list[Any], PyTreeSpec]:
         def helper(node: PyTree, leaves: list[Any]) -> PyTreeSpec:
-            if node is None or (is_leaf is not None and is_leaf(node)):
-                leaves.append(node)
-                return _LEAF_SPEC
-
-            node_type = type(node)
-            if optree.register_pytree_node.get(node_type, namespace="torch") is None:  # type: ignore[attr-defined]
+            if tree_is_leaf(node, is_leaf=is_leaf):
                 leaves.append(node)
                 return _LEAF_SPEC
 
@@ -255,7 +258,7 @@ if python_pytree._cxx_pytree_exists:
 
             # Recursively flatten the children
             subspecs = tuple(helper(child, leaves) for child in children)
-            return PyTreeSpec(subspecs, node_type, metadata, entries, unflatten_func)  # type: ignore[arg-type]
+            return PyTreeSpec(subspecs, type(node), metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
         leaves: list[Any] = []
         treespec = helper(tree, leaves)
