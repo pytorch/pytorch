@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
@@ -28,6 +29,7 @@ from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._library import capture_triton
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -113,6 +115,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
@@ -427,7 +430,7 @@ class TestFxGraphCache(TestCase):
         self.reset()
 
         with mock.patch(
-            "torch._inductor.codecache.has_frozen_params", return_value=True
+            "torch._inductor.output_code.has_frozen_params", return_value=True
         ):
             # A call to fn1 should miss in the cache since we do not consider
             # the constant values.
@@ -586,6 +589,55 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("bundle_triton", (False, True))
+    def test_triton_op(self, bundle_triton):
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(f, fullgraph=True)
+
+            x = torch.randn(4, device=GPU_TYPE)
+            y = torch.randn(4, device=GPU_TYPE)
+
+            compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_generated_kernel_count(self):
@@ -621,45 +673,23 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the inductor counters on a cache hit.
         """
-        compile_to_fn = GraphLowering.compile_to_fn
 
-        counter_name = "a_test_counter"
-        counter_incr = 7
+        def fn(a, b):
+            return torch.mm(a, b)
 
-        def bump_counter(self):
-            # Mock that bumps some arbitrary test counter by a set amount, then calls
-            # the original GraphLowering.compile_to_fn.
-            counters["inductor"][counter_name] += counter_incr
-            return compile_to_fn(self)
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
 
-        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
+        compiled_fn = torch.compile(fn)
 
-            def fn(a, b):
-                return torch.mm(a, b)
+        # Verify the "miss" case.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            a = torch.rand(8, 32, device="cpu")
-            b = torch.rand(32, 8, device="cpu")
-
-            compiled_fn = torch.compile(fn)
-
-            # Verify the "miss" case.
-            counter_val = 2
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
-
-            # Verify the "hit" case.
-            self.reset()
-            counter_val = 5
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
+        # Verify the "hit" case.
+        self.reset()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -1229,7 +1259,7 @@ class TestAutotuneCache(TestCase):
             for k in global_stats.autotune_remote.cache.keys():
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
             for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c11")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")

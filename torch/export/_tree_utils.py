@@ -19,8 +19,8 @@ def reorder_kwargs(user_kwargs: Dict[str, Any], spec: TreeSpec) -> Dict[str, Any
 
     if set(user_kwargs) != set(kwargs_spec.context):
         raise ValueError(
-            f"kwarg key mismatch: "
-            f"Got {list(user_kwargs)} but expected {kwargs_spec.context}"
+            f"Ran into a kwarg keyword mismatch: "
+            f"Got the following keywords {list(user_kwargs)} but expected {kwargs_spec.context}"
         )
 
     reordered_kwargs = {}
