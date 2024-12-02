@@ -164,7 +164,7 @@ class MultiKernel:
         self.args = object()
 
     @staticmethod
-    def _merge_workspace_args(left: List[WorkspaceArg], right: List[WorkspaceArg]):
+    def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
         if left == right:
             return left
         result = {x.inner_name: x for x in left}
@@ -216,7 +216,7 @@ class MultiKernel:
             assert call_args == other_call_args, (call_args, other_call_args)
             assert arg_types == other_arg_types
 
-        grid: List[Any] = []
+        grid: list[Any] = []
 
         if V.graph.cpp_wrapper:
             # for the second pass of cpp-wrapper codegen, we should call

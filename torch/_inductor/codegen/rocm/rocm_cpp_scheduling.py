@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import cast, Sequence
+from typing import cast
+from collections.abc import Sequence
 
 from ... import config
 from ...codecache import code_hash, get_path

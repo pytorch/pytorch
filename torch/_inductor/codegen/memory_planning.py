@@ -5,7 +5,8 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
+from collections.abc import Iterable
 
 import sympy
 
@@ -135,8 +136,8 @@ class Allocation(AllocationTreeNode):
     size_hint: int
     symbolic_size: sympy.Expr
     allocated: bool = False
-    pool: Optional[AllocationPool] = None
-    offset: Optional[sympy.Expr] = None
+    pool: AllocationPool | None = None
+    offset: sympy.Expr | None = None
 
     @property
     def device(self):
@@ -240,7 +241,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
          a.get_live_ranges().overlaps(b.get_live_ranges())
     """
 
-    allocations: List[AllocationTreeNode]
+    allocations: list[AllocationTreeNode]
 
     def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
@@ -368,10 +369,10 @@ class AllocationPool:
     device: torch.device
     root: TemporalSplit
     can_expand: bool = True
-    restrict_live_range: Optional[LiveRange] = None
-    name: Optional[str] = None
-    names_to_del: List[str] = dataclasses.field(default_factory=list)
-    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
+    restrict_live_range: LiveRange | None = None
+    name: str | None = None
+    names_to_del: list[str] = dataclasses.field(default_factory=list)
+    creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def allocate(self, block: Allocation, is_last: bool):
         if self.restrict_live_range and not self.restrict_live_range.contains(
@@ -444,7 +445,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
+    device_to_pools: dict[torch.device, list[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 
@@ -511,7 +512,7 @@ class BufferGroup:
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False
-        self.allocation: Optional[Allocation] = None
+        self.allocation: Allocation | None = None
         self.live_range = LiveRange(float("inf"), -float("inf"))
 
     def update_usage(self, timestep: int):
@@ -550,7 +551,7 @@ class PoolMemoryPlanningLine(MemoryPlanningLine):
     """Abstract base class for {Alloc,Dealloc}FromPoolLine"""
 
     group: BufferGroup
-    timestep: Optional[int] = None
+    timestep: int | None = None
 
     @property
     def node(self):
@@ -608,9 +609,9 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[List[BufferGroup]] = None
+    buffer_groups: list[BufferGroup] | None = None
 
-    def plan(self, lines: List[Any]) -> List[Any]:
+    def plan(self, lines: list[Any]) -> list[Any]:
         """Call all the memory planning passes in sequence"""
         lines = [*lines]
         self.drop_removed_buffers(lines)
@@ -713,8 +714,8 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs: List[Allocation] = []
-        intermediates: List[Allocation] = []
+        outputs: list[Allocation] = []
+        intermediates: list[Allocation] = []
         for group in self.buffer_groups:
             assert group.allocation
             if group.is_output and config.memory_pool != "combined":

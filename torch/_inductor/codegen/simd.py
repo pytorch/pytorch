@@ -12,16 +12,15 @@ import operator
 from typing import (
     Any,
     Callable,
-    Counter,
     Dict,
-    Iterable,
     List,
     no_type_check,
     Optional,
-    Sequence,
     Tuple,
     Union,
 )
+from collections import Counter
+from collections.abc import Iterable, Sequence
 
 import sympy
 
@@ -99,8 +98,8 @@ class IterationRanges:
     def __init__(
         self,
         name: str,
-        var_list: List[sympy.Symbol],
-        var_ranges: Dict[sympy.Symbol, sympy.Expr],
+        var_list: list[sympy.Symbol],
+        var_ranges: dict[sympy.Symbol, sympy.Expr],
         numel: sympy.Expr,
         prefix: str,
         *,
@@ -149,8 +148,8 @@ class IterationRangesRoot(IterationRanges):
         pid_cache=None,
         *,
         is_loop: bool,
-        tensor_dim: Optional[int],
-        grid_dim: Optional[int],
+        tensor_dim: int | None,
+        grid_dim: int | None,
         has_zdim: bool,
     ) -> None:
         if pid_cache is None:
@@ -166,10 +165,10 @@ class IterationRangesRoot(IterationRanges):
         )
         self.index = index
         # Store all the nodes in one flat list
-        self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
+        self.nodes: dict[sympy.Expr, IterationRangesEntry] = {}
         # This is for re-ordering program ID in triton mm template
         # pid_cache["tl.program_id(0)"] = pid_m
-        self.pid_cache: Dict[str, str] = pid_cache
+        self.pid_cache: dict[str, str] = pid_cache
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
@@ -214,7 +213,7 @@ class IterationRangesRoot(IterationRanges):
             self.nodes[expr] = node
         return self.nodes[expr]
 
-    def construct_entries(self, lengths: List[sympy.Expr]):
+    def construct_entries(self, lengths: list[sympy.Expr]):
         divisor = sympy.S.One
         itervars = []
         for length in reversed(lengths):
@@ -222,7 +221,7 @@ class IterationRangesRoot(IterationRanges):
             divisor = divisor * length
         return list(reversed(itervars))
 
-    def construct(self, lengths: List[sympy.Expr]):
+    def construct(self, lengths: list[sympy.Expr]):
         return [e.symbol() for e in self.construct_entries(lengths)]
 
     def vars_and_sizes(self, index: sympy.Expr):
@@ -298,7 +297,7 @@ class IterationRangesEntry(IterationRanges):
 
     def precomputed_args(self):
         # for dynamic shapes, find parts of indexing expressions that have to be precomputed
-        precomputed_args: List[sympy.Expr] = []
+        precomputed_args: list[sympy.Expr] = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
         assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
@@ -340,7 +339,7 @@ class SIMDKernel(Kernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         pid_cache=None,
         override_persistent_reduction=None,
@@ -356,8 +355,8 @@ class SIMDKernel(Kernel):
         self.numels = {
             prefix: V.graph.sizevars.simplify(val) for prefix, val in tiling.items()
         }
-        self.range_trees: List[IterationRangesRoot] = []
-        self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
+        self.range_trees: list[IterationRangesRoot] = []
+        self.range_tree_nodes: dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels["r"] != 1
         self.cooperative_reduction: bool = (
@@ -371,7 +370,7 @@ class SIMDKernel(Kernel):
             else self.should_use_persistent_reduction()
         )
         self.no_x_dim = self.want_no_x_dim()
-        self.code_hash: Optional[str] = None
+        self.code_hash: str | None = None
 
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
@@ -466,7 +465,7 @@ class SIMDKernel(Kernel):
         sizes[i] = ":"
         return f"[{', '.join(sizes)}]"
 
-    def dense_size_list(self) -> List[str]:
+    def dense_size_list(self) -> list[str]:
         sizes = ["1"] * self.triton_tensor_ndim()
         for tree in self.range_trees:
             if tree.tensor_dim is None:
@@ -559,7 +558,7 @@ class SIMDKernel(Kernel):
         groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
         sv = V.graph.sizevars
-        new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
+        new_ranges: list[list[sympy.Expr]] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
@@ -645,7 +644,7 @@ class SIMDKernel(Kernel):
         groups: Sequence[sympy.Expr],
         lengths: Sequence[Sequence[sympy.Expr]],
         set_ranges,
-    ) -> List[List[sympy.Expr]]:
+    ) -> list[list[sympy.Expr]]:
         """
         We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
 
@@ -776,7 +775,7 @@ class SIMDKernel(Kernel):
     def codegen_nan_check(self) -> None:
         raise NotImplementedError("NYI: codegen_nan_check")
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:
+    def call_kernel(self, name: str, node: IRNode | None = None) -> None:
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
@@ -1107,13 +1106,13 @@ class SIMDScheduling(BaseScheduling):
     can_fuse_horizontal = can_fuse
 
     def generate_node_schedule(self, nodes, numel, rnumel):
-        node_schedule: List[Any] = []
+        node_schedule: list[Any] = []
         done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
         current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
-        maybe_split_index: Optional[int] = None
+        maybe_split_index: int | None = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1203,13 +1202,13 @@ class SIMDScheduling(BaseScheduling):
         return node_schedule
 
     def codegen_node(
-        self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]
+        self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
 
-        nodes: List[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+        nodes: list[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
 
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
@@ -1222,7 +1221,7 @@ class SIMDScheduling(BaseScheduling):
 
     @staticmethod
     def can_use_32bit_indexing(
-        numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
+        numel: sympy.Expr, buffers: Iterable[ir.Buffer | ir.TensorBox]
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
@@ -1267,7 +1266,7 @@ class SIMDScheduling(BaseScheduling):
             kernel.code_hash = code_hash(src_code)
         del kernel
 
-        final_kernel: Union[SIMDKernel, MultiKernel]
+        final_kernel: SIMDKernel | MultiKernel
         if len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:
@@ -1311,7 +1310,7 @@ class SIMDScheduling(BaseScheduling):
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
-    ) -> List[SIMDKernel]:
+    ) -> list[SIMDKernel]:
         return [
             self.kernel_type(
                 *kernel_args,
@@ -1355,7 +1354,7 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_template(
         self, template_node, epilogue_nodes, only_gen_src_code=False
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Codegen a triton template
 
@@ -1416,12 +1415,12 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_combo_kernel_code(
         self,
-        subkernel_nodes: List[BaseSchedulerNode],
+        subkernel_nodes: list[BaseSchedulerNode],
         custom_part_algorithm: bool,
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
-    ) -> List[Tuple[str, Any, Any]]:
+    ) -> list[tuple[str, Any, Any]]:
         from .triton_combo_kernel import ComboKernel
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
@@ -1521,7 +1520,7 @@ class SIMDScheduling(BaseScheduling):
         ]
         write_names = {dep.name for dep in rw.writes}
 
-        tilings: List[CandidateTiling] = []
+        tilings: list[CandidateTiling] = []
 
         for dep in deps:
             strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
@@ -1567,7 +1566,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> Dict[str, sympy.Expr]:
+    ) -> dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """
@@ -1581,7 +1580,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def select_tiling(
         cls, node_schedule, numel, reduction_numel=sympy.S.One
-    ) -> Dict[str, sympy.Expr]:
+    ) -> dict[str, sympy.Expr]:
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -1646,7 +1645,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            new_tilings: OrderedSet[tuple[sympy.Expr]] = OrderedSet()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
@@ -1712,9 +1711,9 @@ class SIMDScheduling(BaseScheduling):
 
 @dataclasses.dataclass
 class CandidateTiling:
-    tiling: Tuple[sympy.Expr, sympy.Expr]
+    tiling: tuple[sympy.Expr, sympy.Expr]
     score: int  # higher is better
-    name: Optional[str] = None
+    name: str | None = None
 
     @staticmethod
     def is_good_size(s):

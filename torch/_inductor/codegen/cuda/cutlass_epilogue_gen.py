@@ -67,7 +67,7 @@ class CutlassEVTEpilogueTypeFormatter:
     def ir_to_evt_string(
         template_output_node_name: str,
         evt_type_name: str,
-        epilogue_nodes: List[IRNode],
+        epilogue_nodes: list[IRNode],
     ):
         """
         Formats IR nodes into a string representation compatible with Cutlass EVT format.
@@ -243,12 +243,12 @@ class CutlassEVTEpilogueArgumentFormatter:
         self.var_counter: int = (
             0  # used to generate variable names, incremented for each new variable
         )
-        self.aliases: Dict[str, str] = {}  # Aliases for subexpression functors
+        self.aliases: dict[str, str] = {}  # Aliases for subexpression functors
 
     @staticmethod
     def ir_to_evt_argument_string(
         template_output_node_name: str,
-        epilogue_nodes: List[IRNode],
+        epilogue_nodes: list[IRNode],
     ) -> str:
         formatter = CutlassEVTEpilogueArgumentFormatter(
             template_output_node_name,

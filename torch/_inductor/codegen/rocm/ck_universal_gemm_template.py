@@ -235,11 +235,11 @@ class CKGemmTemplate(CKTemplate):
 
     def __init__(
         self,
-        input_nodes: List[Buffer],
+        input_nodes: list[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: Optional[List[int]] = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         super().__init__(
             "ck_gemm_template",

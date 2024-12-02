@@ -490,7 +490,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         )
         return chosen_instances
 
-    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> Tuple[str, str]:  # type: ignore[name-defined]
+    def emit_ck_instance(self, op: "CKGroupedConvFwdOp") -> tuple[str, str]:  # type: ignore[name-defined]
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
         template_definition = r"""
     // Gemm operator {{operation_name}}

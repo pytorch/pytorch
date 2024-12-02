@@ -36,7 +36,7 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
+        keys: tuple[str, ...],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
@@ -95,7 +95,7 @@ class DeferredGpuDefaultGrid:
         self.grid_callable = grid_callable
         self.grid_extra_kwargs = grid_extra_kwargs
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: Union[list[Any], tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -252,8 +252,8 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -391,7 +391,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid: List[Any],
+        grid: list[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
         **grid_extra_kwargs,
