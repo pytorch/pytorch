@@ -185,8 +185,8 @@ class DataLoader(Generic[_T_co]):
             maintain the workers `Dataset` instances alive. (default: ``False``)
         pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
             ``True``.
-        allow_out_of_order (bool, optional): If ``True``, the data loader will not enforce that batches
-            are returned in a first-in, first-out order when ``num_workers > 0``. (default: ``False``)
+        in_order (bool, optional): If ``False``, the data loader will not enforce that batches
+            are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -215,7 +215,8 @@ class DataLoader(Generic[_T_co]):
     .. warning:: See :ref:`reproducibility`, and :ref:`dataloader-workers-random-seed`, and
                  :ref:`data-loading-randomness` notes for random seed related questions.
 
-    .. warning:: Setting `allow_out_of_order` to `True` can harm reproducibility.
+    .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
+                 distribution being fed to the trainer in cases with imbalanced data.
 
     .. _multiprocessing context:
         https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods
@@ -252,7 +253,7 @@ class DataLoader(Generic[_T_co]):
         prefetch_factor: Optional[int] = None,
         persistent_workers: bool = False,
         pin_memory_device: str = "",
-        allow_out_of_order: bool = False,
+        in_order: bool = True,
     ):
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -286,7 +287,7 @@ class DataLoader(Generic[_T_co]):
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
-        self.allow_out_of_order = allow_out_of_order
+        self.in_order = in_order
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
@@ -1080,7 +1081,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         super().__init__(loader)
 
         self._prefetch_factor = loader.prefetch_factor
-        self._allow_out_of_order = loader.allow_out_of_order
+        self._in_order = loader.in_order
 
         assert self._num_workers > 0
         assert self._prefetch_factor > 0
@@ -1467,7 +1468,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     continue
 
             if idx != self._rcvd_idx:
-                if self._allow_out_of_order:
+                if not self._in_order:
                     # don't store it for later, process now
                     del self._task_info[idx]
                     return self._process_data(data)

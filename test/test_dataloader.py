@@ -3508,7 +3508,7 @@ class TestSlowIndexDataset(Dataset):
 
     def __getitem__(self, idx):
         if idx == self.slow_index:
-            time.sleep(2)
+            time.sleep(0.5)
         return idx
 
     def __len__(self):
@@ -3524,7 +3524,7 @@ class TestSlowIterableDataset(IterableDataset):
     def give_data(self, iter_start, iter_end):
         for i in range(iter_start, iter_end):
             if i >= self.mid:
-                time.sleep(2)
+                time.sleep(0.5)
             yield i
 
     def __iter__(self):
@@ -3539,13 +3539,26 @@ class TestSlowIterableDataset(IterableDataset):
 
 
 class TestOutOfOrderDataLoader(TestCase):
-    def test_allow_out_of_order(self):
+    def test_in_order_index_ds(self):
         dataset = TestSlowIndexDataset(end=10, slow_index=2)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
-            allow_out_of_order=True,
+            in_order=True,
+        )
+
+        expected_order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_index_ds(self):
+        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
         )
 
         # normally, this should be [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -3553,13 +3566,26 @@ class TestOutOfOrderDataLoader(TestCase):
         output = [sample.item() for sample in dataloader]
         self.assertEqual(expected_order, output)
 
-    def test_allow_out_of_order_iterable(self):
+    def test_in_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
-            allow_out_of_order=True,
+            in_order=True,
+        )
+
+        expected_order = [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_iterable_ds(self):
+        dataset = TestSlowIterableDataset(start=0, end=10)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
         )
 
         # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
