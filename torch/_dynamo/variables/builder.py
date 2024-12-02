@@ -1326,10 +1326,8 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
-        )
-        if istype(value, list):
+        result = BaseListVariable.cls_for_instance(value)(output)
+        if istype(value, (list, collections.deque)):
             return self.set_source_and_track_mutable(value, result)
         return result
 
