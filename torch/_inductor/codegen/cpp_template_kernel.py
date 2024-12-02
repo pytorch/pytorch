@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -56,6 +56,7 @@ class CppTemplateKernel(CppKernel):
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
         aliases: Optional[Dict[str, str]] = None,
+        extra_sizevars: Optional[Set[sympy.Symbol]] = None,
     ) -> str:
         for name, inp in inputs.items():
             if inp is not None:
@@ -84,6 +85,8 @@ class CppTemplateKernel(CppKernel):
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         }
+        if extra_sizevars is not None:
+            unique_sizevars |= extra_sizevars
         sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
             self.args.sizevars[sizevar] = f"k{sizevar}"

@@ -27,11 +27,12 @@ FLEX_ATTENTION_TEMPLATE = r"""
 {%- set kernel_args = {"query": query, "key": key, "value": value,
                        "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices, "full_kv_num_blocks": full_kv_num_blocks} %}
 {%- set kernel_args = template.update_kernel_args(kernel_args) %}
-{{kernel.def_kernel(inputs=kernel_args, outputs={"output": output})}}
+{{kernel.def_kernel(inputs=kernel_args, outputs={"output": output}, extra_sizevars=template.extra_sizevars)}}
 {
   int64_t kvBlockSize = {{kvBlockSize}};
-  kvBlockSize = kvBlockSize > {{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}} : kvBlockSize;
-  int64_t num_thread= {{num_thread}};
+  kvBlockSize = kvBlockSize>{{kernel.size(key, 1)}} ? {{kernel.size(key, 1)}}
+                                                    : kvBlockSize;
+  int64_t num_thread = {{num_thread}};
 
   // dtypes of kernel and internal buffers
   using scalar_t = {{kernel.dtype(query)}};
@@ -78,38 +79,39 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t oStrideH = {{kernel.stride(output, 1)}};
 
   // Check total kv block number for kv value.
-  int64_t total_kv_num_blocks = 0;
-  int64_t zero_kv_idx_num = 1;
-  for(int64_t kv_idx = 0; kv_idx <{{kernel.size(kv_indices, 3)}}; kv_idx++){
-    if(*(kv_indices + kv_idx) > 0){
-      total_kv_num_blocks++;
-    }else if(*(kv_indices + kv_idx) == 0){
-      if(zero_kv_idx_num == 1){
-        zero_kv_idx_num--;
-        total_kv_num_blocks++;
-      }else{
+  int64_t block_num_kv_count = 0;
+  bool has_block_indice_zero = true;
+  for (int64_t kv_count = 0; kv_count < block_num_kvi; kv_count++) {
+    if (*(kv_indices + kv_count) > 0) {
+      block_num_kv_count++;
+    } else if (*(kv_indices + kv_count) == 0) {
+      if (has_block_indice_zero) {
+        has_block_indice_zero = false;
+        block_num_kv_count++;
+      } else {
         break;
       }
     }
   }
-  // Check to use kv_indice if total block size is bigger than kv length, e.g., in PagedAttention case.
+  // Check to use kv_indice if total block size is bigger than kv length, e.g.,
+  // in PagedAttention case.
   bool use_kv_indice = false;
-  if(block_num_kvi != total_kv_num_blocks &&  batchSize_k == 1 ){
-    use_kv_indice=true;
+  if (block_num_kvi != block_num_kv_count && batchSize_k == 1) {
+    use_kv_indice = true;
   }
-  int64_t kvSize = use_kv_indice ? total_kv_num_blocks*kvBlockSize : {{kernel.size(key, 1)}};
+  int64_t kvSize = use_kv_indice ? block_num_kv_count * kvBlockSize
+                                 : {{kernel.size(key, 1)}};
   int64_t qSplitSize = 32;
   int64_t kvSplitSize = 512;
-  if(qSize >= 768){
+  if (qSize >= 768) {
     qSplitSize = 256;
     kvSplitSize = 512;
-  }
-  else if(qSize >= 192){
+  } else if (qSize >= 192) {
     qSplitSize = 64;
     kvSplitSize = 512;
   }
-  if (kvBlockSize < kvSplitSize){
-    kvSplitSize=kvBlockSize;
+  if (kvBlockSize < kvSplitSize) {
+    kvSplitSize = kvBlockSize;
   }
 
   qSplitSize = qSplitSize > qSize ? qSize : qSplitSize;
@@ -118,210 +120,214 @@ FLEX_ATTENTION_TEMPLATE = r"""
   int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
   // allocate per thread temp buf (accumulate type)
   int64_t _size_per_thread =
-        /* qk     */ qSplitSize * kvSplitSize +
-        /* qk_max */ qSplitSize +
-        /* qk_sum */ qSplitSize +
-        /* dst    */ qSplitSize * headSize_v;
+      /* qk     */ qSplitSize * kvSplitSize +
+      /* qk_max */ qSplitSize +
+      /* qk_sum */ qSplitSize +
+      /* dst    */ qSplitSize * headSize_v;
 
-  {%- set acc_buf_name = "buf" %}
-      {{kernel.define_buffer(acc_buf_name, ["num_thread", "_size_per_thread"], dtype=accumulate_dtype)}}
-  {%- set acc_reduced_buf_name = "buf_reduced" %}
-      {{ kernel.define_buffer(acc_reduced_buf_name, ["num_thread", "qSplitSize", "kvSplitSize"], dtype=query_dtype)}}
+{%- set acc_buf_name = "buf" %}
+  {{ kernel.define_buffer(acc_buf_name, [ "num_thread", "_size_per_thread" ], dtype = accumulate_dtype) }}
+{%- set acc_reduced_buf_name = "buf_reduced" %}
+  {{ kernel.define_buffer(acc_reduced_buf_name, [ "num_thread", "qSplitSize", "kvSplitSize" ], dtype = query_dtype) }}
 
   const scalar_t* q_data = query;
   const scalar_t* k_data = key;
   const scalar_t* v_data = value;
 
   scalar_t* out_data = output;
-
   accum_t* buf_data = buf;
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced : nullptr;
 
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
-     int64_t i = 0, j = 0, k = 0;
-     at::native::data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
-        int ompIdx = at::get_thread_num();
-        accum_t* buf_ptr = buf_data + ompIdx * _size_per_thread;
-        accum_t* qk_data = buf_ptr;
-        accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
-        accum_t* qk_sum_data = qk_max_data + qSplitSize;
-        accum_t* dst_data = qk_sum_data + qSplitSize;
-        scalar_t* qk_reduced_data = is_reduced_type ? buf_reduced_data + ompIdx * qSplitSize * kvSplitSize : nullptr;
-        scalar_t* query_t_padding_ptr = nullptr;
+    int64_t i = 0, j = 0, k = 0;
+    at::native::data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
+    int ompIdx = at::get_thread_num();
+    accum_t* buf_ptr = buf_data + ompIdx * _size_per_thread;
+    accum_t* qk_data = buf_ptr;
+    accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
+    accum_t* qk_sum_data = qk_max_data + qSplitSize;
+    accum_t* dst_data = qk_sum_data + qSplitSize;
+    scalar_t *qk_reduced_data =
+        is_reduced_type
+            ? buf_reduced_data + ompIdx * qSplitSize * kvSplitSize
+            : nullptr;
+    scalar_t* query_t_padding_ptr = nullptr;
 
-        for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-          int64_t m = k * qSplitSize;
-          int64_t cur_qSplitSize = std::min(qSplitSize, qSize - m);
-          // Initialize max and sum
-          fill_stub(qk_max_data,
-              -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
-          fill_stub(qk_sum_data,
-              static_cast<accum_t>(0), cur_qSplitSize);
-          int64_t num_keys = kvSize;
-          for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
-            int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
-            cur_kvSplitSize = cur_kvSplitSize == kvSplitSize ? kvSplitSize : kvTail;
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      int64_t m = k * qSplitSize;
+      int64_t cur_qSplitSize = std::min(qSplitSize, qSize - m);
+      // Initialize max and sum
+      fill_stub(qk_max_data,
+          -std::numeric_limits<accum_t>::infinity(), cur_qSplitSize);
+      fill_stub(qk_sum_data,
+          static_cast<accum_t>(0), cur_qSplitSize);
+      int64_t num_keys = kvSize;
+      for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
+        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+        cur_kvSplitSize = cur_kvSplitSize == kvSplitSize ? kvSplitSize : kvTail;
+        // Calculate scale * q @ k.T
+        auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
+        auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
+        auto k_addr =
+            k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
 
-            // Calculate scale * q @ k.T
-            auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
-            auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
-            auto k_addr = k_data + i_kv * kStrideB + j_kv * kStrideH + n  * kStrideN;
+        auto kv_block_num = n / kvBlockSize;
+        auto kv_block_offset = n - kv_block_num * kvBlockSize;
+        // getting kv indices by [BS, Head, 1, kv_block_num]
+        auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+        auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                                j_kvi * kviStrideH + kv_block_num;
+        if (use_kv_indice) {
+            k_addr =
+                k_data + i_kv * kStrideB + j_kv * kStrideH +
+                (*kv_logical_data * kvBlockSize + kv_block_offset) * kStrideN;
+        }
 
-            auto kv_block_num = n / kvBlockSize;
-            auto kv_block_offset = n - kv_block_num * kvBlockSize;
-            // getting kv indices by [BS, Head, 1, kv_block_num]
-            auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
-            auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
-            auto kv_logical_data = kv_indices_data + i_kvi*kviStrideB + j_kvi*kviStrideH  + kv_block_num;
+        at::native::cpublas::gemm(
+            at::native::TransposeType::Transpose,
+            at::native::TransposeType::NoTranspose,
+            cur_kvSplitSize,
+            cur_qSplitSize,
+            headSize,
+            scaling_factor,
+            k_addr,
+            kStrideN,
+            q_data + i * qStrideB + j * qStrideH +
+                m * qStrideM,
+            qStrideM,
+            static_cast<accum_t>(0),
+            qk_data,
+            cur_kvSplitSize);
+
+{%- if score_mod and mask_mod %}
+        // apply score mod function
+        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
+            std::vector<int64_t> b_idx = {i};
+            std::vector<int64_t> h_idx = {j};
+            std::vector<int64_t> q_idx = {m+row};
+            int64_t phisical_kv_idx = n+col;
             if(use_kv_indice){
-                k_addr = k_data +
-                         i_kv * kStrideB +
-                         j_kv * kStrideH +
-                         (*kv_logical_data * kvBlockSize + kv_block_offset)  * kStrideN;
+                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
             }
-
-            at::native::cpublas::gemm(
-              at::native::TransposeType::Transpose,
-              at::native::TransposeType::NoTranspose,
-              cur_kvSplitSize,
-              cur_qSplitSize,
-              headSize,
-              scaling_factor,
-              k_addr,
-              kStrideN,
-              q_data + i * qStrideB + j * qStrideH +
-                  m * qStrideM,
-              qStrideM,
-              static_cast<accum_t>(0),
-              qk_data,
-              cur_kvSplitSize);
-
-            {%- if score_mod and mask_mod %}
-            // apply score mod function
-            for (int row = 0; row < cur_qSplitSize; ++row) {
-              for(int col = 0; col< cur_kvSplitSize; col++){
-                std::vector<int> b_idx = {i};
-                std::vector<int> h_idx = {j};
-                std::vector<int> q_idx = {m+row};
-                int phisical_kv_idx = n+col;
-                if(use_kv_indice){
-                    phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
-                }
-                std::vector<int> kv_idx = {phisical_kv_idx};
-                accum_t* in_ptr0 = qk_data + row * cur_kvSplitSize + col;
-                auto in_ptr1 = b_idx.data();
-                auto in_ptr2 = h_idx.data();
-                auto in_ptr3 = q_idx.data();
-                auto in_ptr4 = kv_idx.data();
-                {{template.generate_other_buffer("score_others", 5, 0, "len_score_other", kernel.args)}}
-                accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
-                {{template.modification(score_mod, score_buf_name, score_buf_idx)}}
-                }
-            }
-            // Apply block mask, fill unused with -inf
-            for (int row = 0; row < cur_qSplitSize; ++row) {
-              for(int col = 0; col< cur_kvSplitSize; col++){
-                std::vector<int> b_idx = {i};
-                std::vector<int> h_idx = {j};
-                std::vector<int> q_idx = {m+row};
-                int phisical_kv_idx = n+col;
-                if(use_kv_indice){
-                    phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
-                }
-                std::vector<int> kv_idx = {phisical_kv_idx};
-                accum_t* qk_block = qk_data + row * cur_kvSplitSize + col;
-                auto in_ptr1 = b_idx.data();
-                auto in_ptr2 = h_idx.data();
-                auto in_ptr3 = q_idx.data();
-                auto in_ptr4 = kv_idx.data();
-                {{template.generate_other_buffer("mask_others", 5, -1, "len_mask_other", kernel.args)}}
-                std::vector<int> temp = {0};
-                int* out_ptr{{mask_buf_idx}} = temp.data();
-                {{template.modification(mask_mod, mask_buf_name, mask_buf_idx)}}
-                *qk_block = *out_ptr{{mask_buf_idx}}!=0 ?  *qk_block : -std::numeric_limits<accum_t>::infinity();
-                }
-            }
-            {%- endif %}
-            // Update coefficients with Softmax
-            accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
-            for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-              // apply scaling factor and max per row in fusion
-              _mul_reduce_max_fusion_kernel(
-                  qk_data + row * cur_kvSplitSize,
-                  static_cast<accum_t>(1),
-                  cur_kvSplitSize,
-                  qk_data + row * cur_kvSplitSize,
-                  tmp_max);
-              tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
-              if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
-                // to avoid `nan = exp2f(-inf - (-inf))`
-                fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_kvSplitSize,
-                  static_cast<scalar_t>(0), cur_kvSplitSize);
-              } else {
-                tmp_sum = tmp_max;
-                // qk <- exp(qk - max) and sum per row
-                _exp_reduce_sum_fusion_kernel(
-                    qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
-                    conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_kvSplitSize,
-                    tmp_sum);
-                // exp_tmp <- exp(max[row] - max)
-                exp_tmp = std::exp(qk_max_data[row] - tmp_max);
-                // sum[row] <- sum + exp_tmp * sum[row]
-                qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
-                // max[row] <- max
-                qk_max_data[row] = tmp_max;
-                // dst <- dst * exp_tmp
-                if (n > 0) {
-                  at::vec::map<accum_t>(
-                    [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
-                    dst_data + row * headSize_v,
-                    dst_data + row * headSize_v,
-                    headSize_v);
-                }
-              }
-            }
-            // Calculate Softmax(q @ k.T) @ v
-            auto v_addr = v_data + i_kv * vStrideB + j_kv * vStrideH + n  * vStrideN;
-            if(use_kv_indice){
-                v_addr = v_data +
-                         i_kv * vStrideB +
-                         j_kv * vStrideH +
-                         (*kv_logical_data * kvBlockSize + kv_block_offset)  * vStrideN;
-            }
-            at::native::cpublas::gemm(
-              at::native::TransposeType::NoTranspose,
-              at::native::TransposeType::NoTranspose,
-              headSize_v,
-              cur_qSplitSize,
-              cur_kvSplitSize,
-              static_cast<accum_t>(1),
-              v_addr,
-              vStrideN,
-              conditional_data_ptr(qk_data, qk_reduced_data),
-              cur_kvSplitSize,
-              n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1),
-              dst_data,
-              headSize_v);
+            std::vector<int64_t> kv_idx = {phisical_kv_idx};
+            accum_t* in_ptr0 = qk_data + row * cur_kvSplitSize + col;
+            auto in_ptr1 = b_idx.data();
+            auto in_ptr2 = h_idx.data();
+            auto in_ptr3 = q_idx.data();
+            auto in_ptr4 = kv_idx.data();
+            {{ template.generate_other_buffer("score_others", 5, 0, "len_score_other", kernel.args) }}
+            accum_t* out_ptr{{score_buf_idx}} = in_ptr0;
+            {{ template.modification(score_mod, score_buf_name, score_buf_idx) }}
           }
-          // dst <- dst / sum[row]
-          // reorder MHA output with strides
-          for (int64_t row = 0; row < cur_qSplitSize; ++row) {
-            // Row sums for full masked out rows are 0, we set them to 1
-            // in order to avoid NaNs in the output and instead set fully
-            // masked out rows to 0
-            qk_max_data[row] = qk_max_data[row] == -std::numeric_limits<accum_t>::infinity() ? 0 : qk_max_data[row];
-            qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
-            accum_t sum_reciprocal = 1 / qk_sum_data[row];
-            at::vec::map<scalar_t>(
-              [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
-              out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
+        }
+        // Apply block mask, fill unused with -inf
+        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+          for (int64_t col = 0; col < cur_kvSplitSize; col++) {
+            std::vector<int64_t> b_idx = {i};
+            std::vector<int64_t> h_idx = {j};
+            std::vector<int64_t> q_idx = {m+row};
+            int64_t phisical_kv_idx = n+col;
+            if(use_kv_indice){
+                phisical_kv_idx= *kv_logical_data * kvBlockSize + col;
+            }
+            std::vector<int64_t> kv_idx = {phisical_kv_idx};
+            accum_t* qk_block = qk_data + row * cur_kvSplitSize + col;
+            auto in_ptr1 = b_idx.data();
+            auto in_ptr2 = h_idx.data();
+            auto in_ptr3 = q_idx.data();
+            auto in_ptr4 = kv_idx.data();
+            {{ template.generate_other_buffer("mask_others", 5, -1, "len_mask_other", kernel.args) }}
+            std::vector<int64_t> temp = {0};
+            int64_t* out_ptr{{mask_buf_idx}} = temp.data();
+            {{ template.modification(mask_mod, mask_buf_name, mask_buf_idx) }}
+            *qk_block = *out_ptr{{mask_buf_idx}} != 0
+                            ? *qk_block
+                            : -std::numeric_limits<accum_t>::infinity();
+          }
+        }
+{%- endif %}
+        // Update coefficients with Softmax
+        accum_t tmp_max = 0, tmp_sum = 0, exp_tmp = 0;
+        for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+          // apply scaling factor and max per row in fusion
+          _mul_reduce_max_fusion_kernel(
+              qk_data + row * cur_kvSplitSize,
+              static_cast<accum_t>(1),
+              cur_kvSplitSize,
+              qk_data + row * cur_kvSplitSize,
+              tmp_max);
+          tmp_max = qk_max_data[row] > tmp_max ? qk_max_data[row] : tmp_max;
+          if (tmp_max == -std::numeric_limits<accum_t>::infinity()) {
+            // to avoid `nan = exp2f(-inf - (-inf))`
+            fill_stub(conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_kvSplitSize,
+              static_cast<scalar_t>(0), cur_kvSplitSize);
+          } else {
+            tmp_sum = tmp_max;
+            // qk <- exp(qk - max) and sum per row
+            _exp_reduce_sum_fusion_kernel(
+              qk_data + row * cur_kvSplitSize, cur_kvSplitSize,
+              conditional_data_ptr(qk_data, qk_reduced_data) + row * cur_kvSplitSize,
+              tmp_sum);
+            // exp_tmp <- exp(max[row] - max)
+            exp_tmp = std::exp(qk_max_data[row] - tmp_max);
+            // sum[row] <- sum + exp_tmp * sum[row]
+            qk_sum_data[row] = tmp_sum + exp_tmp * qk_sum_data[row];
+            // max[row] <- max
+            qk_max_data[row] = tmp_max;
+            // dst <- dst * exp_tmp
+            if (n > 0) {
+              at::vec::map<accum_t>(
+              [exp_tmp](Vec x) { return x * Vec(exp_tmp); },
+              dst_data + row * headSize_v,
               dst_data + row * headSize_v,
               headSize_v);
+            }
           }
-          // Move to the next query
+        }
+        // Calculate Softmax(q @ k.T) @ v
+        auto v_addr =
+            v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+        if (use_kv_indice) {
+            v_addr =
+                v_data + i_kv * vStrideB + j_kv * vStrideH +
+                (*kv_logical_data * kvBlockSize + kv_block_offset) * vStrideN;
+        }
+        at::native::cpublas::gemm(
+            at::native::TransposeType::NoTranspose,
+            at::native::TransposeType::NoTranspose,
+            headSize_v,
+            cur_qSplitSize,
+            cur_kvSplitSize,
+            static_cast<accum_t>(1),
+            v_addr,
+            vStrideN,
+            conditional_data_ptr(qk_data, qk_reduced_data),
+            cur_kvSplitSize,
+            n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1),
+            dst_data,
+            headSize_v);
+      }
+      // dst <- dst / sum[row]
+      // reorder MHA output with strides
+      for (int64_t row = 0; row < cur_qSplitSize; ++row) {
+        // Row sums for full masked out rows are 0, we set them to 1
+        // in order to avoid NaNs in the output and instead set fully
+        // masked out rows to 0
+        qk_max_data[row] = qk_max_data[row] == -std::numeric_limits<accum_t>::infinity() ? 0 : qk_max_data[row];
+        qk_sum_data[row] = qk_sum_data[row] == 0 ? 1 : qk_sum_data[row];
+        accum_t sum_reciprocal = 1 / qk_sum_data[row];
+        at::vec::map<scalar_t>(
+            [sum_reciprocal](Vec x) { return x * Vec(sum_reciprocal); },
+            out_data + i * oStrideB + j * oStrideH + m * oStrideM + row * oStrideM,
+            dst_data + row * headSize_v,
+            headSize_v);
+      }
+      // Move to the next query
       at::native::data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
-    });
+  });
 }
 """
 
@@ -342,8 +348,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_mask_other,
         kernel_input_name_to_buffer,
     ) -> None:
-        assert layout.dtype in [torch.float, torch.float16, torch.bfloat16]
-        super().__init__("mha", input_nodes, layout, parallel_num_threads())
+        assert layout.dtype in [torch.float, torch.bfloat16]
+        super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
         self.mask_mod = mask_mod
@@ -373,6 +379,11 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_score_other = len_score_other
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
+        self.extra_sizevars = {
+            val
+            for val in self.kernel_input_name_to_buffer.values()
+            if isinstance(val, sympy.Symbol)
+        }
         self.score_mod_other_buffers = (
             self.input_nodes[
                 5
@@ -467,6 +478,9 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         for name, inp in kernel_output_args.items():
             args.output_buffers[name] = inp
+
+        for name in self.extra_sizevars:
+            args.sizevars[name] = f"k{name}"
 
         kernel_group.args = args
 

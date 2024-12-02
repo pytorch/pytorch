@@ -42,9 +42,22 @@ TEST_ON_CUDA = (
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0)
 )
-test_devices = ["cpu", "cuda"] if TEST_ON_CUDA else ["cpu"]
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 torch.set_float32_matmul_precision("high")
+
+if TEST_ON_CUDA:
+    test_devices = ["cuda"]
+    test_dtypes = (
+        [torch.float32, torch.bfloat16, torch.float16]
+        if PLATFORM_SUPPORTS_BF16
+        else [torch.float16, torch.float32]
+    )
+else:
+    test_devices = ["cpu"]
+    test_dtypes = [torch.float32, torch.bfloat16]
+test_dtypes_fast = {"cuda": torch.float16, "cpu": torch.float32}
+
+test_page_sizes = [64, 128, 256]
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -64,21 +77,6 @@ def create_block_mask_test(score_mod, query, key):
         score_mod, 1, 1, query.shape[-2], key.shape[-2], query.device
     )
     return block_mask
-
-
-test_dtypes = (
-    [torch.float16, torch.bfloat16, torch.float32]
-    if PLATFORM_SUPPORTS_BF16
-    else [torch.float16, torch.float32]
-)
-
-if TEST_ON_CUDA and not PLATFORM_SUPPORTS_BF16:
-    test_dtypes = [torch.float16, torch.float32]
-else:
-    test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
-test_dtypes_fast = {"cuda": torch.float16, "cpu": torch.float32}
-
-test_page_sizes = [64, 128, 256]
 
 
 # --------- Useful score mod functions for testing ---------
@@ -639,9 +637,9 @@ class TestFlexDecoding(InductorTestCase):
         ref_out = golden_call(q_ref, k_ref, v_ref)
 
         if mask_mod is not None:
-            block_mask = create_block_mask(mask_mod, Q_B, 1, 1, S, device=device)
+            block_mask = create_block_mask(mask_mod, Q_B, 1, Q_S, KV_S, device=device)
         else:
-            block_mask = create_block_mask(noop_mask, Q_B, 1, 1, S, device=device)
+            block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
         compiled_out, _ = self.run_paged_attention(
             score_mod, q, k, v, dtype, block_mask, device=device
@@ -753,7 +751,7 @@ class TestFlexDecoding(InductorTestCase):
         BLOCK_SIZE: Union[int, Tuple[int, int]],
     ):
         block_mask = create_block_mask(
-            noop_mask, B, 1, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
+            noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
@@ -1185,7 +1183,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def scoremod_2(qk, b, h, q, kv):
             return torch.where(q >= kv, qk, -float("inf"))
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1, S, device=device)
+        block_mask = create_block_mask(noop_mask, 1, 1, 4, 1024, device=device)
 
         def f(q, k1, k2, v1, v2):
             q2 = flex_attention(q, k1, v1, score_mod=scoremod_1, block_mask=block_mask)
@@ -1267,7 +1265,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def scoremod_2(qk, b, h, q, kv):
             return torch.where(q >= kv, qk, -float("inf"))
 
-        block_mask = create_block_mask(noop_mask, 1, 1, 1, S, device=device)
+        block_mask = create_block_mask(noop_mask, 1, 1, 4, 1024, device=device)
 
         attention1 = functools.partial(
             flex_attention, score_mod=scoremod_1, block_mask=block_mask
@@ -1395,16 +1393,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("device", test_devices)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self, device):
+        dtype = test_dtypes_fast[device]
+
         def score_mod(score, b, h, m, n):
             return score * 2
 
-        self.run_test(score_mod, device=device)
-        self.run_test_with_paged_attention(score_mod, device=device)
+        self.run_test(score_mod, dtype=dtype, device=device)
+        self.run_test_with_paged_attention(score_mod, dtype=dtype, device=device)
 
     @supported_platform
     @common_utils.parametrize("device", test_devices)
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self, device):
+        dtype = test_dtypes_fast[device]
         head_scale = torch.randn(Hq, device=device)
         batch_scale = torch.randn(B, device=device)
         tok_scale = torch.randn(S, device=device)
@@ -1417,8 +1418,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             score = score + head_scale[head]
             return score
 
-        self.run_test(bias_mod, device=device)
-        self.run_test_with_paged_attention(bias_mod, device=device)
+        self.run_test(bias_mod, dtype=dtype, device=device)
+        self.run_test_with_paged_attention(bias_mod, dtype=dtype, device=device)
 
     @skipIfRocm
     @supported_platform
@@ -1776,6 +1777,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @common_utils.parametrize("device", test_devices)
     def test_larger_block_mask_bug(self, device):
+        dtype = test_dtypes_fast[device]
+
         def mask_mod(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -1783,8 +1786,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             mask_mod=mask_mod,
             B=2,
             H=None,
-            Q_LEN=128,
-            KV_LEN=256,
+            Q_LEN=2,
+            KV_LEN=2,
             device=device,
         )
 
@@ -1793,9 +1796,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         # Create input tensors
         shape = (2, 1, 2, 16)
-        q = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
-        k = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
-        v = torch.normal(0.0, 3.0, shape, device=device, dtype=torch.float16)
+        q = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
+        k = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
+        v = torch.normal(0.0, 3.0, shape, device=device, dtype=dtype)
         eager = flex_attention(q, k, v, block_mask=mask_2)
         out = flex_attention_compiled(q, k, v, block_mask=mask_2)
         torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
