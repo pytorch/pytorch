@@ -34,12 +34,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_CPU,
-    HAS_GPU,
-    skipCUDAIf,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
 # Make the helper files in test/ importable
@@ -581,7 +576,10 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
-    @skipCUDAIf(IS_SM89, "Fails(with OOMS) on SM89")
+    @unittest.skipIf(
+        IS_SM89,
+        "Fails(with OOMS) on SM89, see https://github.com/pytorch/pytorch/issues/141915",
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
