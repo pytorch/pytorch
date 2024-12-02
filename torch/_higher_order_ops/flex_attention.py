@@ -614,7 +614,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 value,
                 out,
                 logsumexp,
-                *block_mask[:-1],
+                *block_mask[:10],
                 *score_mod_other_buffers,
                 *mask_mod_other_buffers,
             ),
@@ -630,8 +630,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             value,
             out,
             logsumexp,
-            query_lengths,
-            kv_lengths,
             kv_num_blocks,
             kv_indices,
             full_kv_num_blocks,
@@ -674,8 +672,6 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             fw_graph,
             joint_graph,
             (
-                query_lengths,
-                kv_lengths,
                 kv_num_blocks,
                 kv_indices,
                 full_kv_num_blocks,
@@ -712,8 +708,7 @@ def flex_attention_autograd(
 
     with TransformGetItemToIndex():
         input_requires_grad = any(
-            isinstance(t, torch.Tensor) and t.requires_grad
-            for t in (query, key, value, *score_mod_other_buffers)
+            t.requires_grad for t in (query, key, value, *score_mod_other_buffers)
         )
         if torch.is_grad_enabled() and input_requires_grad:
             example_vals = (
@@ -1135,9 +1130,7 @@ def flex_attention_backward_fake_tensor_mode(
         grad_value = torch.empty_like(value)
         grad_score_mod_captured = tuple(
             [
-                torch.empty_like(buffer)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                else None
+                torch.empty_like(buffer) if buffer.requires_grad else None
                 for buffer in score_mod_other_buffers
             ]
         )
