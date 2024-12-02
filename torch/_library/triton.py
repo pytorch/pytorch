@@ -1,6 +1,6 @@
 import contextlib
 import threading
-from typing import Callable, Generator, Iterable, Optional, Union
+from typing import Any, Callable, Generator, Iterable, Optional, Protocol, Union
 
 from torch.utils._exposed_in import exposed_in
 
@@ -173,13 +173,21 @@ def is_wrap_triton_enabled() -> bool:
     return getattr(wrap_triton_enabled, "value", wrap_triton_enabled_default)
 
 
-def capture_triton(triton_kernel: Callable, /) -> Callable:
+class TritonKernelLike(Protocol):
+    def __getitem__(self, grid: Any) -> "TritonKernelLike":
+        pass
+
+    def __call__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+def capture_triton(triton_kernel: Callable, /) -> TritonKernelLike:
     """This API has been renamed to wrap_triton"""
     return wrap_triton(triton_kernel)
 
 
 @exposed_in("torch.library")
-def wrap_triton(triton_kernel: Callable, /) -> Callable:
+def wrap_triton(triton_kernel: Callable, /) -> TritonKernelLike:
     """Allows capture of a triton kernel into a graph via make_fx or
     non-strict ``torch.export``.
 
