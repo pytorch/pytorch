@@ -14,8 +14,8 @@ from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, 
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
-from torch.monitor import _WaitCounter
 from torch._inductor import config
+from torch.monitor import _WaitCounter
 
 
 try:
