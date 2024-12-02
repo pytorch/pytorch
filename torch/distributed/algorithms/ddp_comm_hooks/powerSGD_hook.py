@@ -402,7 +402,6 @@ def powerSGD_hook(
     group_to_use = (
         process_group if process_group is not None else not_none(dist.group.WORLD)
     )
-    assert isinstance(process_group, dist.ProcessGroup)
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
@@ -714,7 +713,6 @@ def batched_powerSGD_hook(
     group_to_use = (
         process_group if process_group is not None else not_none(dist.group.WORLD)
     )
-    assert isinstance(group_to_use, dist.ProcessGroup)
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
