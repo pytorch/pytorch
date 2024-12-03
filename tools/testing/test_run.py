@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from copy import copy
 from functools import total_ordering
-from typing import Any, Iterable
+from typing import Any, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 class TestRun:

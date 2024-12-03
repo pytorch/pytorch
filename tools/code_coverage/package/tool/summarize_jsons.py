@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from .parser.coverage_record import CoverageRecord
 
 
-# coverage_records: Dict[str, LineInfo] = {}
+# coverage_records: dict[str, LineInfo] = {}
 covered_lines: dict[str, set[int]] = {}
 uncovered_lines: dict[str, set[int]] = {}
 tests_type: TestStatusType = {"success": set(), "partial": set(), "fail": set()}
