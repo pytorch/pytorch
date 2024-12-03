@@ -20,6 +20,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -575,6 +576,10 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
+    @unittest.skipIf(
+        IS_SM89,
+        "Fails(with OOMS) on SM89, see https://github.com/pytorch/pytorch/issues/141915",
+    )
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
