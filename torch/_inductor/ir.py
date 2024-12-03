@@ -6506,7 +6506,7 @@ class FallbackKernel(ExternKernelAlloc):
         # Supply any needed kwarg default values.  Any args with default values are
         # already correctly set thanks to fill_non_provided_args.
         kwarg_to_value = {
-            k: v.get("defaultvalue") for k, v in self.allarg_properties.items()
+            k: v.get("default_value") for k, v in self.allarg_properties.items()
         } | kwargs
         ordered_kwargs = [
             kwarg_to_value.get(key) for key in self.ordered_kwargs_for_cpp_kernel
