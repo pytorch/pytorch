@@ -50,9 +50,7 @@ def _replace_with_hop(node: torch.fx.Node):
     if len(set_grad_nodes) > 0:
         assert len(set_grad_nodes) == 1
         set_grad_node = set_grad_nodes[0]
-        _replace_with_hop_helper(
-            node, set_grad_node, _is_set_grad_enabled_node, wrap_with_set_grad_enabled
-        )
+        _replace_with_hop_helper(node, set_grad_node, wrap_with_set_grad_enabled)
         sub_graph.erase_node(set_grad_node)
 
 
