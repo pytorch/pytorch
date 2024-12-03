@@ -219,6 +219,19 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_node_safe(node)
 
 
+def check_metadata_cacheable(metadata: ViewAndMutationMeta):
+    """
+    When view replay is turned on, we bypass autograd cache if
+    the output is aliased.
+    """
+    if config.view_replay_for_aliased_outputs:
+        for info in metadata.output_info:
+            if info.functional_tensor is not None:
+                raise BypassAOTAutogradCache(
+                    "Cannot cache a graph with functional tensor"
+                )
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -827,7 +840,13 @@ class AOTAutogradCache:
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
+            check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
+        except BypassAOTAutogradCache as e:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.warning("Bypassing autograd cache due to: %s", e)
+            log_cache_bypass("bypass_aot_autograd", str(e))
+            return None
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
             if config.strict_autograd_cache:
