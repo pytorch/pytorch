@@ -42,7 +42,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
@@ -654,10 +653,15 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, y)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8(self):
-        if self.device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest("FP8 is only supported on H100+")
+        # cuda only
+        if self.device != "cuda":
+            return
 
         class Model(torch.nn.Module):
             def __init__(self, dtype):
@@ -678,18 +682,16 @@ class AOTInductorTestsTemplate:
 
         dtype = torch.float16
 
-        a_scale = torch.Tensor([1.0]).to(device=self.device)
-        b_scale = torch.Tensor([1.0]).to(device=self.device)
-        input_bias = torch.rand(32, device=self.device, dtype=dtype)
+        a_scale = torch.Tensor([1.0]).to(device="cuda")
+        b_scale = torch.Tensor([1.0]).to(device="cuda")
+        input_bias = torch.rand(32, device="cuda", dtype=dtype)
         weight_shape = (32, 16)
-        weight = torch.rand(*weight_shape, device=self.device, dtype=dtype).T
+        weight = torch.rand(*weight_shape, device="cuda", dtype=dtype).T
         a_inverse_scale = 1 / a_scale
         b_inverse_scale = 1 / b_scale
 
         x_shape = (16, 16)
-        x = torch.rand(*x_shape, device=self.device, dtype=dtype).to(
-            torch.float8_e4m3fn
-        )
+        x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(torch.float8_e4m3fn)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None, None, None)
         self.check_model(
@@ -698,10 +700,15 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
     @skipIfRocm  # _scaled_mm_out_cuda  is not compiled for ROCm platform
     def test_fp8_view_of_param(self):
-        if self.device == "cuda" and not SM90OrLater:
-            raise unittest.SkipTest("FP8 is only supported on H100+")
+        # cuda only
+        if self.device != "cuda":
+            return
 
         class Model(torch.nn.Module):
             def __init__(self, dtype, weight):
@@ -1404,7 +1411,7 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -3928,7 +3935,6 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(not HAS_CUDA, "No CUDA")
 class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     device_type = "cuda"
@@ -3950,5 +3956,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin" or HAS_CPU:
+    if HAS_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
