@@ -114,7 +114,7 @@ class AutogradCompilerInstance:
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
-        self.old_inline_behavior = True
+        self.old_inline_behavior = False
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -137,7 +137,8 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        self.sizes_proxy_lookup = {}
+        args_proxy, self.sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -160,7 +161,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
+        for i, symint in enumerate(sizes):
+            self.sizes_proxy_lookup[id(symint.node)] = i
+        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -244,7 +247,7 @@ class AutogradCompilerInstance:
         # we should probably "plop" the subgraph into the graph instead
         # of allow_in_graph the node through Dynamo.
         proxy_inputs, proxy_stack = pytree.tree_map(
-            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            lambda e: self.to_proxy(e),
             (inputs, stack),
         )
         op = ops.add(debug_name, fn)
@@ -265,7 +268,7 @@ class AutogradCompilerInstance:
             # breakpoint()
             return result
         proxy_outputs, proxy_stack = pytree.tree_map(
-            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            lambda e: self.to_proxy(e),
             (outputs, stack),
         )
         op = ops.add("validate_outputs", fn)
@@ -817,6 +820,11 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
+        if isinstance(t, torch.SymInt):
+            idx = self.sizes_proxy_lookup[id(t.node)]
+            return self.sizes_proxy[idx]
+        if not isinstance(t, torch.Tensor):
+            return t
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
