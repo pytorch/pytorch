@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen import local
 from torchgen.api.types import (
@@ -51,6 +51,10 @@ from torchgen.model import (
 from torchgen.utils import assert_never
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
 #
@@ -94,6 +98,7 @@ def valuetype_type(
     t: Type,
     *,
     binds: ArgName,
+    mutable: bool = True,
     remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> NamedCType | None:
@@ -113,7 +118,7 @@ def valuetype_type(
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
-        elem = valuetype_type(t.elem, binds=binds, symint=symint)
+        elem = valuetype_type(t.elem, binds=binds, mutable=mutable, symint=symint)
         if elem is None:
             return None
         return NamedCType(binds, OptionalCType(elem.type))
@@ -143,6 +148,7 @@ def argumenttype_type(
     r = valuetype_type(
         t,
         binds=binds,
+        mutable=mutable,
         symint=symint,
         remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
@@ -231,7 +237,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
     # placeholder is ignored
     # NB: symint is ALWAYS respected for return types.  So symint argument
     # here is IGNORED
-    r = valuetype_type(t, binds="__placeholder__", symint=True)
+    r = valuetype_type(t, binds="__placeholder__", mutable=mutable, symint=True)
     if r is not None:
         return r.type
 
@@ -251,9 +257,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert (
-            not mutable
-        ), "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)

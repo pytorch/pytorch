@@ -194,8 +194,9 @@ struct CppNode : public Node {
     if (!T::is_traceable) {
       throw std::runtime_error(
           std::string(
-              "compiled_args not implemented for non-traceable node: ") +
-          name());
+              "Attempting to trace a potentially unsafe C++ autograd function: ") +
+          name() +
+          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
     }
 
     // although neither of the 2 methods below have uniqueness guarantees
@@ -206,7 +207,8 @@ struct CppNode : public Node {
     args.collect(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    args.collect(ctx_.saved_variables_);
+    args.collect(
+        ctx_.saved_variables_, true); // always unpacked as output in eager
     TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
     args.collect(ctx_.materialize_grads_);
     args.collect(ctx_.has_freed_buffers_);

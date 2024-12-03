@@ -43,6 +43,11 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
+# Distributed
+# c10d backend APIs
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @wschin @xadupre
 /torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
@@ -57,7 +62,6 @@ nn/qat/ @jerryzh168
 # Docker
 /.ci/docker/ @jeffdaily
 /.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton-rocm.txt @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
 
 # Github Actions
@@ -99,6 +103,14 @@ test/test_type_promotion.py @mruberry
 test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
 test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
+# HOPs
+torch/_higher_order_ops/*.py @zou3519
+torch/_dynamo/variables/higher_order_ops.py @zou3519
+
+# AOTAutograd
+torch/_functorch/_aot_autograd/*.py @bdhirsh
+torch/_functorch/aot_autograd.py @bdhirsh
+
 # torch MPS
 test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
@@ -109,16 +121,16 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
-torch/autograd/profiler* @aaronenyeshi @sraikund16
-torch/csrc/profiler/ @aaronenyeshi @sraikund16
-torch/profiler/ @aaronenyeshi @sraikund16
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @andrewkho @gokulavasan
+torch/utils/data/ @andrewkho @divyanshk
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd

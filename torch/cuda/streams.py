@@ -2,7 +2,6 @@
 import ctypes
 
 import torch
-from torch._streambase import _EventBase, _StreamBase
 from torch._utils import _dummy_type
 
 
@@ -12,7 +11,7 @@ if not hasattr(torch._C, "_CudaStreamBase"):
     torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
 
 
-class Stream(torch._C._CudaStreamBase, _StreamBase):
+class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
@@ -138,7 +137,7 @@ class ExternalStream(Stream):
             return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
-class Event(torch._C._CudaEventBase, _EventBase):
+class Event(torch._C._CudaEventBase):
     r"""Wrapper around a CUDA event.
 
     CUDA events are synchronization markers that can be used to monitor the

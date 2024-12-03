@@ -12,11 +12,13 @@ constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
 CUDAAllocatorConfig::CUDAAllocatorConfig()
     : m_max_split_size(std::numeric_limits<size_t>::max()),
+      m_max_non_split_rounding_size(kLargeBuffer),
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
+      m_pinned_use_background_threads(false),
       m_last_allocator_settings("") {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
@@ -90,6 +92,27 @@ size_t CUDAAllocatorConfig::parseMaxSplitSize(
     m_max_split_size = val1 * 1024 * 1024;
   } else {
     TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parseMaxNonSplitRoundingSize(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  constexpr int mb = 1024 * 1024;
+  if (++i < config.size()) {
+    size_t val1 = stoi(config[i]);
+    TORCH_CHECK(
+        val1 > kLargeBuffer / mb,
+        "CachingAllocator option max_non_split_rounding_mb too small, must be > ",
+        kLargeBuffer / mb,
+        "");
+    val1 = std::max(val1, kLargeBuffer / mb);
+    val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
+    m_max_non_split_rounding_size = val1 * 1024 * 1024;
+  } else {
+    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
   }
   return i;
 }
@@ -258,6 +281,9 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
     if (config_item_view == "max_split_size_mb") {
       i = parseMaxSplitSize(config, i);
       used_native_specific_option = true;
+    } else if (config_item_view == "max_non_split_rounding_mb") {
+      i = parseMaxNonSplitRoundingSize(config, i);
+      used_native_specific_option = true;
     } else if (config_item_view == "garbage_collection_threshold") {
       i = parseGarbageCollectionThreshold(config, i);
       used_native_specific_option = true;
@@ -305,6 +331,9 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
       used_native_specific_option = true;
     } else if (config_item_view == "pinned_num_register_threads") {
       i = parsePinnedNumRegisterThreads(config, i);
+      used_native_specific_option = true;
+    } else if (config_item_view == "pinned_use_background_threads") {
+      i = parsePinnedUseBackgroundThreads(config, i);
       used_native_specific_option = true;
     } else {
       TORCH_CHECK(
@@ -359,6 +388,22 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   } else {
     TORCH_CHECK(
         false, "Error, expecting pinned_num_register_threads value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePinnedUseBackgroundThreads(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        (config[i] == "True" || config[i] == "False"),
+        "Expected a single True/False argument for pinned_use_background_threads");
+    m_pinned_use_background_threads = (config[i] == "True");
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting pinned_use_background_threads value", "");
   }
   return i;
 }

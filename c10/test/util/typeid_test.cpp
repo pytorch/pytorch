@@ -70,20 +70,22 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassAllowAssignment {
  public:
-  ClassAllowAssignment() : x(42) {}
+  ClassAllowAssignment() = default;
   ClassAllowAssignment(const ClassAllowAssignment& src) = default;
   ClassAllowAssignment& operator=(const ClassAllowAssignment& src) = default;
-  int x;
+  int x{42};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassNoAssignment {
  public:
-  ClassNoAssignment() : x(42) {}
+  ClassNoAssignment() = default;
   ClassNoAssignment(const ClassNoAssignment& src) = delete;
   ClassNoAssignment& operator=(const ClassNoAssignment& src) = delete;
-  int x;
+  int x{42};
 };
 } // namespace
 
