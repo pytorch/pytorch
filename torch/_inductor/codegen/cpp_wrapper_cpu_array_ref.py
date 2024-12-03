@@ -12,7 +12,7 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
-from .cpp_utils import cexpr, DTYPE_TO_CPP
+from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
@@ -63,7 +63,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[bool] = config.allow_stack_allocation
         self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
@@ -403,7 +402,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
-            if output == self.none_str:
+            if output == "nullptr":
                 continue
 
             is_constant_buffer = output in cst_names
@@ -640,10 +639,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return (
-            f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}"
-            f"  {self.comment} reuse"
-        )
+        return f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}  // reuse"
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer

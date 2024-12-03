@@ -226,9 +226,21 @@ def user_defined_kernel_grid_fn_code(
             assert len(grids) > 1
             assert len(grids) == len(configs)
             seen = set()
-            for grid, c in zip(grids, configs):
-                guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
-                guards = " and ".join(guards)
+            # sort the configs from the largest # of kwargs to the smallest to
+            # emit the grids in the order of (approximately) decreasing specificity
+            # TODO(aakhundov): the sorting below is generally not sufficient, so
+            # maybe we'll need to restrict the supported cases to identical kwarg
+            # names in all autotuning configs.
+            for grid, c in sorted(
+                zip(grids, configs), key=lambda x: len(x[1].kwargs), reverse=True
+            ):
+                if c.kwargs:
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in c.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
+                else:
+                    guards = "True"  # for configs with empty kwargs
                 grid, example_grid = determine_grid(grid)
                 statement = f"if {guards}: return {grid}"
                 if statement in seen:
@@ -630,13 +642,11 @@ class PythonWrapperCodegen(CodeGen):
         self.declare_maybe_reference = ""
         self.ending = ""
         self.comment = "#"
-        self.namespace = ""
         self.none_str = "None"
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
@@ -778,6 +788,7 @@ class PythonWrapperCodegen(CodeGen):
                 async_compile = AsyncCompile()
                 generate_example_value = AlgorithmSelectorCache.generate_example_value
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+                empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
             """
         )
 
@@ -1224,60 +1235,47 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
-    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_size = {name}.size()")
+    def codegen_input_symbol_assignment(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        value: ir.TensorBox,
+        bound_vars: Set[sympy.Symbol],
+    ):
+        @functools.lru_cache(None)
+        def sizeof(name):
+            code.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
 
-    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_stride = {name}.stride()")
+        @functools.lru_cache(None)
+        def strideof(name):
+            code.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
+        if isinstance(value, sympy.Expr):
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+                return
+            code.writeline(f"{value} = {name}")
+            bound_vars.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim, size in enumerate(value.get_size()):
+                if isinstance(size, sympy.Symbol) and size not in bound_vars:
+                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
+                    bound_vars.add(size)
+            for dim, stride in enumerate(value.get_stride()):
+                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
+                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
+                    bound_vars.add(stride)
+        else:
+            raise AssertionError(f"Unknown value type: {type(value)}")
 
     def codegen_inputs(
         self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
     ):
         """Assign all symbolic shapes to locals"""
-
-        @functools.lru_cache(None)
-        def sizeof(name):
-            self.codegen_input_size_var_decl(code, name)
-            return f"{name}_size"
-
-        @functools.lru_cache(None)
-        def strideof(name):
-            self.codegen_input_stride_var_decl(code, name)
-            return f"{name}_stride"
-
-        # Assign all symbolic shapes needed to local variables
         bound_vars: Set[sympy.Symbol] = set()
-
-        def is_expr(x):
-            return isinstance(x[1], sympy.Expr)
-
-        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
-        graph_inputs_tensors = list(
-            filter(lambda x: not is_expr(x), graph_inputs.items())
-        )
-
-        for name, shape in graph_inputs_expr:
-            if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
-                bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
+        for name, value in graph_inputs.items():
+            self.codegen_input_symbol_assignment(code, name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -1285,9 +1283,7 @@ class PythonWrapperCodegen(CodeGen):
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
-            self.writeline(
-                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-            )
+            self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
         pass
@@ -1665,14 +1661,7 @@ class PythonWrapperCodegen(CodeGen):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
-        if (expr, V.graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
-            self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(
-                f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
-            )
-        else:
-            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
+        self.writeline(f"{expr} = {pexpr(tree.numel)}")
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -1792,7 +1781,7 @@ class PythonWrapperCodegen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return self.expr_printer(V.graph.sizevars.simplify(arg))
+                return pexpr(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
@@ -2113,7 +2102,11 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
 
-        if name in V.graph.removed_buffers or name in self.allocated:
+        if (
+            name in V.graph.removed_buffers
+            or name in self.allocated
+            or isinstance(buffer, ir.DonatedBuffer)
+        ):
             return
         self.allocated.add(name)
         if isinstance(
@@ -2167,7 +2160,12 @@ class PythonWrapperCodegen(CodeGen):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
-            or name in V.graph.graph_inputs
+            or (
+                name in V.graph.graph_inputs
+                and not isinstance(
+                    V.graph.graph_inputs_original[name], ir.DonatedBuffer
+                )
+            )
             or name in V.graph.constants
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
@@ -2245,19 +2243,15 @@ class PythonWrapperCodegen(CodeGen):
             self.pop_codegened_graph()
 
     def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
-        subgraph.graph.add_symbol_graph_inputs()
-        # NB: Because of symints, the len of graph_inputs might be larger than
-        # outer_inputs
-        explicit_graph_inputs = subgraph.graph.graph_input_names[: len(outer_inputs)]
-        for inner_input, outer_input in zip(explicit_graph_inputs, outer_inputs):
-            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
-
-    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
-        assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
-        for inner_output, outer_output in zip(
-            subgraph.graph.get_output_names(), outer_outputs
+        # All inputs of hops must be explicitly passed in.
+        # Free tensors and basic symbols should have been explictily lifted as inputs in dynamo.
+        assert len(outer_inputs) == len(
+            subgraph.graph.graph_input_names
+        ), f"graph_input_names:{subgraph.graph.graph_input_names}, outer_inputs: {outer_inputs}"
+        for inner_input, outer_input in zip(
+            subgraph.graph.graph_input_names, outer_inputs
         ):
-            self.writeline(f"{outer_output} = {inner_output}{self.ending}")
+            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
@@ -2266,10 +2260,9 @@ class PythonWrapperCodegen(CodeGen):
         if len(input_names) == 1:
             inner_inputs += ","
 
-        output_names = subgraph.graph.get_output_names()
-        inner_outputs = ", ".join(output_names)
-        if len(output_names) == 1:
-            inner_outputs += ","
+        outer_output_names = ", ".join(outer_outputs) + (
+            "," if len(outer_outputs) == 1 else ""
+        )
 
         # Create a list of inputs for the subgraph call
         self.writeline(f"{subgraph.graph.name}_args = [{inner_inputs}]")
@@ -2278,7 +2271,7 @@ class PythonWrapperCodegen(CodeGen):
 
         # Call the subgraph launcher function
         self.writeline(
-            f"({inner_outputs}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
+            f"({outer_output_names}) = {subgraph.graph.name}({subgraph.graph.name}_args)"
         )
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
@@ -2305,8 +2298,6 @@ class PythonWrapperCodegen(CodeGen):
             self.define_subgraph_launcher_fn(subgraph_code)
 
         self.codegen_subgraph_call(subgraph, outer_inputs, outer_outputs)
-
-        self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         name = invoke_subgraph.get_name()
