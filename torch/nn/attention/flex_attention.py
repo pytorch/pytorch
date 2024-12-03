@@ -1262,6 +1262,12 @@ def flex_attention(
     ):
         # This corresponds to the case where we essentially have a "no-op" block mask.
         pass
+    elif query.is_nested:
+        if block_mask.shape[-2] != query._values.size(query._ragged_idx - 1):  # type: ignore[attr-defined]
+            raise RuntimeError(
+                f"block_mask of shape {block_mask.shape} is not compatible with nested tensor input "
+                f"with total sequence length of {query._values.size(query._ragged_idx - 1)}"  # type: ignore[attr-defined]
+            )
     else:
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
