@@ -12,14 +12,15 @@ import logging
 import math
 import operator
 import re
-import typing
 import traceback
+import typing
 
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    Annotated,
     Any,
     Callable,
     cast,
@@ -51,7 +52,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
-    ConstantInputSpec,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -64,6 +64,7 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     InputSpec,
     InputToBufferSpec,
+    InputToConstantInputSpec,
     InputToCustomObjSpec,
     InputTokenSpec,
     InputToParameterSpec,
@@ -225,6 +226,12 @@ def deserialize_device(d: Device) -> torch.device:
     return torch.device(type=d.type, index=d.index)
 
 
+def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
+    if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
+        s = s.node.expr
+    return sympy.printing.repr.srepr(s)
+
+
 def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
     if isinstance(s, (torch.SymInt, sympy.Symbol, int)):
         if symbolic_shapes.is_concrete_int(s):
@@ -232,10 +239,13 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         else:
             assert isinstance(s, (torch.SymInt, sympy.Symbol))
             if s.node.hint is None:
-                return SymInt.create(as_expr=SymExpr(str(s)))
+                return SymInt.create(as_expr=SymExpr(_print_sympy(s)))
             else:
                 return SymInt.create(
-                    as_expr=SymExpr(str(s), hint=SymExprHint.create(as_int=s.node.hint))
+                    as_expr=SymExpr(
+                        _print_sympy(s),
+                        hint=SymExprHint.create(as_int=s.node.hint),
+                    )
                 )
     else:
         raise SerializeError(
@@ -248,7 +258,9 @@ def serialize_sym_bool(s: Union[bool, torch.SymBool]) -> SymBool:
         if symbolic_shapes.is_concrete_bool(s):
             return SymBool.create(as_bool=bool(s))
         else:
-            return SymBool.create(as_expr=SymExpr(expr_str=str(s)))
+            return SymBool.create(
+                as_expr=SymExpr(expr_str=_print_sympy(s))
+            )
     else:
         raise SerializeError(
             f"SymBool should be either symbol or bool, got `{s}` of type `{type(s)}`"
@@ -964,7 +976,7 @@ class GraphModuleSerializer(metaclass=Final):
                 else:
                     raise SerializeError(f"Unhandled constant input {spec.arg.value} to serialize")
                 return InputSpec.create(
-                    constant_input=ConstantInputSpec(
+                    constant_input=InputToConstantInputSpec(
                         name=spec.arg.name, value=constant_spec
                     )
                 )
@@ -1487,6 +1499,46 @@ class GraphModuleDeserializer(metaclass=Final):
                 target = getattr(target, name)
         return target
 
+    def _parse_sym_expr(self, expr_str: str, hint: Optional[Union[int, bool, float]] = None) -> sympy.Expr:
+        """
+        Parses and does bottom-up processing of sympy.Expr nodes,
+        populating ShapeEnv & caching symbols as needed.
+        """
+        def _process_sym_expr(sym: sympy.Expr, hint: Optional[Union[int, bool, float]] = None) -> sympy.Expr:
+            if sym.is_Integer or sym.is_Float or sym.is_Boolean:  # base case
+                return sym
+            else:  # recursive case
+                # important to use str(expr) and not _print_sympy(),
+                # str(expr) is key for self.symbol_name_to_range
+                expr_str = str(sym)
+                for arg in sym.args:
+                    self._parse_sym_expr(arg)
+                # symbol caching
+                if expr_str in self.symbol_name_to_symbol:
+                    sym = self.symbol_name_to_symbol[expr_str]
+                else:
+                    self.symbol_name_to_symbol[expr_str] = sym
+                # hints
+                if (
+                    hint is not None
+                    and sym not in self.shape_env.var_to_val
+                ):
+                    self.shape_env.add_var_to_val(sym, hint)  # type: ignore[arg-type]
+                # ValueRanges
+                if vr := self.symbol_name_to_range.get(expr_str):
+                    self.shape_env.constrain_symbol_range(
+                        sym,
+                        compiler_min=vr.lower,  # type: ignore[arg-type]
+                        compiler_max=vr.upper,  # type: ignore[arg-type]
+                    )
+            return sym
+
+        expr = sympy.sympify(
+            expr_str,
+            locals={**self.sympy_functions, **self.symbol_name_to_symbol},
+        )
+        return _process_sym_expr(expr, hint)
+
     def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
         val = s.value
         if s.type == "as_expr":
@@ -1496,55 +1548,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 assert val.hint.type == "as_int"
                 hint = val.hint.value
 
-            if val.expr_str in self.symbol_name_to_symbol:
-                sym = self.symbol_name_to_symbol[val.expr_str]
-            else:
-                sym = sympy.sympify(
-                    val.expr_str,
-                    locals={**self.sympy_functions, **self.symbol_name_to_symbol},
-                )
-                # NOTE(avik): Assumptions on symbols are not explicitly serialized.
-                # This seems dangerous: it might cause unknown differences in shape env behavior
-                # on deserialization? Probably deserves a follow-up.
-
-                # Here we force symbols corresponding to SymInts to be at least integers.
-                # Otherwise some expressions that the shape env would otherwise evaluate to False,
-                # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
-                # TODO: This is HIGHLY SUSPICIOUS ezyang(May 2024)
-                sym = sym.subs(
-                    {s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols}
-                )
-                # We need to check if the symbol has already been allocated,
-                # self.symbol_name_to_symbol is not enough because the
-                # integer-ification of symbols can induce simplification;
-                # e.g., (2**s0 + 1) // 2  -->  s0 when we know s0 is integral
-                if isinstance(sym, sympy.Symbol) and sym not in self.shape_env.var_to_val:
-                    self.symbol_name_to_symbol[val.expr_str] = sym
-                    if hint is not None:
-                        self.shape_env.add_var_to_val(sym, hint)
-
-                    if vr := self.symbol_name_to_range.get(val.expr_str):
-                        self.shape_env.constrain_symbol_range(
-                            sym,
-                            compiler_min=vr.lower,  # type: ignore[arg-type]
-                            compiler_max=vr.upper,  # type: ignore[arg-type]
-                        )
-                else:
-                    # Placeholders, in particular, can have shapes as symbolic expressions.
-                    # We need to populate the shape env with the range constraints of their
-                    # free symbols, otherwise evaluating such expressions will error.
-                    self.symbol_name_to_symbol[val.expr_str] = sym
-                    free_symbols = sym.free_symbols
-                    for s in free_symbols:
-                        if s.name not in self.symbol_name_to_symbol:
-                            self.symbol_name_to_symbol[s.name] = s  # type: ignore[assignment]
-                        if vr := self.symbol_name_to_range.get(s.name):
-                            self.shape_env.constrain_symbol_range(
-                                s,
-                                compiler_min=vr.lower,  # type: ignore[arg-type]
-                                compiler_max=vr.upper,  # type: ignore[arg-type]
-                            )
-
+            sym = self._parse_sym_expr(val.expr_str, hint)
             return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
             assert type(val) is int
@@ -1557,16 +1561,7 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
         val = s.value
         if s.type == "as_expr":
-            # first we sympify this just to access any untracked symbols
-            expr = sympy.sympify(val.expr_str)
-            for sym in expr.free_symbols:
-                if (
-                    not isinstance(sym, sympy.Number)
-                    and str(sym) not in self.symbol_name_to_symbol
-                ):
-                    self.deserialize_sym_int(SymInt.create(as_expr=SymExpr(str(sym))))
-            # then we sympify again using locals to correctly reify with the constructed symbols
-            expr = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
+            expr = self._parse_sym_expr(val.expr_str)
             return self.shape_env.create_symboolnode(expr)
         elif s.type == "as_bool":
             assert isinstance(val, bool)
@@ -1666,9 +1661,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 ) from e
 
         # Outputs: convert to a single `output` node.
-        outputs = []
-        for output in serialized_graph.outputs:
-            outputs.append(self.deserialize_graph_output(output))
+        outputs = [self.deserialize_graph_output(output) for output in serialized_graph.outputs]
 
         if serialized_graph.is_single_tensor_return:
             assert len(outputs) == 1
@@ -2035,9 +2028,7 @@ class GraphModuleDeserializer(metaclass=Final):
             if len(value) == 0:
                 return []
             elif typ_ == "as_tensors":
-                result = []
-                for arg in value:
-                    result.append(self.serialized_name_to_node[arg.name])
+                result = [self.serialized_name_to_node[arg.name] for arg in value]
                 return result
             elif typ_ in ("as_ints", "as_floats", "as_bools", "as_strings"):
                 # convert from serialized.python.types.List to python list
@@ -2415,6 +2406,8 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
+    if typing.get_origin(cls) == Annotated:
+        return _dict_to_dataclass(cls.__origin__, data)
     if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
         if data is None:
             return None
@@ -2430,7 +2423,7 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment]
+        obj = cls(**data)  # type: ignore[assignment,operator]
         type_hints = typing.get_type_hints(cls)
         for f in dataclasses.fields(cls):
             name = f.name

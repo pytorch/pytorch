@@ -36,7 +36,7 @@ expecttest==0.2.1
 #Pinned versions: 0.2.1
 #test that import:
 
-fbscribelogger==0.1.6
+fbscribelogger==0.1.7
 #Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
@@ -90,7 +90,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.11.2
+mypy==1.13.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.10.0

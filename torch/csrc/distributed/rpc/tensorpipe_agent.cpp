@@ -195,7 +195,7 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 
 // The UV transport is implemented using standard TCP connections. It leverages
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
-C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport)
 
 #if TENSORPIPE_HAS_SHM_TRANSPORT
 
@@ -209,7 +209,7 @@ std::unique_ptr<TransportRegistration> makeShmTransport() {
 // memory (plus UNIX domain sockets to bootstrap the connection and exchange
 // file descriptors). It is Linux-only due to some advanced features (O_TMPFILE,
 // eventfd, ...).
-C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport)
 
 #endif // TENSORPIPE_HAS_SHM_TRANSPORT
 
@@ -227,7 +227,7 @@ std::unique_ptr<TransportRegistration> makeIbvTransport() {
 // issuing a RDMA write for transferring data across machines (plus a send for
 // acknowledging it). It bootstraps using a standard TCP connection to exchange
 // setup information. It is Linux-only.
-C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport)
 
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
 
@@ -239,7 +239,7 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
 
 // The basic channel is just a straightforward adapter wrapper that allows any
 // transport to be used as a channel.
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel)
 
 #if TENSORPIPE_HAS_CMA_CHANNEL
 
@@ -254,7 +254,7 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
 // process (as long as they belong to the same user and other security
 // constraints are satisfied). It does, more or less, what GDB does when it's
 // attached to a running process.
-C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
+C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel)
 
 #endif // TENSORPIPE_HAS_CMA_CHANNEL
 
