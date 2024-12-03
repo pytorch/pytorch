@@ -649,6 +649,10 @@ def copy_default(func, *args, **kwargs):
         raise RuntimeError(
             "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
         )
+    # AOTD allows mutations of inputs only, (not views of the inputs).
+    # NJT.values() returns _values.detach() to workaround some issues.
+    # To keep mutation in the graph, AOTD manually calls copy_ on the input (NJT).
+    # Here we directly mutate self._values to not emit .detach() in the graph, which would make it non-compilable.
     inp._values.copy_(src._values)
     return inp
 

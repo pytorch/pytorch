@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._logging import getArtifactLogger
-from torch._subclasses import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -663,12 +662,25 @@ from a multi-output view call"
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
         def _plain_fake_tensor_like_subclass(x):
-            t = torch.empty(x.shape, dtype=x.dtype, device=x.device)
-            return FakeTensor.from_tensor(t, detect_fake_mode())
+            with detect_fake_mode():
+                return torch.empty(
+                    x.shape, dtype=x.dtype, device=x.device, layout=x.layout
+                )
 
         f_input_tangents = [
-            # For subclass inputs that are mutated out of graph tangent will be
-            # plain zeros tensor like subclass input.
+            # Generally when creating tangents to trace with, we assume that tangents will have
+            # the same subclass-ness as their forward outs
+            # however: for tangents that correspond to input mutations, in practice it is more likely
+            # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
+            # to assume that the these tangents should always be plaint tensors.
+            # Example:
+            #  def f(x):
+            #      x.mul_(2)
+            #      return x + 1
+            #  out = f(x)
+            #  out.sum().backward()
+            # In the above code, we will have a tangent "x_updated_tangent",
+            # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
             _plain_fake_tensor_like_subclass(inp)
             if is_traceable_wrapper_subclass(inp)
             else inp

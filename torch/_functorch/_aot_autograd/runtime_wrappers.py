@@ -1913,22 +1913,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.metadata.num_mutated_inp_runtime_indices
                     )
 
-                    flat_processed_tangents: List[torch.Tensor] = []
-                    if _num_mutated_inp_runtime > 0:
-                        for t, m in zip(
-                            tangents[:_num_mutated_inp_runtime],
-                            CompiledFunction.metadata.subclass_tangent_meta[
-                                :_num_mutated_inp_runtime
-                            ],
-                        ):
-                            if isinstance(m, SubclassCreationMeta):
-                                flat_processed_tangents.extend(
-                                    AOTDispatchAutograd.process_runtime_tangent(t, m)[1]
-                                )
-                            else:
-                                flat_processed_tangents.append(t)
-
-                    flat_processed_tangents += list(
+                    flat_processed_tangents = list(
                         itertools.chain.from_iterable(
                             (
                                 AOTDispatchAutograd.process_runtime_tangent(
@@ -1937,10 +1922,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 )[1]
                             )
                             for t, m in zip(
-                                tangents[_num_mutated_inp_runtime:],
-                                CompiledFunction.metadata.subclass_tangent_meta[
-                                    _num_mutated_inp_runtime:
-                                ],
+                                tangents,
+                                CompiledFunction.metadata.subclass_tangent_meta,
                             )
                         )
                     )
