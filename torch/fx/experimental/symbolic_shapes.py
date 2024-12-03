@@ -234,7 +234,9 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
-def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+def _nested_int_aware_sort(
+    tup: Tuple[Union[SymInt, int], int]
+) -> Tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
         # 1 here to order nested ints after non-nested-ints.

@@ -27,8 +27,6 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
-    FLOAT8_E5M2 = 23
-    FLOAT8_E4M3FN = 24
     UINT16 = 28
 
 
