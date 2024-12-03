@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import textwrap
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
@@ -22,6 +22,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import mapMaybe
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 base_type_to_c_type = {
@@ -114,14 +118,14 @@ def convert_arg_type_and_name(  # type: ignore[return]
                 new_aten_types.append(f"::std::optional<{aten_type}>")
                 base_type = aten_type[len("c10::ArrayRef<") : -1]
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j + 1]})"
                 )
                 j += 2
             elif aten_type == "c10::Device":
                 # Device is passed as device_type + device_index
                 new_aten_types.append("::std::optional<c10::Device>")
                 new_callsite_exprs.append(
-                    f"pointer_to_optional_device({names[j]}, {names[j+1]})"
+                    f"pointer_to_optional_device({names[j]}, {names[j + 1]})"
                 )
                 j += 2
             else:
