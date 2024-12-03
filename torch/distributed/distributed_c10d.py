@@ -76,6 +76,7 @@ __all__ = [
     "gather_object",
     "get_backend_config",
     "get_backend",
+    "get_default_backend_for_device",
     "get_rank",
     "get_world_size",
     "get_pg_count",
@@ -1343,6 +1344,29 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
         raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
+
+
+def get_default_backend_for_device(device: Union[str, torch.device]) -> str:
+    """
+    Return the default backend for the given device.
+
+    Args:
+        Union[str, torch.device]: The device to get the default backend for.
+
+    Returns:
+        The default backend for the given device as a lower case string.
+
+    """
+    if isinstance(device, torch.device):
+        device_str = device.type
+    else:
+        device_str = device.split(":")[0]
+
+    backend = Backend.default_device_backend_map.get(device_str)
+    if backend is None:
+        raise ValueError(f"Default backend not registered for device : {device}")
+
+    return backend
 
 
 def _get_process_group_uid(pg: ProcessGroup) -> int:
@@ -4453,7 +4477,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
 
 @_exception_logger
-def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
+def barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD, async_op=False, device_ids=None
+):
     """
     Synchronize all processes.
 
@@ -4495,7 +4521,11 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         work.wait()
 
 
-def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
+def monitored_barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD,
+    timeout=None,
+    wait_all_ranks=False,
+):
     """
     Synchronize processes similar to ``torch.distributed.barrier``, but consider a configurable timeout.
 
@@ -4565,7 +4595,9 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
+    return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
+        timeout, wait_all_ranks=wait_all_ranks
+    )
 
 
 def _create_process_group_wrapper(
