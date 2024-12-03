@@ -6,10 +6,10 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.runtime.benchmarking import (
-    is_feature_enabled,
     Benchmarker,
     InductorBenchmarker,
     InductorGroupedBenchmarker,
+    is_feature_enabled,
     TritonBenchmarker,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -141,9 +141,10 @@ class TestBenchmarker(TestCase):
     @unittest.skipIf(config.is_fbcode(), "test does not run in fbcode")
     @parametrize("feature_name", ("inductor_benchmarker", "inductor_grouped_benchmarker"))
     @parametrize(
-        "config_name,config_val,expected",        [
-            ("env_val", "1", False),
-            ("env_val", "0", True),
+        "config_name,config_val,expected",
+        [
+            ("env_val", "1", True),
+            ("env_val", "0", False),
             ("env_val", "", None),
             ("oss_default", True, False),
             ("oss_default", False, True),
