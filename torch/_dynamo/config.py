@@ -446,7 +446,7 @@ reorderable_logging_functions: Set[Callable[[Any], None]] = set()
 # to prevent graph breaks.
 # Add logging.Logger.<method> to ignore all calls for method,
 # or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: Set[Callable] = set()
+ignore_logger_methods: Set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
