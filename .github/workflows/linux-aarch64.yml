@@ -42,6 +42,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.arm64.2xlarge" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.arm64.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-aarch64-py3_10-test:
     name: linux-jammy-aarch64-py3.10
@@ -54,3 +55,4 @@ jobs:
       build-environment: linux-jammy-aarch64-py3.10
       docker-image: ${{ needs.linux-jammy-aarch64-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-build.outputs.test-matrix }}
+    secrets: inherit

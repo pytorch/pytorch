@@ -115,6 +115,7 @@ jobs:
         { include: [
           { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-cpu-py3_12-inductor-triton-cpu-test:
     name: linux-jammy-cpu-py3.12-gcc11-inductor-triton-cpu
@@ -124,6 +125,7 @@ jobs:
       build-environment: linux-jammy-py3.12-gcc11
       docker-image: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_12-inductor-triton-cpu-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-inductor-build:
     name: linux-jammy-cpu-py3.9-gcc11-inductor

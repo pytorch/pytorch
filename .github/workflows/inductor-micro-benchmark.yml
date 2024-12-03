@@ -52,6 +52,7 @@ jobs:
         { include: [
           { config: "inductor-micro-benchmark", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-test:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -63,3 +64,4 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-micro-benchmark-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+    secrets: inherit
