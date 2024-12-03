@@ -69,6 +69,7 @@ class InputPickler(pickle.Pickler):
             {
                 FakeTensor: _extract_tensor_metadata_for_node_hash,
                 torch.SymInt: lambda x: (_ident, (str(x),)),
+                torch.SymBool: lambda x: (_ident, (str(x),)),
             }
         )
         self.fast = True
