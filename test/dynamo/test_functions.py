@@ -10,7 +10,8 @@ import random
 import sys
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, Dict, Generic, List, TypeVar
+from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -38,6 +39,8 @@ from torch.testing._internal.common_utils import (
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
+
+T = TypeVar("T")
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -1867,6 +1870,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             sorted(tmp.items(), key=operator.itemgetter(1), reverse=True),
         )
 
+    @make_test
+    def test_sorted_const_key_non_const_items(x, y):
+        tmp = {1: x, 10: x - 1, 3: 2 * x, -1: y + 2, 0: torch.ones(3, 4)}
+        return (
+            sorted(tmp),
+            sorted(tmp.items(), key=operator.itemgetter(0)),
+            sorted(tmp.items(), key=operator.itemgetter(0), reverse=True),
+        )
+
     def test_dict_hasattr(self):
         def fn(x):
             if hasattr(x, "to"):
@@ -1931,12 +1943,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def class_method(cls) -> str:
             return cls.__name__
 
+    class MyGenericNamedTuple(NamedTuple, Generic[T]):
+        first: T
+        second: T
+
+        def add(self) -> T:
+            return self.first + self.second
+
+        @staticmethod
+        def static_method() -> int:
+            return 1
+
+        @classmethod
+        def class_method(cls) -> str:
+            return cls.__name__
+
     class MyNamedTupleSubclass(MyNamedTuple):
+        pass
+
+    class MyGenericNamedTupleSubclass(MyGenericNamedTuple[T]):
         pass
 
     @make_test
     def test_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
+        return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
+    @make_test
+    def test_generic_namedtuple_user_methods(a, b):
+        mytuple = FunctionTests.MyGenericNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
@@ -1956,8 +1991,33 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a - b
 
     @make_test
+    def test_generic_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyGenericNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
     def test_namedtuple_subclass(a, b):
         mytuple = FunctionTests.MyNamedTupleSubclass(a, b)
+        mytuple.x = a
+        mytuple.y = b
+        mytuple.z = b
+        mytuple.z = a
+        return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
+
+    @make_test
+    def test_generic_namedtuple_subclass(a, b):
+        mytuple = FunctionTests.MyGenericNamedTupleSubclass(a, b)
         mytuple.x = a
         mytuple.y = b
         mytuple.z = b
@@ -3585,6 +3645,18 @@ class GraphModule(torch.nn.Module):
         it2 = opt_fn(*inps)
         self.assertIsInstance(it2, enumerate)
         self.assertEqual(list(it1), list(it2))
+
+    def test_returning_recursive_func(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            def f():
+                return f
+
+            return x + 1, f
+
+        res, f = run(torch.zeros(1))
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertTrue(f is f())
 
 
 def udf_mul(x, y):
