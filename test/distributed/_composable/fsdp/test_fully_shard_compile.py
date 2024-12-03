@@ -85,7 +85,7 @@ class TestFullyShardCompileCompute(FSDPTest):
     ):
         torch._dynamo.reset()
         trace_rules_check_count = 0
-        HOOKS_FILE_NAME = "torch/distributed/_composable/fsdp/_fsdp_state.py"
+        HOOKS_FILE_NAME = "torch/distributed/fsdp/fully_shard/_fsdp_state.py"
         HOOK_WRAPPER_NAME = "fsdp_hook_wrapper"
 
         def patched_trace_rules_check(*args, **kwargs):
