@@ -347,7 +347,7 @@ class BlockPtrOptions:
         if (
             not V.kernel.inside_reduction
             and len(params.strides) == len(V.kernel.numels) - reduction_ndim
-            and V.kernel.total_reduction_numel != 1
+            and V.kernel.features.reduction_numel != 1
         ):
             # Need to expand rank to match the rank used inside the reduction loop
             final_shape += [sympy.S.One] * reduction_ndim

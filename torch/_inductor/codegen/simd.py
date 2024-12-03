@@ -361,7 +361,7 @@ class SIMDKernel(Kernel):
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
-        self.inside_reduction = self.total_reduction_numel != 1
+        self.inside_reduction = features.is_reduction()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -389,17 +389,9 @@ class SIMDKernel(Kernel):
 
     @property
     @cache_on_self
-    @no_type_check
+    @no_type_check  # https://github.com/python/mypy/issues/17184
     def num_reduction_dims(self) -> int:
-        return sum(dim.startswith("r") for dim in self.numels)
-
-    @property
-    @cache_on_self
-    @no_type_check
-    def total_reduction_numel(self):
-        return sympy_product(
-            [val for key, val in self.numels.items() if key.startswith("r")]
-        )
+        return sum(prefix_is_reduction(prefix) for prefix in self.numels)
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
@@ -414,7 +406,7 @@ class SIMDKernel(Kernel):
     def initialize_range_tree(self, pid_cache):
         prefixes = ["z", "y", "x", "r0_", "r1_"]
         active_prefixes = [prefix for prefix in prefixes if prefix in self.numels]
-        no_r_dim = not self.inside_reduction or self.total_reduction_numel == 1
+        no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
 
         grid_dims = ["x", "y", "z"]
         reduction_dims = ["r0_", "r1_"]
@@ -546,7 +538,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.total_reduction_numel == 1:
+            if self.features.reduction_numel == 1:
                 assert not self.inside_reduction
                 yield
                 return
@@ -985,7 +977,7 @@ class SIMDKernel(Kernel):
     def welford_reduce_fallback(self, dtype, value):
         sum_ = ops.reduction(dtype, dtype, "sum", value)
         self.inside_reduction = False
-        rnumel = ops.index_expr(self.total_reduction_numel, dtype)
+        rnumel = ops.index_expr(self.features.reduction_numel, dtype)
         mean = ops.truediv(sum_, rnumel)
 
         self.inside_reduction = True
