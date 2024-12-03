@@ -69,7 +69,7 @@ DEFINE_CONSTANT(started_state, "started")
 class TORCH_API DebugInfoWriter {
  public:
   virtual ~DebugInfoWriter() = default;
-  virtual void write(const std::string& ncclTrace);
+  virtual void write(const std::string& trace);
   static DebugInfoWriter& getWriter(int rank);
   static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
   virtual std::string getWriterTarget() {
@@ -92,14 +92,14 @@ float getDurationFromEvent(
     at::cuda::CUDAEvent& ncclStartEvent,
     at::cuda::CUDAEvent& ncclEndEvent);
 
-struct NCCLTraceBuffer {
-  static NCCLTraceBuffer* get() {
+struct FlightRecorder {
+  static FlightRecorder* get() {
     // intentionally leak on exit
     // because this will hold python state that may get destructed
-    static NCCLTraceBuffer* instance = new NCCLTraceBuffer();
+    static FlightRecorder* instance = new FlightRecorder();
     return instance;
   }
-  NCCLTraceBuffer() {
+  FlightRecorder() {
     max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
