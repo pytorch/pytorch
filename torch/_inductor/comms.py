@@ -7,7 +7,7 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Dict, List, Set, TYPE_CHECKING, Union, Callable
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -336,6 +336,288 @@ def reorder_compute_and_comm_for_overlap(
             except Exception as e:
                 overlap_log.debug(str(e))
     return order
+
+
+def bucket_fsdp_all_gather(gm: torch.fx.GraphModule, all_gather_bucket_cap_mb: float) -> None:
+    def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        )
+    
+    def is_wait_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.wait_tensor.default
+        )
+
+    def is_graph_input(node: torch.fx.Node) -> bool:
+        return node.op == "placeholder"
+
+    node_list = gm.graph.nodes
+
+    # Prerequisite: Check if there is any all_gather node
+    found_all_gather = False
+    for node in node_list:
+        if is_all_gather_into_tensor(node):
+            found_all_gather = True
+            break
+    if not found_all_gather:
+        return
+
+    ag_nodes: List[torch.fx.Node] = []
+    ag_node_to_wait_node: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Step 1: Find all all_gather nodes
+    for node in node_list:
+        if (
+            is_wait_tensor(node)
+            and is_all_gather_into_tensor(node.args[0])
+        ):
+            ag_wait_node = node
+            ag_node = node.args[0]
+            assert is_graph_input(ag_node.args[0]) or (
+                ag_node.args[0].op == "call_function"
+                and ag_node.args[0].target == torch.ops.prims.convert_element_type.default
+                and is_graph_input(ag_node.args[0].args[0])
+            ), f"Assume all_gather_into_tensor input is either graph input or dtype conversion of graph input, but got {ag_node.args[0]}"
+            ag_nodes.append(ag_node)
+            ag_node_to_wait_node[ag_node] = ag_wait_node
+    
+    # Step 2: Put all_gather nodes into buckets
+    ag_buckets: List[List[torch.fx.Node]] = []
+    ag_node_to_bucket_id = {}
+    bucket_id_to_actual_bucket_size = {}
+    cur_bucket: List[torch.fx.Node] = []
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    # Convert MiB to bytes
+    all_gather_bucket_size_bytes = int(all_gather_bucket_cap_mb * 1024 * 1024)
+    for ag_node in ag_nodes:
+        assert is_all_gather_into_tensor(ag_node)
+        assert "val" in ag_node.meta
+        ag_output_size_bytes = ag_node.meta["val"].numel() * torch.finfo(ag_node.meta["val"].dtype).bits // 8 
+        if cur_bucket_size_bytes + ag_output_size_bytes > all_gather_bucket_size_bytes and cur_bucket:
+            # Current bucket is full, create new bucket
+            ag_buckets.append(cur_bucket)
+            for n in cur_bucket:
+                ag_node_to_bucket_id[n] = cur_bucket_id
+            bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+        cur_bucket_size_bytes += ag_output_size_bytes
+        cur_bucket.append(ag_node)
+    if cur_bucket:
+        # add remaining nodes in the last bucket
+        ag_buckets.append(cur_bucket)
+        for n in cur_bucket:
+            ag_node_to_bucket_id[n] = cur_bucket_id
+        bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+
+    assert len(ag_buckets) > 0  # DEBUG, remove when shipping this
+    for bucket_id, ag_bucket in enumerate(ag_buckets):
+        log.warning(f"AG Bucket {bucket_id}: size: {bucket_id_to_actual_bucket_size[bucket_id]}, # AG nodes: {len(ag_bucket)}, AG nodes: {ag_bucket}")
+
+    # Step 3: Create new (bucketed) all_gather nodes
+    bucket_id_to_bucketed_op_info = {}
+    bucket_id_is_scheduled = {}
+    for bucket_id, ag_bucket in enumerate(ag_buckets):
+        _, group_size, group_name = list(ag_node_to_wait_node.keys())[0].args
+        ag_input_nodes = []
+        wait_nodes = []
+        for ag_node in ag_bucket:
+            assert ag_node in ag_node_to_wait_node and ag_node.args[1] == group_size and ag_node.args[2] == group_name
+            ag_input_nodes.append(ag_node.args[0])
+            wait_nodes.append(ag_node_to_wait_node[ag_node])
+        bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_nodes, group_size, group_name, wait_nodes)
+
+    all_ag_related_nodes = set(ag_nodes + list(ag_node_to_wait_node.values()))
+    new_graph: torch.fx.Graph = torch.fx.Graph()
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def env_lookup(x: torch.fx.Node, node_user: Union[torch.fx.Node, str]) -> torch.fx.Node:
+        assert x in env, f"Dependent node {x} not in env when creating downstream node {node_user}"
+        return env[x]
+
+    def node_copy(node: torch.fx.Node, arg_transform: Callable[[torch.fx.Node], "Argument"]) -> torch.fx.Node:
+        new_node = new_graph.node_copy(node, arg_transform=arg_transform)
+        env[node] = new_node
+        return new_node
+
+    for node in node_list:
+        if node not in all_ag_related_nodes:
+            # not related to all_gather - schedule it normally
+            node_copy(node, lambda x: env_lookup(x, node))
+        elif node in ag_node_to_wait_node:
+            assert node in ag_node_to_bucket_id
+            bucket_id = ag_node_to_bucket_id[node]
+            if bucket_id not in bucket_id_is_scheduled:
+                ag_input_nodes, group_size, group_name, wait_nodes = bucket_id_to_bucketed_op_info[bucket_id]
+                # must schedule all the all_gather input nodes first, before the bucketed all_gather node
+                for ag_input_node in ag_input_nodes:
+                    if ag_input_node.op != "placeholder":
+                        node_copy(ag_input_node, lambda x: env_lookup(x, ag_input_node))
+                # schedule the bucketed all_gather node
+                new_ag_node = new_graph.call_function(
+                    torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default,
+                    ([env_lookup(x, "new_ag_node") for x in ag_input_nodes], group_size, group_name),
+                    {},
+                )
+                # each wait node's input should now be a getitem of the bucketed all_gather node
+                for i in range(len(wait_nodes)):
+                    wait_node = wait_nodes[i]
+                    getitem_node = new_graph.call_function(
+                        operator.getitem,
+                        (new_ag_node, i),
+                        {},
+                    )
+                    node_copy(wait_node, lambda x: getitem_node)
+                bucket_id_is_scheduled[bucket_id] = True
+        else:
+            continue
+    gm.graph = new_graph
+
+
+def bucket_fsdp_reduce_scatter(gm: torch.fx.GraphModule, reduce_scatter_bucket_cap_mb: float) -> None:
+    def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
+        )
+    
+    def is_wait_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.wait_tensor.default
+        )
+
+    node_list = gm.graph.nodes
+
+    # Prerequisite: Check if there is any reduce_scatter node
+    found_reduce_scatter = False
+    for node in node_list:
+        if is_reduce_scatter_tensor(node):
+            found_reduce_scatter = True
+            break
+    if not found_reduce_scatter:
+        return
+
+    rs_nodes: List[torch.fx.Node] = []
+    rs_node_to_wait_node: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Step 1: Find all reduce_scatter nodes
+    for node in node_list:
+        if (
+            is_wait_tensor(node)
+            and is_reduce_scatter_tensor(node.args[0])
+        ):
+            rs_wait_node = node
+            rs_node = node.args[0]
+            rs_nodes.append(rs_node)
+            rs_node_to_wait_node[rs_node] = rs_wait_node
+    
+    # Step 2: Put reduce_scatter nodes into buckets
+    rs_buckets: List[List[torch.fx.Node]] = []
+    rs_node_to_bucket_id = {}
+    bucket_id_to_actual_bucket_size = {}
+    cur_bucket: List[torch.fx.Node] = []
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    # Convert MiB to bytes
+    reduce_scatter_bucket_size_bytes = int(reduce_scatter_bucket_cap_mb * 1024 * 1024)
+    for rs_node in rs_nodes:
+        assert is_reduce_scatter_tensor(rs_node)
+        rs_input = rs_node.args[0]
+        assert "val" in rs_input.meta
+        rs_input_size_bytes = rs_input.meta["val"].numel() * torch.finfo(rs_input.meta["val"].dtype).bits // 8 
+        if cur_bucket_size_bytes + rs_input_size_bytes > reduce_scatter_bucket_size_bytes and cur_bucket:
+            # Current bucket is full, create new bucket
+            rs_buckets.append(cur_bucket)
+            for n in cur_bucket:
+                rs_node_to_bucket_id[n] = cur_bucket_id
+            bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+        cur_bucket_size_bytes += rs_input_size_bytes
+        cur_bucket.append(rs_node)
+    if cur_bucket:
+        # add remaining nodes in the last bucket
+        rs_buckets.append(cur_bucket)
+        for n in cur_bucket:
+            rs_node_to_bucket_id[n] = cur_bucket_id
+        bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+
+    assert len(rs_buckets) > 0
+    for bucket_id, rs_bucket in enumerate(rs_buckets):
+        log.warning(f"RS Bucket {bucket_id}: size: {bucket_id_to_actual_bucket_size[bucket_id]}, # RS nodes: {len(rs_bucket)}, RS nodes: {rs_bucket}")
+
+    # Step 3: Create new (bucketed) reduce_scatter nodes
+    bucket_id_to_bucketed_op_info = {}
+    bucket_id_is_scheduled = {}
+    for bucket_id, rs_bucket in enumerate(rs_buckets):
+        _, reduce_op, group_size, group_name = list(rs_node_to_wait_node.keys())[0].args
+        rs_input_nodes = []
+        wait_nodes = []
+        for rs_node in rs_bucket:
+            assert rs_node in rs_node_to_wait_node and rs_node.args[1] == reduce_op and rs_node.args[2] == group_size and rs_node.args[3] == group_name
+            rs_input_nodes.append(rs_node.args[0])
+            wait_nodes.append(rs_node_to_wait_node[rs_node])
+        bucket_id_to_bucketed_op_info[bucket_id] = (rs_input_nodes, reduce_op, group_size, group_name, wait_nodes)
+
+    rs_wait_nodes = rs_node_to_wait_node.values()
+    for n in rs_wait_nodes:
+        assert len(n.users) == 1, f"Expect only one user for {n}, but got {n.users}"
+    all_rs_related_nodes = set(rs_nodes + list(rs_wait_nodes) + [next(iter(n.users.keys())) for n in rs_wait_nodes])
+    new_graph: torch.fx.Graph = torch.fx.Graph()
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def env_lookup(x: torch.fx.Node, node_user: Union[torch.fx.Node, str]) -> torch.fx.Node:
+        assert x in env, f"Dependent node {x} not in env when creating downstream node {node_user}"
+        return env[x]
+
+    def node_copy(node: torch.fx.Node, arg_transform: Callable[[torch.fx.Node], "Argument"]) -> torch.fx.Node:
+        new_node = new_graph.node_copy(node, arg_transform=arg_transform)
+        env[node] = new_node
+        return new_node
+
+    for node in node_list:
+        if node not in all_rs_related_nodes:
+            # not related to reduce_scatter - schedule it normally
+            node_copy(node, lambda x: env_lookup(x, node))
+        elif node in rs_node_to_wait_node:
+            assert node in rs_node_to_bucket_id
+            bucket_id = rs_node_to_bucket_id[node]
+            if bucket_id not in bucket_id_is_scheduled and rs_buckets[bucket_id][-1] == node:
+                # If we are at the last node in the bucket, we can start to schedule the bucketed reduce_scatter node
+                rs_input_nodes, reduce_op, group_size, group_name, wait_nodes = bucket_id_to_bucketed_op_info[bucket_id]
+                # must schedule all the reduce_scatter input nodes first, before the bucketed reduce_scatter node
+                for rs_input_node in rs_input_nodes:
+                    node_copy(rs_input_node, lambda x: env_lookup(x, rs_input_node))
+                # schedule the bucketed reduce_scatter node
+                new_rs_node = new_graph.call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default,
+                    ([env_lookup(x, "new_rs_node") for x in rs_input_nodes], reduce_op, group_size, group_name),
+                    {},
+                )
+                # each wait node's input should now be a getitem of the bucketed reduce_scatter node
+                for i in range(len(wait_nodes)):
+                    wait_node = wait_nodes[i]
+                    getitem_node = new_graph.call_function(
+                        operator.getitem,
+                        (new_rs_node, i),
+                        {},
+                    )
+                    node_copy(wait_node, lambda x: getitem_node)
+                # schedule each wait node's (only) user
+                for wait_node in wait_nodes:
+                    wait_node_user = next(iter(wait_node.users.keys()))
+                    node_copy(wait_node_user, lambda x: env_lookup(x, wait_node_user))
+                bucket_id_is_scheduled[bucket_id] = True
+        else:
+            continue
+    gm.graph = new_graph
 
 
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
