@@ -71,6 +71,7 @@ static PyObject* THCPStream_pynew(
 
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
   new (&self->cuda_stream) at::cuda::CUDAStream(stream);
@@ -156,7 +157,8 @@ static PyMethodDef THCPStream_methods[] = {
     {nullptr}};
 
 PyTypeObject THCPStreamType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._CudaStreamBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._CudaStreamBase", /* tp_name */
     sizeof(THCPStream), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THCPStream_dealloc, /* tp_dealloc */
