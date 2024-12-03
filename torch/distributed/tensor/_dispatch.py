@@ -401,9 +401,11 @@ class OpDispatcher:
             mesh,
             OpSchema(
                 op_call,
-                pytree.tree_unflatten(args_schema, args_spec)
-                if args_spec
-                else tuple(args_schema),
+                (
+                    pytree.tree_unflatten(args_schema, args_spec)
+                    if args_spec
+                    else tuple(args_schema)
+                ),
                 kwargs_schema,
                 schema_info=runtime_schema_info,
             ),
