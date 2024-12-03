@@ -1640,8 +1640,7 @@ class SIMDScheduling(BaseScheduling):
         pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
         reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
         return immutable_dict(
-            list(zip(pw_prefixes, pw_tiling))
-            + list(zip(reduction_prefixes, reduction_tiling))
+            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
         )
 
     @classmethod
@@ -1866,7 +1865,9 @@ class SIMDScheduling(BaseScheduling):
             tiling_reduction_numel = sympy_product(
                 size for var, size in tiling.items() if var[0] == "r"
             )
-            tiling_pointwise_numel = tiling_total_numel / tiling_reduction_numel
+            tiling_pointwise_numel = sympy_product(
+                size for var, size in tiling.items() if var[0] != "r"
+            )
             sizevars = V.graph.sizevars
             return sizevars.statically_known_equals(
                 tiling_pointwise_numel, numel
