@@ -4,6 +4,7 @@ import contextlib
 import functools
 import io
 import itertools
+import json
 import logging
 import sys
 import time
@@ -51,20 +52,16 @@ from torch._dynamo.utils import (
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import (
-    _StrideExprStr,
-    code_hash,
-    CompiledFxGraph,
-    FxGraphCache,
-)
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    get_placeholder_info,
-    log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
-)
+from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.output_code import (
+    CompiledAOTI,
+    CompiledFxGraph,
+    get_expanded_dims,
+    index_expanded_dims,
+    OutputCode,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import (
     BoxedBool,
@@ -95,6 +92,8 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import get_device_type, IRNode
+from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -110,6 +109,7 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from torch._inductor.output_code import _StrideExprStr
     from torch._ops import OpOverload
 
     from .ir import ExternKernelNode
@@ -143,41 +143,6 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
-
-
-# copy_ fails when trying to write to tensors with memory overlap,
-# for expanded dimensions (a dimension which used to have size 1 -> ?)
-# we can select one element from that dimension and write to it
-# to achieve writing to all values of that dimension of the input tensor
-def get_expanded_dims(t: torch.Tensor) -> List[int]:
-    if not isinstance(t, torch.Tensor):
-        return None
-    return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
-
-
-def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tensor:
-    for expanded_dim in expanded_dims:
-        t = torch.ops.aten.slice(t, expanded_dim, 0, 1)
-    return t
-
-
-def complex_memory_overlap(t: torch.Tensor) -> bool:
-    # if torch._debug_has_internal_overlap thinks this tensor potentially has
-    # memory overlap internally, let's dig deeper to find out whether it's true.
-    #
-    # Call squeeze() so that dimension with size 1 does not cause false positive.
-    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
-    if torch._debug_has_internal_overlap(t) != 0:
-        strides = t.stride()
-        sizes = t.shape
-        indices = list(range(len(strides)))
-        indices = [x for _, x in sorted(zip(strides, indices))]
-        for i in range(len(strides)):
-            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
-            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
-            if strides[indices[i]] < prev_stride * prev_size:
-                return True
-    return False
 
 
 def get_static_input_idxs(num_fixed: int) -> List[int]:
@@ -417,7 +382,7 @@ def split_const_gm(
             gm,
             node,
             (
-                const_result[const_outputs[node.name]]
+                const_result[const_outputs[node.name]]  # type:ignore[index]
                 if lifted_constant_names is None
                 else None
             ),
@@ -537,27 +502,24 @@ class _CompileFxKwargs(TypedDict, total=False):
     is_inference: bool
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
-
-
-class _CompileFxKwargsEx(_CompileFxKwargs, total=False):
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
 
-class _CompileFxCallableEx(Protocol):
+class _CompileFxCallable(Protocol):
     def __call__(
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
-        **kwargs: Unpack[_CompileFxKwargsEx],
-    ) -> Union[CompiledFxGraph, str]:
+        **kwargs: Unpack[_CompileFxKwargs],
+    ) -> OutputCode:
         ...
 
 
 def compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    **kwargs: Unpack[_CompileFxKwargsEx],
-) -> Union[CompiledFxGraph, str]:
+    **kwargs: Unpack[_CompileFxKwargs],
+) -> OutputCode:
     kwargs.setdefault("cudagraphs", None)
     kwargs.setdefault("static_input_idxs", ())
     kwargs.setdefault("is_backward", False)
@@ -609,9 +571,8 @@ def compile_fx_inner(
 def _compile_fx_inner(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     **graph_kwargs: Unpack[_CompileFxKwargs],
-) -> Union[CompiledFxGraph, str]:
+) -> OutputCode:
     """
     Inductor API that compiles a single graph.
 
@@ -630,6 +591,7 @@ def _compile_fx_inner(
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
+    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
     assert isinstance(
         next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
@@ -641,143 +603,161 @@ def _compile_fx_inner(
         save_args_for_compile_fx_inner(
             gm,
             example_inputs,
-            boxed_forward_device_index=boxed_forward_device_index,
             **graph_kwargs,
         )
+
+    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
 
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
-    inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
-
-    def codegen_and_compile(
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-    ) -> Union[CompiledFxGraph, str]:
-        """
-        This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
-        compiled fx graph. The metadata is saved to FXGraphCache.
-        """
-        with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
-            compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-            if isinstance(compiled_graph, str) or fx_kwargs["aot_mode"]:
-                # We only return a string in aot mode, in which case we don't
-                # need to do any post-compilation steps: we just return the string,
-                # which is the filename of the compiled code.
-                return compiled_graph
-            cudagraph_info = None
-            if cudagraphs:
-                # check cudagraph disabling reasons from inductor lowering
-                if compiled_graph.disabled_cudagraphs_reason:
-                    if "cuda" in compiled_graph.device_types:
-                        log_cudagraph_skip_and_bump_counter(
-                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                        )
-                    else:
-                        counters["inductor"]["cudagraph_skips"] += 1
-                    BoxedBool.disable(cudagraphs)
-                else:
-                    complex_memory_overlap_inputs = any(
-                        complex_memory_overlap(t)
-                        for t in example_inputs
-                        if isinstance(t, torch.Tensor)
-                    )
-
-                    if not config.triton.cudagraph_support_input_mutation:
-                        # Skip supports for cudagraph-managed tensors
-                        from torch._inductor.cudagraph_utils import (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor,
-                        )
-
-                        has_mutation_str = (
-                            check_for_mutation_ignore_cuda_graph_managed_tensor(
-                                gm,
-                                compiled_graph,
-                                static_input_idxs,
-                            )
-                        )
-                        has_mutation = has_mutation_str is not None
-
-                        if has_mutation:
-                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-                    else:
-                        # Check mutation later to support cudagraph-managed tensors
-                        has_mutation = None
-
-                    cudagraph_tests = [
-                        (not has_mutation, "mutated inputs"),
-                        (not complex_memory_overlap_inputs, "complex memory overlap"),
-                        (
-                            all(
-                                isinstance(t, (torch.Tensor, torch.SymInt))
-                                for t in example_inputs
-                            ),
-                            "non-Tensor inputs",
-                        ),
-                    ]
-                    output = output_node(gm)
-                    # output args are tuple of first argument
-                    assert len(output.args) == 1
-                    stack_traces = [
-                        (
-                            arg.stack_trace
-                            if isinstance(arg, torch.fx.node.Node)
-                            else None
-                        )
-                        for arg in output.args[0]
-                    ]
-                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                    placeholders = tuple(get_placeholder_info(gm.graph))
-                    cudagraph_info = CudagraphCachedInfo(
-                        placeholders, stack_traces, cudagraph_fail_reasons
-                    )
-
-            compiled_graph.cudagraph_info = cudagraph_info
-            compiled_graph.inputs_to_check = inputs_to_check
-            compiled_graph.fx_kwargs = fx_kwargs
-            # TODO: should this be part of fx_kwargs
-            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
-            return compiled_graph
-
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
-        if (
+        use_cache = (
             not config.force_disable_caches
             and (config.fx_graph_cache or fx_graph_remote_cache)
             and not aot_mode
-        ):
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", True)
-            for i, input in enumerate(example_inputs):
-                if (
-                    isinstance(input, torch.Tensor)
-                    and input.device.type == "cuda"
-                    and i in static_input_idxs
-                ):
-                    input._is_inductor_static = True  # type: ignore[attr-defined]
-            compiled_graph = FxGraphCache.load(
-                codegen_and_compile,
-                gm,
+        )
+        local = config.fx_graph_cache
+        remote = fx_graph_remote_cache
+        set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", use_cache)
+
+        # TODO: This is a hack purely to get some info to extract_tensor_metadata_for_cache_key,
+        # figure out how to not have to modify example inputs
+        for i, input in enumerate(example_inputs):
+            if (
+                isinstance(input, torch.Tensor)
+                and input.device.type == "cuda"
+                and i in static_input_idxs
+            ):
+                input._is_inductor_static = True  # type: ignore[attr-defined]
+
+        mb_compiled_graph: Optional[OutputCode] = None
+        key_info = None
+        cache_info = None
+        remote_cache = None
+
+        # TODO: this time will be slightly inconsistent with the one computed
+        # in prepare_key/load_with_key, dump those settings of "cache_event_time"
+        start_time = time.time_ns()
+
+        if use_cache:
+            (key_info, cache_info) = FxGraphCache.prepare_key(
+                gm, example_inputs, graph_kwargs, inputs_to_check, remote
+            )
+
+            # Attempt a cache lookup
+            if key_info is not None:
+                key, debug_lines = key_info
+                if remote:
+                    remote_cache = FxGraphCache.get_remote_cache()
+                mb_compiled_graph, cache_info = FxGraphCache.load_with_key(
+                    key,
+                    debug_lines,
+                    example_inputs,
+                    local,
+                    remote_cache,
+                    is_backward=graph_kwargs.get("is_backward", False),
+                    gm=gm,
+                )
+
+        # CACHE BYPASS: Compile the graph, don't save it to the cache
+        # (this can happen either because cache was disabled, or we
+        # determined the input is uncacheable)
+        if cache_info is None or cache_info["cache_state"] == "bypass":
+            assert mb_compiled_graph is None
+            mb_compiled_graph = fx_codegen_and_compile(
+                gm, example_inputs, inputs_to_check, **graph_kwargs
+            )
+
+        # CACHE MISS: Compile the graph and save to cache
+        elif cache_info["cache_state"] == "miss":
+            assert mb_compiled_graph is None
+            assert key_info is not None
+            TritonBundler.begin_compile()
+            try:
+                mb_compiled_graph = fx_codegen_and_compile(
+                    gm, example_inputs, inputs_to_check, **graph_kwargs
+                )
+                assert mb_compiled_graph is not None
+                mb_compiled_graph._time_taken_ns = time.time_ns() - start_time
+                cache_key = key_info[0]
+                mb_compiled_graph._fx_graph_cache_key = cache_key
+                (
+                    triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+                mb_compiled_graph.set_triton_bundle(triton_bundle)
+            finally:
+                TritonBundler.end_compile()
+            if triton_bundler_meta is not None:
+                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
+            cache_info["time_taken_ns"] = mb_compiled_graph._time_taken_ns
+            FxGraphCache._save_graph(
+                cache_key,
+                mb_compiled_graph,
                 example_inputs,
-                graph_kwargs,
-                inputs_to_check,
-                local=config.fx_graph_cache,
-                remote=fx_graph_remote_cache,
+                local,
+                remote_cache,
             )
+
+        # CACHE HIT: not much to really do, just make sure the cache key
+        # is recorded on the graph
         else:
-            set_feature_use("pytorch/remote_cache:fx_graph_memcache_version", False)
-            compiled_graph = codegen_and_compile(
-                gm, example_inputs, inputs_to_check, graph_kwargs
+            assert cache_info["cache_state"] == "hit"
+            assert mb_compiled_graph is not None
+            assert key_info is not None
+            cache_key = key_info[0]
+            mb_compiled_graph._fx_graph_cache_key = cache_key
+
+        assert mb_compiled_graph is not None
+        compiled_graph = mb_compiled_graph
+
+        # Logging and observability: we log a single chromium event
+        # and a tlparse log for every cache action.
+        # In the event of a bypass, we also logged to the remote table earlier
+        # with log_cache_bypass.
+        chromium_log = get_chromium_event_logger()
+        cache_state = (
+            cache_info["cache_state"] if cache_info is not None else "disabled"
+        )
+        # Here for grepping:
+        # fx_graph_cache_hit
+        # fx_graph_cache_miss
+        # fx_graph_cache_bypass
+        # fx_graph_cache_disabled
+        chromium_log.log_instant_event(
+            f"fx_graph_cache_{cache_state}",
+            start_time,
+            metadata=cache_info,
+        )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=start_time,
+            key=cache_info.get("key") if cache_info else None,
+            components=cache_info.get("components") if cache_info else None,
+            cache_bypass_reason=cache_info.get("cache_bypass_reason")
+            if cache_info
+            else "cache not enabled",
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
+
+        # Don't clog up the main tlparse output with disabled cache
+        if cache_info is not None:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": f"fx_graph_cache_{cache_state}",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps(cache_info),
             )
-            if aot_mode:
-                # AOT mode is special because codegen_and_compile returns a string.
-                # In that case, we don't need to run all post compilation steps, we just need
-                # to return the string directly.
-                return compiled_graph
-            compiled_graph = FxGraphCache.post_compile(
-                compiled_graph, example_inputs, cudagraphs, gm
-            )
+
+        compiled_graph.post_compile(example_inputs, cudagraphs, gm)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
@@ -787,31 +767,48 @@ def _compile_fx_inner(
         f"{'BACKWARDS' if graph_kwargs['is_backward'] else 'FORWARDS'} "
         f"graph {graph_kwargs['graph_id']}",
     )
-    # aot autograd needs to know to pass in inputs as a list
-    compiled_graph._boxed_call = True
     return compiled_graph
 
 
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
-    cudagraphs: Optional[BoxedBool] = None,
-    static_input_idxs: Optional[Sequence[int]] = None,
-    is_backward: bool = False,
-    graph_id: Optional[int] = None,
-    cpp_wrapper: bool = False,
-    aot_mode: bool = False,
-    is_inference: bool = False,
-    layout_opt: Optional[bool] = None,
-    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
-) -> Union[CompiledFxGraph, str]:
-    if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
-        import time
+    # This is derivable from the other inputs to this function, but we pass it
+    # in explicitly because it's nontrivial to compute
+    inputs_to_check: Sequence[int],
+    **graph_kwargs: Unpack[_CompileFxKwargs],
+) -> OutputCode:
+    # Sorry about the mess, we need graph_kwargs to continue to be able
+    # to propagate it further on
+    # TODO: _CompileFxKwargs actually has stronger types than in the
+    # signature, need to tighten it up
+    assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
+    cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+    static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
+    is_backward: bool = graph_kwargs.get("is_backward", False)
+    graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
+    cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
+    aot_mode: bool = graph_kwargs.get("aot_mode", False)
+    is_inference: bool = graph_kwargs.get("is_inference", False)
+    layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
+    extern_node_serializer: Optional[
+        Callable[[List[ExternKernelNode]], Any]
+    ] = graph_kwargs.get("extern_node_serializer", None)
+    boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
+        "boxed_forward_device_index", None
+    )
 
-        log.warning("Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec)
-        time.sleep(sleep_sec)
+    with _WaitCounter(
+        "pytorch.wait_counter.actual_codegen_and_compile"
+    ).guard(), dynamo_utils.preserve_rng_state():
+        if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+            import time
 
-    with dynamo_utils.preserve_rng_state():
+            log.warning(
+                "Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec
+            )
+            time.sleep(sleep_sec)
+
         if is_tf32_warning_applicable(gm):
             _warn_tf32_disabled()
 
@@ -976,7 +973,49 @@ def fx_codegen_and_compile(
                             output_strides.append(None)
 
                 _check_triton_bf16_support(graph)
-                compiled_fn = graph.compile_to_fn()
+
+                # TODO: The switching between AOT mode and not here is a bit
+                # messy, but it's localized to the block of code below so I'm
+                # not going to touch it for now
+
+                compiled_fn: Any
+
+                with dynamo_timed(
+                    "GraphLowering.compile_to_fn", log_pt2_compile_event=True
+                ):
+                    if graph.aot_mode:
+                        from .codecache import AotCodeCompiler
+
+                        assert graph.cpp_wrapper, "AOT mode only supports C++ wrapper"
+                        code, linemap = graph.codegen_with_cpp_wrapper()
+                        output_code_log.debug("Output code: \n%s", code)
+
+                        serialized_extern_kernel_nodes = None
+                        if graph.extern_kernel_nodes:
+                            serialized_extern_kernel_nodes = (
+                                graph.extern_node_serializer(graph.extern_kernel_nodes)
+                            )
+                            output_code_log.debug(
+                                "Serialized Extern Kernel Nodes: \n%s",
+                                serialized_extern_kernel_nodes,
+                            )
+
+                        additional_files = graph.wrapper_code.additional_files
+
+                        with dynamo_timed(
+                            "AotCodeCompiler.compile", log_pt2_compile_event=True
+                        ):
+                            # Directly return the file path with the compiled code
+                            compiled_fn = AotCodeCompiler.compile(
+                                graph,
+                                code,
+                                serialized_extern_kernel_nodes,
+                                device_type=graph.device_type,
+                                additional_files=additional_files,
+                            )
+                    else:
+                        compiled_fn = graph.compile_to_module().call
+
                 num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
                 metrics.num_bytes_accessed += num_bytes
                 metrics.node_runtimes += node_runtimes
@@ -1018,8 +1057,10 @@ def fx_codegen_and_compile(
                         V.graph.disable_cudagraphs_reason = disable
 
                 if V.aot_compilation is True:
-                    return compiled_fn
+                    assert isinstance(compiled_fn, (str, list))
+                    return CompiledAOTI(compiled_fn)
 
+                # TODO: Hoist this above V.aot_compilation
                 if cudagraphs and not V.graph.disable_cudagraphs_reason:
                     from torch._inductor.cudagraph_utils import (
                         check_lowering_disable_cudagraph,
@@ -1029,7 +1070,7 @@ def fx_codegen_and_compile(
                         check_lowering_disable_cudagraph(V.graph.device_node_mapping)
                     )
 
-                compiled_graph = CompiledFxGraph(
+                return CompiledFxGraph(
                     compiled_fn,
                     graph,
                     gm,
@@ -1037,9 +1078,13 @@ def fx_codegen_and_compile(
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
                     counters["inductor"] - inductor_counters,
+                    cudagraphs,
+                    example_inputs,
+                    static_input_idxs,
+                    graph_kwargs,
+                    inputs_to_check,
+                    boxed_forward_device_index,
                 )
-
-        return compiled_graph
 
 
 def get_input_idxs_to_check(
@@ -1237,9 +1282,11 @@ def cudagraphify_impl(
 def compile_fx_aot(
     model_: GraphModule,
     example_inputs_: List[InputType],
-    inner_compile: _CompileFxCallableEx = compile_fx_inner,
+    inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
+    assert isinstance(model_, GraphModule), model_
+
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
@@ -1280,11 +1327,9 @@ def compile_fx_aot(
             config_patches=config_patches,
         )
 
-        assert isinstance(compiled_artifacts, str) or (
-            isinstance(compiled_artifacts, list)
-            and isinstance(compiled_artifacts[0], str)
-        )
-        return compiled_artifacts
+        assert isinstance(compiled_artifacts, CompiledAOTI)
+
+        return compiled_artifacts.filename
 
 
 _graph_counter = count(0)
@@ -1441,89 +1486,116 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> ContextManager[None]:
 def compile_fx(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
-    inner_compile: Callable[..., Any] = compile_fx_inner,
+    inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ) -> Union[Callable[[List[object]], Sequence[torch.Tensor]], str, List[str]]:
+    """
+    Main entry point for compiling given FX graph.  Despite the fact that this
+    lives in :mod:`torch._inductor`, this function is responsible for calling
+    into AOT Autograd (and we will eventually get a callback to
+    ``inner_compile`` to perform actual compilation.  In other words, this
+    function orchestrates end-to-end compilation for the inductor backend when
+    you use :func:`torch.compile`.
+
+    NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
+    mutate it!  Make a copy if you need to preserve the original GraphModule.
+    """
+
+    # Some arguments trigger a recursive call to compile_fx.  Handle these
+    # short circuits first, before anything else
+
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
+            )
+
+    # TODO: This probably shouldn't be a recursive call
+    if config.cpp_wrapper:
+        with config.patch(
+            {
+                "cpp_wrapper": False,  # reset to break recursive call to compile_fx
+                **get_cpp_wrapper_config(),
+            }
+        ), V.set_real_inputs(example_inputs_):
+            inputs_: Sequence[InputType] = example_inputs_
+
+            if isinstance(model_, GraphModule):
+                fake_inputs = [
+                    node.meta.get("val")
+                    for node in model_.graph.nodes
+                    if node.op == "placeholder"
+                ]
+                # Replace non-tensor (constant) inputs with Nones, since these are not being
+                # used anyways by the graph
+                fake_inputs = [
+                    inp if isinstance(inp, torch.Tensor) else None
+                    for inp in fake_inputs
+                ]
+
+                if any(v is not None for v in fake_inputs):
+                    # Validate devices before switching to fake tensors.
+                    for idx, fi, i in zip(count(), fake_inputs, inputs_):
+                        if fi is not None:
+                            assert isinstance(i, torch.Tensor)
+                            if fi.device != i.device:
+                                raise ValueError(
+                                    f"Device mismatch between fake input and example input at position #{idx}: "
+                                    f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
+                                    "make sure torch.export() and torch.aot_compile() run on the same device."
+                                )
+                    inputs_ = fake_inputs  # type: ignore[assignment]
+            return compile_fx(
+                model_,
+                inputs_,
+                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                decompositions=decompositions,
+            )
+
+    recursive_compile_fx = functools.partial(
+        compile_fx,
+        inner_compile=inner_compile,
+        decompositions=decompositions,
+    )
+
+    if not graph_returns_tuple(model_):
+        return make_graph_return_tuple(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    if isinstance(model_, GraphModule) and isinstance(
+        model_.graph._codegen, _PyTreeCodeGen
+    ):
+        # this graph is the result of dynamo.export()
+        return handle_dynamo_export_graph(
+            model_,
+            example_inputs_,
+            recursive_compile_fx,
+        )
+
+    # Do the actual work
+
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
     ), enable_python_dispatcher():
-        """Main entrypoint to a compile given FX graph"""
-        if config_patches:
-            with config.patch(config_patches):
-                return compile_fx(
-                    model_,
-                    example_inputs_,
-                    # need extra layer of patching as backwards is compiled out of scope
-                    inner_compile=config.patch(config_patches)(inner_compile),
-                    decompositions=decompositions,
-                )
-
-        if config.cpp_wrapper:
-            with config.patch(
-                {
-                    "cpp_wrapper": False,  # reset to break recursive call to compile_fx
-                    **get_cpp_wrapper_config(),
-                }
-            ), V.set_real_inputs(example_inputs_):
-                inputs_: Sequence[InputType] = example_inputs_
-
-                if isinstance(model_, GraphModule):
-                    fake_inputs = [
-                        node.meta.get("val")
-                        for node in model_.graph.nodes
-                        if node.op == "placeholder"
-                    ]
-                    # Replace non-tensor (constant) inputs with Nones, since these are not being
-                    # used anyways by the graph
-                    fake_inputs = [
-                        inp if isinstance(inp, torch.Tensor) else None
-                        for inp in fake_inputs
-                    ]
-
-                    if any(v is not None for v in fake_inputs):
-                        # Validate devices before switching to fake tensors.
-                        for idx, fi, i in zip(count(), fake_inputs, inputs_):
-                            if fi is not None:
-                                assert isinstance(i, torch.Tensor)
-                                if fi.device != i.device:
-                                    raise ValueError(
-                                        f"Device mismatch between fake input and example input at position #{idx}: "
-                                        f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
-                                        "make sure torch.export() and torch.aot_compile() run on the same device."
-                                    )
-                        inputs_ = fake_inputs  # type: ignore[assignment]
-                return compile_fx(
-                    model_,
-                    inputs_,
-                    inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
-                    decompositions=decompositions,
-                )
-
-        recursive_compile_fx = functools.partial(
-            compile_fx,
-            inner_compile=inner_compile,
-            decompositions=decompositions,
-        )
-
-        if not graph_returns_tuple(model_):
-            return make_graph_return_tuple(
-                model_,
-                example_inputs_,
-                recursive_compile_fx,
-            )
-
+        # Pre-grad passes cannot be run if we weren't given a GraphModule.
+        # Dynamo will always produce a GraphModule, but this handles cases
+        # where a user directly passes a plain Module with the intention of
+        # having AOTAutograd trace it.
+        # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
-            if isinstance(model_.graph._codegen, _PyTreeCodeGen):
-                # this graph is the result of dynamo.export()
-                return handle_dynamo_export_graph(
-                    model_,
-                    example_inputs_,
-                    recursive_compile_fx,
-                )
-
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
+        # TODO: Move this before recursive pre-grad passes
+        # NB: This short circuit never occurs for Dynamo produced graphs
+        # (which are pre-flattened)
         if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
             return flatten_graph_inputs(
                 model_,
@@ -1532,10 +1604,22 @@ def compile_fx(
             )
 
         assert not config._raise_error_for_testing
+
         num_example_inputs = len(example_inputs_)
+
+        # Although cudagraphs may have been enabled via config, various
+        # conditions (which are tested within the bowels of Inductor) may
+        # force cudagraphs to be disabled.  This mutable box lets us retrieve
+        # the final determination if cudagraphs actually can be used or not.
         cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+        # See [Backward Generation Handling]
         forward_device = BoxedDeviceIndex(None)
 
+        # TODO: The modern style is to use CompileId from TracingContext to
+        # identify Inductor compilation.  However, this CompileId cannot
+        # uniquely identify multiple Inductor compilations that arise from
+        # DDPOptimizer
         graph_id = next(_graph_counter)
 
         decompositions = (
@@ -1546,86 +1630,81 @@ def compile_fx(
             model: GraphModule,
             example_inputs: List[InputType],
             is_inference: bool,
-        ) -> CompiledFxGraph:
+        ) -> OutputCode:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
-                return _fw_compiler_base(model, example_inputs, is_inference)
+                if is_inference:
+                    # partition_fn won't be called
+                    _recursive_joint_graph_passes(model)
 
-        def _fw_compiler_base(
-            model: GraphModule,
-            example_inputs: List[InputType],
-            is_inference: bool,
-        ) -> CompiledFxGraph:
-            if is_inference:
-                # partition_fn won't be called
-                _recursive_joint_graph_passes(model)
-
-            fixed = torch._inductor.utils.num_fw_fixed_arguments(
-                num_example_inputs, len(example_inputs)
-            )
-
-            model_outputs_node = output_node(model)
-            if config.keep_output_stride:
-                model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                num_model_outputs = len(model_outputs)
-
-                context = torch._guards.TracingContext.try_get()
-                # See Note [User Outputs in the inductor graph]
-                if context is not None and context.fw_metadata and not is_inference:
-                    original_output_start_index = (
-                        context.fw_metadata.num_mutated_inp_runtime_indices
-                    )
-                else:
-                    original_output_start_index = 0
-
-                if isinstance(model_, GraphModule):
-                    *_, orig_model_outputs_node = model_.graph.nodes
-                    assert orig_model_outputs_node.op == "output"
-                    orig_model_outputs, _ = pytree.tree_flatten(
-                        orig_model_outputs_node.args
-                    )
-                    num_orig_model_outputs = len(orig_model_outputs)
-                else:
-                    num_orig_model_outputs = num_model_outputs
-
-                assert num_orig_model_outputs <= num_model_outputs
-
-                # Note [User Outputs in the inductor graph]
-                # We makes the following assumption
-                # For inference
-                #   len(orig_model_outputs) == len(model_outputs)
-                # For training
-                #   len(orig_model_outputs) <= len(model_outputs)
-                # During training, most of the time the model_outputs starts with
-                # original module's outputs followed by saved activations.
-                # But this can be not true if the model have inplace updated tensors.
-                # AOTAutograd will make those tensors being returned before the original
-                # module's output.
-                # To make things safe, we'll use original_output_start_index field
-                # set by AOTAutograd to decide where the original module outputs start.
-                orig_output_end_idx = (
-                    original_output_start_index + num_orig_model_outputs
+                fixed = torch._inductor.utils.num_fw_fixed_arguments(
+                    num_example_inputs, len(example_inputs)
                 )
-                # Sanity chec: we are about to splice out the "user" outputs from the full set
-                # of "graph" outputs. Make sure we're within bounds.
-                assert orig_output_end_idx <= num_model_outputs
 
-                model_outputs_node.meta["user_visible_output_idxs"] = [
-                    idx
-                    for idx in range(original_output_start_index, orig_output_end_idx)
-                    if isinstance(model_outputs[idx], torch.fx.Node)
-                ]
-            else:
-                model_outputs_node.meta["user_visible_output_idxs"] = []
+                model_outputs_node = output_node(model)
+                if config.keep_output_stride:
+                    model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+                    num_model_outputs = len(model_outputs)
 
-            return inner_compile(
-                model,
-                example_inputs,
-                static_input_idxs=get_static_input_idxs(fixed),
-                cudagraphs=cudagraphs,
-                graph_id=graph_id,
-                is_inference=is_inference,
-                boxed_forward_device_index=forward_device,
-            )
+                    context = torch._guards.TracingContext.try_get()
+                    # See Note [User Outputs in the inductor graph]
+                    if context is not None and context.fw_metadata and not is_inference:
+                        original_output_start_index = (
+                            context.fw_metadata.num_mutated_inp_runtime_indices
+                        )
+                    else:
+                        original_output_start_index = 0
+
+                    if isinstance(model_, GraphModule):
+                        *_, orig_model_outputs_node = model_.graph.nodes
+                        assert orig_model_outputs_node.op == "output"
+                        orig_model_outputs, _ = pytree.tree_flatten(
+                            orig_model_outputs_node.args
+                        )
+                        num_orig_model_outputs = len(orig_model_outputs)
+                    else:
+                        num_orig_model_outputs = num_model_outputs
+
+                    assert num_orig_model_outputs <= num_model_outputs
+
+                    # Note [User Outputs in the inductor graph]
+                    # We makes the following assumption
+                    # For inference
+                    #   len(orig_model_outputs) == len(model_outputs)
+                    # For training
+                    #   len(orig_model_outputs) <= len(model_outputs)
+                    # During training, most of the time the model_outputs starts with
+                    # original module's outputs followed by saved activations.
+                    # But this can be not true if the model have inplace updated tensors.
+                    # AOTAutograd will make those tensors being returned before the original
+                    # module's output.
+                    # To make things safe, we'll use original_output_start_index field
+                    # set by AOTAutograd to decide where the original module outputs start.
+                    orig_output_end_idx = (
+                        original_output_start_index + num_orig_model_outputs
+                    )
+                    # Sanity check: we are about to splice out the "user" outputs from the full set
+                    # of "graph" outputs. Make sure we're within bounds.
+                    assert orig_output_end_idx <= num_model_outputs
+
+                    model_outputs_node.meta["user_visible_output_idxs"] = [
+                        idx
+                        for idx in range(
+                            original_output_start_index, orig_output_end_idx
+                        )
+                        if isinstance(model_outputs[idx], torch.fx.Node)
+                    ]
+                else:
+                    model_outputs_node.meta["user_visible_output_idxs"] = []
+
+                return inner_compile(
+                    model,
+                    example_inputs,
+                    static_input_idxs=get_static_input_idxs(fixed),
+                    cudagraphs=cudagraphs,
+                    graph_id=graph_id,
+                    is_inference=is_inference,
+                    boxed_forward_device_index=forward_device,
+                )
 
         fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
@@ -1657,7 +1736,7 @@ def compile_fx(
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
-        ) -> Union[CompiledFxGraph, str]:
+        ) -> OutputCode:
             from torch._dynamo.convert_frame import compile_lock
 
             with dynamo_utils.dynamo_timed(
@@ -1687,10 +1766,6 @@ def compile_fx(
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
                     )
-
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-        # once torchdynamo is merged into pytorch
 
         fake_mode = detect_fake_mode(
             example_inputs_

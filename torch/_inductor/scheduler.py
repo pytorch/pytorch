@@ -125,10 +125,16 @@ class SchedulerBuffer:
             hasattr(V.kernel, "args")
             and self.get_name() in V.kernel.inplace_update_buffers
         ):
+            input_buffer: Union[ir.DonatedBuffer, ir.Buffer]
+            input_buffer_name = V.kernel.inplace_update_buffers[self.get_name()]
+            if input_buffer_name in self.scheduler.name_to_donated_buffer:
+                input_buffer = self.scheduler.name_to_donated_buffer[
+                    input_buffer_name
+                ].node
+            else:
+                input_buffer = self.scheduler.name_to_buf[input_buffer_name].node
             V.graph.wrapper_code.codegen_inplace_reuse(
-                self.scheduler.name_to_buf[
-                    V.kernel.inplace_update_buffers[self.get_name()]
-                ].node,
+                input_buffer,
                 self.node,
             )
         else:
@@ -161,6 +167,11 @@ class SchedulerBuffer:
     def get_mutations(self) -> Sequence[str]:
         assert self.node is not None
         return self.node.get_mutation_names()
+
+
+@dataclasses.dataclass
+class SchedulerDonatedBuffer(SchedulerBuffer):
+    defining_op: Optional[BaseSchedulerNode] = None  # type: ignore[assignment]
 
 
 class BaseSchedulerNode:
@@ -442,9 +453,12 @@ class BaseSchedulerNode:
                 continue
 
             for read in self.read_writes.reads:
-                input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
-                    read.name
-                )
+                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                if read.name in self.scheduler.name_to_donated_buffer:
+                    input_buf = self.scheduler.name_to_donated_buffer[read.name]
+                else:
+                    input_buf = self.scheduler.name_to_buf.get(read.name)
+
                 if (
                     input_buf
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
@@ -470,7 +484,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
+                            input_buf.defining_op
+                            and isinstance(
                                 input_buf.defining_op.node,
                                 (ir.FallbackKernel, ir.MultiOutput),
                             )
@@ -1801,6 +1816,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
+        self.name_to_donated_buffer: Dict[
+            str, SchedulerDonatedBuffer
+        ] = self.get_donated_buffers()
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -1883,6 +1901,17 @@ class Scheduler:
                 "num_nodes_after_fusion": len(self.nodes),
             }
         )
+
+    def get_donated_buffers(self) -> Dict[str, SchedulerDonatedBuffer]:
+        name_to_donated_buf = {}
+        for name in V.graph.graph_inputs_original:
+            if isinstance(V.graph.graph_inputs_original[name], ir.DonatedBuffer):
+                name_to_donated_buf[name] = SchedulerDonatedBuffer(
+                    self,
+                    V.graph.graph_inputs_original[name],
+                    defining_op=None,
+                )
+        return name_to_donated_buf
 
     @property
     def current_device(self) -> Optional[torch.device]:
@@ -2159,6 +2188,9 @@ class Scheduler:
         for node in self.nodes:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
+
+        for name in self.name_to_donated_buffer:
+            self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
 
     def dead_node_elimination(self) -> None:
         """

@@ -45,6 +45,7 @@ from typing import (
     Deque,
     Dict,
     Generator,
+    Generic,
     Iterable,
     Iterator,
     KeysView,
@@ -1087,7 +1088,7 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self):
+    def get_stack(self) -> List[str]:
         """
         The main event stack, with every chromium event.
         Logged to tlparse.
@@ -1098,7 +1099,7 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> str:
+    def get_top(self) -> Optional[str]:
         """
         Get the top event name or None if the stack is empty.
         """
@@ -1129,6 +1130,14 @@ class ChromiumEventLogger:
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
+    def try_add_event_data(self, event_name: str, **kwargs) -> None:
+        """
+        Same as add_event_data, but will silently not log if the event isn't in the stack.
+        """
+        if event_name not in self.get_stack():
+            return
+        self.add_event_data(event_name, **kwargs)
 
     def add_event_data(
         self,
@@ -1589,14 +1598,19 @@ def is_namedtuple_cls(cls):
             if isinstance(getattr(cls, "_fields", None), tuple) and callable(
                 getattr(cls, "_make", None)
             ):
-                if cls.__bases__ == (tuple,):
+                # The subclassing style namedtuple can have an extra base `typing.Generic`
+                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                if bases == (tuple,):
                     # This is a namedtuple type directly created by `collections.namedtuple(...)`
                     return True
-                if (
-                    # Subclass of namedtuple
-                    is_namedtuple_cls(cls.__bases__[0])
-                    # For subclasses of namedtuple, the __new__ method should not be customized
-                    and cls.__new__ is cls.__bases__[0].__new__
+                if bases and any(
+                    (
+                        # Subclass of namedtuple
+                        is_namedtuple_cls(t)
+                        # For subclasses of namedtuple, the __new__ method should not be customized
+                        and cls.__new__ is t.__new__
+                    )
+                    for t in bases
                 ):
                     return True
     except TypeError:
@@ -1692,11 +1706,17 @@ common_constant_types: Set[type] = {
     bytes,
     type(None),
     Ellipsis.__class__,
+    NotImplemented.__class__,
     types.CodeType,
+    # Commonly used immutable types from torch.
     torch.device,
     torch.dtype,
     torch.memory_format,
     torch.layout,
+    torch.finfo,
+    torch.iinfo,
+    torch.nn.attention.SDPBackend,
+    torch.cuda._CudaDeviceProperties,
 }
 
 if has_triton_package():

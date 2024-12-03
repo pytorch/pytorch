@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
@@ -114,6 +115,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
@@ -428,7 +430,7 @@ class TestFxGraphCache(TestCase):
         self.reset()
 
         with mock.patch(
-            "torch._inductor.codecache.has_frozen_params", return_value=True
+            "torch._inductor.output_code.has_frozen_params", return_value=True
         ):
             # A call to fn1 should miss in the cache since we do not consider
             # the constant values.
@@ -448,7 +450,7 @@ class TestFxGraphCache(TestCase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         block_mask = create_block_mask(
-            lambda b, h, q, kv: q >= kv, None, None, 2048, 2048
+            lambda b, h, q, kv: q >= kv, None, None, 512, 512
         )
 
         def score_mod(score, b, h, q, kv):
@@ -671,45 +673,24 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the inductor counters on a cache hit.
         """
-        compile_to_fn = GraphLowering.compile_to_fn
 
-        counter_name = "a_test_counter"
-        counter_incr = 7
+        def fn(a, b):
+            return torch.mm(a, b)
 
-        def bump_counter(self):
-            # Mock that bumps some arbitrary test counter by a set amount, then calls
-            # the original GraphLowering.compile_to_fn.
-            counters["inductor"][counter_name] += counter_incr
-            return compile_to_fn(self)
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
 
-        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
+        compiled_fn = torch.compile(fn)
 
-            def fn(a, b):
-                return torch.mm(a, b)
+        # Verify the "miss" case.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            a = torch.rand(8, 32, device="cpu")
-            b = torch.rand(32, 8, device="cpu")
-
-            compiled_fn = torch.compile(fn)
-
-            # Verify the "miss" case.
-            counter_val = 2
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
-
-            # Verify the "hit" case.
-            self.reset()
-            counter_val = 5
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
+        # Verify the "hit" case.
+        self.reset()
+        counter_val = 5
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

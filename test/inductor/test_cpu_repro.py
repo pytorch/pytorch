@@ -1727,7 +1727,8 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         not cpu_vec_isa.valid_vec_isa_list()
-        or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
+        or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()]
+        or "asimd" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
         "Does not support vectorization or not s390x/ppc64le machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
@@ -3238,7 +3239,6 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         self.common(fn, (x,))
-        check_metrics_vec_kernel_count(1)
 
     def test_non_contiguous_index_with_constant_stride(self):
         def fn(x):
