@@ -29,7 +29,7 @@ static Tensor permuteBatchDimsToFront(const BatchedTensorImpl* batched) {
     if (is_bdim[ptr]) {
       continue;
     }
-    permutation[idx++] = ptr;
+    permutation[idx++] = static_cast<int64_t>(ptr);
   }
   return physical_tensor.permute(permutation);
 }
@@ -43,7 +43,7 @@ VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logica
 }
 
 int64_t VmapPhysicalView::numBatchDims() const {
-  return levels_.count();
+  return static_cast<int64_t>(levels_.count());
 }
 
 int64_t VmapPhysicalView::numLogicalDims() const {
@@ -102,7 +102,7 @@ static Tensor moveDimToFrontAndExpand(Tensor tensor, std::optional<int64_t> dim,
   } else {
     tensor = tensor.unsqueeze(0);
     auto expanded_sizes = tensor.sym_sizes().vec();
-    expanded_sizes[0] = size;
+    expanded_sizes[0] = std::move(size);
     tensor = tensor.expand_symint(expanded_sizes);
   }
   return tensor;
@@ -171,7 +171,7 @@ static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, std::optional<int64_t> d
 
 VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   auto cur_level = maybeCurrentDynamicLayer().value().layerId();
-  auto bdim_size = -1;
+  int64_t bdim_size = -1;
 
   // Figure out the batch size first
   for (const auto& logical_tensor : logical_tensors) {

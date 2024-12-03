@@ -48,6 +48,9 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
     struct Capture {
       Capture(const Capture&) = delete;
       Capture(Capture&&) = default;
+      Capture& operator=(const Capture&) = delete;
+      Capture& operator=(Capture&&) = default;
+      ~Capture() = default;
 
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}

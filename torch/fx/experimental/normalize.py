@@ -1,16 +1,16 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, Tuple, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 import torch.fx
 import torch.fx as fx
-from torch.fx import Transformer, Proxy
-from torch.fx.node import Argument, Target, Node, map_aggregate
+from torch.fx import Proxy, Transformer
+from torch.fx.node import Argument, map_aggregate, Node, Target
 from torch.fx.operator_schemas import (
-    normalize_module,
-    normalize_function,
     create_type_hint,
+    normalize_function,
+    normalize_module,
 )
 
 from .schema_type_annotation import AnnotateTypesWithSchema

@@ -73,9 +73,9 @@ void bitwise_xor_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel_cuda);
-REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel_cuda);
-REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda);
+REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel_cuda)
+REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel_cuda)
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel_cuda)
 
 
 } // namespace at::native

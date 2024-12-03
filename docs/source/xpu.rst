@@ -13,10 +13,11 @@ torch.xpu
     device
     device_count
     device_of
-    empty_cache
+    get_arch_list
     get_device_capability
     get_device_name
     get_device_properties
+    get_gencode_flags
     init
     is_available
     is_initialized
@@ -51,7 +52,25 @@ Streams and events
     Stream
 
 
+Memory management
+-----------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+     empty_cache
+     max_memory_allocated
+     max_memory_reserved
+     memory_allocated
+     memory_reserved
+     memory_stats
+     memory_stats_as_nested_dict
+     reset_accumulated_memory_stats
+     reset_peak_memory_stats
+
+
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
+.. py:module:: torch.xpu.memory
 .. py:module:: torch.xpu.random
 .. py:module:: torch.xpu.streams
