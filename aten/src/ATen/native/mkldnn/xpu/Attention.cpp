@@ -45,6 +45,16 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     }
     return false;
   }
+  if (query_size_last > 256) {
+    if (debug) {
+      TORCH_WARN(
+          "OneDNN Graph's attention requires q,k,v to have head dimension less than 256.",
+          " Got ",
+          query_size_last,
+          " instead.");
+    }
+    return false;
+  }
   return true;
 }
 
