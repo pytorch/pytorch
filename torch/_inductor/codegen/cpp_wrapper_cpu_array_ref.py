@@ -46,6 +46,16 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         if not hasattr(self, "device"):
             self.device = "cpu"
         super().__init__()
+        self.declare = "auto "
+        self.declare_maybe_reference = "decltype(auto) "
+        self.ending = ";"
+        self.open_bracket = "{"
+        self.closed_bracket = "}"
+        self.comment = "//"
+        self.namespace = "at::"
+        self.none_str = "nullptr"
+        self.size = "sizes()"
+        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()

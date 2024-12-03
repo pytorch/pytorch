@@ -43,9 +43,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
+        self.open_bracket = "{"
+        self.closed_bracket = "}"
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
+        self.size = "sizes()"
+        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -60,6 +64,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices = set()
         self.used_cached_dtypes = set()
         self.used_cached_layouts = set()
+        self.used_cached_memory_formats = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -200,11 +205,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_path = (
+        extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
-        if os.path.exists(extend_aoti_path):
-            self.header.splice(f"#include <{extend_aoti_path}>")
+        extend_aoti_c_shim_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "include",
+            extend_aoti_c_shim_include,
+        )
+        if os.path.exists(extend_aoti_c_shim_path):
+            self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -795,6 +805,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
             cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+        for memory_format in self.used_cached_memory_formats:
+            cached_dtypes_buffer.writeline(
+                f"CACHE_TORCH_MEMORY_FORMAT({memory_format});"
+            )
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1127,7 +1141,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
-            self.writeline(f"{self.declare}{sym} = {cexpr(expr)};")
+            self.writeline(f"int64_t {sym} = {cexpr(expr)};")
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
         expr = f"{kernel_name}_{tree.prefix}numel"
@@ -1136,7 +1150,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if (expr, V.graph) not in self.kernel_numel_expr:
             # declare expr once in each graph (scope)
             self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(f"{self.declare}{expr} = {cexpr(tree.numel)};")
+            self.writeline(f"int64_t {expr} = {cexpr(tree.numel)};")
         else:
             self.writeline(f"{expr} = {cexpr(tree.numel)};")
         # We can get symbolic expressions here, like s0*64
@@ -1165,14 +1179,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             device_index = current_device.index
 
         return device_index, call_args
-
-    def _grid_dim_str(self, grid_per_dim):
-        if isinstance(grid_per_dim, list):
-            return (
-                "[" + ", ".join(self._grid_dim_str(item) for item in grid_per_dim) + "]"
-            )
-        else:
-            return cexpr(grid_per_dim)
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -1246,6 +1252,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         layout_str = str(layout).split(".")[-1]
         self.used_cached_layouts.add(layout_str)
         return f"cached_torch_layout_{layout_str}"
+
+    def codegen_memory_format(self, memory_format):
+        memory_format_str = str(memory_format).split(".")[-1]
+        self.used_cached_memory_formats.add(memory_format_str)
+        return f"cached_torch_memory_format_{memory_format_str}"
 
     @functools.lru_cache(None)  # noqa: B019
     def codegen_int_array_var(
@@ -1504,7 +1515,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in case the outer_output carried a value
             # before (e.g., in the while_loop codegen)
             self.writeline(f"{outer_output}.reset();")
-            self.writeline(f"{outer_output} = {src};")
+            self.writeline(f"{outer_output} = {src}{self.ending}")
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -1917,6 +1928,16 @@ if (custom_op_wrapper.get() == NULL) {
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
+            elif isinstance(raw_arg, torch.memory_format):
+                # memory_format
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
+                return (
+                    "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
+                    f"{self.codegen_memory_format(raw_arg)})))"
+                )
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
@@ -2100,6 +2121,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
+        elif isinstance(val, torch.memory_format):
+            return self.codegen_memory_format(val)
         elif isinstance(val, float):
             return self.generate_float_value(val)
         elif isinstance(val, (list, tuple)):

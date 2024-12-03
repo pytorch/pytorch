@@ -31,6 +31,11 @@ class AllocatorMap {
     return it->second;
   }
 
+  bool has_allocator(c10::DeviceType device_type) {
+    auto it = map_.find(device_type);
+    return it != map_.end();
+  }
+
   ~AllocatorMap() {
     is_finalizing_ = true;
   }
@@ -122,6 +127,10 @@ void register_allocator(
       device_type, std::move(allocator));
 }
 
+bool has_allocator(c10::DeviceType device_type) {
+  return AllocatorMap::get().has_allocator(device_type);
+}
+
 c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type) {
   return AllocatorMap::get().get_allocator(device_type);
@@ -190,7 +199,11 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx) {
-  auto allocator = get_allocator(device_type);
-  return allocator->has_multicast_support(device_idx);
+  if (!has_allocator(device_type)) {
+    return false;
+  } else {
+    auto allocator = get_allocator(device_type);
+    return allocator->has_multicast_support(device_idx);
+  }
 }
 } // namespace c10d::symmetric_memory
