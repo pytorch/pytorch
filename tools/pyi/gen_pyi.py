@@ -334,11 +334,11 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
             ),
             tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
+                return_type="tuple[Tensor, Tensor]",
             ),
             tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
+                return_type="tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -384,13 +384,13 @@ def gen_nn_functional(fm: FileManager) -> None:
                                 "_random_samples: Tensor",
                             ]
                         ),
-                        "Tuple[Tensor, Tensor]",
+                        "tuple[Tensor, Tensor]",
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
                     f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
                         ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
-                        "Tuple[Tensor, Tensor]",
+                        "tuple[Tensor, Tensor]",
                     )
                 ],
             }
@@ -694,9 +694,9 @@ def gen_pyi(
                     f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
                         ", ".join(
                             [
-                                f"{n1}_indices: Union[Tensor, List]",
-                                f"{n2}_indices: Union[Tensor, List]",
-                                "values: Union[Tensor, List]",
+                                f"{n1}_indices: Union[Tensor, list]",
+                                f"{n2}_indices: Union[Tensor, list]",
+                                "values: Union[Tensor, list]",
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
@@ -771,7 +771,7 @@ def gen_pyi(
                     ", ".join(
                         [
                             "indices: Tensor",
-                            "values: Union[Tensor, List]",
+                            "values: Union[Tensor, list]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -787,9 +787,9 @@ def gen_pyi(
                 "def sparse_compressed_tensor({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            "compressed_indices: Union[Tensor, List]",
-                            "plain_indices: Union[Tensor, List]",
-                            "values: Union[Tensor, List]",
+                            "compressed_indices: Union[Tensor, list]",
+                            "plain_indices: Union[Tensor, list]",
+                            "values: Union[Tensor, list]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -1074,6 +1074,10 @@ def gen_pyi(
             "Tuple[Tensor, ...], List[Tensor]] = None",
             "tuple[Tensor, ...], list[Tensor], None] = None",
         )
+        hint = hint.replace(
+            "tuple[Tensor, ...], list[Tensor]] = None",
+            "tuple[Tensor, ...], list[Tensor], None] = None",
+        )
         return hint
 
     docstrs = gather_docstrs()
@@ -1142,7 +1146,7 @@ def gen_pyi(
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
-            "tolist": ["def tolist(self) -> List: ..."],
+            "tolist": ["def tolist(self) -> list: ..."],
             "requires_grad_": [
                 "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
             ],
