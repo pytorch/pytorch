@@ -1849,7 +1849,7 @@ class CommonTemplate:
         size_hints = [67108864, 8192]
         for i in range(4):
             size_hints[0] = next_power_of_2(size_hints[0])
-            triton_config_reduction(size_hints, 1, [2048], 1, 8)
+            triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
         def fn(a):
