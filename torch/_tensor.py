@@ -1490,7 +1490,7 @@ class Tensor(torch._C.TensorBase):
         """
         return self.to_sparse()
 
-    def dim_order(self):
+    def dim_order(self, raise_error = False):
         """
 
         dim_order() -> tuple
@@ -1516,13 +1516,12 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
 
+        if raise_error:
+            raise RuntimeError("just raise error")
+
         import torch._prims_common as utils
 
         return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
-
-    def just_raise_error(self, raise_error = False):
-        if raise_error:
-            raise RuntimeError("just raise error")
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
