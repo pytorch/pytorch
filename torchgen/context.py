@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torchgen.local as local
 from torchgen.model import (
@@ -39,7 +39,7 @@ F2 = TypeVar(
     str,
 )
 
-F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
+F3 = TypeVar("F3", tuple[NativeFunction, Any], list[NativeFunction])
 
 
 @contextlib.contextmanager

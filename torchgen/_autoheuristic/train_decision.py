@@ -560,7 +560,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class {heuristic_name}(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices: List[Choice] = []
+        self.choices: list[Choice] = []
         self.fill_choices()
 
 {self.gen_precondition(opt_name, shared_memory, device_capa)}

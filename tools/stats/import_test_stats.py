@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Callable, cast, Dict
+from typing import Any, Callable, cast
 from urllib.request import urlopen
 
 
@@ -61,7 +61,7 @@ def fetch_and_cache(
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already download the file, so don't re-do it
         with open(path) as f:
-            return cast(Dict[str, Any], json.load(f))
+            return cast(dict[str, Any], json.load(f))
 
     for _ in range(3):
         try:

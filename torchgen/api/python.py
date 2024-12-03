@@ -956,14 +956,14 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "Union[_int, _size]" if t.size is not None else "_size"
         elif t.is_tensor_like():
             # TODO: this doesn't seem right...
-            # Tensor?[] currently translates to Optional[Union[Tuple[Tensor, ...], List[Tensor]]]
-            # It should probably translate to   Union[Tuple[Optional[Tensor], ...], List[Optional[Tensor]]]
+            # Tensor?[] currently translates to Optional[Union[Tuple[Tensor, ...], list[Tensor]]]
+            # It should probably translate to   Union[Tuple[Optional[Tensor], ...], list[Optional[Tensor]]]
             if isinstance(t.elem, OptionalType):
                 add_optional = True
             ret = (
-                "Union[Tensor, Tuple[Tensor, ...], List[Tensor]]"
+                "Union[Tensor, tuple[Tensor, ...], list[Tensor]]"
                 if t.size is not None
-                else "Union[Tuple[Tensor, ...], List[Tensor]]"
+                else "Union[Tuple[Tensor, ...], list[Tensor]]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
@@ -1043,7 +1043,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __new__(cls, sequence: Tuple[Tensor, Tensor]): ...\n"
+        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]): ...\n"
         #     "    n_fields: _int = 2",
         #     "    n_sequeunce_fields: _int = 2",
         #     "    n_unnamed_fields: _int = 0",

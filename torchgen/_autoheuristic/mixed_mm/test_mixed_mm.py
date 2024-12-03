@@ -39,7 +39,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class MixedMMA100(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices: List[Choice] = []
+        self.choices: list[Choice] = []
         self.fill_choices()
 
     def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
@@ -201,7 +201,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class MixedMMH100(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices: List[Choice] = []
+        self.choices: list[Choice] = []
         self.fill_choices()
 
     def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
