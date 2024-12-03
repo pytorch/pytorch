@@ -776,7 +776,6 @@ class VariableBuilder:
                 source=self.source,
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
-            raise Exception("Something went wrong!")
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return AutogradFunctionVariable(
                 value,

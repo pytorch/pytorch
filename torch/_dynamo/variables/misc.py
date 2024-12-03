@@ -647,6 +647,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         if requires_grad and torch.is_grad_enabled():
             if config.capture_autograd_function:
+                raise Exception("Something went wrong!")
                 warnings.warn(
                     "The config.capture_autograd_function flag is deprecated, it's now always true."
                 )
