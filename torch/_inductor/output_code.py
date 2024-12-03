@@ -557,10 +557,7 @@ class MockFXGraphCacheOutput(OutputCode):
     # How long it took to compile this OutputCode, end to end
     _time_taken_ns: Optional[int]
 
-    def __init__(self, gm: Any, key: Optional[str]) -> None:
-        self.gm = gm
-        self._fx_graph_cache_key = key
-        self._time_taken_ns = 0
+    def __post_init__(self) -> None:
         self._boxed_call = True
 
     def post_compile(
