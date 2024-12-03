@@ -17,8 +17,6 @@ The list of support files are as follows:
     conda environment
   * conda-env-macOS-ARM64. This is used by MacOS (m1, arm64) build and
     test jobs to setup the conda environment
-  * conda-env-macOS-X64. This is use by MacOS (x86-64) build and test
-    jobs to setup the conda environment
   * conda-env-Linux-X64. This is used by Linux buck build and test jobs
     to setup the conda environment
 * Pip:

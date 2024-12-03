@@ -387,11 +387,11 @@ def create_submodule_from_subgraph(
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
                     if isinstance(arg, torch.nn.Parameter):
-                        new_arg = arg.clone().detach()  # type: ignore[assignment]
+                        new_arg = arg.detach().clone()  # type: ignore[assignment]
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
-                        new_arg_placeholder = gm.placeholder(mod_name)
+                        new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
                         cur_args_copy.append(arg)
@@ -406,19 +406,19 @@ def create_submodule_from_subgraph(
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
             cur_name_idx += 1
-            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
+            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined,arg-type]
 
         elif cur_node_orig.op == "call_function":
             cur_node_copy = g.call_function(
-                cur_node_orig.target,
-                cur_args_copy,
+                cur_node_orig.target,  # type: ignore[arg-type]
+                cur_args_copy,  # type: ignore[arg-type]
                 cur_kwargs_copy,  # type: ignore[possibly-undefined]
             )
 
         elif cur_node_orig.op == "call_method":
             cur_node_copy = g.call_method(
-                cur_node_orig.target,
-                cur_args_copy,
+                cur_node_orig.target,  # type: ignore[arg-type]
+                cur_args_copy,  # type: ignore[arg-type]
                 cur_kwargs_copy,  # type: ignore[possibly-undefined]
             )
 
@@ -568,9 +568,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     and len(arg)
                     and isinstance(arg[0], Node)
                 ):
-                    for inner_arg in arg:
-                        if isinstance(inner_arg, Node):
-                            new_args.append(inner_arg)
+                    new_args.extend(
+                        inner_arg for inner_arg in arg if isinstance(inner_arg, Node)
+                    )
 
             new_kwargs = {}
             for name, old_kwarg in first_node.kwargs.items():
@@ -582,7 +582,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
 
             new_args = tuple(new_args)  # type: ignore[assignment]
 
-            new_node = mt.graph.call_module(attr_name, args=new_args, kwargs=new_kwargs)
+            new_node = mt.graph.call_module(attr_name, args=new_args, kwargs=new_kwargs)  # type: ignore[arg-type]
 
         # add a logger to parent graph to observe the shadow wrapper
         logger_mod_orig = _get_logger_for_subgraph(

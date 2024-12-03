@@ -1224,13 +1224,13 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
             r_ptr + row * r_stride0, r_stride1);
     } else {
       if (col < 0 || col >= dim_j) {
-        AT_ERROR("addmm: index out of column bound: ", col, " not between 1 and ", dim_j);
+        TORCH_CHECK(false, "addmm: index out of column bound: ", col, " not between 1 and ", dim_j);
       } else {
-        AT_ERROR("addmm: index out of row bound: ", row, " not between 1 and ", dim_i);
+        TORCH_CHECK(false, "addmm: index out of row bound: ", row, " not between 1 and ", dim_i);
       }
     }
   }
-};
+}
 
 static Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
@@ -1577,7 +1577,7 @@ SparseTensor& _sspaddmm_out_cpu(
                   dense_ptr + col * dense_stride0, dense_stride1,
                   newv_ptr + p * newv_stride0, 1);
             } else {
-              AT_ERROR("index out of bound. sspmm: ", col, " not between 1 and ", dim_j);
+              TORCH_CHECK(false, "index out of bound. sspmm: ", col, " not between 1 and ", dim_j);
             }
           }
           // Fill up the indices with the right values
@@ -1602,7 +1602,7 @@ SparseTensor& _sspaddmm_out_cpu(
 // sparse, sparse, sparse, dense, real, real -> sparse
 Tensor& _sspaddmm_out_only_sparse(const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
-  AT_ERROR("tensor.sspaddmm(...) can only be called on sparse tensors");
+  TORCH_CHECK(false, "tensor.sspaddmm(...) can only be called on sparse tensors");
 }
 
 // sparse, dense -> sparse

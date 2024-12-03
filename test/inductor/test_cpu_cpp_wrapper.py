@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
+    TEST_MKL,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -28,11 +29,11 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_cpu_repro
-        import test_cpu_select_algorithm
-        import test_mkldnn_pattern_matcher
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_cpu_repro  # @manual=fbcode//caffe2/test/inductor:test_cpu_repro-library
+        import test_cpu_select_algorithm  # @manual=fbcode//caffe2/test/inductor:cpu_select_algorithm_cpu-library
+        import test_mkldnn_pattern_matcher  # @manual
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -86,48 +87,6 @@ if TEST_WITH_ROCM:
             ),
         }
     )
-if config.abi_compatible:
-    xfail_list = [
-        "test_conv2d_binary_inplace_fusion_failed_cpu",
-        "test_conv2d_binary_inplace_fusion_pass_cpu",
-        "test_dynamic_qlinear_cpu",
-        "test_dynamic_qlinear_qat_cpu",
-        "test_lstm_packed_change_input_sizes_cpu",
-        "test_qconv2d_add_cpu",
-        "test_qconv2d_add_relu_cpu",
-        "test_qconv2d_cpu",
-        "test_qconv2d_dequant_promotion_cpu",
-        "test_qconv2d_maxpool2d_linear_dynamic_cpu",
-        "test_qconv2d_relu_cpu",
-        "test_qlinear_cpu",
-        "test_qlinear_add_cpu",
-        "test_qlinear_add_relu_cpu",
-        "test_qlinear_dequant_promotion_cpu",
-        "test_qlinear_gelu_cpu",
-        "test_qlinear_relu_cpu",
-        *[
-            func
-            for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
-            if func.startswith("test_linear_with_pointwise")
-        ],
-    ]
-    for test_name in xfail_list:
-        test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cpp_wrapper",), is_skip=False
-        )
-        test_failures_cpp_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
-    skip_list = [
-        "test_multihead_attention_cpu",
-    ]
-    for test_name in skip_list:
-        test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cpp_wrapper",), is_skip=True
-        )
-        test_failures_cpp_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=True)
 
 
 def make_test_case(
@@ -147,7 +106,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -209,8 +168,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise_binary.call"],
-                ["op_mkldnn__convolution_pointwise__binary.call"],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
             ],
         ),
         BaseTest(
@@ -219,8 +178,8 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
-                ["op_mkldnn__convolution_pointwise__binary.call"],
-                ["op_mkldnn__convolution_pointwise_binary.call"],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
             ],
         ),
         BaseTest(
@@ -242,6 +201,7 @@ if RUN_CPU:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_int8_weight_only_quant"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         *[
@@ -267,13 +227,20 @@ if RUN_CPU:
                 or torch.ops.mkldnn._is_mkldnn_fp16_supported()
             ),
         ),
-        BaseTest(
-            "test_lstm_packed_change_input_sizes",
-            "cpu",
-            test_cpu_repro.CPUReproTests(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
+        *[
+            BaseTest(
+                func,
+                "",
+                test_cpu_repro.CPUReproTests(),
+                condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+            )
+            for func in dir(test_cpu_repro.CPUReproTests())
+            if func.startswith("test_lstm_packed_change_input_sizes")
+        ],
         BaseTest("test_max_pool2d6"),
+        BaseTest(
+            "test_mkl_linear", "", test_cpu_repro.CPUReproTests(), condition=TEST_MKL
+        ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
@@ -320,44 +287,24 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
                 [
-                    "op_onednn_qconv2d_pointwise_.call",
-                    "op_quantized_max_pool2d_.call",
-                    "op_onednn_qlinear_pointwise_tensor.call",
+                    "aoti_torch_cpu__qconv2d_pointwise_tensor",
+                    "torch.ops.quantized.max_pool2d",
+                    "aoti_torch_cpu__qlinear_pointwise_tensor",
                 ]
             ],
         ),
+        *[
+            BaseTest(
+                func,
+                "",
+                test_mkldnn_pattern_matcher.TestPatternMatcher(),
+                condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+            )
+            for func in dir(test_mkldnn_pattern_matcher.TestPatternMatcher())
+            if func.startswith("test_qlinear")
+        ],
         BaseTest(
-            "test_qlinear",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qlinear_relu",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qlinear_gelu",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qlinear_add",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qlinear_add_relu",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qlinear_dequant_promotion",
+            "test_qconv2d_with_concat",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,

@@ -14,9 +14,10 @@
 
 namespace at {
 #if AT_MKLDNN_ENABLED()
-namespace native { namespace mkldnn {
+namespace native::mkldnn {
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void clear_computation_cache();
-}} // namespace native::mkldnn
+} // namespace native::mkldnn
 #endif
 
 namespace {
@@ -61,9 +62,8 @@ void set_num_threads(int nthreads) {
 #endif
 #ifdef USE_PTHREADPOOL
   // because PyTorch uses caffe2::pthreadpool() in QNNPACK
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
-  pool->set_thread_count(nthreads);
 #endif
 #if AT_MKLDNN_ENABLED()
   at::native::mkldnn::clear_computation_cache();
@@ -101,13 +101,13 @@ bool in_parallel_region() {
 #endif
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
   // execute inline in openmp case
   func();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    std::function<void()> func) {
+    const std::function<void()>& func) {
   func();
   auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   future->markCompleted();

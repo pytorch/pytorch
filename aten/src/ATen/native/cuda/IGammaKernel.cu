@@ -126,7 +126,7 @@ __host__ __device__ scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   accscalar_t ax, fac, res, num, numfac;
-  static const accscalar_t MAXLOG = std::is_same<accscalar_t,double>::value ?
+  static const accscalar_t MAXLOG = std::is_same_v<accscalar_t,double> ?
     7.09782712893383996843E2 : 88.72283905206835;
   static const accscalar_t EXP1 = 2.718281828459045;
   static const accscalar_t lanczos_g = 6.024680040776729583740234375;
@@ -158,7 +158,7 @@ __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
-  static const accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   static const int MAXITER = 2000;
 
@@ -197,7 +197,7 @@ __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   accscalar_t sum = 0;
   accscalar_t term, logx;
   static const int MAXITER = 2000;
-  static const accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
   for (n = 1; n < MAXITER; n++) {
@@ -248,7 +248,7 @@ __host__ __device__ scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t
 
   int k, n, sgn;
   int maxpow = 0;
-  static const accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   accscalar_t lambda = x / a;
   accscalar_t sigma = (x - a) / a;
@@ -315,11 +315,11 @@ __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   static const int MAXITER = 2000;
-  static const accscalar_t MACHEP = std::is_same<accscalar_t, double>::value ?
+  static const accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static const accscalar_t BIG = std::is_same<accscalar_t,double>::value ?
+  static const accscalar_t BIG = std::is_same_v<accscalar_t,double> ?
     4.503599627370496e15 : 16777216.;
-  static const accscalar_t BIGINV = std::is_same<accscalar_t,double>::value ?
+  static const accscalar_t BIGINV = std::is_same_v<accscalar_t,double> ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   ax = _igam_helper_fac(a, x);
@@ -545,8 +545,8 @@ void igammac_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda);
-REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda);
+REGISTER_DISPATCH(igamma_stub, &igamma_kernel_cuda)
+REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda)
 
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.
