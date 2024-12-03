@@ -20,9 +20,7 @@ echo "Free space on filesystem before build:"
 df -h
 
 pushd "$BUILDER_ROOT"
-if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-    ./windows/internal/build_conda.bat
-elif [[ "$PACKAGE_TYPE" == 'wheel' || "$PACKAGE_TYPE" == 'libtorch' ]]; then
+if [[ "$PACKAGE_TYPE" == 'wheel' || "$PACKAGE_TYPE" == 'libtorch' ]]; then
     export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     ./windows/internal/build_wheels.bat
 fi
