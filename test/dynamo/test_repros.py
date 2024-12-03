@@ -6421,7 +6421,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with torch._dynamo.config.patch(assume_static_by_default=False):
             out_ref = f(x_ref, s0, s1, s2)
             out = f_compiled(x, s0, s1, s2)
-            self.assertFalse(torch.any(torch.isnan(out)))
+            self.assertEqual(out_ref, out)
 
     def test_bitwise_op_guard(self):
         # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
