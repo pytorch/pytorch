@@ -5,9 +5,13 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, List, Sequence
+from typing import Callable, List, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
