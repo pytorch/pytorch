@@ -1581,7 +1581,11 @@ if TEST_WITH_TORCHDYNAMO:
         torch._inductor.config.fallback_random = True
 
 
-def xpassIfTorchDynamo(func):
+# seems like this is only used in test/torch_np
+def xpassIfTorchDynamo_np(func):
+    # numpy 2.0+ is causing issues
+    if TEST_WITH_TORCHDYNAMO and np.__version__[0] == '2':
+        return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
 
