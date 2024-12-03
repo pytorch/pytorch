@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -16,8 +20,8 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = List[Optional[Union[int, torch.Tensor]]]
-ModelType = Callable[[List[InputType]], OutputType]
+OutputType = list[Optional[Union[int, torch.Tensor]]]
+ModelType = Callable[[list[InputType]], OutputType]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -35,10 +39,10 @@ class PlaceholderInfo:
     """
 
     name: str
-    stack_trace: Optional[str]
+    stack_trace: str | None
     # This field is recursive, but never cyclic (since a node never uses itself)
-    users: List[PlaceholderInfo]
-    mutating_use_stack_trace: Optional[str]
+    users: list[PlaceholderInfo]
+    mutating_use_stack_trace: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,14 +56,14 @@ class WrappedFunction:
     model: Callable[..., Any]
     static_input_idxs: Sequence[int]
     id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
+    constants: tuple[torch.Tensor, ...]
     placeholders: Sequence[PlaceholderInfo]
     mutated_input_idxs: Sequence[int]
 
 
 def get_mutating_use_stack_trace_from_node(
     placeholder_node: torch.fx.Node,
-) -> Optional[str]:
+) -> str | None:
     # reinplaced uses might have a single, non-copy_ use
     if len(placeholder_node.users) == 1:
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
@@ -72,7 +76,7 @@ def get_mutating_use_stack_trace_from_node(
     return None
 
 
-def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> Optional[str]:
+def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | None:
     return placeholder_info.mutating_use_stack_trace
 
 
@@ -91,7 +95,7 @@ def to_placeholder_info(placeholder_node: torch.fx.Node) -> PlaceholderInfo:
     return PlaceholderInfo(name, stack_trace, users, mutating_use_stack_trace)
 
 
-def get_placeholder_info(graph: torch.fx.Graph) -> List[PlaceholderInfo]:
+def get_placeholder_info(graph: torch.fx.Graph) -> list[PlaceholderInfo]:
     return [
         to_placeholder_info(node) for node in graph.nodes if node.op == "placeholder"
     ]
@@ -104,7 +108,7 @@ def format_default_skip_message(reason: str) -> str:
 def get_mutation_stack_trace(
     placeholders: Sequence[PlaceholderInfo], mutation_indices: Sequence[int]
 ) -> str:
-    stack_trace: Optional[str] = ""
+    stack_trace: str | None = ""
 
     for idx in mutation_indices:
         placeholder = placeholders[idx]
@@ -122,9 +126,9 @@ def get_mutation_stack_trace(
 
 def check_for_mutation(
     func: WrappedFunction,
-    inputs: List[InputType],
+    inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
-) -> Optional[str]:
+) -> str | None:
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
@@ -151,7 +155,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node) -> Optional[str]:
+def _get_use_stack_trace(node) -> str | None:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -159,8 +163,8 @@ def _get_use_stack_trace(node) -> Optional[str]:
 
 
 def check_multiple_devices_or_any_cpu_nodes(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
-) -> Optional[str]:
+    device_node_mapping: dict[torch.device, torch.fx.Node]
+) -> str | None:
     if cpu_node := device_node_mapping.get(torch.device("cpu")):
         msg = f"cpu device ({cpu_node.name})"
         if stack_trace := _get_use_stack_trace(cpu_node):
@@ -179,7 +183,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 
 def check_lowering_disable_cudagraph(
-    device_node_mapping: Dict[torch.device, torch.fx.Node]
+    device_node_mapping: dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
@@ -191,16 +195,16 @@ def log_cudagraph_skip_and_bump_counter(msg):
 
 @dataclasses.dataclass
 class BoxedDeviceIndex:
-    value: Optional[int]
+    value: int | None
 
-    def set(self, device_idx: Optional[int]):
+    def set(self, device_idx: int | None):
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
     gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: Sequence[int]
-) -> Optional[str]:
+) -> str | None:
     default_msg = format_default_skip_message("mutated inputs")
 
     # doesnt work for non-trees because the warmup run would apply mutation twice
@@ -221,7 +225,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return None if not has_mutation else default_msg
 
 
-def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> Optional[str]:
+def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> str | None:
     """
     Gets the first non-empty stack trace of a placeholder or its users.
     """
@@ -261,8 +265,8 @@ class CheckInvariantStatus(Enum):
 
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
-    inputs: List[InputType],
-    recorded_data_ptr: Sequence[Optional[int]],
+    inputs: list[InputType],
+    recorded_data_ptr: Sequence[int | None],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
 ) -> str:
@@ -291,7 +295,7 @@ def log_data_ptr_mismatch(
 
 
 def maybe_warning_due_to_dynamic_shape(
-    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]],
+    fn_cache: dict[tuple[int, ...], Callable[..., Any]],
     new_int_key: Any,
 ) -> bool:
     num_cudagraphs = len(fn_cache.keys()) + 1
@@ -326,5 +330,5 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: List[Optional[str]]
-    cudagraph_fail_reasons: List[str]
+    stack_traces: list[str | None]
+    cudagraph_fail_reasons: list[str]

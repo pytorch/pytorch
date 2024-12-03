@@ -10,7 +10,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0: Optional[float] = None
+_t0: float | None = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
@@ -99,7 +99,7 @@ log = logging.getLogger(__name__)
 
 
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[AnyPool] = set()
+_pool_set: set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
@@ -255,7 +255,7 @@ class AsyncCompile:
             get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
             return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+    def cpp_pybinding(self, argtypes: list[str], source_code: str):
         kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
         if get_compile_threads() <= 1:
             return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
@@ -304,7 +304,7 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def wait(self, scope: Dict[str, Any]) -> None:
+    def wait(self, scope: dict[str, Any]) -> None:
         with dynamo_timed("async_compile.wait", log_pt2_compile_event=True):
             num_kernels = len(
                 [

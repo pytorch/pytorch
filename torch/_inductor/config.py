@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -175,8 +175,8 @@ pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 # hence custom IR passes built on top of it might break in the future.
 _pre_fusion_custom_pass: Optional[
     Callable[
-        [List["torch._inductor.scheduler.BaseSchedulerNode"]],
-        List["torch._inductor.scheduler.BaseSchedulerNode"],
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
     ]
 ] = None
 
@@ -213,11 +213,11 @@ batch_fusion = True
 # merge_splits_pass
 # mutate_cat_pass
 # split_cat_pass
-pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
-post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
+post_grad_fusion_options: dict[str, dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
@@ -239,7 +239,7 @@ use_mixed_mm = True
 # floating point numbers,about 16 decimal digits for double precision floating point numbers)
 # according to PyTorch documentation.
 # https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
-fx_passes_numeric_check: Dict[str, Any] = {
+fx_passes_numeric_check: dict[str, Any] = {
     "pre_grad": False,
     "precision": 1e-4,
     "num_iterations": 1,
@@ -589,7 +589,7 @@ _fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+_fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
@@ -1105,7 +1105,7 @@ class aot_inductor:
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
-    metadata: Dict[str, str] = {}
+    metadata: dict[str, str] = {}
 
     # fbcode only. Whether to raise error if C++ codegen is too big to optimize
     raise_error_on_ignored_optimization: bool = (
@@ -1116,7 +1116,7 @@ class aot_inductor:
     dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
     # Dictionary of presets that can be passed in
-    presets: Dict[str, Any] = {}
+    presets: dict[str, Any] = {}
 
 
 class cuda:
@@ -1195,11 +1195,11 @@ class cuda:
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
-    arch: List[str] = []
+    arch: list[str] = []
 
     # Enable the CK backend for CDNA2 and CDNA3 only (for now)
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: List[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
+    ck_supported_arch: list[str] = ["gfx90a", "gfx940", "gfx941", "gfx942"]
 
     # Optimization level, use to balance compilation speed and runtime performance
     compile_opt_level = "-O2"
@@ -1359,7 +1359,7 @@ _cache_config_ignore_prefix = [
 ]
 
 # External callable for matmul tuning candidates
-external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
+external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
 
 class test_configs:

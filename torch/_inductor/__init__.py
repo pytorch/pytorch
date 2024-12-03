@@ -29,8 +29,8 @@ log = logging.getLogger(__name__)
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[InputType],
-    options: Optional[Dict[str, Any]] = None,
+    example_inputs: list[InputType],
+    options: dict[str, Any] | None = None,
 ):
     """
     Compile a given FX graph with TorchInductor.  This allows compiling
@@ -54,8 +54,8 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    package_path: str | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
@@ -128,12 +128,12 @@ def aoti_compile_and_package(
 
 def _aoti_compile_and_package_inner(
     m,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: dict[str, Any] | None = None,
     *,
     load_and_run: bool = False,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    package_path: str | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ):
     """
     See docstring for aoti_compile_and_package.
@@ -174,11 +174,11 @@ def _aoti_compile_and_package_inner(
 
 def aoti_compile_and_package_debug_wrapper(
     exported_program,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: dict[str, Any] | None = None,
     *,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
+    package_path: str | None = None,
+    inductor_configs: dict[str, Any] | None = None,
 ):
     m = exported_program.module()
     assert isinstance(m, torch.fx.GraphModule)
@@ -234,11 +234,11 @@ def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any],
+    kwargs: dict[str, Any] | None = None,
     *,
-    options: Optional[Dict[str, Any]] = None,
-) -> Union[str, List[str]]:
+    options: dict[str, Any] | None = None,
+) -> str | list[str]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -324,8 +324,8 @@ def aot_compile(
 
 
 def list_mode_options(
-    mode: Optional[str] = None, dynamic: Optional[bool] = None
-) -> Dict[str, Any]:
+    mode: str | None = None, dynamic: bool | None = None
+) -> dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -338,7 +338,7 @@ def list_mode_options(
         >>> torch._inductor.list_mode_options()
     """
 
-    mode_options: Dict[str, Dict[str, bool]] = {
+    mode_options: dict[str, dict[str, bool]] = {
         "default": {},
         # enable cudagraphs
         "reduce-overhead": {
@@ -360,7 +360,7 @@ def list_mode_options(
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
 
 
-def list_options() -> List[str]:
+def list_options() -> list[str]:
     r"""Returns a dictionary describing the optimizations and debug configurations
     that are available to `torch.compile()`.
 
@@ -373,7 +373,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.get_config_copy()
+    current_config: dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 
