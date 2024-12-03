@@ -1514,7 +1514,7 @@ def _export_to_aten_ir_make_fx(
                 if node.op == "call_function" and node.target in (
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
-                    torch.ops.profiler._record_function_exit.default,
+                    torch.ops.profiler._record_function_exit._RecordFunction,
                 ):
                     return False
                 return True
