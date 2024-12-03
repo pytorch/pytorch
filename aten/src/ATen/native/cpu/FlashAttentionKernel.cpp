@@ -1980,26 +1980,14 @@ cpu_flash_attention_u8(
       query.options());
   scalar_t* total_buf_data = total_buf.data_ptr<scalar_t>();
 
-  int64_t kv_sum_size_per_BH =
-    /* key_sum */ kvSize +
-    /* value_sum */ headSize;
-
-  at::Tensor kv_sum_buf = at::empty(
-      {batchSize, num_head, kv_sum_size_per_BH},
+  at::Tensor k_sum_buf = at::empty(
+      {batchSize, num_head, kvSize},
       query.options().dtype(at::kInt));
-  int32_t* k_sum_buf_data = kv_sum_buf.data_ptr<int32_t>();
-  int32_t* v_sum_buf_data = k_sum_buf_data + batchSize * num_head * kvSize;
-
-  int64_t kv_reorder_size_per_BH =
-    /* key_t_reorder */ qk_gemm_K * rndkvSize +
-    /* value_t_reorder */ kvSlice * av_gemm_K * rndHeadSize;
-
-  at::Tensor kv_reorder_buf = at::empty(
-      {batchSize, num_head, kv_reorder_size_per_BH},
-      query.options());
-  scalar_t* kv_reorder_buf_data = kv_reorder_buf.data_ptr<scalar_t>();
-  scalar_t* key_reorder_ptr = kv_reorder_buf_data;
-  scalar_t* value_reorder_ptr = kv_reorder_buf_data + batchSize * num_head * qk_gemm_K * rndkvSize;
+  int32_t* k_sum_buf_data = k_sum_buf.data_ptr<int32_t>();
+  at::Tensor v_sum_buf = at::empty(
+      {batchSize, num_head, headSize},
+      query.options().dtype(at::kInt));
+  int32_t* v_sum_buf_data = v_sum_buf.data_ptr<int32_t>();
 
   // Create transforms for Key
   auto && brgemm_k_xform = create_or_get_packb_microkernel(
@@ -2059,7 +2047,9 @@ cpu_flash_attention_u8(
   (*brgemm_v_xform_tail).generate();
 
   // sum k
-  if (q_zp != 0) {
+  if (q_zp == 0) {
+    k_sum_buf.zero_();
+  } else {
     at::parallel_for(
         0, batchSize * num_head * kvSize, 1, [&](int64_t begin, int64_t end) {
           int64_t i = 0, j = 0, k = 0;
@@ -2081,7 +2071,9 @@ cpu_flash_attention_u8(
   }
 
   // sum v
-  if (a_zp != 0) {
+  if (a_zp == 0) {
+    v_sum_buf.zero_();
+  } else {
     at::parallel_for(
         0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
           int64_t i = 0, j = 0;
