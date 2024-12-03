@@ -1646,6 +1646,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_sync_debug_mode",
