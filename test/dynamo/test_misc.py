@@ -32,7 +32,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.onnx.operators
-import torch.utils._pytree as python_pytree
+import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
@@ -89,11 +89,9 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = python_pytree._cxx_pytree_exists
+HAS_OPTREE = importlib.util.find_spec("optree")
 if HAS_OPTREE:
-    import torch.utils._cxx_pytree as cxx_pytree
-else:
-    cxx_pytree = None
+    import optree
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -295,9 +293,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_OPTREE, "missing optree package")
     def test_optree_graph_break_message(self):
-        import optree
-
-        @torch.compile(backend="eager")
+        @torch.compile(
+            backend="eager",
+        )
         def fn(x):
             d = {"a": 1}
             optree.tree_flatten(d)
@@ -1398,7 +1396,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -3747,8 +3745,18 @@ utils_device.CURRENT_DEVICE == None""".split(
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
-            self.assertEqual(cnts.frame_count, 1)
-            self.assertEqual(cnts.op_count, 3)
+            if i == 1:
+                # No automatic dynamic
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 3)
+            elif i == 2:
+                # Automatic dynamic float arguments kicked in
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 6)
+            else:
+                # No more recompiles
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(cnts.op_count, 0)
             cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):
@@ -3913,10 +3921,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_writes_to_cells_across_frames2(self):
         # This regression test was added when Dynamo didn't fully account for
-        # already established `NewCellVariable` instance for pre-existing cell,
+        # already established `CellVariable` instance for pre-existing cell,
         # while encountering the same cell again (we should reuse the instance
         # rather than creating a new one). This caused buffered writes to escape
-        # the newly created `NewCellVariable`.
+        # the newly created `CellVariable`.
         x = 0
 
         def inc_x_and_get_x(obj):
@@ -8668,9 +8676,9 @@ def ___make_guard_fn():
 
     def test_tracing_py_tree(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
 
@@ -8680,10 +8688,12 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = [xs, xs, xs, xs]
@@ -8696,10 +8706,12 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = (xs, xs, xs, xs)
@@ -8712,10 +8724,12 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = {
@@ -8748,10 +8762,12 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsa = (xs, xs)
@@ -8796,12 +8812,13 @@ def ___make_guard_fn():
         self.assertEqual(cnt.frame_count, 2)
 
     def test_tracing_py_tree_tensor_subclass(self):
+        import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
         def fn(xs):
             nested_xs = [[xs]]
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             return flat_xs[0].clone()
 
         # use checkpoint to trigger a "sourceless" tensor subclass
@@ -8816,11 +8833,13 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
         def fn(xs):
             def mapper(x):
                 return x.clone()
 
-            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
             return y
 
         xs = [torch.tensor(i) for i in range(3)] + ["hi"]
@@ -10174,9 +10193,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
-        if cxx_pytree is not None:
-            implemtations.append(("cxx", cxx_pytree))
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10208,7 +10225,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10257,7 +10274,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("python", pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -12022,6 +12039,27 @@ fn
         res, foo = run(torch.zeros(1), Foo(0))
         self.assertTrue(res, torch.ones(1))
         self.assertEqual(foo.x, 1)
+
+    def test_frozenset_of_non_literals(self):
+        class Foo:
+            pass
+
+        foo = Foo()
+        foo.x = 0
+        s = frozenset([foo])
+
+        @torch.compile(backend="eager")
+        def run(x, s, foo0):
+            # Dynamo must have the same representation for `foo0` and `foo1`,
+            # otherwise the update to `foo0.x` won't be reflected in the read of
+            # `foo1.x`.
+            foo1 = list(s)[0]
+            foo0.x += 1
+            return x + 1, foo1.x
+
+        res = run(torch.ones(1), s, foo)
+        self.assertTrue(same(res[0], torch.ones(1) + 1))
+        self.assertEqual(res[1], 1)
 
 
 class TestTracer(JitTestCase):
