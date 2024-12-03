@@ -14,6 +14,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
@@ -21,7 +22,13 @@ from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
-from .wrapper import EnterSubgraphLine, ExitSubgraphLine, PythonWrapperCodegen
+from .triton_utils import should_unwrap_unspec_arg
+from .wrapper import (
+    EnterSubgraphLine,
+    ExitSubgraphLine,
+    PythonWrapperCodegen,
+    SymbolicCallArg,
+)
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -63,7 +70,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: Dict[str, Kernel] = {}
-        self.expr_printer = cexpr
 
     @staticmethod
     def create(
@@ -1032,7 +1038,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_args.append(f"&{output_name}")
             elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {self.expr_printer(output)};")
+                self.writeline(f"auto {output_name} = {cexpr(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1112,7 +1118,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         super().add_benchmark_harness(output)
 
     def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+        return cexpr(V.graph.sizevars.simplify(x) if simplify else x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_cpp_sizevar(x)
@@ -1128,6 +1134,51 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if len(parts) == 1:
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
+
+    def ensure_size_computed(self, sym: sympy.Symbol):
+        if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
+            if sym in self.computed_sizes:
+                return
+            self.computed_sizes.add(sym)
+            expr = V.graph.sizevars.inv_precomputed_replacements[sym]
+            self.writeline(f"int64_t {sym} = {cexpr(expr)};")
+
+    def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
+        expr = f"{kernel_name}_{tree.prefix}numel"
+        if suffix is not None:
+            expr += f"_{suffix}"
+        if (expr, V.graph) not in self.kernel_numel_expr:
+            # declare expr once in each graph (scope)
+            self.kernel_numel_expr.add((expr, V.graph))
+            self.writeline(f"int64_t {expr} = {cexpr(tree.numel)};")
+        else:
+            self.writeline(f"{expr} = {cexpr(tree.numel)};")
+        # We can get symbolic expressions here, like s0*64
+        # It is fine to have them here, but we need to handle them correctly as their own type
+        # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+        # scalars as well.
+        # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+        # constant now, need type info. I agree, this needs type info, and while this is not true type info
+        # it suffices as a type hint for the purposes of producing the correct code for this type.
+        return SymbolicCallArg(expr, tree.numel)
+
+    def prepare_triton_kernel_call(self, device_index, call_args):
+        def wrap_arg(arg):
+            if isinstance(arg, str):
+                # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+                return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
+            elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
+                return str(arg)
+            else:
+                return cexpr(V.graph.sizevars.simplify(arg))
+
+        call_args = [wrap_arg(arg) for arg in call_args]
+
+        if device_index is None:
+            current_device = V.graph.get_current_device_or_throw()
+            device_index = current_device.index
+
+        return device_index, call_args
 
     def codegen_dynamic_scalar(self, node):
         (data,) = (t.codegen_reference() for t in node.inputs)
@@ -1286,7 +1337,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
         args = [
             name,
-            self.expr_printer(offset),  # bytes not numel
+            cexpr(offset),  # bytes not numel
             self.codegen_dtype(dtype),
             str(len(shape)),
             self.codegen_int_array_var(
@@ -1609,7 +1660,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
                 expr = arg.node.expr if isinstance(arg, torch.SymInt) else arg
-                new_int_args.append(self.expr_printer(expr))
+                new_int_args.append(cexpr(expr))
             elif isinstance(arg_type, torch.NumberType):
                 # Scalar of type int
                 assert isinstance(arg, (int, float, bool))
@@ -1639,9 +1690,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     expressions = [
                         a.node.expr if isinstance(a, torch.SymInt) else a for a in arg
                     ]
-                    new_int_args.extend(
-                        [self.expr_printer(expr) for expr in expressions]
-                    )
+                    new_int_args.extend([cexpr(expr) for expr in expressions])
                 # List[Scalar]
                 elif isinstance(arg_type.getElementType(), torch.NumberType):
                     # Only treat int Scalar as dynamic
@@ -1847,7 +1896,7 @@ if (custom_op_wrapper.get() == NULL) {
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
-                return f"PyLong_FromLongLong({self.expr_printer(expr)})"
+                return f"PyLong_FromLongLong({cexpr(expr)})"
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({self.generate_float_value(raw_arg)})"
             elif isinstance(arg_type, torch.BoolType):
@@ -1867,7 +1916,7 @@ if (custom_op_wrapper.get() == NULL) {
                     return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
                 elif isinstance(raw_arg, torch.SymInt):
                     expr = raw_arg.node.expr
-                    return f"PyLong_FromLongLong({self.expr_printer(expr)})"
+                    return f"PyLong_FromLongLong({cexpr(expr)})"
                 else:
                     raise NotImplementedError(
                         f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
@@ -2080,9 +2129,9 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             # FIXME: This happens because type_ is not always properly set to torch.ListType
             return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
         elif isinstance(val, SymTypes):
-            return self.expr_printer(val.node.expr)
+            return cexpr(val.node.expr)
         elif isinstance(val, sympy.Expr):
-            return self.expr_printer(val)
+            return cexpr(val)
         else:
             return repr(val)
 
