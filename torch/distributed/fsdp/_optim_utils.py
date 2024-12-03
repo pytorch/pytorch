@@ -630,7 +630,7 @@ def _flatten_optim_state(
     assert state_names is not None
 
     # Flatten the state
-    flat_state: Dict[str, Any] = {}
+    flat_state: Dict[str, Optional[torch.Tensor]] = {}
     for state_name in state_names:
         state_values = [
             unflat_param_state[state_name] if unflat_param_state is not None else None
@@ -658,7 +658,7 @@ def _flatten_optim_state(
         if are_pos_dim_tensors:
             flat_tensor = _flatten_tensor_optim_state(
                 state_name,
-                state_values,
+                state_values,  # type: ignore[arg-type]
                 unflat_param_names,
                 unflat_param_shapes,
                 handle,
@@ -680,7 +680,7 @@ def _flatten_optim_state(
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
                 state_name,
-                state_values,
+                state_values,  # type: ignore[arg-type]
                 unflat_param_names,
             )
         else:
