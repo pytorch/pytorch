@@ -3152,8 +3152,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
 
             def forward(self, a):
-                a_reshaped = a.reshape(-1, a.size(-1))
-                c = torch._int_mm(a_reshaped, self.b)
+                c = torch._int_mm(a, self.b)
                 c = c.to(self.dtype)
                 a_scale = self.a_scale.expand(c.shape)
                 c = c * a_scale
