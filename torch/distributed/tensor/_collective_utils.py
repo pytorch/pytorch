@@ -8,11 +8,13 @@ from typing import List, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
+from torch._C._distributed_c10d import _resolve_process_group
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
     get_global_rank,
+    get_group_rank,
     get_rank,
     GroupMember,
     ProcessGroup,
@@ -29,10 +31,15 @@ if not torch._running_with_deploy():
     @torch.library.register_fake("_dtensor::shard_dim_alltoall")
     def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
         group_size = _get_group_size_by_name(group_name)
-        shape = list(input.shape)
-        shape[gather_dim] *= group_size
-        shape[shard_dim] //= group_size
-        return torch.empty(shape, device=input.device, dtype=input.dtype)
+        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+        group = _resolve_process_group(group_name)
+        group_rank = get_group_rank(group, get_rank())
+
+        return (
+            torch.cat(stacked_list, dim=gather_dim)
+            .chunk(group_size, dim=shard_dim)[group_rank]
+            .contiguous()
+        )
 
 else:
     import warnings
