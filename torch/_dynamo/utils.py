@@ -83,6 +83,7 @@ from torch._utils_internal import (
     signpost_event,
 )
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
@@ -301,6 +302,7 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[Dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
+    log_waitcounter: bool = False,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -334,6 +336,7 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
+    - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
     # We're standardizing on microseconds for dynamo_compile timings.
     if dynamo_compile_column_us is not None:
@@ -363,7 +366,11 @@ def dynamo_timed(
 
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            yield
+            if log_waitcounter:
+                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
+                    yield
+            else:
+                yield
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
@@ -1088,7 +1095,7 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self):
+    def get_stack(self) -> List[str]:
         """
         The main event stack, with every chromium event.
         Logged to tlparse.
@@ -1099,7 +1106,7 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> str:
+    def get_top(self) -> Optional[str]:
         """
         Get the top event name or None if the stack is empty.
         """
@@ -1824,6 +1831,16 @@ def tuple_iterator_getitem(it, index):
 
 
 iter_next = next
+
+
+def normalize_range_iter(range_iter) -> Tuple[int, int, int]:
+    _, (range_obj,), maybe_idx = range_iter.__reduce__()
+    # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
+    # already incremented by the current index.
+    start = range_obj.start + (maybe_idx or 0)
+    stop = range_obj.stop
+    step = range_obj.step
+    return (start, stop, step)
 
 
 def to_subclass(t, cls):

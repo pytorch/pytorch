@@ -3866,6 +3866,64 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    def test_update_constant_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+
+        # Let's check whether the model has correct constant name mapping.
+        expected_original_fqns = {
+            "L__self___weight": "L__self___weight",
+            "L__self___bias": "L__self___bias",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+        runner.update_constant_buffer(new_weights, False, False)
+        new_output = runner_call(test_inputs)
+        new_expected = torch.nn.functional.linear(
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+        )
+        self.assertEqual(new_expected, new_output)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -3906,6 +3964,7 @@ def fail_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
+    "test_update_constant_buffer": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip

@@ -383,7 +383,7 @@ def split_const_gm(
             gm,
             node,
             (
-                const_result[const_outputs[node.name]]
+                const_result[const_outputs[node.name]]  # type:ignore[index]
                 if lifted_constant_names is None
                 else None
             ),
@@ -1286,6 +1286,8 @@ def compile_fx_aot(
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
+    assert isinstance(model_, GraphModule), model_
+
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
