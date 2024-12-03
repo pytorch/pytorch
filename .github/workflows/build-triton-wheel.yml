@@ -54,12 +54,12 @@ jobs:
             docker-image: "pytorch/manylinux2_28-builder:cpu"
         include:
           - device: "rocm"
-            rocm_version: "6.2"
+            rocm_version: "6.2.4"
           - device: "cuda"
             rocm_version: ""
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
+      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ matrix.device }}
       PLATFORM: ${{ contains(matrix.docker-image, '2_28') && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
