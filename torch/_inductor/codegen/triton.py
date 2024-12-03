@@ -8,7 +8,6 @@ import functools
 import itertools
 import logging
 import os
-import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -63,6 +62,7 @@ from ..utils import (
     Placeholder,
     sympy_dot,
     sympy_subs,
+    triton_type,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
@@ -656,22 +656,6 @@ class TritonPrinter(PythonPrinter):
 
 
 texpr = TritonPrinter().doprint
-
-# correct cases where Triton types names don't match PyTorch
-_triton_type_mapping = {
-    "tl.bool": "tl.int1",
-    "tl.float8_e4m3fn": "tl.float8e4nv",
-    "tl.float8_e5m2": "tl.float8e5",
-    "tl.float8_e4m3fnuz": "tl.float8e4b8",
-    "tl.float8_e5m2fnuz": "tl.float8e5b16",
-}
-_triton_type_re = re.compile(r"^.*[.]")
-
-
-def triton_type(dtype: torch.dtype) -> str:
-    """Convert torch.dtype to triton type"""
-    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
-    return _triton_type_mapping.get(triton_type_name, triton_type_name)
 
 
 def triton_compute_type(dtype: torch.dtype) -> str:

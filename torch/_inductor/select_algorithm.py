@@ -57,8 +57,10 @@ from .utils import (
     sympy_index_symbol,
     sympy_product,
     unique,
+    triton_type_to_torch,
+    upcast_compute_type,
 )
-from .virtualized import V
+from .virtualized import V, OpsValue
 
 
 log = logging.getLogger(__name__)
@@ -589,7 +591,8 @@ class TritonTemplateKernel(TritonKernel):
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex", integer=True)
 
-            epilogue_args = [val]
+            acc_dtype = triton_type_to_torch(self.meta["ACC_TYPE"]) if "ACC_TYPE" in self.meta else torch.float32
+            epilogue_args = [V.kernel.cse.namedvar(name="acc", dtype=acc_dtype)]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
