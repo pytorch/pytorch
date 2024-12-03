@@ -1951,6 +1951,60 @@ class FakeTensorDispatchCache(TestCase):
                 extract_tensor_metadata(res4),
             )
 
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_wrapper_tensor_subclass_different_device(self):
+        class DifferentDeviceTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a):
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = torch.device("cpu")
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, a.size(), **kwargs)
+                return out
+
+            def __init__(self, a):
+                self.inner_tensor = a
+
+            def __repr__(self):
+                return f"DifferentDeviceTensor({repr(self.inner_tensor)})"
+
+            def __tensor_flatten__(self):
+                return ["inner_tensor"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                assert meta is None
+                return DifferentDeviceTensor(inner_tensors["inner_tensor"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args = pytree.tree_map_only(DifferentDeviceTensor, lambda x: x.inner_tensor, args)
+                kwargs = pytree.tree_map_only(DifferentDeviceTensor, lambda x: x.inner_tensor, kwargs)
+                # Returns unwrapped tensor
+                return func(*args, **kwargs)
+
+        a = torch.ones(2, 2, 768, device="cuda")
+        wrapped_a = DifferentDeviceTensor(a)
+
+        # Outer Tensor is on cpu, inner is on cuda
+        self.assertTrue(wrapped_a.is_cpu)
+        self.assertFalse(wrapped_a.inner_tensor.is_cpu)
+
+        with FakeTensorMode() as fake_mode:
+            fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
+
+        self.assertTrue(fake_wrapped_a.is_cpu)
+        assert isinstance(fake_wrapped_a, DifferentDeviceTensor)
+        self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
+
+
     def test_cache_tuple_outputs(self):
         """
         Test to check that ops with tuple outputs work.
