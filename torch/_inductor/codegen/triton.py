@@ -1465,6 +1465,9 @@ class TritonKernel(SIMDKernel):
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
         self.triton_meta: Optional[Dict[str, object]] = None
 
+        if self.inside_reduction:
+            self.codegen_reduction_numels(self.body)
+
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
 
@@ -1504,7 +1507,11 @@ class TritonKernel(SIMDKernel):
             """,
             strip=True,
         )
-        if not self._has_constant_mask(self.range_trees[-1]):
+        if any(
+            not self._has_constant_mask(tree)
+            for tree in self.range_trees
+            if tree.is_reduction
+        ):
             self.body.writeline(
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
             )
@@ -1522,9 +1529,15 @@ class TritonKernel(SIMDKernel):
                 )
 
         if self.inside_reduction:
-            self.codegen_reduction_numels(self.body)
-            if not any(tree.is_loop for tree in self.range_trees):
-                # Indexing goes inside the innermost loop
+            if any(tree.is_loop for tree in self.range_trees):
+                # If the kernel contains loops, compute rbase.
+                rn_bases = self._get_reduction_symbols(
+                    "base", integer=True, nonnegative=True
+                )
+                rbase = self._flatten_reduction_inds(rn_bases)
+                self.body.splice(f"rbase = {self.index_to_str(rbase)}")
+            else:
+                # For looped reductions, indexing is deferred to the innermost loop.
                 self.codegen_reduction_inds(self.body)
 
     def need_numel_args(self):
@@ -2434,7 +2447,7 @@ class TritonKernel(SIMDKernel):
                     result_var, upcast_acc_dtype(src_dtype)
                 )
                 final_reduction_define(
-                    self.post_loop_combine, str(result_var), peers, None
+                    self.post_loop_store, str(result_var), peers, None
                 )
             exit_stack.close()
 
@@ -2851,13 +2864,9 @@ class TritonKernel(SIMDKernel):
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    loop_start = (
-                        f"{prefix}split_start" if self.cooperative_reduction else "0"
-                    )
+                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
                     loop_end = (
-                        f"{prefix}split_end"
-                        if self.cooperative_reduction
-                        else f"{prefix}numel"
+                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
                     self.body.writeline(
                         f"for {prefix}offset in range({loop_start}, {loop_end}, {prefix.upper()}BLOCK):"
@@ -3552,14 +3561,6 @@ class TritonKernel(SIMDKernel):
         rblock = sympy_product(rn_blocks)
         buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
-        # If the kernel contains loops, compute rbase.
-        if any(tree.is_loop for tree in self.range_trees):
-            rn_bases = self._get_reduction_symbols(
-                "base", integer=True, nonnegative=True
-            )
-            rbase = self._flatten_reduction_inds(rn_bases)
-            buffer.splice(f"rbase = {self.index_to_str(rbase)}")
-
     def _get_reduction_symbols(self, suffix: str, **kwargs) -> List[sympy.Symbol]:
         """
         Helper to initialize symbols like rn_numel, rn_base, etc.
@@ -3889,7 +3890,7 @@ class TritonScheduling(SIMDScheduling):
                 )
             )
         if optional_cooperative:
-            rnumel = kernel.numels["r"]
+            rnumel = kernel.features.reduction_numel
             # for larger sizes non-cooperative gets very slow
             if V.graph.sizevars.statically_known_leq(rnumel, 65536):
                 kernels.append(
