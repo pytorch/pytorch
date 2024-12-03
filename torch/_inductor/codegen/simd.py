@@ -125,7 +125,7 @@ class IterationRanges:
 
     @property
     @cache_on_self
-    @no_type_check
+    @no_type_check  # https://github.com/python/mypy/issues/17184
     def is_reduction(self) -> bool:
         return prefix_is_reduction(self.prefix)
 
@@ -414,10 +414,10 @@ class SIMDKernel(Kernel):
     def initialize_range_tree(self, pid_cache):
         prefixes = ["z", "y", "x", "r0_", "r1_"]
         active_prefixes = [prefix for prefix in prefixes if prefix in self.numels]
+        no_r_dim = not self.inside_reduction or self.total_reduction_numel == 1
 
         grid_dims = ["x", "y", "z"]
         reduction_dims = ["r0_", "r1_"]
-        no_r_dim = not self.inside_reduction or self.total_reduction_numel == 1
         if self.no_x_dim:
             tensor_dims = reduction_dims
         elif no_r_dim:
@@ -1454,7 +1454,7 @@ class SIMDScheduling(BaseScheduling):
             tiling = self.select_tiling(node_schedule, numel, rnumel)
             node_schedule_map[pn] = node_schedule, tiling, numel, rnumel
             subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                tiling=tiling,
+                tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
             )
@@ -1641,7 +1641,7 @@ class SIMDScheduling(BaseScheduling):
     @classmethod
     def create_tiling(
         cls, pw_tiling: Sequence[sympy.Expr], reduction_tiling: Sequence[sympy.Expr]
-    ) -> Dict[str, Tuple[sympy.Expr]]:
+    ) -> Dict[str, sympy.Expr]:
         """
         Create a tiling dict from pointwise and reduction splits.
         """

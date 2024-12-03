@@ -388,7 +388,7 @@ class IRNode:
         self._post_init_setattr("origin_node", None)
 
     def get_read_names(self) -> OrderedSet[str]:
-        raise NotImplementedError(f"NYI on {type(self)}")
+        return OrderedSet(dep.name for dep in self.get_reads())
 
     def get_traceback(self) -> Optional[List[str]]:
         return self.traceback
@@ -497,7 +497,7 @@ class IRNode:
         return device
 
     def has_exceeded_max_reads(self) -> bool:
-        raise NotImplementedError(type(self).__name__)
+        return False
 
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         raise NotImplementedError(type(self).__name__)
@@ -524,13 +524,13 @@ class IRNode:
             return None
 
     def has_large_inner_fn(self, threshold: Optional[int] = None) -> bool:
-        raise NotImplementedError(type(self).__name__)
+        return False
 
     def mark_reuse(self, users: int) -> None:
-        raise NotImplementedError(type(self).__name__)
+        pass
 
     def realize_hint(self) -> None:
-        raise NotImplementedError(type(self).__name__)
+        pass
 
     def unwrap_view(self) -> IRNode:
         raise NotImplementedError(type(self).__name__)
@@ -554,11 +554,14 @@ class IRNode:
     ) -> None:
         raise NotImplementedError(type(self).__name__)
 
-    def get_reads(self) -> OrderedSet[Dep]:
+    def get_read_writes(self) -> dependencies.ReadWrites:
         raise NotImplementedError(type(self).__name__)
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.get_read_writes().reads
+
     def num_reads(self) -> int:
-        raise NotImplementedError(type(self).__name__)
+        return len(self.get_reads())
 
     def get_storage_numel(self) -> _IntLike:
         raise NotImplementedError(type(self).__name__)
@@ -573,10 +576,10 @@ class IRNode:
         raise NotImplementedError(type(self).__name__)
 
     def is_extern(self) -> bool:
-        raise NotImplementedError(type(self).__name__)
+        return False
 
     def is_no_op(self) -> bool:
-        raise NotImplementedError(type(self).__name__)
+        return False
 
     def constant_to_device(self, device: torch.device) -> IRNode:
         raise NotImplementedError(type(self).__name__)
@@ -709,9 +712,6 @@ class Loops(IRNode):
 
     def get_pointwise_size(self) -> Sequence[Expr]:
         return self.ranges
-
-    def is_extern(self) -> bool:
-        return False
 
     @classmethod
     def create(cls, *args: Any, **kwargs: Any) -> TensorBox:
@@ -3087,17 +3087,8 @@ class BaseConstant(IRNode):
     def get_origin_node(self) -> Optional[torch.fx.Node]:
         return None
 
-    def mark_reuse(self, users: int) -> None:
-        pass
-
-    def has_exceeded_max_reads(self) -> bool:
-        return False
-
     def get_reads(self) -> OrderedSet[Dep]:
         return OrderedSet()
-
-    def is_extern(self) -> bool:
-        return False
 
 
 @ir_dataclass
@@ -3748,9 +3739,6 @@ class Buffer(IRNode):
     def get_storage_numel(self):  # type: ignore[no-untyped-def]
         return self.get_numel()
 
-    def is_extern(self) -> bool:
-        return False
-
     def freeze_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, Layout) and not isinstance(
             self.layout, NonOwningLayout
@@ -3842,6 +3830,16 @@ class OperationBuffer(Buffer, Operation):
 class InputBuffer(Buffer):
     def num_reads(self) -> int:
         return 1
+
+
+class DonatedBuffer(InputBuffer):
+    """
+    Represents a donated buffer which is a saved tensor that is not alias to any
+    fwd inputs, fwd user outputs, and bwd outputs. We generally cannot inplace
+    reuse the input tensor memory during backward since it might be used in another
+    function. However, donated buffer can be inplace reused during backward
+    to save memory.
+    """
 
 
 class ConstantBuffer(InputBuffer):
@@ -4157,7 +4155,7 @@ class ComputedBuffer(OperationBuffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges,
             reduce_ranges,
-            prefix="z",
+            prefix="p",
         )
         body = LoopBody(
             body,
@@ -4261,9 +4259,6 @@ class TemplateBuffer(OperationBuffer):
 
     def get_reduction_type(self) -> Optional[str]:
         return None
-
-    def is_no_op(self) -> bool:
-        return False
 
     def should_allocate(self) -> bool:
         return True
@@ -4498,6 +4493,9 @@ class InputsKernel(OperationBuffer):
             index_exprs=OrderedSet(),
         )
 
+    def get_reads(self) -> OrderedSet[Dep]:
+        return self.get_read_writes().reads
+
     @classmethod
     def unwrap_storage_for_input(cls, x: IRNode) -> IRNode:
         if isinstance(x, TensorBox):
@@ -4531,9 +4529,6 @@ class InputsKernel(OperationBuffer):
     def is_extern(self) -> bool:
         return True
 
-    def is_no_op(self) -> bool:
-        return False
-
     def num_reads(self) -> int:
         return 1
 
@@ -4541,6 +4536,9 @@ class InputsKernel(OperationBuffer):
 class NopKernel(InputsKernel):
     def is_no_op(self) -> bool:
         return True
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
 
 
 class ConcatKernel(NopKernel):
@@ -6848,6 +6846,9 @@ class MutableBox(IRNode):
         self, exact_strides: List[_IntLike], allow_padding: bool = False
     ) -> None:
         return self.data.freeze_layout_with_exact_strides(exact_strides, allow_padding)
+
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        return self.data.get_read_writes()
 
     def get_reads(self) -> OrderedSet[Dep]:
         return self.data.get_reads()

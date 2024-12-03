@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import math
 from typing import Dict
 
 import sympy
@@ -10,6 +9,9 @@ from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch.utils._sympy.functions import CeilDiv
+
+from ..utils import sympy_product
+from .simd import prefix_is_reduction
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -59,8 +61,7 @@ class TritonSplitScanKernel(TritonKernel):
         grid_dims = ["r0_", "x", "y"]
         for prefix in active_prefixes:
             numel = self.numels[prefix]
-            is_reduction = prefix[0] == "r"
-            tensor_dim = 0 if is_reduction else None
+            tensor_dim = 0 if prefix_is_reduction(prefix) else None
             grid_dim = grid_dims.index(prefix)
             self.range_trees.append(
                 IterationRangesRoot(
@@ -103,16 +104,15 @@ class TritonSplitScanKernel(TritonKernel):
 
         assert len(self.numels) == 2, "Unexpected tiling"
         min_rblock = config.triton.min_split_scan_rblock
-        is_reduction_dim = [var[0] == "r" for var in self.numels]
-        reduction_numel = math.prod(
+        reduction_numel = sympy_product(
             numel
-            for is_reduction, (var, numel) in zip(is_reduction_dim, self.numels.items())
-            if is_reduction
+            for prefix, numel in self.numels.items()
+            if prefix_is_reduction(prefix)
         )
-        pointwise_numel = math.prod(
+        pointwise_numel = sympy_product(
             numel
-            for is_reduction, (var, numel) in zip(is_reduction_dim, self.numels.items())
-            if not is_reduction
+            for prefix, numel in self.numels.items()
+            if not prefix_is_reduction(prefix)
         )
         max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
