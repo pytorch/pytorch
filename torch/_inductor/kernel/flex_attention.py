@@ -813,6 +813,8 @@ def flex_attention(
     mask_mod_other_buffers,
 ):
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -1142,12 +1144,6 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -1683,7 +1679,7 @@ def bwd_dq_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1715,7 +1711,7 @@ def bwd_dq_block_mn(
 
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1865,7 +1861,7 @@ def bwd_dkdv_block_mn(
             n="n",
         ) | indent_except_first(2) }}
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1923,7 +1919,7 @@ def bwd_dkdv_block_mn(
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2034,6 +2030,8 @@ def flex_attention_backward(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -2209,6 +2207,9 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_KV_BLOCK_SIZE % BLOCK2 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
+            continue
+        if num_warps == 8:
+            # Working around https://github.com/pytorch/pytorch/issues/141603
             continue
 
         # Performance tuning
