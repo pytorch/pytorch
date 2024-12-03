@@ -34,7 +34,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
@@ -68,9 +67,18 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class OutputCode(Protocol):
+@dataclasses.dataclass
+class OutputCode:
+    # TODO: Remove underscores here
+
+    # None if the output is not remote cacheable
+    _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        ...
+        raise NotImplementedError(type(self))
 
     def post_compile(
         self,
@@ -78,22 +86,11 @@ class OutputCode(Protocol):
         cudagraphs: BoxedBool,
         gm: GraphModule,
     ) -> None:
-        ...
-
-    # TODO: Not sure if I really want these to be properties, this is easy
-    # though
-    #
-    # TODO: Remove leading underscores
-
-    # None if the output is not remote cacheable
-    _fx_graph_cache_key: Optional[str]
-
-    # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: Optional[int]
+        raise NotImplementedError(type(self))
 
     # TODO: Get rid of this
     def set_triton_bundle(self, triton_bundle: Any) -> None:
-        ...
+        raise NotImplementedError(type(self))
 
 
 _StrideExprStr: TypeAlias = str
@@ -142,7 +139,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
 
 
 @dataclasses.dataclass
-class CompiledFxGraph:
+class CompiledFxGraph(OutputCode):
     """
     Class holding a compiled FX graph. This is the object serialized on disk
     to support FxGraph caching.
@@ -182,9 +179,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
-    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
     _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
@@ -409,16 +404,12 @@ def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
 
 
 @dataclasses.dataclass
-class CompiledAOTI:
+class CompiledAOTI(OutputCode):
     """
     Class holding an AOTInductor compiled so.
     """
 
     filename: Union[str, List[str]]
-
-    # TODO: Figure out if these make sense or not here
-    _fx_graph_cache_key: Optional[str] = None
-    _time_taken_ns: Optional[int] = None
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")
