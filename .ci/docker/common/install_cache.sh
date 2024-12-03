@@ -13,7 +13,7 @@ install_ubuntu() {
       # TODO: Remove this
       git clone https://github.com/pytorch/sccache
   else
-      git clone https://github.com/mozilla/sccache -b v0.8.2
+      git clone https://github.com/mozilla/sccache -b v0.8.1
   fi
   cd sccache
   echo "Building sccache"
