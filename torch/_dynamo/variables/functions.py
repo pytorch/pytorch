@@ -316,7 +316,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
-                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+                from torch.distributed.fsdp.fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
             if FSDPState is not None and self.fn in [
