@@ -12,6 +12,10 @@ struct PushPRIVATEUSE1CallbacksStub {
   PushPRIVATEUSE1CallbacksStub(const PushPRIVATEUSE1CallbacksStub&) = delete;
   PushPRIVATEUSE1CallbacksStub& operator=(const PushPRIVATEUSE1CallbacksStub&) =
       delete;
+  PushPRIVATEUSE1CallbacksStub(PushPRIVATEUSE1CallbacksStub&&) = default;
+  PushPRIVATEUSE1CallbacksStub& operator=(PushPRIVATEUSE1CallbacksStub&&) =
+      default;
+  ~PushPRIVATEUSE1CallbacksStub() = default;
 
   template <typename... ArgTypes>
   void operator()(ArgTypes&&... args) {

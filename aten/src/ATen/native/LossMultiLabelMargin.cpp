@@ -76,7 +76,7 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (C10_UNUSED const auto t : c10::irange(nframe)) {
+    for ([[maybe_unused]] const auto t : c10::irange(nframe)) {
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -180,7 +180,7 @@ static void multilabel_margin_loss_backward_out_frame(
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.mutable_data_ptr<scalar_t>();
-  for (C10_UNUSED const auto t : c10::irange(nframe)) {
+  for ([[maybe_unused]] const auto t : c10::irange(nframe)) {
     for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {

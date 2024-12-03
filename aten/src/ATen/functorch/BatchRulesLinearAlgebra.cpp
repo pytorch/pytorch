@@ -185,34 +185,34 @@ struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
-    const auto tensor_ = check_and_reshape_input(tensor, batch_dim);
-    return std::make_tuple(Func(tensor_, std::forward<T>(extra_args)...), 0);
+    auto tensor_ = check_and_reshape_input(tensor, batch_dim);
+    return std::make_tuple(Func(std::move(tensor_), std::forward<T>(extra_args)...), 0);
   }
 
   static twoOutputs apply_two(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
-    const auto tensor_ = check_and_reshape_input(tensor, batch_dim);
-    const auto res = Func(tensor_, std::forward<T>(extra_args)...);
-    return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
+    auto tensor_ = check_and_reshape_input(tensor, batch_dim);
+    auto res = Func(std::move(tensor_), std::forward<T>(extra_args)...);
+    return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0);
   }
 
   static threeOutputs apply_three(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
-    const auto tensor_ = check_and_reshape_input(tensor, batch_dim);
-    const auto res = Func(tensor_, std::forward<T>(extra_args)...);
-    return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+    auto tensor_ = check_and_reshape_input(tensor, batch_dim);
+    auto res = Func(std::move(tensor_), std::forward<T>(extra_args)...);
+    return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0);
   }
 
   static fourOutputs apply_four(
       const Tensor& tensor,
       std::optional<int64_t> batch_dim,
       T... extra_args) {
-    const auto tensor_ = check_and_reshape_input(tensor, batch_dim);
-    const auto res = Func(tensor_, std::forward<T>(extra_args)...);
+    auto tensor_ = check_and_reshape_input(tensor, batch_dim);
+    auto res = Func(std::move(tensor_), std::forward<T>(extra_args)...);
     return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
   }
 };
@@ -236,21 +236,17 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim,
       T... extra_args) {
-    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
-    const auto tensor_ = std::get<0>(tensor_other);
-    const auto other_ = std::get<1>(tensor_other);
-    return std::make_tuple(Func(tensor_, other_, std::forward<T>(extra_args)...), 0);
+    auto [tensor_, other_]= check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
+    return std::make_tuple(Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...), 0);
   }
 
   static twoOutputs apply_two(
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim,
       T... extra_args) {
-    const auto tensor_other = check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
-    const auto tensor_ = std::get<0>(tensor_other);
-    const auto other_ = std::get<1>(tensor_other);
-    const auto res = Func(tensor_, other_, std::forward<T>(extra_args)...);
-    return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
+    auto [tensor_, other_]= check_inputs_and_reshape_inputs(first, first_bdim, second, second_bdim);
+    auto res = Func(std::move(tensor_), std::move(other_), std::forward<T>(extra_args)...);
+    return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0);
   }
 };
 
@@ -325,8 +321,8 @@ oneOutput linalg_lu_solve_batch_rule(
   pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
   B_ = maybePadToLogicalRank(B_, B_bdim, max_num_batch_dims + B_min_rank);
 
-  const auto result = at::linalg_lu_solve(LU_, pivots_, B_, left, adjoint);
-  return std::make_tuple(result, 0);
+  auto result = at::linalg_lu_solve(LU_, pivots_, B_, left, adjoint);
+  return std::make_tuple(std::move(result), 0);
 }
 
 oneOutput cholesky_solve_batch_rule(
@@ -338,9 +334,7 @@ oneOutput cholesky_solve_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
 
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
-  const auto tensor_ = std::get<0>(tensor_other);
-  const auto other_ = std::get<1>(tensor_other);
+  auto [tensor_, other_]= _binary_pointwise_helper(self, self_bdim, A, A_bdim, /*do_type_promotion=*/false);
   return std::make_tuple(at::cholesky_solve(tensor_, other_, upper), 0);
 }
 
@@ -348,8 +342,8 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
     const Tensor& A, std::optional<int64_t> A_bdim, bool pivot, bool check_errors) {
   TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor_ex: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
   const auto A_ = moveBatchDimToFront(A, A_bdim);
-  const auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
-  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+  auto res = at::linalg_lu_factor_ex(A_, pivot, check_errors);
+  return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0);
 }
 
 oneOutput matrix_exp_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim) {
@@ -396,8 +390,8 @@ fourOutputs solve_ex_batch_rule(
   if (batched_A_was_contiguous && !A.is_complex()) {
     A_ = A_.contiguous();
   }
-  const auto res = _linalg_solve_ex(A_, B_, left, check_errors);
-  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0, std::get<3>(res), 0);
+  auto res = _linalg_solve_ex(A_, B_, left, check_errors);
+  return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0, std::move(std::get<3>(res)), 0);
 }
 
 oneOutput cross_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim,
@@ -408,10 +402,10 @@ oneOutput cross_batch_rule(const Tensor& self, std::optional<int64_t> self_bdim,
   );
 
   const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
-  const auto self_other_bundled = _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
+  auto [self_, other_]= _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
 
-  const auto self_ = ensure_has_bdim(std::get<0>(self_other_bundled), self_bdim.has_value(), batch_size);
-  const auto other_ = ensure_has_bdim(std::get<1>(self_other_bundled), other_bdim.has_value(), batch_size);
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  other_ = ensure_has_bdim(other_, other_bdim.has_value(), batch_size);
 
   const auto dim_ = getPhysicalDim(self_, true, dim);
 
@@ -432,20 +426,20 @@ fourOutputs linalg_lstsq_batch_rule(
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
   const auto batch_size = get_bdim_size2(self, self_bdim, b, b_bdim);
-  const auto tensor_other = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
+  auto [self_, other] = _binary_pointwise_helper(self, self_bdim, b, b_bdim, /*do_type_promotion=*/false);
 
   // because of ambiguity with vector case, lstsq can broadcast [1, 2] -> [batch_size, 2] but not [2] -> [batch_size, 2]
   // so could unsqueeze if there's no bdim or just ensure_has_bdim
-  const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
-  const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  other = ensure_has_bdim(other, b_bdim.has_value(), batch_size);
 
-  auto [res, res_1, res_2, res_3] = at::linalg_lstsq(self_, b_, rcond, driver);
+  auto [res, res_1, res_2, res_3] = at::linalg_lstsq(self_, other, rcond, driver);
 
   // everything but the 0th output are only sometimes computed. When they aren't, they're empty tensors without a bdim
   const auto res_1_bdim = batch_dim_if_not_empty(res_1);
   const auto res_2_bdim = batch_dim_if_not_empty(res_2);
   const auto res_3_bdim = batch_dim_if_not_empty(res_3);
-  return std::make_tuple(res, 0, res_1, res_1_bdim, res_2, res_2_bdim, res_3, res_3_bdim);
+  return std::make_tuple(std::move(res), 0, std::move(res_1), res_1_bdim, std::move(res_2), res_2_bdim, std::move(res_3), res_3_bdim);
 }
 
 template<typename F>
@@ -485,6 +479,162 @@ pinv_batch_rule(
     const std::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
 }
+
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_flash_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale
+) {
+  if (dropout_p > 0) {
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    RandomnessType randomness = maybe_layer->randomness();
+    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
+  }
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
+      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale);
+
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  res1 = reshape_dim_outof(0, batch_size, res1);
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  if (return_debug_mask) {
+    res8 = reshape_dim_outof(0, batch_size, res8);
+  }
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), std::nullopt,
+    std::move(res3), std::nullopt,
+    std::move(res4),
+    std::move(res5),
+    std::move(res6), std::nullopt,
+    std::move(res7), std::nullopt,
+    std::move(res8), return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
+fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, std::optional<int64_t> attn_bias_bdim,
+  bool compute_log_sumexp,
+  double dropout_p,
+  bool is_causal,
+  std::optional<double> scale
+) {
+  if (dropout_p > 0) {
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    RandomnessType randomness = maybe_layer->randomness();
+    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
+  }
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  std::optional<Tensor> attn_bias_;
+  if (attn_bias.has_value() && attn_bias->defined()) {
+    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+  }
+  auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
+      query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, scale);
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  res1 = reshape_dim_outof(0, batch_size, res1);
+  // philox seed is always non-batched
+  return std::make_tuple(std::move(res0), 0, std::move(res1), 0, std::move(res2), std::nullopt, std::move(res3), std::nullopt);
+}
+
+// Please unify SDPA APIs!!!
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_cudnn_attention_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, std::optional<int64_t> attn_bias_bdim,
+  bool compute_log_sumexp,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale
+) {
+  if (dropout_p > 0) {
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    RandomnessType randomness = maybe_layer->randomness();
+    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
+  }
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  std::optional<Tensor> attn_bias_;
+  if (attn_bias.has_value() && attn_bias->defined()) {
+    attn_bias_ = attn_bias_bdim.has_value() ? reshape_dim_into(*attn_bias_bdim, 0, attn_bias.value()) : attn_bias.value();
+  }
+
+  auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_cudnn_attention(
+      query_, key_, value_, attn_bias_, compute_log_sumexp, dropout_p, is_causal, return_debug_mask, scale);
+
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  std::optional<int64_t> res1_bdim;
+  if (compute_log_sumexp) {
+    res1 = reshape_dim_outof(0, batch_size, res1);
+    res1_bdim = 0;
+  } else {
+    res1_bdim = std::nullopt;
+  }
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  if (return_debug_mask) {
+    res8 = reshape_dim_outof(0, batch_size, res8);
+  }
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), res1_bdim,
+    std::move(res2), std::nullopt,
+    std::move(res3), std::nullopt,
+    std::move(res4),
+    std::move(res5),
+    std::move(res6), std::nullopt,
+    std::move(res7), std::nullopt,
+    std::move(res8), return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
@@ -532,65 +682,65 @@ pinv_batch_rule(
 #endif
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(fn, overload, op_name) \
-  LINALG_STRING_CONST2(fn, overload, op_name);\
+  LINALG_STRING_CONST2(fn, overload, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT2(fn, overload, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE2(fn, overload, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, two));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_THREE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, three));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, four));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, two));\
   }
 
 // These need to be outside. String constant must be declared outside of a macro to be used as template param
 // NOLINTBEGIN(*array*)
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet);
-LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular);
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky)
+LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet)
+LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular)
 
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
-LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
-LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
-LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
-LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf)
+LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det)
+LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh)
+LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet)
+LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd)
 // NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
@@ -612,6 +762,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+
+  VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
 

@@ -1,10 +1,12 @@
 # Owner(s): ["module: serialization"]
 
+import contextlib
 import copy
 import gc
 import gzip
 import io
 import os
+import pathlib
 import pickle
 import platform
 import shutil
@@ -15,10 +17,12 @@ import warnings
 import zipfile
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
 from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
 from torch.serialization import (
@@ -27,6 +31,7 @@ from torch.serialization import (
     LoadEndianness,
     safe_globals,
     set_default_load_endianness,
+    skip_data,
     SourceChangeWarning,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -841,6 +846,17 @@ class ClassThatUsesBuildInstruction:
         # Third item, state here will cause pickle to push a BUILD instruction
         return ClassThatUsesBuildInstruction, (self.num,), {'foo': 'bar'}
 
+@dataclass
+class ClassThatUsesBuildInstructionAllSlots:
+    __slots__ = ["x", "y"]
+    x: int
+    y: int
+
+@dataclass
+class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlots):
+    x: int
+    y: int
+    c: str
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
@@ -1083,12 +1099,9 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
                 torch.load(f, weights_only=True)
-            try:
-                torch.serialization.add_safe_globals([print])
+            with torch.serialization.safe_globals([print]):
                 f.seek(0)
                 torch.load(f, weights_only=True)
-            finally:
-                torch.serialization.clear_safe_globals()
 
     def test_weights_only_safe_globals_newobj(self):
         # This will use NEWOBJ
@@ -1100,12 +1113,9 @@ class TestSerialization(TestCase, SerializationMixin):
                                         "GLOBAL __main__.Point was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             f.seek(0)
-            try:
-                torch.serialization.add_safe_globals([Point])
+            with torch.serialization.safe_globals([Point]):
                 loaded_p = torch.load(f, weights_only=True)
                 self.assertEqual(loaded_p, p)
-            finally:
-                torch.serialization.clear_safe_globals()
 
     def test_weights_only_safe_globals_build(self):
         counter = 0
@@ -1122,22 +1132,40 @@ class TestSerialization(TestCase, SerializationMixin):
                                         "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
-                torch.serialization.add_safe_globals([ClassThatUsesBuildInstruction])
-                # Test dict update path
-                f.seek(0)
-                loaded_c = torch.load(f, weights_only=True)
-                self.assertEqual(loaded_c.num, 2)
-                self.assertEqual(loaded_c.foo, 'bar')
-                # Test setstate path
-                ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
-                f.seek(0)
-                loaded_c = torch.load(f, weights_only=True)
-                self.assertEqual(loaded_c.num, 2)
-                self.assertEqual(counter, 1)
-                self.assertFalse(hasattr(loaded_c, 'foo'))
+                with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
+                    # Test dict update path
+                    f.seek(0)
+                    loaded_c = torch.load(f, weights_only=True)
+                    self.assertEqual(loaded_c.num, 2)
+                    self.assertEqual(loaded_c.foo, 'bar')
+                    # Test setstate path
+                    ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
+                    f.seek(0)
+                    loaded_c = torch.load(f, weights_only=True)
+                    self.assertEqual(loaded_c.num, 2)
+                    self.assertEqual(counter, 1)
+                    self.assertFalse(hasattr(loaded_c, 'foo'))
             finally:
-                torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
+
+    @parametrize("slots", ['some', 'all'])
+    def test_weights_only_safe_globals_build_with_slots(self, slots):
+        obj_cls = (
+            ClassThatUsesBuildInstructionAllSlots if slots == 'all' else ClassThatUsesBuildInstructionSomeSlots
+        )
+        args = (2, 3) if slots == 'all' else (2, 3, 'foo')
+        obj = obj_cls(*args)
+        with BytesIOContext() as f:
+            torch.save(obj, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        f"GLOBAL __main__.{obj_cls.__name__} was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+
+            f.seek(0)
+            with torch.serialization.safe_globals([obj_cls]):
+                loaded_obj = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_obj, obj)
 
     def test_weights_only_safe_globals_blocklist(self):
         module = 'nt' if IS_WINDOWS else 'posix'
@@ -1162,7 +1190,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             if unsafe_global:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` to allowlist"):
+                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` or .* to allowlist"):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
@@ -4052,7 +4080,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('path_type', (str, Path))
     @parametrize('weights_only', (True, False))
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_mmap_loading(self, weights_only, path_type):
+    def test_serialization_mmap_loading_options(self, weights_only, path_type):
         class DummyModel(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -4101,7 +4129,7 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading_options(self):
+    def test_serialization_mmap_loading(self):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
                 torch.serialization.set_default_mmap_options(2)
@@ -4111,23 +4139,38 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
             # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
-            sd_loaded = torch.load(f.name, mmap=True)
+            sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
             sd_loaded['weight'][0][0] = 0
-            sd_loaded2 = torch.load(f.name, mmap=True)
+            sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
             self.assertEqual(sd_loaded2['weight'], sd['weight'])
             # with MmapVisibility.MAP_SHARED, should be able to modify file
             torch.serialization.set_default_mmap_options(MAP_SHARED)
             try:
-                sd_loaded = torch.load(f.name, mmap=True)
+                sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
                 sd_loaded['weight'][0][0] = 0
-                sd_loaded2 = torch.load(f.name, mmap=True)
+                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
                 self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
                 self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
             finally:
                 torch.serialization.set_default_mmap_options(MAP_PRIVATE)
 
-    @parametrize('dtype', (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32))
+    @unittest.skipIf(IS_WINDOWS, "mmap ctx doesn't work on Windows")
+    def test_serialization_mmap_loading_ctx(self):
+        sd = torch.nn.Linear(3, 5).state_dict()
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            with torch.serialization.set_default_mmap_options(MAP_SHARED):
+                sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
+                sd_loaded['weight'][0][0] = 0
+                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
+                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
+
+    @parametrize('dtype',
+                 (torch.float8_e5m2, torch.float8_e4m3fn, torch.complex32, torch.uint16, torch.uint32, torch.uint64))
     @parametrize('weights_only', (True, False))
     def test_serialization_dtype(self, dtype, weights_only):
         """ Tests that newer dtypes can be serialized using `_rebuild_tensor_v3` """
@@ -4138,9 +4181,13 @@ class TestSerialization(TestCase, SerializationMixin):
             y = torch.load(f, weights_only=weights_only)
             self.assertEqual(y['x'], x)
             # Check that views are actually views
-            y['odd'][0] = torch.tensor(0.25, dtype=dtype)
-            y['even'][0] = torch.tensor(-0.25, dtype=dtype)
-            self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
+            if dtype.is_signed:
+                val1, val2, check_dtype = 0.25, -0.25, torch.float32
+            else:
+                val1, val2, check_dtype = 1, 2, torch.int64
+            y['odd'][0] = torch.tensor(val1, dtype=dtype)
+            y['even'][0] = torch.tensor(val2, dtype=dtype)
+            self.assertEqual(y['x'][:2].to(dtype=check_dtype), torch.tensor([val2, val1]))
 
     @parametrize('byte_literals', (b'byte', bytearray(b'bytearray')))
     @parametrize('weights_only', (True, False))
@@ -4197,6 +4244,231 @@ class TestSerialization(TestCase, SerializationMixin):
             sd_loaded = torch.load(g)
             sd_loaded_ref = torch.load(f)
             self.assertEqual(sd_loaded, sd_loaded_ref)
+
+    @parametrize("materialize_fake", (True, False))
+    def test_skip_data_serialization(self, materialize_fake):
+        # Create one tensor that uses each of the paths in __reduce_ex__ that should work
+        t_device = "cuda" if torch.cuda.is_available() else "cpu"
+        t_v2 = torch.randn(2, 3, device=t_device)
+        t_v3 = torch.randn(2, 3, dtype=torch.complex32, device=t_device)
+        i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]])
+        v = torch.tensor([3, 4, 5], dtype=torch.float32)
+        if not materialize_fake:
+            # FakeTensorConverter messes up sizes of i and v for the sparse tensor
+            st = torch.sparse_coo_tensor(i, v, (2, 4))
+        tt = TwoTensor(torch.randn(2, device=t_device), torch.randn(2, device=t_device))
+
+        mode, converter = FakeTensorMode(), FakeTensorConverter()
+
+        def fn(t):
+            return converter.from_real_tensor(mode, t) if materialize_fake else t
+
+        sd = {'t_v2': fn(t_v2), 't_v3': fn(t_v3), 'tt': fn(tt)}
+        sd_expected = {
+            't_v2': torch.zeros(2, 3, device=t_device),
+            't_v3': torch.zeros(2, 3, dtype=torch.complex32, device=t_device),
+            'tt': TwoTensor(torch.zeros(2, device=t_device), torch.zeros(2, device=t_device)),
+        }
+
+        if not materialize_fake:
+            sd['st'] = st
+            sd_expected['st'] = torch.sparse_coo_tensor(torch.zeros(2, 3), torch.zeros(3), (2, 4))
+
+        with BytesIOContext() as f:
+            with skip_data(materialize_fake_tensors=materialize_fake):
+                torch.save(sd, f)
+            f.seek(0)
+            with safe_globals([TwoTensor]):
+                sd_loaded = torch.load(f, weights_only=True)
+            self.assertEqual(sd_loaded, sd_expected, exact_device=True)
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "materialize_fake_tensors", False))
+            self.assertFalse(getattr(torch.serialization._serialization_tls, "skip_data", False))
+
+        # Test that without materialize_fake_tensor, behavior for fake_tensors is not altered by ctx
+        if not materialize_fake:
+            ft = converter.from_real_tensor(mode, torch.randn(2, device=t_device))
+            with self.assertRaisesRegex(
+                AttributeError,
+                "Can't (get|pickle) local object 'WeakValueDictionary.__init__.<locals>.remove'"
+            ):
+                with skip_data(), BytesIOContext() as f:
+                    torch.save(ft, f)
+
+    @parametrize("materialize_fake", (True, False))
+    def test_skip_data_serialization_preserves_views(self, materialize_fake):
+        ctx = FakeTensorMode if materialize_fake else contextlib.nullcontext
+        with ctx():
+            t = torch.randn(2, 3)
+            t_view = t.view(-1)
+            t_slice = t[1]
+        sd = {'t': t, 't_view': t_view, 't_slice': t_slice}
+        with BytesIOContext() as f:
+            with skip_data(materialize_fake_tensors=materialize_fake):
+                torch.save(sd, f)
+            f.seek(0)
+            sd_loaded = torch.load(f, weights_only=True)
+            self.assertTrue(id(sd_loaded['t_view'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
+            self.assertTrue(id(sd_loaded['t_slice'].untyped_storage()) == id(sd_loaded['t'].untyped_storage()))
+
+    def test_skip_data_serialization_error_cases(self):
+        def _save_load(t):
+            with BytesIOContext() as f:
+                with skip_data():
+                    torch.save(t, f)
+                f.seek(0)
+                torch.load(f, weights_only=True)
+
+        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)])
+        t = torch.randn(2, 3, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "Cannot serialize nested tensor under skip_data context manager"):
+            _save_load(nt)
+
+        with self.assertWarnsRegex(UserWarning, "meta device under skip_data context manager is a no-op"):
+            _save_load(t)
+
+        with self.assertRaisesRegex(RuntimeError, "Please call torch.load outside the skip_data context manager"):
+            with skip_data(), BytesIOContext() as f:
+                torch.save(torch.randn(2, 3), f)
+                f.seek(0)
+                torch.load(f, weights_only=True)
+
+    @parametrize("force_weights_only", (True, False))
+    def test_weights_only_env_variables(self, force_weights_only):
+        env_var = "TORCH_FORCE_WEIGHTS_ONLY_LOAD" if force_weights_only else "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"
+        args = (
+            (pickle.UnpicklingError, "Weights only load failed")
+            if force_weights_only
+            else (UserWarning, "forcing weights_only=False")
+        )
+        ctx = self.assertRaisesRegex if force_weights_only else self.assertWarnsRegex
+        m = torch.nn.Linear(3, 5)
+        with TemporaryFileName() as f:
+            torch.save(m, f)
+            try:
+                old_value = os.environ[env_var] if env_var in os.environ else None
+                os.environ[env_var] = "1"
+                # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
+                    m = torch.load(f, weights_only=not force_weights_only)
+                with ctx(*args):
+                    m = torch.load(f, weights_only=None)
+            finally:
+                if old_value is None:
+                    del os.environ[env_var]
+                else:
+                    os.environ[env_var] = old_value
+
+    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
+    @parametrize("compute_crc32", (True, False))
+    @parametrize("filename", (True, False))
+    def test_crc32_options(self, compute_crc32, filename):
+        # test both path and buffer case
+        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
+        sd = torch.nn.Linear(3, 5).state_dict()
+        with file_creation_func() as f:
+            try:
+                torch.serialization.set_crc32_options(compute_crc32)
+                torch.save(sd, f)
+                if not filename:
+                    f.seek(0)
+                sd_loaded = torch.load(f, weights_only=True)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                torch.serialization.set_crc32_options(True)
+
+            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
+            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
+
+            if not filename:
+                f.seek(0)
+            # zip_file.extractall() will raise BadZipFile if CRC32 is not populated
+            # we use the context manager to check whether CRC32 was populated
+            with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(f) as zip_file:
+                    zip_file.extractall(path=temp_dir)
+
+    def test_serialization_with_header(self):
+        orig = torch.randn(3, 3)
+        with BytesIOContext() as f:
+            f.write(b'header')
+            torch.save(orig, f)
+            f.seek(6)
+            loaded = torch.load(f)
+            self.assertEqual(orig, loaded)
+
+    def test_get_unsafe_globals_in_checkpoint(self):
+        t = torch.randn(2, 3)
+        tt = TwoTensor(t, t)
+        expected_unsafe_global_strs = {"torch.testing._internal.two_tensor.TwoTensor"}
+        expected_all_global_strs = {"torch.testing._internal.two_tensor.TwoTensor",
+                                    "torch._utils._rebuild_wrapper_subclass",
+                                    "torch._tensor._rebuild_from_type_v2",
+                                    "torch.serialization._get_layout",
+                                    "torch.float32",
+                                    "torch.device",
+                                    "torch._utils._rebuild_tensor_v2",
+                                    "torch.FloatStorage",
+                                    "collections.OrderedDict"}
+        with BytesIOContext() as f:
+            torch.save(tt, f)
+            f.seek(0)
+            unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+            self.assertEqual(set(unsafe_globals), expected_unsafe_global_strs)
+            f.seek(0)
+            with torch.serialization.safe_globals([TwoTensor]):
+                unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_globals), set())
+            f.seek(0)
+            try:
+                old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
+                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807
+                unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
+            finally:
+                torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
+
+    @parametrize("should_import", [False, True])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_load_njt_weights_only(self, should_import):
+        with tempfile.NamedTemporaryFile() as f:
+            njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
+            torch.save(njt, f)
+            filename = pathlib.Path(f.name)
+            import_string = "import torch._dynamo;" if should_import else ""
+            err_msg = (
+                "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
+                " must be imported to load nested jagged tensors (NJTs)"
+            ) if not should_import else None
+            self._attempt_load_from_subprocess(filename, import_string, err_msg)
+
+    @parametrize("dtype", all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @parametrize("weights_only", [True, False])
+    def test_save_load_preserves_dtype(self, dtype, weights_only):
+        class MyModule(torch.nn.Module):
+            def __init__(self, t):
+                super().__init__()
+                requires_grad = torch.is_floating_point(t) or torch.is_complex(t)
+                self.param = torch.nn.Parameter(t, requires_grad=requires_grad)
+
+        if dtype.is_floating_point or dtype.is_complex:
+            t = torch.randn(10, dtype=dtype)
+            sd = MyModule(t).state_dict()
+        elif dtype is torch.bool:
+            t = torch.randn(10) > 0
+            sd = MyModule(t).state_dict()
+        else:
+            iinfo = torch.iinfo(dtype)
+            t = torch.randint(iinfo.min, iinfo.max, (10,), dtype=dtype)
+            sd = MyModule(t).state_dict()
+        sd_save = {'t': t, 'sd': sd, 'i' : t[0].item()}
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd_save, f)
+            f.seek(0)
+            loaded_sd = torch.load(f, weights_only=weights_only)
+            self.assertEqual(sd_save, loaded_sd)
+
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
@@ -4350,10 +4622,12 @@ class TestSubclassSerialization(TestCase):
                 sd = torch.load(f, weights_only=True)
 
             # Loading tensor subclass should work if the class is marked safe
+            safe_globals_before = torch.serialization.get_safe_globals()
             f.seek(0)
             try:
                 torch.serialization.add_safe_globals([TwoTensor])
-                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
+                expected_safe_globals = set(safe_globals_before + [TwoTensor])
+                self.assertEqual(set(torch.serialization.get_safe_globals()), expected_safe_globals)
                 sd = torch.load(f, weights_only=True)
                 self.assertEqual(sd['t'], t)
                 self.assertEqual(sd['p'], p)
@@ -4366,6 +4640,7 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
             finally:
                 torch.serialization.clear_safe_globals()
+                torch.serialization.add_safe_globals(safe_globals_before)
 
     def test_safe_globals_context_manager_weights_only(self):
         '''
@@ -4375,6 +4650,7 @@ class TestSubclassSerialization(TestCase):
         p = torch.nn.Parameter(t)
         sd = OrderedDict([('t', t), ('p', p)])
 
+        safe_globals_before = torch.serialization.get_safe_globals()
         try:
             torch.serialization.add_safe_globals([TestEmptySubclass])
             with tempfile.NamedTemporaryFile() as f:
@@ -4382,13 +4658,23 @@ class TestSubclassSerialization(TestCase):
                 with safe_globals([TwoTensor]):
                     f.seek(0)
                     torch.load(f, weights_only=True)
-                self.assertTrue(torch.serialization.get_safe_globals() == [TestEmptySubclass])
+                expected_safe_globals = set(safe_globals_before + [TestEmptySubclass])
+                self.assertEqual(set(torch.serialization.get_safe_globals()), expected_safe_globals)
                 f.seek(0)
                 with self.assertRaisesRegex(pickle.UnpicklingError,
                                             "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
                     torch.load(f, weights_only=True)
         finally:
             torch.serialization.clear_safe_globals()
+            torch.serialization.add_safe_globals(safe_globals_before)
+
+    def test_sets_are_loadable_with_weights_only(self):
+        s = {1, 2, 3}
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(s, f)
+            f.seek(0)
+            l_s = torch.load(f, weights_only=True)
+            self.assertEqual(l_s, s)
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):
