@@ -328,19 +328,6 @@ def _tensor_str(self, indent):
     if self.is_neg():
         self = self.resolve_neg()
 
-    if self.dtype in [
-        torch.float16,
-        torch.bfloat16,
-        torch.float8_e5m2,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fn,
-        torch.float8_e4m3fnuz,
-    ]:
-        self = self.float()
-
-    if self.dtype is torch.complex32:
-        self = self.cfloat()
-
     if self.dtype.is_complex:
         # handle the conjugate bit
         self = self.resolve_conj()
