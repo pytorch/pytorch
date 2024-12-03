@@ -16,6 +16,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..fx_utils import matches_module_function_pattern
@@ -621,12 +622,15 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         return users[0] if len(users) == 1 else None
 
     def is_view(node):
-        view = {"view"}
+        view = OrderedSet(["view"])
         return node.op == "call_method" and node.target in view
 
     def is_pointwise_unary(node):
-        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
-        return node.op in {"call_function", "call_method"} and node.target in pointwise
+        pointwise = OrderedSet([torch.relu, torch.tanh, "relu", "tanh"])
+        return (
+            node.op in OrderedSet(["call_function", "call_method"])
+            and node.target in pointwise
+        )
 
     g = module.graph
     for node in g.nodes:

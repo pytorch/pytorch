@@ -13,6 +13,8 @@ from typing import (
 
 import sympy
 
+from torch.utils._ordered_set import OrderedSet
+
 
 if TYPE_CHECKING:
     from torch._inductor.loop_body import LoopBodyBlock
@@ -129,8 +131,8 @@ class DtypePropagationOpsHandler:
 
         from torch._inductor.ops_handler import OpsHandler
 
-        ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
-        unimplemented_ops = ops_set - set(dir(self))
+        ops_set = OrderedSet([s for s in dir(OpsHandler) if s[0] != "_"])
+        unimplemented_ops = ops_set - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",

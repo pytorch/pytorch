@@ -4,6 +4,8 @@ import itertools
 import logging
 from typing import Callable, Optional
 
+from torch.utils._ordered_set import OrderedSet
+
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
 
@@ -111,7 +113,7 @@ class CoordescTuner:
         return out
 
     def value_too_large(self, name: str, val: int) -> bool:
-        if name in {"XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"}:
+        if name in OrderedSet(["XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"]):
             return val > self.get_config_max(name[0])
         if name == "num_warps":
             return val > self.get_warpsmax()

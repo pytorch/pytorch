@@ -1701,6 +1701,6 @@ command = [
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-    'torch/**/does-not-exist.py'
+    "torch/_inductor/**/*.py",
 ]
 is_formatter = true
