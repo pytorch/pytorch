@@ -83,13 +83,8 @@ static void im2col_out_mps_template(Tensor& output,
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-      mtl_setBytes(computeEncoder, kernel_dilation, 2);
-      mtl_setBytes(computeEncoder, padding_stride, 3);
-      mtl_setBytes(computeEncoder, input_strides, 4);
-      mtl_setBytes(computeEncoder, output_strides, 5);
-      mtl_setBytes(computeEncoder, input_sizes, 6);
+      mtl_setArgs(
+          computeEncoder, input, output, kernel_dilation, padding_stride, input_strides, output_strides, input_sizes);
       [computeEncoder dispatchThreads:MTLSizeMake(output_length, n_input_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       getMPSProfiler().endProfileKernel(im2colPSO);

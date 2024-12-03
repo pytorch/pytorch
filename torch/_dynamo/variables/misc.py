@@ -144,8 +144,7 @@ class SuperVariable(VariableTracker):
             return GetAttrVariable(self, name)
         if source:
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
-            return variables.ConstantVariable.create(value, source=source)
-        return variables.ConstantVariable.create(value)
+        return variables.ConstantVariable.create(value, source=source)
 
     def call_method(
         self,
@@ -330,23 +329,24 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class ClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
+class CellVariable(VariableTracker):
+    # If the cell existed before Dynamo tracing started, this will be the
+    # VariableTracker that represents the cell content.
+    #
+    # Note that all mutation to the cell (i.e., its content) will be buffered in
+    # SideEffects, rather than being reflected here. One can think of
+    # `CellVariable` as a special case for `UserDefinedObjectVariable`.
+    pre_existing_contents: Optional[VariableTracker]
 
-    def __init__(self, name, **kwargs) -> None:
+    # This is set when this cell can be referenced via `LOAD/STORE_DEREF` in the
+    # root frame via this name (e.g., the name is in `co_cellvars/co_freevars`).
+    local_name: Optional[str] = None
+
+    def __init__(
+        self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
-class NewCellVariable(VariableTracker):
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+        self.pre_existing_contents = pre_existing_contents
 
 
 class NewGlobalVariable(VariableTracker):
@@ -721,11 +721,11 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_backward(self, tx: "InstructionTranslator", args, kwargs):
         fn = self.fn_cls.backward
-        self.source = AttrSource(self.source, "backward")
         assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
         assert isinstance(fn, types.FunctionType)
 
-        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+        fn_source = AttrSource(self.source, "backward")
+        return variables.UserFunctionVariable(fn, source=fn_source).call_function(
             tx, args, kwargs
         )
 
@@ -963,15 +963,23 @@ class LambdaVariable(VariableTracker):
 class GetAttrVariable(VariableTracker):
     _nonvar_fields = {
         "name",
+        "py_type",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, obj, name, **kwargs) -> None:
+    def __init__(self, obj, name, py_type=None, **kwargs) -> None:
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        self.py_type = py_type  # In some cases we know the type (ex. tensor methods)
+
+    def python_type(self):
+        if self.py_type is not None:
+            return self.py_type
+        else:
+            super().python_type()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
@@ -1168,11 +1176,11 @@ class TypingVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Create a new typing variable, e.g., `List[int]`
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable.create(
-                self.value[args[0].as_python_constant()],
-            )
-        unimplemented("typing")
+            new_typing = self.value[args[0].as_python_constant()]
+            return TypingVariable(new_typing)
+        unimplemented("unsupported method call on typing variablel")
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder

@@ -840,8 +840,8 @@ void cuLoadWriteStridedInputs(
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T curr_mean = mean[i1];
-    T curr_rstd = rstd[i1];
+    T_ACC curr_mean = mean[i1];
+    T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*N+i2;
