@@ -1753,11 +1753,9 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 fixed = count_tangents(model)
-                with (
-                    config.patch(get_cpp_wrapper_config())
-                    if config.cpp_wrapper
-                    else contextlib.nullcontext()
-                ):
+                with config.patch(
+                    get_cpp_wrapper_config()
+                ) if config.cpp_wrapper else contextlib.nullcontext():
                     return inner_compile(
                         model,
                         example_inputs,
