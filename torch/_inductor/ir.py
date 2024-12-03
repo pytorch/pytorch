@@ -4723,7 +4723,6 @@ class ExternKernel(InputsKernel):
     op_overload: Optional[
         Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator]
     ] = None
-    kwarg_properties: Optional[Dict[str, Dict[str, Any]]] = None
     unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
         default_factory=dict
     )
