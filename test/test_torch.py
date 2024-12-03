@@ -8725,7 +8725,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_raise_error(self):
         with self.assertRaises(RuntimeError):
-            torch.empty((2,3,4,5)).just_raise_error()
+            torch.empty((2,3,4,5)).just_raise_error(raise_error=True)
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor

@@ -1520,8 +1520,9 @@ class Tensor(torch._C.TensorBase):
 
         return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
 
-    def just_raise_error(self):
-        raise RuntimeError("just raise error")
+    def just_raise_error(self, raise_error = False):
+        if raise_error:
+            raise RuntimeError("just raise error")
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
