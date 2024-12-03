@@ -3832,6 +3832,16 @@ class InputBuffer(Buffer):
         return 1
 
 
+class DonatedBuffer(InputBuffer):
+    """
+    Represents a donated buffer which is a saved tensor that is not alias to any
+    fwd inputs, fwd user outputs, and bwd outputs. We generally cannot inplace
+    reuse the input tensor memory during backward since it might be used in another
+    function. However, donated buffer can be inplace reused during backward
+    to save memory.
+    """
+
+
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 
@@ -3874,7 +3884,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
@@ -4145,7 +4155,7 @@ class ComputedBuffer(OperationBuffer):
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges,
             reduce_ranges,
-            prefix="z",
+            prefix="p",
         )
         body = LoopBody(
             body,

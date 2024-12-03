@@ -67,7 +67,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.6.3.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -75,7 +75,16 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvjitlink-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64'"
+        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64'"
+    ),
+    "xpu": (
+        "intel-cmplr-lib-rt==2025.0.2 | "
+        "intel-cmplr-lib-ur==2025.0.2 | "
+        "intel-cmplr-lic-rt==2025.0.2 | "
+        "intel-sycl-rt==2025.0.2 | "
+        "tcmlib==1.2.0 | "
+        "umf==0.9.1 | "
+        "intel-pti==0.10.0; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
 
@@ -149,16 +158,15 @@ def arch_type(arch_version: str) -> str:
 DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
-    **{
-        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in CUDA_ARCHES
-    },
+    "11.8": f"pytorch/manylinux-builder:cuda11.8-{DEFAULT_TAG}",
+    "12.4": f"pytorch/manylinux-builder:cuda12.4-{DEFAULT_TAG}",
+    "12.6": f"pytorch/manylinux2_28-builder:cuda12.6-{DEFAULT_TAG}",
     **{
         gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
@@ -237,9 +245,6 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
-            # skip CUDA 12.6 builds on Windows
-            if "12.6" in arches:
-                arches.remove("12.6")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -304,9 +309,6 @@ def generate_wheels_matrix(
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
-            # skip CUDA 12.6 builds on Windows
-            if "12.6" in arches:
-                arches.remove("12.6")
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
@@ -435,8 +437,10 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
-                            if os != "linux" and gpu_arch_type != "xpu"
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["xpu"]
+                            if gpu_arch_type == "xpu"
+                            else PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
+                            if os != "linux"
                             else ""
                         ),
                     }

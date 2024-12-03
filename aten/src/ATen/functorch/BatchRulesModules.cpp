@@ -161,16 +161,14 @@ grid_sample_backward_helper_in(
 
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
-    const std::tuple<Tensor, Tensor> & bw_out,
+    std::tuple<Tensor, Tensor> bw_out,
     std::optional<int64_t> grad_input_out_bdim,
     std::optional<int64_t> grad_grid_out_bdim,
     int64_t bdim_size) {
-  auto grad_input = std::get<0>(bw_out);
-  auto grad_grid = std::get<1>(bw_out);
+  auto& [grad_input, grad_grid] = bw_out;
   grad_input = reshape_dim_outof(*grad_input_out_bdim, bdim_size, grad_input);
   grad_grid = reshape_dim_outof(*grad_grid_out_bdim, bdim_size, grad_grid);
-  auto result = std::make_tuple(grad_input, grad_input_out_bdim, grad_grid, grad_grid_out_bdim);
-  return result;
+  return std::make_tuple(std::move(grad_input), grad_input_out_bdim, std::move(grad_grid), grad_grid_out_bdim);
 }
 
 
@@ -185,34 +183,26 @@ grid_sample_backward_batch_rule(
   auto new_bw_input = grid_sample_backward_helper_in(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
-  auto new_grad_output = std::get<0>(new_bw_input);
-  auto new_input = std::get<1>(new_bw_input);
-  auto new_grid = std::get<2>(new_bw_input);
-  int64_t batch_size = std::get<3>(new_bw_input);
+  auto [new_grad_output, new_input, new_grid, batch_size] = new_bw_input;
 
-  auto bw_out = Func(new_grad_output, new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
+  auto bw_out = Func(std::move(new_grad_output), std::move(new_input), std::move(new_grid), std::forward<ExtraArgs>(extra_args)...);
 
-  return grid_sample_backward_helper_out(bw_out, 0, 0, batch_size);
+  return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, batch_size);
 }
 
 template<typename F, F Func>
 std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
-cudnn_grid_sample_backward_batch_rule(
+static cudnn_grid_sample_backward_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim,
     const Tensor& grid, std::optional<int64_t> grid_bdim,
     const Tensor& grad_output, std::optional<int64_t> grad_output_bdim) {
 
-  auto new_bw_input = grid_sample_backward_helper_in(
+  auto [new_grad_output,new_input,new_grid,bdim_size]= grid_sample_backward_helper_in(
       grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
 
-  auto new_grad_output = std::get<0>(new_bw_input);
-  auto new_input = std::get<1>(new_bw_input);
-  auto new_grid = std::get<2>(new_bw_input);
-  int64_t bdim_size = std::get<3>(new_bw_input);
+  auto bw_out = Func(std::move(new_input), std::move(new_grid), std::move(new_grad_output));
 
-  auto bw_out = Func(new_input, new_grid, new_grad_output);
-
-  return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
+  return grid_sample_backward_helper_out(std::move(bw_out), 0, 0, bdim_size);
 }
 
 // TODO: replace with targetable functionalization
