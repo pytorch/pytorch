@@ -511,7 +511,7 @@ def _multi_tensor_radam(
             del bias_correction1
         else:
             rect = [
-                (
+                (  # type: ignore[misc]
                     (rho_t - 4)  # type: ignore[arg-type]
                     * (rho_t - 2)
                     * rho_inf
