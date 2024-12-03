@@ -8,15 +8,16 @@ import torch._prims_common as utils
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
-from torch.distributed._tensor.ops._embedding_ops import _MaskPartial
-from torch.distributed._tensor.ops._math_ops import (
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
     replicate_reduction_dims,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
-from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.placement_types import Placement
 
 
 aten = torch.ops.aten
@@ -278,7 +279,6 @@ def _nll_loss_forward_handler(
     ignore_index = cast(int, args[4])
 
     channel_dim = 1 if x.dim() >= 2 else 0
-    channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
 

@@ -18,7 +18,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        import test_torchinductor
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -66,9 +66,9 @@ class TestDebugTrace(test_torchinductor.TestCase):
             open(filename / "ir_pre_fusion.txt").read().rstrip(),
             """\
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -80,8 +80,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -93,8 +93,8 @@ class op0_loop_body:
 
 
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
@@ -107,8 +107,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)
@@ -134,9 +134,9 @@ op2.node.kernel = extern_kernels.mm""",
             open(filename / "ir_post_fusion.txt").read().rstrip(),
             """\
 op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
-op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}, None), MemoryDep('buf1', c0, {c0: 256}, None)]
+op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 op0_op1.unmet_dependencies = []
-op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0_op1.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -147,9 +147,9 @@ op0_op1.outputs = [
 ]
 op0_op1.snodes[0] =
 op0: SchedulerNode(ComputedBuffer)
-op0.writes = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
-op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256}, None)]
+op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -161,8 +161,8 @@ op0.sizes = ([256], [])
 arg0_1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op0_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('arg0_1', get_index)
@@ -173,8 +173,8 @@ class op0_loop_body:
         return store
 op0_op1.snodes[1] =
 op1: SchedulerNode(ComputedBuffer)
-op1.writes = [MemoryDep('buf1', c0, {c0: 256}, None)]
-op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256}, None)]
+op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
+op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
 op1.outputs = [
     buf1: ComputedBuffer
@@ -187,8 +187,8 @@ op1.sizes = ([256], [])
 buf0_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 buf1_layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
 class op1_loop_body:
-    var_ranges = {z0: 256}
-    index0 = z0
+    var_ranges = {p0: 256}
+    index0 = p0
     def body(self, ops):
         get_index = self.get_index('index0')
         load = ops.load('buf0', get_index)
@@ -212,6 +212,22 @@ op2.node.kernel = extern_kernels.mm""",
         )
         # intentionally only cleanup on success so debugging test is easier
         shutil.rmtree(filename)
+
+    def test_debug_printer_const(self):
+        """Test that having a const example_input does not break the debug printer."""
+
+        class Model(torch.nn.Module):
+            def forward(self, x, ks0):
+                return x.sum()
+
+        example_inputs = (
+            torch.tensor([0, 3, 6], dtype=torch.int64),
+            70,  # const input, that will be filtered in the examples
+        )
+        _ = torch._export.aot_compile(
+            Model(),
+            example_inputs,
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):

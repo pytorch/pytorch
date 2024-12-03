@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -551,9 +555,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),

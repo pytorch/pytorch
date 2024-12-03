@@ -19,7 +19,7 @@ Vectorized<scalar_t> is_lerp_weight_small(Vectorized<scalar_t> weight) {
 // is_lerp_weight_small doesn't work for complex because z.abs() returns a
 // complex vector which can't be compared. Either implement it with z.abs_2_(),
 // or fallback to the scalar function.
-#if !(defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER))
+#if !(defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER) || defined(CPU_CAPABILITY_SVE))
 template <typename value_t>
 Vectorized<c10::complex<value_t>> is_lerp_weight_small(Vectorized<c10::complex<value_t>> weight) {
   using vec_reg_t = decltype(weight.abs_2_());
@@ -158,8 +158,8 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
-REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel)
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel)
 
 } // namespace native
 } // namespace at

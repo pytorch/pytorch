@@ -812,8 +812,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     is_embedding_op);
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& embedding_bag_byte_rowwise_offsets_out(
     Tensor& output,
@@ -1143,5 +1142,4 @@ TORCH_LIBRARY_IMPL(quantized, Meta, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

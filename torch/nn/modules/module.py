@@ -126,6 +126,7 @@ _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
+_global_forward_hooks_with_kwargs: Dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -243,6 +244,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
 def register_module_forward_hook(
     hook: Callable[..., None],
     *,
+    with_kwargs: bool = False,
     always_call: bool = False,
 ) -> RemovableHandle:
     r"""Register a global forward hook for all the modules.
@@ -259,9 +261,8 @@ def register_module_forward_hook(
 
     The input contains only the positional arguments given to the module.
     Keyword arguments won't be passed to the hooks and only to the ``forward``.
-    The hook can modify the output. It can modify the input inplace but
-    it will not have effect on forward since this is called after
-    :func:`forward` is called.
+    You can optionally modify the output of the module by returning a new value
+    that will replace the output from the :func:`forward` function.
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
@@ -280,6 +281,8 @@ def register_module_forward_hook(
         _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
     )
     _global_forward_hooks[handle.id] = hook
+    if with_kwargs:
+        _global_forward_hooks_with_kwargs[handle.id] = True
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
     return handle
@@ -401,7 +404,7 @@ class Module:
 
     Your models should also subclass this class.
 
-    Modules can also contain other Modules, allowing to nest them in
+    Modules can also contain other Modules, allowing them to be nested in
     a tree structure. You can assign the submodules as regular attributes::
 
         import torch.nn as nn
@@ -417,8 +420,8 @@ class Module:
                 x = F.relu(self.conv1(x))
                 return F.relu(self.conv2(x))
 
-    Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call :meth:`to`, etc.
+    Submodules assigned in this way will be registered, and will also have their
+    parameters converted when you call :meth:`to`, etc.
 
     .. note::
         As per the example above, an ``__init__()`` call to the parent class
@@ -677,7 +680,7 @@ class Module:
                 )
             )
 
-        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` which has a nested
         submodule ``net_b``, which itself has two submodules ``net_c``
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
@@ -864,7 +867,7 @@ class Module:
         module's `state_dict()`.
 
         Note that extra state should be picklable to ensure working serialization
-        of the state_dict. We only provide provide backwards compatibility guarantees
+        of the state_dict. We only provide backwards compatibility guarantees
         for serializing Tensors; other objects may break backwards compatibility if
         their serialized pickled form changes.
 
@@ -1034,7 +1037,7 @@ class Module:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on GPU while being optimized.
 
         .. note::
@@ -1053,7 +1056,7 @@ class Module:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on IPU while being optimized.
 
         .. note::
@@ -1091,7 +1094,7 @@ class Module:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
-        it should be called before constructing optimizer if the module will
+        it should be called before constructing the optimizer if the module will
         live on MTIA while being optimized.
 
         .. note::
@@ -1746,9 +1749,11 @@ class Module:
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
 
-        try:
-            result = None
-            called_always_called_hooks = set()
+        result = None
+        called_always_called_hooks = set()
+
+        def inner():
+            nonlocal result, args, kwargs
 
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
@@ -1795,7 +1800,7 @@ class Module:
                     if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
                         called_always_called_hooks.add(hook_id)
 
-                    if hook_id in self._forward_hooks_with_kwargs:
+                    if hook_id in self._forward_hooks_with_kwargs or hook_id in _global_forward_hooks_with_kwargs:
                         hook_result = hook(self, args, kwargs, result)
                     else:
                         hook_result = hook(self, args, result)
@@ -1826,6 +1831,20 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
+        # This is technically not behavior equivalent when compiling, but it's
+        # incredibly unlikely we will ever support throwing an exception in NN
+        # module, and then catching it here, and then reraising it, and then
+        # catching it again, and expecting the resulting frame to be compiled.
+        # The reraise here just gunks up our exception handling for no good
+        # reason.  Don't try to run the always called hooks in event of
+        # exception.
+        if is_compiling():
+            return inner()
+
+        try:
+            return inner()
         except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
@@ -1892,14 +1911,10 @@ class Module:
         if "_backward_pre_hooks" not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
-    # On the return type:
-    # We choose to return `Any` in the `__getattr__` type signature instead of a more strict `Union[Tensor, Module]`.
-    # This is done for better interop with various type checkers for the end users.
-    # Having a stricter return type doesn't play nicely with `register_buffer()` and forces
-    # people to excessively use type-ignores, asserts, casts, etc.
-    # See full discussion on the problems with returning `Union` here
-    # https://github.com/microsoft/pyright/issues/4213
-    def __getattr__(self, name: str) -> Any:
+    # It is crucial that the return type is not annotated as `Any`, otherwise type checking
+    # on `torch.nn.Module` and all its subclasses is largely disabled as a result. See:
+    # https://github.com/pytorch/pytorch/pull/115074
+    def __getattr__(self, name: str) -> Union[Tensor, "Module"]:
         if "_parameters" in self.__dict__:
             _parameters = self.__dict__["_parameters"]
             if name in _parameters:
@@ -2477,9 +2492,9 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): When ``False``, the properties of the tensors
-                in the current module are preserved while when ``True``, the
-                properties of the Tensors in the state dict are preserved. The only
+            assign (bool, optional): When set to ``False``, the properties of the tensors
+                in the current module are preserved whereas setting it to ``True`` preserves
+                properties of the Tensors in the state dict. The only
                 exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
                 for which the value from the module is preserved.
                 Default: ``False``
@@ -2614,7 +2629,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters(recurse=recurse):
+        for _name, param in self.named_parameters(recurse=recurse):
             yield param
 
     def named_parameters(
@@ -2709,7 +2724,7 @@ class Module:
         Yields:
             Module: a child module
         """
-        for name, module in self.named_children():
+        for _name, module in self.named_children():
             yield module
 
     def named_children(self) -> Iterator[Tuple[str, "Module"]]:
@@ -2811,9 +2826,9 @@ class Module:
     def train(self: T, mode: bool = True) -> T:
         r"""Set the module in training mode.
 
-        This has any effect only on certain modules. See documentations of
+        This has an effect only on certain modules. See the documentation of
         particular modules for details of their behaviors in training/evaluation
-        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        mode, i.e., whether they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
         etc.
 
         Args:
@@ -2833,9 +2848,9 @@ class Module:
     def eval(self: T) -> T:
         r"""Set the module in evaluation mode.
 
-        This has any effect only on certain modules. See documentations of
+        This has an effect only on certain modules. See the documentation of
         particular modules for details of their behaviors in training/evaluation
-        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        mode, i.e. whether they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
         etc.
 
         This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
@@ -2907,7 +2922,7 @@ class Module:
         return self.__class__.__name__
 
     def extra_repr(self) -> str:
-        r"""Set the extra representation of the module.
+        r"""Return the extra representation of the module.
 
         To print customized extra information, you should re-implement
         this method in your own modules. Both single-line and multi-line
