@@ -424,6 +424,28 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     )
 
 
+@register_op_strategy(aten.scatter_add.default)
+def scatter_add_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    dim = cast(int, op_schema.args_schema[1])
+    index_strategy = cast(OpStrategy, op_schema.args_schema[2])
+    source_strategy = cast(OpStrategy, op_schema.args_schema[3])
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, source]
+    # first we always have replicate all for inputs and output
+    all_replicate: PlacementList = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    index_sharding: PlacementList = [Partial(), Partial(), Shard(dim), Shard(dim)]
+    single_mesh_dim_strategies.append(index_sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=1
+    )
+
+
 def _derive_follow_placements_from_tuple_strategy(
     tuple_strategy: TupleStrategy,
 ) -> Sequence[Placement]:

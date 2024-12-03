@@ -66,6 +66,10 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
 
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
+
+    if isinstance(input, torch.distributed.tensor.DTensor):
+        input = input._local_tensor
+
     return torch.ops._dtensor.shard_dim_alltoall(
         input, gather_dim, shard_dim, group_name
     )

@@ -147,7 +147,7 @@ class OpDispatcher:
         # as implicitly replicated or we throw error to user.
         # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
         # it as False by default.
-        self._allow_implicit_replication = False
+        self._allow_implicit_replication = True
 
     def dispatch(
         self,
