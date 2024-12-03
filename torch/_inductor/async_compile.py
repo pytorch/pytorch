@@ -38,7 +38,6 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
-from torch.monitor import _WaitCounter
 from torch.utils._triton import has_triton_package
 
 
