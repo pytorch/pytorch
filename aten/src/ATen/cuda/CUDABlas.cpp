@@ -20,6 +20,7 @@
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
 #include <ATen/native/hip/ck_gemm.h>
+#include <ATen/native/hip/ck_bgemm.h>
 #define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
 #define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
 // needed to work around calling rocblas API instead of hipblas API
@@ -671,6 +672,11 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     bgemm_internal_cublaslt<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
+#endif
   else {
     bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }

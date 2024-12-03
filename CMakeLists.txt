@@ -883,7 +883,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
