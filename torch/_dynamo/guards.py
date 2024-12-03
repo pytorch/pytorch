@@ -44,7 +44,6 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
-    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     profile_guard_manager,
@@ -83,7 +82,6 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
-    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -740,11 +738,7 @@ class GuardBuilder(GuardBuilderBase):
         # reported in https://github.com/python/cpython/issues/125608,
         # fixed by https://github.com/python/cpython/pull/125611), we cannot take
         # advantage of __dict__ versions to speed up guard checks.
-        if (
-            config.issue_3_13_0_warning
-            and sys.version_info >= (3, 13)
-            and sys.version_info < (3, 13, 1)
-        ):
+        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
             warnings.warn(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
@@ -972,14 +966,6 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AutoDerefLocalSource):
-            # Guard checks run on f_locals, in which the python level
-            # auto-dereferenced cell objects are also dereferenced (e.g., rather
-            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
-            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
-            # base guard manager.
-            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
-            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
