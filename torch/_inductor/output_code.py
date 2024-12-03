@@ -23,6 +23,10 @@ serialized format:
 from __future__ import annotations
 
 import dataclasses
+import logging
+import os
+import re
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -59,6 +63,8 @@ if TYPE_CHECKING:
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -333,6 +339,64 @@ class CompiledFxGraph(OutputCode):
             for name, orig_name in self.allocated_constant_name.items()
         }
         return constants
+
+    def prepare_for_serialization(self) -> None:
+        # We can't really serialize callables that may be C++/Triton/etc.,
+        # so we serialize their PyCodeCache disk cache location instead.
+        # TODO: This could be better if we're ever able to serialize compiled
+        # models to disk.
+        self.current_callable = None
+
+    def after_deserialization(self, gm: Optional[torch.fx.GraphModule]) -> str:
+        from torch._dynamo.utils import counters, dynamo_timed
+        from torch._inductor.codecache import (
+            cpp_prefix_path,
+            get_path,
+            PyCodeCache,
+            write_atomic,
+        )
+
+        # See _save_graph(); we don't store the callable in the cache entry so
+        # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(self.cache_key, "py")[2]
+        code = self.source_code
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+                    self.source_code = code
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
+        from .graph import GraphLowering
+
+        # This is used by tests to check the output for specific details.
+        GraphLowering.save_output_code(code)
+
+        try:
+            with dynamo_timed(
+                "PyCodeCache.load_by_key_path",
+                log_pt2_compile_event=True,
+            ):
+                self.current_callable = PyCodeCache.load_by_key_path(
+                    self.cache_key,
+                    artifact_path,
+                    self.cache_linemap,
+                    self.get_constants(gm),
+                ).call
+        except OSError:
+            log.error("Failed to load artifact: %s", artifact_path)
+            raise
+
+        return artifact_path
 
 
 def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
