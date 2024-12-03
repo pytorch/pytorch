@@ -4800,7 +4800,8 @@ class ExternKernel(InputsKernel):
             )
         # assert that ordered_kwargs_for_cpp_kernel makes sense
         assert all(
-            x in (self.allarg_properties | self.kwargs) for x in self.ordered_kwargs_for_cpp_kernel
+            x in (self.allarg_properties | self.kwargs)
+            for x in self.ordered_kwargs_for_cpp_kernel
         )
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
@@ -6501,12 +6502,16 @@ class FallbackKernel(ExternKernelAlloc):
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
-        # any args with default values are already correctly set thanks to
-        # fill_non_provided_args
+
+        # Supply any needed kwarg default values.  Any args with default values are
+        # already correctly set thanks to fill_non_provided_args.
+        kwarg_to_value = {
+            k: v.get("defaultvalue") for k, v in self.allarg_properties.items()
+        } | kwargs
         ordered_kwargs = [
-            kwargs.get(key, self.allarg_properties.get(key)["defaultvalue"])  # type: ignore[index]
-            for key in self.ordered_kwargs_for_cpp_kernel
+            kwarg_to_value.get(key) for key in self.ordered_kwargs_for_cpp_kernel
         ]
+
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
             return [*args, *ordered_kwargs]
