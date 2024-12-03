@@ -3,6 +3,7 @@ import contextlib
 import sys
 import traceback
 import unittest
+from collections import OrderedDict
 from contextlib import contextmanager
 
 import torch
@@ -2980,22 +2981,53 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=eager, fullgraph=True)
         def fn(t):
-            tmp1 = [t+1, t+2]
-            tmp2 = [t+3, t+4]
+            tmp1 = [t + 1, t + 2]
+            tmp2 = [t + 3, t + 4]
             return list(itertools.chain(tmp1, tmp2))
 
         t = torch.tensor([1.0])
         y = fn(t)
-        self.assertEqual(y, [t+1, t+2, t+3, t+4])
+        self.assertEqual(y, [t + 1, t + 2, t + 3, t + 4])
+
+    def test_zip_generator(self):
+        def whoo(t):
+            yield t + 1
+            yield t + 2
+            yield t + 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(zip(range(3), whoo(t)))
+
+        t = torch.randn(3)
+        y = fn(t)
+        expected = list(zip(range(3), whoo(t)))
+        self.assertEqual(expected, y)
+
+    @parametrize("container", [list, tuple, dict, OrderedDict])
+    def test_dict_tuple_list_generator(self, container):
+        def whoo(t):
+            yield 1, t + 1
+            yield 2, t + 2
+            yield 3, t + 3
+
+        def fn(t):
+            gen = whoo(t)
+            return container(gen)
+
+        t = torch.randn(2)
+        expected = fn(t)
+        got = torch.compile(backend="eager", fullgraph=True)(fn)(t)
+        self.assertEqual(expected, got)
 
     def test_subgenerator(self):
         def subgen(t):
-            yield t+1
-            yield t+2
+            yield t + 1
+            yield t + 2
 
         def main_gen(t):
             yield from subgen(t)
-            yield t+3
+            yield t + 3
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -3004,11 +3036,12 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         y = fn(t)
-        self.assertEqual(y, [t+1, t+2, t+3])
+        self.assertEqual(y, [t + 1, t + 2, t + 3])
 
 
 instantiate_parametrized_tests(CtxManagerTests)
 instantiate_parametrized_tests(ContextlibContextManagerTests)
+instantiate_parametrized_tests(GeneratorTests)
 
 
 if __name__ == "__main__":

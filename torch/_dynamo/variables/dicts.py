@@ -272,6 +272,7 @@ class ConstDictVariable(VariableTracker):
         from . import (
             BuiltinVariable,
             ConstantVariable,
+            GeneratorObjectVariable,
             ListIteratorVariable,
             ListVariable,
             TupleVariable,
@@ -343,6 +344,7 @@ class ConstDictVariable(VariableTracker):
                     ListIteratorVariable,
                     variables.IteratorVariable,
                     UserDefinedObjectVariable,
+                    GeneratorObjectVariable,
                 ),
             )
 

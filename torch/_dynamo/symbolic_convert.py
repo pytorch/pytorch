@@ -921,7 +921,7 @@ class InstructionTranslatorBase(
         """
         # TODO: figure it out why dynamo produces the wrong result when fn is
         # a UserMethodVariable
-        if is_generator(fn.get_code()) and not isinstance(fn, variables.UserMethodVariable):
+        if is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -3149,7 +3149,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (
                 UserFunctionVariable,
-                GeneratorFunctionVariable,
                 NestedUserFunctionVariable,
                 GeneratorFunctionVariable,
                 # I'm not so sure if Dynamo can inline an object.
@@ -3453,19 +3452,16 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             self.push(ConstantVariable.create(ex.value))
         else:
-            self.push(val)
-            # Add the value to yield into generated_items and replace the top of the stack with None
-            try:
-                self.YIELD_VALUE(inst)
-            except YieldValueOp:
-                pass
-
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (
                 isinstance(self.instruction_pointer, int)
                 and self.instruction_pointer > 0
             )
             self.instruction_pointer -= 1
+
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
 
     def SEND(self, inst):
         assert len(self.stack) >= 2

@@ -1392,7 +1392,7 @@ class BuiltinVariable(VariableTracker):
                     TupleVariable,
                     ListIteratorVariable,
                     variables.IteratorVariable,
-                    variables.GeneratorFunctionVariable,
+                    variables.GeneratorObjectVariable,
                 ),
             ):
                 items = dict(
