@@ -56,7 +56,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -1415,6 +1415,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
+        self.mutation_type = AttributeMutationExisting()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
