@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import os
-from typing import List, Optional
+from typing import Optional
 
 from torch._inductor import config
 from torch._inductor.utils import is_linux
@@ -10,7 +10,7 @@ from torch._inductor.utils import is_linux
 log = logging.getLogger(__name__)
 
 
-def _rocm_include_paths(dst_file_ext: str) -> List[str]:
+def _rocm_include_paths(dst_file_ext: str) -> list[str]:
     from torch.utils import cpp_extension
 
     rocm_include = (
@@ -44,7 +44,7 @@ def _rocm_include_paths(dst_file_ext: str) -> List[str]:
     return paths
 
 
-def _rocm_lib_options(dst_file_ext: str) -> List[str]:
+def _rocm_lib_options(dst_file_ext: str) -> list[str]:
     from torch.utils import cpp_extension
 
     rocm_lib_dir = (
@@ -69,7 +69,7 @@ def _rocm_lib_options(dst_file_ext: str) -> List[str]:
     return opts
 
 
-def _rocm_compiler_options() -> List[str]:
+def _rocm_compiler_options() -> list[str]:
     arch_list = config.rocm.arch or ["native"]
     gpu_arch_flags = [f"--offload-arch={arch}" for arch in arch_list]
     opts = [
@@ -119,10 +119,10 @@ def rocm_compiler() -> Optional[str]:
 
 
 def rocm_compile_command(
-    src_files: List[str],
+    src_files: list[str],
     dst_file: str,
     dst_file_ext: str,
-    extra_args: Optional[List[str]] = None,
+    extra_args: Optional[list[str]] = None,
 ) -> str:
     include_paths = _rocm_include_paths(dst_file_ext)
     lib_options = _rocm_lib_options(dst_file_ext)

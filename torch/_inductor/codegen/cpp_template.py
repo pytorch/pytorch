@@ -4,7 +4,7 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 from unittest.mock import patch
 
 import sympy
@@ -83,7 +83,7 @@ class CppTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
             flag_template_buffer_has_other_users: bool,
-            epilogue_nodes: Optional[List[ir.IRNode]] = None,
+            epilogue_nodes: Optional[list[ir.IRNode]] = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads
