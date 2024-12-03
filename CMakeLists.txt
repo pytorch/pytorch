@@ -262,7 +262,6 @@ else()
   cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
 endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
-option(USE_X86_SIMD_SORT "Use x86-simd-sort to accelerate sorting and topk for AVX2/AVX512" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
@@ -884,7 +883,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
@@ -902,13 +901,6 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_X86_SIMD_SORT)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_X86_SIMD_SORT")
-  if(USE_XSS_OPENMP)
-    string(APPEND CMAKE_CXX_FLAGS " -DXSS_USE_OPENMP")
-  endif()
 endif()
 
 if(USE_PYTORCH_QNNPACK)
