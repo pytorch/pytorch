@@ -103,6 +103,7 @@ jobs:
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -118,6 +119,7 @@ jobs:
       timeout-minutes: 720
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -133,6 +135,7 @@ jobs:
       timeout-minutes: 1440
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -148,3 +151,4 @@ jobs:
       timeout-minutes: 720
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
