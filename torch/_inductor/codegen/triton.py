@@ -1911,11 +1911,13 @@ class TritonKernel(SIMDKernel):
         more than one read dependency
         """
         depcount = 0
-        for node in self.current_node.scheduler.nodes:
-            for l in list(node.read_writes.reads):
-                if (l.name == name):
-                    depcount+=1
-        has_read_deps = depcount > 1 # has more than one read dep
+        has_read_deps = True # by default, assume that this buffer has > 1 read dependencies
+        if self.current_node: # it can be that self.current_node is None (!)
+            for node in self.current_node.scheduler.nodes:
+                for l in list(node.read_writes.reads):
+                    if (l.name == name):
+                        depcount+=1
+            has_read_deps = depcount > 1 # has more than one read dep
 
         is_coalesced = any(
             i == 1 for i in self.get_strides_of_load(original_index).values()
@@ -1955,7 +1957,10 @@ class TritonKernel(SIMDKernel):
             or not is_coalesced 
             or self.inside_reduction
             or has_read_deps
-        )
+        ) and config.triton.skip_l1_cache
+        # note: must be enabled via env variable
+        # export TORCHINDUCTOR_SKIP_L1=1
+
         cachemod = ""
         if skip_l1_cache:
             cachemod=", cache_modifier='.cg'"

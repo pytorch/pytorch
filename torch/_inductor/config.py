@@ -1059,6 +1059,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
+    # skip L1 cache for buffers that are used only once.  Enable by default
+    skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "1") == "1"
+
 
 class aot_inductor:
     # AOTInductor output path
