@@ -1,15 +1,15 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import contextlib
 import functools
-import getpass
 import operator
-import os
-import re
-import tempfile
 
 import torch
+from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
+    cache_dir,
+    default_cache_dir,
+    triton_cache_dir,
+)
 
 
 def conditional_product(*args):
@@ -65,6 +65,17 @@ def triton_config_to_hashable(cfg):
     return tuple(items)
 
 
+def validate_triton_config(cfg):
+    # [Note: Triton pre_hook in inductor]
+    # pre-hook is a lambda function, which we don't attempt to serialize.
+    # right now, if a pre-hook is attached to the config, it will not be saved;
+    # and then it won't be used when the config is loaded from cache.
+    # So we assert - if we do get a pre_hook, it might get ignored after caching.
+    assert (
+        getattr(cfg, "pre_hook", None) is None
+    ), "triton configs with pre_hooks not supported"
+
+
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     slow = ms > 0.012 and gb_per_s < 650
@@ -73,22 +84,6 @@ def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=
 
 def get_max_y_grid():
     return 65535
-
-
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def default_cache_dir():
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-    return os.path.join(
-        tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
-    )
 
 
 try:
@@ -134,10 +129,26 @@ def get_first_attr(obj, *attrs):
     raise AssertionError(f"{obj} does not has any of the attributes: {attrs}")
 
 
-try:
-    dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
-except AttributeError:  # Compile workers only have a mock version of torch
+dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 
-    @contextlib.contextmanager
-    def dynamo_timed(key, phase_name=None, fwd_only=True):
-        yield
+
+def triton_hash_to_path_key(key):
+    # In early versions of Triton, the hash is directly used in the path name.
+    # Later, the hash is converted to base64 before being used in the path name.
+    # Later, the base64 convertion was replaced to the base32
+    #
+    # This code tries to import _base64 and falls back to _base32 if _base64 is unavailable.
+    #
+    # To handle this, try to import the to-base64-conversion function.
+    # If it exists, use it; otherwise, try using _base32; if both are unavailable, use the hash directly.
+    try:
+        from triton.runtime.cache import _base64
+
+        return _base64(key)
+    except Exception as e:
+        try:
+            from triton.runtime.cache import _base32
+
+            return _base32(key)
+        except Exception as e:
+            return key

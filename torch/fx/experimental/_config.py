@@ -52,6 +52,14 @@ extended_debug_create_symbol = os.environ.get(
 # [@compile_ignored: debug]
 extended_debug_cpp = os.environ.get("TORCHDYNAMO_EXTENDED_DEBUG_CPP", "") != ""
 
+# Give extended debug information (line of code) when a torch function
+# is called during export.  This is useful for showing progress and detecting
+# where export might be stuck. Currently only works for strict=False.
+# [@compile_ignored: debug]
+extended_debug_current_loc = (
+    os.environ.get("TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC", "0") == "1"
+)
+
 # [@compile_ignored: debug] Show a warning for every specialization
 print_specializations = False
 

@@ -94,7 +94,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         state_dict = {"model": model.state_dict()}
         state_dict_to_save = deepcopy(state_dict)
 
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=state_dict_to_save,
             storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
             planner=DefaultSavePlanner(),
@@ -113,7 +113,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
             self.assertNotEqual(v1.to_local(), v2.to_local())
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=state_dict_to_save,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=DefaultLoadPlanner(),

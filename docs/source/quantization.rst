@@ -559,7 +559,7 @@ Please follow these tutorials to get started on PyTorch 2 Export Quantization:
 Modeling Users:
 
 - `PyTorch 2 Export Post Training Quantization <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq.html>`_
-- `PyTorch 2 Export Post Training Quantization with X86 Backend through Inductor <https://pytorch.org/tutorials/prototype/pt2e_quant_ptq_x86_inductor.html>`_
+- `PyTorch 2 Export Post Training Quantization with X86 Backend through Inductor <https://pytorch.org/tutorials/prototype/pt2e_quant_x86_inductor.html>`_
 - `PyTorch 2 Export Quantization Aware Training <https://pytorch.org/tutorials/prototype/pt2e_quant_qat.html>`_
 
 Backend Developers (please check out all Modeling Users docs as well):
@@ -1353,6 +1353,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.quantizer.quantizer
 .. py:module:: torch.ao.quantization.quantizer.utils
 .. py:module:: torch.ao.quantization.quantizer.x86_inductor_quantizer
+.. py:module:: torch.ao.quantization.quantizer.xpu_inductor_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils
 .. py:module:: torch.ao.quantization.stubs

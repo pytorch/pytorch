@@ -29,19 +29,19 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-static-cast-downcast,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
--cppcoreguidelines-special-member-functions,
 -cppcoreguidelines-non-private-member-variables-in-classes,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
 misc-*,
+-misc-confusable-identifiers,
 -misc-const-correctness,
 -misc-include-cleaner,
 -misc-use-anonymous-namespace,
 -misc-unused-parameters,
 -misc-no-recursion,
 -misc-non-private-member-variables-in-classes,
--misc-confusable-identifiers,
+-misc-unused-using-decls,
 modernize-*,
 -modernize-macro-to-enum,
 -modernize-return-braced-init-list,
@@ -63,5 +63,7 @@ readability-string-compare,
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
-  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h;IListRef.h'
 ...

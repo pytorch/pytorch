@@ -175,7 +175,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
 
   auto count = self.numel();
   if (count != 0) {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
         self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
           max_unpooling2d_forward_kernel<<<
               GET_BLOCKS(count),
@@ -267,7 +267,7 @@ static void max_unpooling3d_shape_check(
   if (gradOutput.defined()) {
     if (oT != gradOutput.size(dimt) || oH != gradOutput.size(dimh) ||
         oW != gradOutput.size(dimw)) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "Inconsistent gradOutput size. oT= ",
           oT,
           ", oH= ",
@@ -358,7 +358,7 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
   int offsetZ = 0;
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
       self.scalar_type(), "max_unpooling3d_forward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
@@ -447,7 +447,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
   nInputRows = self.size(dimh);
 
   if (oheight != grad_output.size(dimh) || owidth != grad_output.size(dimw)) {
-    AT_ERROR(
+    TORCH_CHECK(false,
         "Inconsistent gradOutput size. output height: ",
         oheight,
         ", output width= ",
@@ -466,7 +466,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
     return grad_input;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
       self.scalar_type(), "max_unpooling2d_backward_kernel", ([&] {
         max_unpooling2d_backward_kernel<<<
             GET_BLOCKS(count),
@@ -569,7 +569,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
 
   dim3 block(32, 8);
 
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
       self.scalar_type(), "max_unpooling3d_backward_kernel", ([&] {
         while (totalZ > 0) {
           dim3 grid(
