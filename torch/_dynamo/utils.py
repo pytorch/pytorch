@@ -1003,6 +1003,7 @@ def record_compilation_metrics(
                 FbRemoteFxGraphCache,
                 REMOTE_CACHE_VERSION,
             )
+
             remote_cache_version = REMOTE_CACHE_VERSION
             backend = FbRemoteFxGraphCache.get_remote_backend()
             inductor_fx_remote_cache_backend_type = type(backend).__name__
