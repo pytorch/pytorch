@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import functools
 import io
@@ -137,11 +136,6 @@ if TYPE_CHECKING:
         GraphInputName,
         GraphSignature,
     )
-
-# For testing - force using the async path rather than shortcutting to
-# codegen_and_compile_sync() when available.
-_debug_force_async = False
-
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -777,8 +771,11 @@ def _compile_fx_inner(
 
 
 class FxCompile(ABC):
+    # TODO: We should probably eventually add some kind of async version of this
+    # so we can kick off a compile and then go do other things - but we'll need
+    # to know what kind of API we want for that first.
     @abstractmethod
-    async def codegen_and_compile(
+    def codegen_and_compile(
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
@@ -788,33 +785,9 @@ class FxCompile(ABC):
         ...
 
 
-class _FxCompileSync(FxCompile):
+class _InProcessFxCompile(FxCompile):
     @override
-    async def codegen_and_compile(
-        self,
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        return self.codegen_and_compile_sync(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
-    @abstractmethod
-    def codegen_and_compile_sync(
-        self,
-        gm: GraphModule,
-        example_inputs: Sequence[InputType],
-        inputs_to_check: Sequence[int],
-        graph_kwargs: _CompileFxKwargs,
-    ) -> OutputCode:
-        ...
-
-
-class _InProcessFxCompile(_FxCompileSync):
-    @override
-    def codegen_and_compile_sync(
+    def codegen_and_compile(
         self,
         gm: GraphModule,
         example_inputs: Sequence[InputType],
@@ -1146,28 +1119,7 @@ def fx_codegen_and_compile(
 ) -> OutputCode:
     scheme: FxCompile = _InProcessFxCompile()
 
-    if not _debug_force_async and isinstance(scheme, _FxCompileSync):
-        # As a debugging optimization if the scheme supports sync then run it
-        # sync.
-        return scheme.codegen_and_compile_sync(
-            gm, example_inputs, inputs_to_check, graph_kwargs
-        )
-
-    future = scheme.codegen_and_compile(
-        gm, example_inputs, inputs_to_check, graph_kwargs
-    )
-
-    try:
-        # We're already buried under an event loop - python won't let us nest
-        # event loops so trick it out.
-        try:
-            while True:
-                future.send(None)
-        except StopIteration as result:
-            return result.value
-    except RuntimeError:
-        # No existing loop - create one and run our future
-        return asyncio.run(future)
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
 
 def get_input_idxs_to_check(
