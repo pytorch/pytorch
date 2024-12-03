@@ -595,7 +595,7 @@ class TritonTemplateKernel(TritonKernel):
                 if "ACC_TYPE" in self.meta
                 else torch.float32
             )
-            epilogue_args = [V.kernel.cse.namedvar(name="acc", dtype=acc_dtype)]
+            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],

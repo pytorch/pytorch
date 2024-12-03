@@ -1561,7 +1561,9 @@ class CSE:
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         dtype: Optional[torch.dtype] = None,
     ) -> CSEVariable:
-        torch._check(name not in self.varname_map, lambda: f"duplicate name: {name}")
+        torch._check_value(
+            name not in self.varname_map, lambda: f"duplicate name: {name}"
+        )
         var = V.kernel.create_cse_var(name, bounds, dtype)
         self.varname_map[name] = var
         return var
