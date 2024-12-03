@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from unittest.mock import patch
@@ -67,6 +68,7 @@ from .utils import (
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
+    register_op_dtype_propagation_rules,
     sympy_product,
     use_scatter_fallback,
 )
@@ -74,7 +76,7 @@ from .virtualized import ops, V
 
 
 log = logging.getLogger(__name__)
-lowerings: Dict[Callable[..., Any], Callable[..., Any]] = {}
+lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -762,6 +764,14 @@ def register_pointwise(
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
+        register_op_dtype_propagation_rules(
+            "libdevice_" + name, type_promotion_kind, override_return_dtype
+        )
+
+    register_op_dtype_propagation_rules(
+        name, type_promotion_kind, override_return_dtype
+    )
+
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -1788,11 +1798,9 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 @functools.lru_cache(None)
 def _warn_complex_not_supported():
-    # TODO: replace
-    # warnings.warn(
-    # "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    # )
-    pass
+    warnings.warn(
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
 
 
 # There are some types (CPU) which we accept as input but not as

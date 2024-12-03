@@ -27,10 +27,6 @@ def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
     )
 
 
-def fx_graph_async_compile_default() -> Optional[bool]:
-    return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_ASYNC_COMPILE")
-
-
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
@@ -60,12 +56,6 @@ fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 bundle_triton_into_fx_graph_cache: Optional[
     bool
 ] = bundle_triton_into_fx_graph_cache_default()
-
-# use async compile to compile fx graphs
-# False: Disabled - compile in-process
-# True: Enabled - compile out-of-process
-# None: Not set -- Off for OSS, JustKnobs based for internal
-fx_graph_async_compile: Optional[bool] = fx_graph_async_compile_default()
 
 # Enable autotune local cache.
 #
@@ -307,6 +297,9 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# Modifies the number of autotuning choices displayed, set to None for all
+autotune_num_choices_displayed = 10
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -808,6 +801,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # any cycles.
 check_stack_no_cycles_TESTING_ONLY: bool = False
 
+# When True, complex_memory_overlap always reports True
+always_complex_memory_overlap_TESTING_ONLY: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -970,6 +966,10 @@ class triton:
     dense_indexing = False
 
     # limit tiling dimensions
+    #   - max_tiles=1 disables tiling
+    #   - max_tiles=2 is the default
+    #   - max_tiles=3 is experimental and may have bugs
+    # higher values are unsupported
     max_tiles = 2
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
@@ -1173,7 +1173,7 @@ class cuda:
     # enable generation of inline standalone runner in CUDA CPP generated code
     # which allows to compile the generated code into a standalone executable.
     generate_test_runner: bool = (
-        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern
@@ -1354,6 +1354,8 @@ _cache_config_ignore_prefix = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    # tests assume that changes here don't invalidate cache
+    "always_complex_memory_overlap_TESTING_ONLY",
 ]
 
 # External callable for matmul tuning candidates
@@ -1362,6 +1364,8 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class test_configs:
     force_extern_kernel_in_multi_template = False
+
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:

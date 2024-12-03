@@ -6,6 +6,7 @@ import itertools
 import math
 import re
 import sys
+import warnings
 from enum import Enum
 from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
@@ -291,7 +292,7 @@ def reduction_prefix_array(
     acc_type: str,
     reduction_type: str,
     dtype: torch.dtype,
-    len: int,
+    len: Union[str, int],
     init_fn,
 ):
     """
@@ -3283,6 +3284,11 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        assert isinstance(value, CppCSEVariable), value
+        if not value.is_vec:
+            # this happens when we store a scalar into a vectorized buffer like "fill"
+            value = self.broadcast(value)
+
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -3378,9 +3384,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]
                     _use_fp32 = True
                 elif _lowp_fp_type is not None:
                     if _lowp_fp_type != opt_ctx.dtype:
-                        # TODO: re-enable
-                        # warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
-                        pass
+                        warnings.warn("bf16 and fp16 are mixed in the scheduler node.")
                 else:
                     _lowp_fp_type = opt_ctx.dtype
             else:
@@ -3512,11 +3516,15 @@ class TilingSelect:
                 non_contig_indexing_op_num = sum(
                     non_contig_indexing_op_counter.values()
                 )
-                threshold = 0.08
-                if op_num > 0 and non_contig_indexing_op_num / op_num >= threshold:
+                ratio_threshold = 0.12
+                quantity_threshold = 35
+                if non_contig_indexing_op_num >= quantity_threshold or (
+                    op_num > 0
+                    and non_contig_indexing_op_num / op_num >= ratio_threshold
+                ):
                     # Too many non-contiguous load/store/index_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
-                    # the threshold.
+                    # the thresholds.
                     return [], []
 
                 if (
@@ -4462,8 +4470,9 @@ class CppScheduling(BaseScheduling):
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
             2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
-               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
-               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
+               where the divisor is an integer and not too small (the divisor > 8), the dividend is
+               one of the iter_vars, and this var, i.e. the dimension that needs to be split, is
+               contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4511,6 +4520,7 @@ class CppScheduling(BaseScheduling):
                             for name_, expr_ in original_body.indexing_exprs.items()
                             if name_ != name
                         )
+                        and div_expr.args[1] > 8
                     ):
                         split_var = div_expr.args[0]
                         split_number = div_expr.args[1]
