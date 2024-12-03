@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import weakref
-from typing import Set
+from typing import Set, List
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -9,6 +9,7 @@ from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
+from torch.utils.hooks import RemovableHandle
 from torch.utils._pytree import tree_flatten
 
 
@@ -61,6 +62,7 @@ class ModuleTracker:
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
+        self._hooks: List[RemovableHandle] = []
 
     def _maybe_set_engine_callback(self):
         # This assumes no concurrent calls to backward
@@ -126,7 +128,7 @@ class ModuleTracker:
         args, _ = tree_flatten(input)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
-            register_multi_grad_hook(tensors, self._get_pop_fn(name, True))
+            self._hooks.append(register_multi_grad_hook(tensors, self._get_pop_fn(name, True)))
 
     def _fw_post_hook(self, mod, input, output):
         name = self._get_mod_name(mod)
@@ -135,7 +137,7 @@ class ModuleTracker:
         args, _ = tree_flatten(output)
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
-            register_multi_grad_hook(tensors, self._get_append_fn(name, True))
+            self._hooks.append(register_multi_grad_hook(tensors, self._get_append_fn(name, True)))
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
@@ -145,3 +147,6 @@ class ModuleTracker:
     def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()
+        for hook in self._hooks:
+            hook.remove()
+        self._hooks.clear()
