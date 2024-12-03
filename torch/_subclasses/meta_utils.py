@@ -821,7 +821,7 @@ class MetaConverter(Generic[_TensorT]):
         self.arg_cnt += 1
 
         def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            callback = functools.partial(callback, device=t.device)
+            inner_callback = functools.partial(callback, device=t.device)
 
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)
@@ -830,13 +830,13 @@ class MetaConverter(Generic[_TensorT]):
             else:
                 # Run into this case in test_jagged_fake_to_fake_preserved
                 inner_context = all_dynamic_symbolic_context(
-                    t, src, shape_env, callback
+                    t, src, shape_env, inner_callback
                 )
 
             return self.meta_tensor(
                 t,
                 shape_env,
-                callback,
+                inner_callback,
                 source=src,
                 symbolic_context=inner_context,
             )
