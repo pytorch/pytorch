@@ -1156,5 +1156,26 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
 
 
+# TODO: Remove this test class once we remove the old import path:
+# torch/distributed/_composable/fsdp
+class TestFullyShardOldImport(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_old_import_training(self):
+        from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        fully_shard(model[0], mp_policy=mp_policy)
+        fully_shard(model[1], mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        inp = torch.randn((8, 16), device="cuda")
+        model(inp).sum().backward()
+
+
 if __name__ == "__main__":
     run_tests()

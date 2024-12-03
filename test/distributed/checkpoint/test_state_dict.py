@@ -3,6 +3,7 @@
 import copy
 import functools
 import sys
+from itertools import chain
 from typing import Callable, Tuple, Type, Union
 
 import torch
@@ -32,6 +33,7 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
@@ -297,6 +299,52 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 ],
             },
             self._test_ddp,
+        )
+
+    def _test_fsdp_ddp(
+        self,
+        optimizer_class: Type[Optimizer],
+        optim_in_backward: bool = False,
+        test_frozen: bool = False,
+    ) -> None:
+        def init_model_optim():
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
+            if test_frozen:
+                for param in chain(
+                    orig_model.u1.parameters(), orig_model.u2.parameters()
+                ):
+                    param.requires_grad = False
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-4)
+            dist_model = copy.deepcopy(orig_model)
+            dist_model.l = DDP(dist_model.l)
+            dist_model = FSDP(
+                copy.deepcopy(orig_model),
+                auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                use_orig_params=optim_in_backward,
+                ignored_modules=[dist_model.l],
+            )
+            if optim_in_backward:
+                _apply_optimizer_in_backward(
+                    optimizer_class, dist_model.parameters(), {"lr": 1e-4}
+                )
+                dist_optim = [
+                    p._in_backward_optimizers[0] for p in dist_model.parameters()
+                ]
+            else:
+                dist_optim = optimizer_class(dist_model.parameters(), lr=1e-4)
+            return orig_model, orig_optim, copy_optim, dist_model, dist_optim
+
+        self._test_save_load(init_model_optim, test_frozen)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_ddp(self) -> None:
+        self.run_subtests(
+            {
+                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
+            },
+            self._test_fsdp_ddp,
         )
 
     def _test_single_gpu(self, optimizer_class: Type[Optimizer]) -> None:
