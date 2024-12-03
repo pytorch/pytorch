@@ -61,7 +61,7 @@ void apply_triu_tril_single(
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = std::max(zero, i + k); j < m; j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+            result[i * res_row_stride + j * res_col_stride] = c10::load(&self[i * self_row_stride + j * self_col_stride]);
           }
         }
       }
@@ -74,7 +74,7 @@ void apply_triu_tril_single(
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
-            result[i * res_row_stride + j * res_col_stride] = self[i * self_row_stride + j * self_col_stride];
+            result[i * res_row_stride + j * res_col_stride] = c10::load(&self[i * self_row_stride + j * self_col_stride]);
           }
         }
       }
