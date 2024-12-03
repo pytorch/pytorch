@@ -1,5 +1,5 @@
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
-from .fully_shard import (
+from ._fully_shard import (
     FSDPModule,
     fully_shard,
     register_fsdp_forward_method,
@@ -18,6 +18,6 @@ __all__ = [
 ]
 
 # Set namespace for exposed private names
-CPUOffloadPolicy.__module__ = "torch.distributed.fsdp.fully_shard"
-MixedPrecisionPolicy.__module__ = "torch.distributed.fsdp.fully_shard"
-OffloadPolicy.__module__ = "torch.distributed.fsdp.fully_shard"
+CPUOffloadPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
+MixedPrecisionPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
+OffloadPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
