@@ -1414,6 +1414,29 @@ def forward(self, x, y):
         with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
+    
+    def test_subclasses_parameterization(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep = export(m, (ref_x,)).run_decompositions({})
+        res = ep.module()(ref_x)
+
+        self.assertEqual(res, ref_out)
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})

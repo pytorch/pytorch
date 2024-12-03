@@ -51,6 +51,7 @@ from torch._functorch._aot_autograd.input_output_analysis import (
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
+
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,
@@ -724,6 +725,12 @@ def _export_to_aten_ir(
             yield
         finally:
             torch.compiler._is_compiling_flag = old_value
+    
+    from torch._functorch._aot_autograd.subclass_parametrization import (
+        unwrap_tensor_subclass_parameters,
+    )
+
+    unwrap_tensor_subclass_parameters(mod)
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
