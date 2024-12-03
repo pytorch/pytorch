@@ -1007,7 +1007,7 @@ def record_compilation_metrics(
             backend = FbRemoteFxGraphCache.get_remote_backend()
             inductor_fx_remote_cache_backend_type = type(backend).__name__
         except ModuleNotFoundError:
-            REMOTE_CACHE_VERSION = None
+            remote_cache_version = None
             inductor_fx_remote_cache_backend_type = None
     else:
         inductor_fx_remote_cache_backend_type = None
