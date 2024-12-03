@@ -9,7 +9,6 @@ import subprocess
 import sys
 import threading
 import traceback
-import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
@@ -283,14 +282,7 @@ class SubprocMain:
         return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
-
-
-def _warm_process_pool(pool: AnyPool, n: int) -> None:
-    if isinstance(pool, SubprocPool):
-        return  # no need
-    assert isinstance(pool, ProcessPoolExecutor)
-
+def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
     # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
     # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
 
@@ -306,7 +298,6 @@ def _warm_process_pool(pool: AnyPool, n: int) -> None:
 
     # We force them to start here with some YOLOing of the internal methods.
 
-    # TODO(masnesral): Are these still relevant?
     if hasattr(pool, "_start_queue_management_thread"):
         pool._start_queue_management_thread()
     else:
