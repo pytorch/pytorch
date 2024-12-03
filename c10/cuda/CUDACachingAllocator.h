@@ -203,6 +203,7 @@ class CUDAAllocator : public Allocator {
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual bool initialized() = 0;
+  virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
   virtual void enable(bool value) = 0;
@@ -334,6 +335,10 @@ inline void raw_delete(void* ptr) {
 
 inline void init(int device_count) {
   return get()->init(device_count);
+}
+
+inline double getMemoryFraction(c10::DeviceIndex device) {
+  return get()->getMemoryFraction(device);
 }
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
