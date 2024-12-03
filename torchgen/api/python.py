@@ -958,8 +958,7 @@ def argument_type_str_pyi(t: Type) -> str:
             # TODO: this doesn't seem right...
             # Tensor?[] currently translates to Optional[Union[tuple[Tensor, ...], list[Tensor]]]
             # It should probably translate to   Union[tuple[Optional[Tensor], ...], list[Optional[Tensor]]]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
+            add_optional = True
             ret = (
                 "Union[Tensor, tuple[Tensor, ...], list[Tensor]]"
                 if t.size is not None

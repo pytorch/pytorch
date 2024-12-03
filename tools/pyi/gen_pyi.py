@@ -1063,13 +1063,6 @@ def gen_pyi(
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
         hint = hint.replace("at::Reduction::Mean", "1")
         hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
-        # Match both:
-        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
-        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
-        hint = hint.replace(
-            "Tuple[Tensor, ...], List[Tensor]] = None",
-            "Tuple[Tensor, ...], List[Tensor], None] = None",
-        )
         return hint
 
     docstrs = gather_docstrs()
