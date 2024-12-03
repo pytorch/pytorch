@@ -2549,7 +2549,7 @@ def _register_smooth_quant_int_mm_pattern():
 
     # When torch.compile'ing with dynamic=True, the expand node and the two tailing reshape nodes exist
     # When torch.compile'ing with dynamic=False, they don't exist
-    def get_pattern_no_bias(expand_a_scale: bool, expand_a: bool = True):
+    def get_pattern_no_bias(expand_a_scale: bool, reshape_a: bool = True):
         return CallFunction(
             aten.mul.Tensor,
             CallFunction(
@@ -2563,7 +2563,7 @@ def _register_smooth_quant_int_mm_pattern():
                             KeywordArg("a"),
                             KeywordArg("in_shape"),
                         )
-                        if expand_a
+                        if reshape_a
                         else KeywordArg("a"),
                         KeywordArg("b"),
                     ),
@@ -2615,11 +2615,11 @@ def _register_smooth_quant_int_mm_pattern():
     # In practice, though, they may also match smooth-quant pattern if there wouldn't be a reshape for the output.
     # Since add is not currently being used as a oneDNN post-op, but is unfused, we don't need these patterns with bias.
     # Ideally, we should add mul + add post-op support in ATen int8 oneDNN linear op.
-    pattern1_with_no_reshape_no_act_expand = get_pattern_no_bias(
-        expand_a_scale=False, expand_a=False
+    pattern1_with_no_outer_or_act_reshape = get_pattern_no_bias(
+        expand_a_scale=False, reshape_a=False
     )
-    pattern2_with_no_outer_reshape_no_act_expand = get_pattern_no_bias(
-        expand_a_scale=True, expand_a=False
+    pattern2_with_no_outer_or_act_reshape = get_pattern_no_bias(
+        expand_a_scale=True, reshape_a=False
     )
 
     def _validate_pattern(match: Match):
@@ -2646,8 +2646,8 @@ def _register_smooth_quant_int_mm_pattern():
         pattern_with_bias_2: 0,
         pattern_no_bias_1: 1,
         pattern_with_bias_1: 1,
-        pattern1_with_no_reshape_no_act_expand: 2,
-        pattern2_with_no_outer_reshape_no_act_expand: 2,
+        pattern1_with_no_outer_or_act_reshape: 2,
+        pattern2_with_no_outer_or_act_reshape: 2,
     }
     for pattern, pass_number in pattern_to_pass_number.items():
 
@@ -2724,11 +2724,12 @@ def _register_smooth_quant_int_mm_pattern():
                 else:
                     # onednn.qlinear does not support per-channel quantization of x
                     # so in this case, we have to apply x scale and add bias ourselves after qlinear
-                    if kwargs.get("in_shape", None) is None:
+                    in_shape = kwargs.get("in_shape", None)
+                    if in_shape is None:
                         x_reshaped = x
                     else:
                         x_reshaped = match.graph.call_function(
-                            aten.reshape.default, args=(x, kwargs["in_shape"])
+                            aten.reshape.default, args=(x, in_shape)
                         )
                     new_args = (
                         x_reshaped,
