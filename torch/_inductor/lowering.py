@@ -2394,24 +2394,30 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         if effn_attn_fwd_bias:
+            orig_size = list(arg.get_size())
+            out_size = list(arg.get_size())
             if arg.maybe_get_stride() is not None:
                 # We require a dense last dimension, but the other strides
                 # can be expanded, which results in a smaller tensor that gets
                 # written out.
-                orig_size = list(arg.get_size())
-                out_size = list(arg.get_size())
                 for i, s in enumerate(arg.get_stride()[0:-1]):
                     if V.graph.sizevars.statically_known_equals(s, 0):
                         arg = slice_(arg, i, 0, 1)
                         out_size[i] = 1
-                out = ir.ExternKernel.require_exact_strides(
-                    arg, ir.FlexibleLayout.contiguous_strides(out_size)
-                )
-                return expand(out, orig_size)
 
-            return ir.ExternKernel.require_exact_strides(
-                arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
-            )
+            # Now, pad strides to alignment
+            out_strides = [-1 for _ in range(len(out_size))]
+            out_strides[-1] = 1
+            stride = 1
+            for i in range(len(out_size) - 2, -1, -1):
+                stride = stride * out_size[i + 1]
+                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                    stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
+
+                out_strides[i] = stride
+
+            out = ir.ExternKernel.require_exact_strides(arg, out_strides)
+            return expand(out, orig_size)
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
