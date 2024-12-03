@@ -137,6 +137,7 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",

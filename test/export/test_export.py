@@ -304,9 +304,12 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
 
-    def test_export_narrow_unbacked_expr(self):
+    def test_export_strict_narrow_unbacked_expr(self):
         # Tests that we are able to handle 0/1 specialization on sizes represented
         # by unbacked int expressions by transforming them into an unbacked int.
+        #
+        # This test only works with strict=True, since it relies on dynamo tracing
+        # for transforming the expression into an unbacked SymInt.
 
         def identity(x):
             return x
@@ -326,12 +329,14 @@ class TestDynamismExpression(TestCase):
         inputs = (torch.arange(10), torch.tensor(2))
 
         # Without transforming the unbacked int expression, we can't export.
-        with self.assertRaisesRegex(RuntimeError, escape("Could not guard on data-dependent expression")):
-            export(Module(identity), inputs)
+        with self.assertRaisesRegex(
+            RuntimeError, escape("Could not guard on data-dependent expression")
+        ):
+            export(Module(identity), inputs, strict=True)
 
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
-        export(Module(torch.sym_fresh_size), inputs)
+        export(Module(torch.sym_fresh_size), inputs, strict=True)
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
