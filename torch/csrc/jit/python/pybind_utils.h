@@ -84,7 +84,6 @@ struct VISIBILITY_HIDDEN PythonFunctionGuard {
   PythonFunctionGuard& operator=(const PythonFunctionGuard&) = delete;
   PythonFunctionGuard& operator=(PythonFunctionGuard&&) = delete;
 
-
   ~PythonFunctionGuard() {
     pybind11::gil_scoped_acquire ag;
     func_.dec_ref();
@@ -120,7 +119,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   PythonFutureWrapper(PythonFutureWrapper&&) = default;
   PythonFutureWrapper& operator=(PythonFutureWrapper&&) = default;
   ~PythonFutureWrapper() = default;
-
 
   bool done() {
     return fut->completed();
@@ -402,6 +400,7 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(FloatType::get());
   } else if (PyComplex_CheckExact(input.ptr())) {
     return InferredType(ComplexType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::bytes>(input)) {
     // NOTE: We may need a ByteType in the future
     return InferredType(StringType::get());
