@@ -1,5 +1,6 @@
 import copyreg
 import io
+import logging
 import math
 import pickle
 from collections import defaultdict, deque
@@ -35,6 +36,7 @@ Region = List[Node]
 IdenticalNodes = List[Node]
 GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool]
 
+log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
     __name__, "graph_region_expansion"
 )
@@ -55,6 +57,10 @@ def _extract_tensor_metadata_for_node_hash(
         out.append(getattr(metadata, field.name))
 
     return (_ident, tuple(out))
+
+
+class NodeHashException(Exception):
+    pass
 
 
 class InputPickler(pickle.Pickler):
@@ -82,6 +88,8 @@ class InputPickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
+        except (TypeError, AttributeError) as e:
+            raise NodeHashException from e
         finally:
             self._stream.seek(0)
             self._stream.truncate(0)
@@ -187,13 +195,16 @@ class GraphRegionTracker:
         return sha256_hash(self.input_pickler.dumps(key))
 
     def track_node(self, tx: "InstructionTranslatorBase", node: Node) -> None:
-        duplicates = self.loc_to_duplicates[
-            self._hash_node(
-                tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
-            )
-        ]
-        duplicates.append(node)
-        self.node_to_duplicates[node] = duplicates
+        try:
+            duplicates = self.loc_to_duplicates[
+                self._hash_node(
+                    tx.f_code.co_filename, tx.lineno, tx.instruction_pointer, node
+                )
+            ]
+            duplicates.append(node)
+            self.node_to_duplicates[node] = duplicates
+        except NodeHashException as e:
+            log.debug("Unable to hash node %s with exception %s", node, e)
 
     def is_identical(self, n0: Node, n1: Node) -> bool:
         return (
