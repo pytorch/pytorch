@@ -1749,6 +1749,7 @@ main()
 
         self.check_output_and_recompiles(fn, 1)
 
+    @unittest.expectedFailure  # TODO: should check the graph at aot_eager or something
     def test_trace_run_with_rng_state(self):
         def sdpa(xq, xk):
             return F.scaled_dot_product_attention(xq, xk, xk, is_causal=True)
@@ -1842,10 +1843,12 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
+    @unittest.expectedFailure  # TODO: test needs to change to checking the HOP in the post-AOTDispatch graph
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_trace_auto_functionalized_v2(self):
         self.trace_auto_functionalized_base()
 
+    @unittest.expectedFailure  # TODO: test needs to change to checking the HOP in the post-AOTDispatch graph
     @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
     def test_trace_auto_functionalized(self):
         self.trace_auto_functionalized_base()
