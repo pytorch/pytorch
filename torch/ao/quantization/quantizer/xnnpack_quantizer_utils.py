@@ -152,6 +152,7 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_spec.qscheme not in [
         torch.per_tensor_symmetric,
         torch.per_channel_symmetric,
+        None,
     ]:
         raise ValueError(
             f"Unsupported quantization_spec {quantization_spec} for weight"
@@ -247,6 +248,10 @@ def _annotate_linear_relu(
             continue
 
         linear_node = maybe_linear_node
+        if len(linear_node.users) > 1:
+            # if linear node has multiple users, then it can't be fused with relu
+            continue
+
         input_qspec_map = {}
         input_act = linear_node.args[0]
         assert isinstance(input_act, Node)
@@ -350,6 +355,11 @@ def _do_annotate_conv_relu(
         if not isinstance(maybe_conv_node, Node) or not is_conv_node(maybe_conv_node):
             continue
         conv_node = maybe_conv_node
+
+        if len(conv_node.users) > 1:
+            # relu shouldn't be fuseable to conv if there are other users
+            # of convolution
+            continue
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
@@ -501,6 +511,10 @@ def _do_annotate_conv_bn(
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(gm)
+
     matches = []
     if is_conv_transpose:
         combinations = [
@@ -523,7 +537,7 @@ def _do_annotate_conv_bn(
     # Match against all conv dimensions and cuda variants
     for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
         pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda, using_training_ir=using_training_ir)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
@@ -734,6 +748,12 @@ def _annotate_add_relu(
             continue
 
         add_node = maybe_add
+
+        if len(add_node.users) > 1:
+            # add can't be fused with ReLU if the result of add is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, add_node]
 
         if _is_annotated(partition):
@@ -856,6 +876,11 @@ def _annotate_mul_relu(
             continue
 
         mul_node = maybe_mul
+        if len(mul_node.users) > 1:
+            # mul can't be fused with ReLU if the result of mul is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, mul_node]
 
         if _is_annotated(partition):
@@ -979,13 +1004,14 @@ def _annotate_cat(
         inputs = cat_node.args[0]
 
         input_qspec_map = {}
-        input_act0 = inputs[0]
+        input_act0 = inputs[0]  # type: ignore[index]
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
-        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
-        for input_act in inputs[1:]:
-            input_qspec_map[input_act] = shared_with_input0_qspec
+        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
+        for input_act in inputs[1:]:  # type: ignore[index]
+            if input_act not in input_qspec_map:
+                input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 
@@ -999,6 +1025,7 @@ def _annotate_cat(
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     return op in [
+        torch.ops.aten.relu.default,
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.hardtanh_.default,
         torch.ops.aten.max_pool2d.default,

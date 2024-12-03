@@ -123,8 +123,7 @@ bool test_mnist(
   torch::Device device(with_cuda ? torch::kCUDA : torch::kCPU);
   model->to(device);
 
-  for (const auto epoch : c10::irange(number_of_epochs)) {
-    (void)epoch; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto epoch : c10::irange(number_of_epochs)) {
     // NOLINTNEXTLINE(performance-for-range-copy)
     for (torch::data::Example<> batch : *data_loader) {
       auto data = batch.data.to(device);

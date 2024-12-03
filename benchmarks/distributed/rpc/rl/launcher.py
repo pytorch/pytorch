@@ -209,9 +209,8 @@ def main():
         x_axis_variables
     ):  # run benchmark for every x axis variable
         if len(x_axis_variables) > 1:
-            args[
-                args["x_axis_name"]
-            ] = x_axis_variable  # set x axis variable for this benchmark iteration
+            # set x axis variable for this benchmark iteration
+            args[args["x_axis_name"]] = x_axis_variable
         processes = []
         start_time = time.time()
         for rank in range(args["world_size"]):

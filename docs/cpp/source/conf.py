@@ -123,7 +123,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2022, PyTorch Contributors"
+copyright = "2024, PyTorch Contributors"
 author = "PyTorch Contributors"
 
 # The version info for the project you're documenting, acts as replacement for

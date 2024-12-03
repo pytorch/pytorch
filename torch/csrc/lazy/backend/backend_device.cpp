@@ -7,8 +7,7 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <optional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 BackendDevice::BackendDevice()
     : type_(getBackend()->GetDefaultDeviceType()),
@@ -51,7 +50,8 @@ BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
 c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
-  return c10::Device(at::kLazy, device.ordinal());
+  return c10::Device(
+      at::kLazy, static_cast<c10::DeviceIndex>(device.ordinal()));
 }
 
 std::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
@@ -77,7 +77,7 @@ std::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
 std::optional<BackendDevice> GetBackendDevice(
     const std::optional<c10::Device>& device) {
   if (device) {
-    return std::make_optional(atenDeviceToBackendDevice(*device));
+    return atenDeviceToBackendDevice(*device);
   }
   return std::nullopt;
 }
@@ -86,5 +86,4 @@ std::optional<BackendDevice> GetBackendDevice() {
   return std::nullopt;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

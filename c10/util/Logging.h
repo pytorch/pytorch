@@ -322,8 +322,8 @@ C10_API const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)                        \
-  C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
+#define C10_LOG_API_USAGE_ONCE(...)                              \
+  [[maybe_unused]] static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
 // API usage logging capabilities

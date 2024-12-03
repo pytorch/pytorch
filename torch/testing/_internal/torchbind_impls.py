@@ -75,6 +75,7 @@ def register_fake_operators():
 
 
 def register_fake_classes():
+    # noqa: F841
     @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
     class FakeFoo:
         def __init__(self, x: int, y: int):
