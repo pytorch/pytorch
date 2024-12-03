@@ -37,11 +37,11 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp._common_utils import TrainingState
-from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
-from torch.distributed.fsdp.fully_shard._fsdp_param_group import (
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     MixedPrecision,

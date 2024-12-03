@@ -15,7 +15,7 @@ from torch.distributed.distributed_c10d import (
     Work,
 )
 from torch.distributed.fsdp import FSDPModule
-from torch.distributed.fsdp.fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.futures import Future
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
