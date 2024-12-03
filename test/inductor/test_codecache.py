@@ -450,7 +450,7 @@ class TestFxGraphCache(TestCase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         block_mask = create_block_mask(
-            lambda b, h, q, kv: q >= kv, None, None, 2048, 2048
+            lambda b, h, q, kv: q >= kv, None, None, 512, 512
         )
 
         def score_mod(score, b, h, q, kv):
