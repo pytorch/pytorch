@@ -45,7 +45,7 @@ from .codegen.triton import (
 )
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
-from .ir import ChoiceCaller, PrimitiveInfoType
+from .ir import ChoiceCaller, NoneAsConstantBuffer, PrimitiveInfoType
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .utils import (
@@ -1283,7 +1283,7 @@ def get_env_num_workers() -> Optional[int]:
 
 
 def create_inputs_key(input_nodes) -> str:
-    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes if not isinstance(x, NoneAsConstantBuffer)])
 
 
 def create_precompile_key(
@@ -1575,6 +1575,7 @@ class AlgorithmSelectorCache(PersistentCache):
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
                 for i, x in enumerate(input_nodes)
+                if not isinstance(x, NoneAsConstantBuffer)
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
@@ -1598,6 +1599,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 )
                 for input_node in input_nodes
+                if not isinstance(input_node, NoneAsConstantBuffer)
             ]
             out = cls.benchmark_example_value(layout)
             out_extern = torch.as_strided(
@@ -1728,6 +1730,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 )
                 for n in input_nodes
+                if not isinstance(n, NoneAsConstantBuffer)
             ]
         )
         if config.autotune_num_choices_displayed == 0:

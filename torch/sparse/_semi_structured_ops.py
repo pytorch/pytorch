@@ -180,18 +180,31 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
     # only cuSPARSELt supports float8_e4m3fn currentl
-    assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
-    assert A.packed is not None
-    # Currently we only support per-tensor scaling, with float32 scales
-    assert A_scale.numel() == 1 and B_scale.numel() == 1
-    assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
+    if isinstance(A, torch.sparse.SparseSemiStructuredTensor):
+        assert A.packed is not None
+        # Currently we only support per-tensor scaling, with float32 scales
+        assert A_scale.numel() == 1 and B_scale.numel() == 1
+        assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
 
-    # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
-    # Note that this limits us to per-tensor scalig only.
-    sparse_result = torch._cslt_sparse_mm(
-        A.packed,
-        B,
-        alpha=A_scale * B_scale,
-        out_dtype=out_dtype,
-    )
+        # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
+        # Note that this limits us to per-tensor scalig only.
+        sparse_result = torch._cslt_sparse_mm(
+            A.packed,
+            B,
+            out_dtype=out_dtype,
+        ) * A_scale * B_scale
+    else:
+        assert isinstance(B, torch.sparse.SparseSemiStructuredTensor)
+        assert B.packed is not None
+        sparse_result = torch._cslt_sparse_mm(
+            B.packed,
+            A.t(),
+            out_dtype=out_dtype,
+            bias=bias,
+            transpose_result=B.fuse_transpose_cusparselt,
+        )
+        sparse_result = (
+            sparse_result if B.fuse_transpose_cusparselt else sparse_result.t()
+        )
+        return sparse_result * B_scale * A_scale
     return sparse_result
