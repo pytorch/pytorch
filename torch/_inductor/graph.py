@@ -1883,9 +1883,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
-                        materialize(x)
+                        materialize(x)  # type:ignore[arg-type]
                         for x in (
-                            self.example_inputs
+                            self.example_inputs  # type:ignore[union-attr]
                             if isinstance(V.real_inputs, NullHandler)
                             else V.real_inputs
                         )
