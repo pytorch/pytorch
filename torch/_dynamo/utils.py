@@ -1108,7 +1108,7 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self):
+    def get_stack(self) -> List[str]:
         """
         The main event stack, with every chromium event.
         Logged to tlparse.
@@ -1119,7 +1119,7 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_top(self) -> str:
+    def get_top(self) -> Optional[str]:
         """
         Get the top event name or None if the stack is empty.
         """
