@@ -1666,6 +1666,7 @@ def _backward_prologue_functional(
 
     return all_args
 
+
 def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
@@ -1680,10 +1681,7 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
 
     # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
     if maybe_subclass_metadata is not None:
-        assert (
-            maybe_subclass_metadata.grad_input_metas
-            is not None
-        )
+        assert maybe_subclass_metadata.grad_input_metas is not None
         outs_wrapped = wrap_tensor_subclasses(
             out,
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
@@ -1721,6 +1719,10 @@ class AOTDispatchAutograd:
             runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
 
         def maybe_coerce(x):
+            # TODO(xmfan): make this function traceable
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                return x
+
             same_type: bool = expected_type == runtime_type
             same_meta: bool = expected_meta == runtime_meta
 
@@ -1799,7 +1801,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -1944,7 +1945,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def impl_fn(double_ctx=None):
                     out = CompiledFunction._backward_impl(ctx, all_args)
-                    return _backward_epilogue_functional(CompiledFunction.metadata, CompiledFunction.maybe_subclass_metadata, out)
+                    return _backward_epilogue_functional(
+                        CompiledFunction.metadata,
+                        CompiledFunction.maybe_subclass_metadata,
+                        out,
+                    )
 
                 needs_grad = torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
@@ -1962,7 +1967,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
                     _aot_id = aot_config.aot_id
 
                     @staticmethod

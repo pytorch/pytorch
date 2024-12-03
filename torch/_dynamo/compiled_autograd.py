@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
+    call_aot_bwd_impl,
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
@@ -200,25 +201,117 @@ class AutogradCompilerInstance:
         )
         return inputs, sizes, scalars
 
+    def proxy_call_aot_backward(
+        self,
+        pinputs,
+        psaved_tensors,
+        pctx,
+        ctx,
+    ):
+        psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+
+        # NOTE: we should only close over constants
+        CompiledFunction = ctx._forward_cls
+        metadata = CompiledFunction.metadata
+        maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
+        del CompiledFunction
+
+        @torch._dynamo.allow_in_graph  # type: ignore[misc]
+        def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
+            # TODO: backward state
+            out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
+                ctx_saved_tensors,
+                ctx_symints,
+                metadata,
+                maybe_subclass_metadata,
+                *flat_args,
+            )
+            return out
+
+        # def call_aot_bwd_prologue(
+        #     *args: Any,
+        # ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        #     all_args = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(fakectx, *args)
+
+        #     # non-traceable calls originally in call_aot_bwd_impl
+        #     if forward_cls._lazy_backward_info is None:
+        #         raise RuntimeError(
+        #             """This compiled backward function was saved by AOTAutogradCache, which does not support
+        #         compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+        #         )
+
+        #     # assert fakectx.symints is not None
+        #     # assert fakectx.bw_module is not None
+        #     if hasattr(forward_cls, "_backward_state_indices"):
+        #         # probably need to pass proxy to this func
+        #         assert fakectx._compiled_autograd_backward_state.proxy is not None
+        #         all_args.append(fakectx._compiled_autograd_backward_state)
+
+        #     return all_args
+
+        @torch._dynamo.allow_in_graph  # type: ignore[misc]
+        def call_aot_bwd_epilogue(
+            out: List[torch.Tensor],
+        ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+            return torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
+                metadata, maybe_subclass_metadata, out
+            )
+
+        pall_args = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_prologue,
+            args=(
+                psaved_tensors,
+                psymints,
+                *pinputs,
+            ),
+            kwargs={},
+        )
+        pout = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_impl,
+            args=(
+                pctx,
+                psaved_tensors,
+                pall_args,
+            ),
+            kwargs={},
+        )
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_epilogue,
+            args=(pout,),
+            kwargs={},
+        )
+        return proxies
+
     def proxy_call_backward(
         self,
         inputs,
         output_metadatas,
         saved_tensors,
         backward_idx: int,
+        ctx: torch.autograd.function.BackwardCFunction,
     ):
         assert self.hooks_proxy is not None
-        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
-        proxies = self.fx_tracer.create_proxy(
-            kind="call_function",
-            target=call_backward,
-            args=(
-                backward_c_function,
-                self.to_proxy(saved_tensors),
-                *self.to_proxy(inputs),
-            ),
-            kwargs={},
-        )
+        pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        pinputs = self.to_proxy(inputs)
+        psaved_tensors = self.to_proxy(saved_tensors)
+        if hasattr(ctx._forward_cls, "_aot_id"):  # type: ignore[attr-defined]
+            # AOT backward
+            proxies = self.proxy_call_aot_backward(pinputs, psaved_tensors, pctx, ctx)
+        else:
+            proxies = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=call_backward,
+                args=(
+                    pctx,
+                    psaved_tensors,
+                    *pinputs,
+                ),
+                kwargs={},
+            )
+        assert proxies is not None
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
