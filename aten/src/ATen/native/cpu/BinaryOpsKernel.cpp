@@ -81,6 +81,12 @@ void atan2_kernel(TensorIteratorBase& iter) {
 }
 
 #if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INTEGRAL_TYPES_V2(TYPE, NAME, ...)  \
+  AT_DISPATCH_V2(                                        \
+      TYPE,                                              \
+      NAME,                                              \
+      AT_WRAP(__VA_ARGS__),                              \
+      AT_EXPAND(AT_INTEGRAL_TYPES_V2))
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...) \
   AT_DISPATCH_V2(                \
       TYPE,                                              \
@@ -104,6 +110,8 @@ void atan2_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),       \
       kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
+#define _AT_DISPATCH_INTEGRAL_TYPES_V2(TYPE, NAME, ...)  \
+  AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, __VA_ARGS__)
 #define _AT_DISPATCH_ALL_TYPES_AND_BOOL(TYPE, NAME, ...) \
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                \
       kComplexHalf, kHalf, kBool, kBFloat16, TYPE, NAME, __VA_ARGS__)
@@ -264,7 +272,7 @@ inline Vectorized<scalar_t> div_floor_floating_vec(
   floordiv = vec_t::blendv(floordiv, zero.copysign(basic_div), div == zero);
   floordiv = vec_t::blendv(floordiv, basic_div, b == zero);
   return floordiv;
-};
+}
 
 void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
@@ -382,7 +390,7 @@ void bitwise_and_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) { return a && b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_and_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_and_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a & b; },
@@ -395,7 +403,7 @@ void bitwise_or_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) { return a || b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_or_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_or_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a | b; },
@@ -410,7 +418,7 @@ void bitwise_xor_kernel(TensorIteratorBase& iter) {
     // this operation for both Boolean and integral types.
     cpu_kernel(iter, [](bool a, bool b) { return a != b; });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cpu", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES_V2(iter.dtype(), "bitwise_xor_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return a ^ b; },
@@ -733,7 +741,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
 
 void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   if (iter.dtype() == kBFloat16) {
-    const float beta_val(beta);
+    const float beta_val(static_cast<float>(beta));
     const Vectorized<float> beta_val_vec(beta_val);
     const Vectorized<float> point_five_vec(static_cast<float>(0.5));
     cpu_kernel_vec(
@@ -951,13 +959,7 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
 }
 
 void mse_kernel(TensorIteratorBase& iter) {
-  if (iter.dtype() == ScalarType::Half) {
-    TORCH_WARN_ONCE(
-        "Applying the CPU mse kernel on half-type tensors. "
-        "This may be slower than using float or double-type tensors.");
-  }
-
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -1367,72 +1369,72 @@ void shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
 
 } // namespace
 
-REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
-REGISTER_DISPATCH(mul_stub, &mul_kernel);
-REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
-REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
-REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel);
-REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
-REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
-REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
-REGISTER_DISPATCH(lshift_stub, &lshift_kernel);
-REGISTER_DISPATCH(rshift_stub, &rshift_kernel);
-REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
-REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
-REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
-REGISTER_DISPATCH(lt_stub, &lt_kernel);
-REGISTER_DISPATCH(le_stub, &le_kernel);
-REGISTER_DISPATCH(gt_stub, &gt_kernel);
-REGISTER_DISPATCH(ge_stub, &ge_kernel);
-REGISTER_DISPATCH(eq_stub, &eq_kernel);
-REGISTER_DISPATCH(ne_stub, &ne_kernel);
-REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
-REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
-REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
-REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
-REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
-REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
-REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
-REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
-REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
-REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
-REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
-REGISTER_DISPATCH(zeta_stub, &zeta_kernel);
-REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
-REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
-REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel);
-REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_kernel);
-REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel);
-REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel);
-REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel);
+REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel)
+REGISTER_DISPATCH(mul_stub, &mul_kernel)
+REGISTER_DISPATCH(div_true_stub, &div_true_kernel)
+REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel)
+REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel)
+REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel)
+REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel)
+REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel)
+REGISTER_DISPATCH(lshift_stub, &lshift_kernel)
+REGISTER_DISPATCH(rshift_stub, &rshift_kernel)
+REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel)
+REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel)
+REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel)
+REGISTER_DISPATCH(lt_stub, &lt_kernel)
+REGISTER_DISPATCH(le_stub, &le_kernel)
+REGISTER_DISPATCH(gt_stub, &gt_kernel)
+REGISTER_DISPATCH(ge_stub, &ge_kernel)
+REGISTER_DISPATCH(eq_stub, &eq_kernel)
+REGISTER_DISPATCH(ne_stub, &ne_kernel)
+REGISTER_DISPATCH(maximum_stub, &maximum_kernel)
+REGISTER_DISPATCH(minimum_stub, &minimum_kernel)
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel)
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel)
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel)
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel)
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel)
+REGISTER_DISPATCH(gcd_stub, &gcd_kernel)
+REGISTER_DISPATCH(lcm_stub, &lcm_kernel)
+REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel)
+REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel)
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel)
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_v_stub, &chebyshev_polynomial_v_kernel)
+REGISTER_DISPATCH(chebyshev_polynomial_w_stub, &chebyshev_polynomial_w_kernel)
+REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel)
+REGISTER_DISPATCH(legendre_polynomial_p_stub, &legendre_polynomial_p_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_t_stub,
-    &shifted_chebyshev_polynomial_t_kernel);
+    &shifted_chebyshev_polynomial_t_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_u_stub,
-    &shifted_chebyshev_polynomial_u_kernel);
+    &shifted_chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_v_stub,
-    &shifted_chebyshev_polynomial_v_kernel);
+    &shifted_chebyshev_polynomial_v_kernel)
 REGISTER_DISPATCH(
     shifted_chebyshev_polynomial_w_stub,
-    &shifted_chebyshev_polynomial_w_kernel);
+    &shifted_chebyshev_polynomial_w_kernel)
 // Might enable AVX512 dispatch after enabling explicit vectorization for them.
-REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel);
-REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel);
-REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel);
+REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
+REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)
+REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel)
 
-ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(huber_stub, &huber_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logit_backward_stub, &logit_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(mse_stub, &mse_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logaddexp_stub, &logaddexp_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(huber_stub, &huber_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logit_backward_stub, &logit_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(tanh_backward_stub, &tanh_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(mse_stub, &mse_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logaddexp_stub, &logaddexp_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel)
 
 } // namespace at::native

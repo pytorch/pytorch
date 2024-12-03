@@ -13,24 +13,19 @@ https://github.com/pytorch/pytorch/blob/6aa5bb1a76dee8112f1a9e7c194c790b5cdc6462
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import logging
 import math
 import operator
 import types
-import typing
-from typing import Callable, Literal, Mapping, Union
+from typing import Callable, Literal, Union
 from typing_extensions import TypeAlias
 
 import torch
 import torch._ops
+from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
-
-
-if typing.TYPE_CHECKING:
-    import onnxscript
-    from onnxscript.function_libs.torch_lib import registration as torchlib_registration
-
-_DEFAULT_OPSET_VERSION = 18
+from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
 
 TorchOp: TypeAlias = Union[torch._ops.OpOverload, types.BuiltinFunctionType, Callable]
@@ -49,7 +44,7 @@ class OnnxDecompMeta:
     device: The device the function is registered to. If None, it is registered to all devices.
     """
 
-    onnx_function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction
+    onnx_function: Callable
     fx_target: TorchOp
     is_custom: bool = False
     is_complex: bool = False
@@ -67,18 +62,9 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
     if namespace == "math":
         return getattr(math, op_name)
     if namespace == "torchvision":
-        try:
-            import torchvision.ops  # type: ignore[import-untyped]
-        except ImportError:
+        if importlib.util.find_spec("torchvision") is None:
             logger.warning("torchvision is not installed. Skipping %s", qualified_name)
             return None
-        try:
-            return getattr(torchvision.ops, op_name)
-        except AttributeError:
-            logger.warning("Failed to find torchvision op '%s'", qualified_name)
-            return None
-        except Exception:
-            logger.exception("Failed to find torchvision op '%s'", qualified_name)
     try:
         op_packet = getattr(getattr(torch.ops, namespace), op_name)
         if maybe_overload:
@@ -118,80 +104,73 @@ class ONNXRegistry:
 
     def __init__(self) -> None:
         """Initializes the registry"""
-
-        # TODO: Design multi-opset version support
-        self._opset_version = _DEFAULT_OPSET_VERSION
-
+        self._opset_version = onnxscript_apis.torchlib_opset_version()
         self.functions: dict[TorchOp | str, list[OnnxDecompMeta]] = {}
 
     @property
     def opset_version(self) -> int:
-        """The ONNX opset version the exporter should target.
-
-        Defaults to the latest supported ONNX opset version: 18.
-        The default version will increment over time as ONNX continues to evolve.
-        """
-
+        """The ONNX opset version the exporter should target."""
         return self._opset_version
 
     @classmethod
-    def from_torchlib(
-        cls,
-        torchlib_registry: Mapping[str, torchlib_registration.OverloadedFunction]
-        | None = None,
-    ) -> ONNXRegistry:
+    def from_torchlib(cls) -> ONNXRegistry:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         registry = cls()
-        if torchlib_registry is None:
-            from onnxscript.function_libs.torch_lib import (
-                registration as torchlib_registration,
-            )
 
-            torchlib_registry = torchlib_registration.default_registry  # type: ignore[assignment]
-        for qualified_name, aten_overloads_func in torchlib_registry.items():  # type: ignore[union-attr]
+        torchlib_ops = onnxscript_apis.get_torchlib_ops()
+
+        for meta in torchlib_ops:
+            qualified_name = meta.qualified_name
+            overload_func = meta.function
+            domain = meta.domain
+            name = meta.name
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
-                if qualified_name.startswith("internal::"):
-                    # Skip the custom defined internal functions
-                    continue
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
-                for overload_func in aten_overloads_func.overloads:
-                    overload_func.signature = _schemas.OpSignature.from_function(
-                        overload_func,
-                        overload_func.function_ir.domain,
-                        overload_func.name,
-                    )
-                    onnx_decomposition = OnnxDecompMeta(
-                        onnx_function=overload_func,
-                        fx_target=target,
-                        is_custom=False,
-                        is_complex=False,
-                    )
-                    registry._register(target, onnx_decomposition)
 
-                for complex_func in aten_overloads_func.complex:
-                    overload_func.signature = _schemas.OpSignature.from_function(
-                        overload_func,
-                        overload_func.function_ir.domain,
-                        overload_func.name,
-                    )
-                    onnx_decomposition = OnnxDecompMeta(
-                        onnx_function=complex_func,
-                        fx_target=target,
-                        is_custom=False,
-                        is_complex=True,
-                    )
-                    registry._register(target, onnx_decomposition)
+                if isinstance(overload_func, onnxscript.OnnxFunction):
+                    opset_version = overload_func.opset.version
+                else:
+                    opset_version = 1
+
+                overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                    overload_func,
+                    domain,
+                    name,
+                    opset_version=opset_version,
+                )
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=overload_func,
+                    fx_target=target,
+                    is_custom=False,
+                    is_complex=meta.is_complex,
+                )
+                registry._register(target, onnx_decomposition)
             except Exception:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
+
+        # Gather ops from the internal torchlib registry
+        # TODO(justinchuby): Make this the main registry after torchlib is migrated to PyTorch
+        # Trigger registration
+        from torch.onnx._internal.exporter._torchlib import ops
+
+        del ops
+        for target, implementations in _torchlib_registry.registry.items():  # type: ignore[assignment]
+            for impl in implementations:
+                onnx_decomposition = OnnxDecompMeta(
+                    onnx_function=impl,
+                    fx_target=target,  # type: ignore[arg-type]
+                )
+                registry._register(target, onnx_decomposition)  # type: ignore[arg-type]
+
         return registry
 
     def _register(
@@ -220,7 +199,7 @@ class ONNXRegistry:
     def register_op(
         self,
         target: TorchOp,
-        function: onnxscript.OnnxFunction | onnxscript.TracedOnnxFunction,
+        function: Callable,
         is_complex: bool = False,
     ) -> None:
         """Registers a custom operator: torch.ops.<namespace>.<op_name>.<overload>.
@@ -230,6 +209,25 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
+        if not hasattr(function, "signature"):
+            try:
+                # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
+                if isinstance(function, onnxscript.OnnxFunction):
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        function,
+                        function.function_ir.domain,
+                        function.name,
+                        opset_version=function.opset.version,
+                    )
+                else:
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                        function, "__custom", function.__name__
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to infer the signature for function '%s'", function
+                )
+
         onnx_decomposition = OnnxDecompMeta(
             onnx_function=function,
             fx_target=target,

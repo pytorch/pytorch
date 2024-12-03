@@ -29,6 +29,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
+# Enable Autograd caching
+if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
+    torch._functorch.config.enable_autograd_cache = True
+
 
 def _reassign_parameters(model):
     # torch_geometric models register parameter as tensors due to
@@ -56,6 +60,9 @@ def setup_torchbench_cwd():
         "../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
+        "../../../torchbenchmark",
+        "../../../torchbench",
+        "../../../benchmark",
     ):
         if exists(torchbench_dir):
             break
@@ -135,8 +142,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
-    def skip_models_for_freezing(self):
-        return self._skip["freezing"]
+    def skip_models_for_freezing_cuda(self):
+        return self._skip["freezing"]["cuda"]
+
+    @property
+    def skip_models_for_freezing_cpu(self):
+        return self._skip["freezing"]["cpu"]
 
     @property
     def slow_models(self):

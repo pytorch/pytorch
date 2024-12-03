@@ -106,7 +106,7 @@ bool is_fast_path(const Tensor& src, const std::optional<Tensor>& scale, Tensor&
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
 template <typename data_t, typename index_t>
-static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -184,10 +184,9 @@ void fbgemm_spmdm_report_error_(
 } // namespace
 
 template <typename data_t, typename index_t>
-typename std::enable_if<
-    std::is_same<data_t, at::Half>::value ||
-        std::is_same<data_t, at::BFloat16>::value,
-    void>::type
+std::enable_if_t<
+    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
+    void>
 index_select_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -281,7 +280,7 @@ index_select_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same_v<data_t, at::Half>) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -366,7 +365,7 @@ index_select_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if<std::is_same<data_t, float>::value, void>::type
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
@@ -493,7 +492,7 @@ index_select_add(const Tensor &select_indices,
 // mul (scaling by per_sample_weights)
 // index_add (using add_indices as the index)
 template <typename data_t, typename index_t>
-static typename std::enable_if<std::is_same<data_t, double>::value, void>::type
+static std::enable_if_t<std::is_same_v<data_t, double>, void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -548,10 +547,9 @@ index_select_scale_add(
 }
 
 template <typename data_t, typename index_t>
-typename std::enable_if<
-    std::is_same<data_t, at::Half>::value ||
-        std::is_same<data_t, at::BFloat16>::value,
-    void>::type
+std::enable_if_t<
+    std::is_same_v<data_t, at::Half> || std::is_same_v<data_t, at::BFloat16>,
+    void>
 index_select_scale_add(
     const Tensor& select_indices,
     const Tensor& add_indices,
@@ -664,7 +662,7 @@ index_select_scale_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same_v<data_t, at::Half>) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -741,7 +739,7 @@ index_select_scale_add(
   }
 }
 template<typename data_t, typename index_t>
-typename std::enable_if<std::is_same<data_t, float>::value, void>::type
+std::enable_if_t<std::is_same_v<data_t, float>, void>
 index_select_scale_add(const Tensor &select_indices,
                                           const Tensor &add_indices,
                                           const Tensor &scale,
@@ -1253,7 +1251,7 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
   }
   return out;
-};
+}
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
@@ -1504,7 +1502,7 @@ template <typename scalar_t>
 void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
-    const Tensor& offset2bag__,
+    const Tensor& offset2bag_,
     const Tensor& bag_size_,
     int64_t num_weights,
     bool scale_grad_by_freq,
@@ -1513,12 +1511,9 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     Tensor& index_grad_weight,
     int64_t padding_idx) {
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
-
   auto ind_sort_ = indices_.sort();
-  auto indices = std::get<0>(ind_sort_);
-  auto ind_sort = std::get<1>(ind_sort_);
+  auto const& indices = std::get<0>(ind_sort_);
+  auto const& ind_sort = std::get<1>(ind_sort_);
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
   std::optional<Tensor> per_sample_weights;
@@ -1761,8 +1756,6 @@ Tensor _embedding_bag_sparse_backward_symint(
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);
 
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);

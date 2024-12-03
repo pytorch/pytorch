@@ -9,10 +9,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 static std::atomic<bool> cuda_fusion_guard_mode{true};
 
@@ -131,7 +128,4 @@ bool skipNode(const std::string& symbol_str, bool flip) {
       getFuserInterface()->fn_skip_n(symbol_str, flip);
 }
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

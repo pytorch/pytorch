@@ -41,6 +41,6 @@ void argmax_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
+REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda)
 
 } // namespace at::native

@@ -82,7 +82,6 @@ namespace at::meta {
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
   TORCH_CHECK(type != ScalarType::Bool &&
-      type != ScalarType::BFloat16 &&
       type != ScalarType::ComplexFloat &&
       type != ScalarType::ComplexDouble,
       "Unsupported input type encountered for isin(): ", type);
@@ -585,8 +584,8 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim,
                                        Tensor& values, Tensor& indices) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "mode only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              "mode only supports CPU, CUDA and XPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.device() == values.device(),

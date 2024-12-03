@@ -313,8 +313,6 @@ Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
   return rtensor;
 }
 
-Quantizer::~Quantizer() = default;
-
 C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);
 }
@@ -367,9 +365,7 @@ Tensor from_blob_quantized_per_tensor_affine(
   const auto ndim = sizes.size();
   if (ndim > 0) {
     strides.resize(ndim);
-    // NOLINTNEXTLINE
-    int32_t i = ndim - 1;
-    // NOLINTNEXTLINE
+    int64_t i = static_cast<int64_t>(ndim - 1);
     strides[i] = 1;
     while (--i >= 0) {
       strides[i] = sizes[i + 1] * strides[i + 1];

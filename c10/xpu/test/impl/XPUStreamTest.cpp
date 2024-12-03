@@ -115,7 +115,7 @@ TEST(XPUStreamTest, StreamPoolRoundRobinTest) {
   }
 
   std::vector<c10::xpu::XPUStream> streams{};
-  for (C10_UNUSED const auto _ : c10::irange(200)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(200)) {
     streams.emplace_back(c10::xpu::getStreamFromPool());
   }
 
