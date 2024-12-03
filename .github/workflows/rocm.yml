@@ -43,6 +43,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.2" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.2" },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-test:
     permissions:
@@ -57,3 +58,4 @@ jobs:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
+    secrets: inherit

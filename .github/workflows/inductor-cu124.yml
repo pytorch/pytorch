@@ -23,6 +23,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: inductor-unittest
     uses: ./.github/workflows/inductor-cu124-unittest.yml
+    secrets: inherit
 
   get-default-label-prefix:
     name: get-default-label-prefix

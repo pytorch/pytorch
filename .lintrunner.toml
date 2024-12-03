@@ -365,6 +365,16 @@ init_command = [
 is_formatter = true
 
 [[linter]]
+code = 'GHA'
+include_patterns=['.github/workflows/**/*.yml']
+command = [
+    'python3',
+    'tools/linter/adapters/gha_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'NEWLINE'
 include_patterns=['**']
 exclude_patterns=[

@@ -200,6 +200,8 @@ jobs:
           { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
+    secrets: inherit
+
   linux-focal-py3_9-clang10-test:
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-test.yml
