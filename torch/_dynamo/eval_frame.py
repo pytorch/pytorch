@@ -1112,8 +1112,8 @@ class ExportResult(NamedTuple):
 def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
-        assert "grapharg" in node.meta and node.meta["grapharg"] is not None
-        source = node.meta["grapharg"].source
+        assert "_dynamo_source" in node.meta
+        source = node.meta["_dynamo_source"]
         assert "_source_to_user_stacks" in graph.meta
         user_stacks = graph.meta["_source_to_user_stacks"].get(source)
         if user_stacks is None:

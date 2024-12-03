@@ -1417,6 +1417,8 @@ class OutputGraph:
             if node.op == "placeholder":
                 placeholders.append(node)
         increment_op_count(tot)
+        for pl in placeholders:
+            pl.meta["_dynamo_source"] = pl.meta["grapharg"].source
 
         gm.meta["_param_name_to_source"] = self.param_name_to_source
         gm.meta["_source_to_user_stacks"] = self.source_to_user_stacks
