@@ -1,10 +1,12 @@
 # Owner(s): ["module: inductor"]
+import enum
 import itertools
 import logging
 import os
 import sys
 import tempfile
 import unittest
+from enum import auto
 from typing import Dict, Tuple
 from unittest import skip
 
@@ -50,7 +52,6 @@ from torch.utils._triton import has_triton_tma
 
 if HAS_CUDA:
     import triton  # @manual
-    from triton import language as tl
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -63,6 +64,7 @@ if HAS_CUDA:
         add_kernel_with_tma_2d,
         mul2_inplace_kernel,
     )
+    from triton import language as tl
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -3865,6 +3867,26 @@ class AOTInductorTestsTemplate:
         bs = torch.export.Dim("bs", max=12)
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
+
+    def test_enum_in_input(self):
+        class TestEnum(enum.Enum):
+            A = auto()
+
+
+        class Model(torch.nn.Module):
+            def forward(self, enum_dict):
+                return enum_dict[TestEnum.A]
+
+
+        example_inputs = (
+            {TestEnum.A: torch.rand(10, device=self.device)},
+        )
+        # TODO: refactor to use the same API 
+        # currently using self.check_model would result in pytree errors
+        ep = torch.export.export(Model(), example_inputs)
+        path = torch._inductor.aot_compile(ep.module(), example_inputs)
+        aot_model = torch._export.aot_load(path, "cuda")
+        aot_model(*example_inputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
