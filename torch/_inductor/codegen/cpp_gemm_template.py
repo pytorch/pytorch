@@ -308,8 +308,8 @@ def transpose_w(
 
 
 def expand_bias(
-    B: Union[ir.IRNode, torch.Tensor], X: Union[ir.IRNode, torch.Tensor]
-) -> Union[ir.IRNode, torch.Tensor]:
+    B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
+) -> Optional[Union[ir.IRNode, torch.Tensor]]:
     """
     Expand Bias to the same size of X.
     """
@@ -870,7 +870,7 @@ class CppPackedGemmTemplate(CppTemplate):
             W = new_inputs[1]
             B = new_inputs[2] if has_bias else None
             W = transpose_w(W, trans_w)
-            B = expand_bias(B, X)
+            B = expand_bias(B, X)  # type:ignore[arg-type]
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B
