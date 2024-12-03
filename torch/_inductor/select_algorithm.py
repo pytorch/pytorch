@@ -216,7 +216,11 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         ), "Mask is required for inner stores in modifications"
         self.kernel.template_out = value
         self.kernel.template_mask = self.mask
-        return self._inner.store(name, index, value, mode)
+        #  Ensure all out_buf is added after
+        self._inner.store(name, index, value, mode)
+        val = self.kernel.args.output_buffers.pop("buf_out", None)
+        if val is not None:
+            self.kernel.args.output_buffers["buf_out"] = val
 
     def _add_kernel_input(self, name: str):
         """Add name as input to kernel and return input ref."""
