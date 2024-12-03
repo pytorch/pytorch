@@ -222,7 +222,7 @@ class TestSDPAXpuOnly(NNTestCase):
         k = torch.randn(b, h, s_kv, d_qk, device=device, dtype=torch.bfloat16)
         v = torch.randn(b, h, s_kv, d_v, device=device, dtype=torch.bfloat16)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
@@ -366,8 +366,8 @@ class TestSDPAXpuOnly(NNTestCase):
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.OVERRIDEABLE.value
 
-    @parametrize("fused_kernel", [SDPBackend.MATH])
-    @parametrize("dtype", [torch.half])
+    @parametrize("fused_kernel", [SDPBackend.MATH, SDPBackend.OVERRIDEABLE])
+    @parametrize("dtype", [torch.half, torch.bfloat16, torch.float32])
     @parametrize("batch_size,n_head,q_size,kv_size,head_dim", [
         # (2, 5, 9216, 9216, 64),
         # (2, 5, 9216, 77, 64),
@@ -436,13 +436,15 @@ class TestSDPAXpuOnly(NNTestCase):
         k2 = k2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
         v2 = v2.view(batch_size, kv_size, n_head, head_dim).transpose(1, 2)
 
-        with sdpa_kernel(backends=[fused_kernel]):
+        if fused_kernel == SDPBackend.MATH:
+            actual = torch.ops.aten._scaled_dot_product_attention_math(
+                q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
+        elif fused_kernel == SDPBackend.OVERRIDEABLE:
             actual = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+
         math_ref = torch.ops.aten._scaled_dot_product_attention_math(
             q2, k2, v2, attn_mask=attn_mask.float(), dropout_p=0.0, is_causal=False)[0]
-
-        math_ref = math_ref.to(dtype)
 
         self.assertEqual(actual.float(), math_ref, atol=tol.atol, rtol=tol.rtol)
 
@@ -456,14 +458,15 @@ class TestSDPAXpuOnly(NNTestCase):
                     active=iter_n),
                 on_trace_ready=self.trace_handler()) as prof:
             for _ in range(iter_n * 2 + 2):
-                # actual = torch.ops.aten._scaled_dot_product_attention_math(
-                #     q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-                actual = torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-                # actual = torch._scaled_dot_product_efficient_attention(
-                #     q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=False, compute_log_sumexp=False)
-                # actual = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
-                #     q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=False)
+                if fused_kernel == SDPBackend.MATH:
+                    actual = torch.ops.aten._scaled_dot_product_attention_math(
+                        q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)[0]
+                elif fused_kernel == SDPBackend.OVERRIDEABLE:
+                    actual = torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                elif fused_kernel == SDPBackend.EFFICIENT_ATTENTION:
+                    actual = torch._scaled_dot_product_efficient_attention(
+                        q, k, v, attn_bias=attn_mask, dropout_p=0.0, is_causal=False, compute_log_sumexp=False)[0]
                 torch.xpu.synchronize()
                 prof.step()
 

@@ -181,18 +181,16 @@ TORCH_API void gpu_float_sdpa(
       {c10::kXPU, c10::xpu::current_device()});
   auto strm = GpuStreamManager::Instance().get_stream();
 
-  Tensor softmax_scale1 = at::full(
-      {},
-      1 / softmax_scale,
-      TensorOptions().dtype(c10::ScalarType::Half).device(DeviceType::XPU));
+  Tensor softmax_scale1 = at::full({}, 1 / softmax_scale, query.options());
 
   const data_type logical_tensor_dtype =
-      query.scalar_type() == c10::ScalarType::Float  ? data_type::f32
-      : query.scalar_type() == c10::ScalarType::Half ? data_type::f16
-                                                     : data_type::undef;
+      query.scalar_type() == c10::ScalarType::Float      ? data_type::f32
+      : query.scalar_type() == c10::ScalarType::Half     ? data_type::f16
+      : query.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
+                                                         : data_type::undef;
   TORCH_CHECK(
       (logical_tensor_dtype != data_type::undef),
-      "Only FP16 & FP32 datatypes are currently supported");
+      "Only FP16/BF16/FP32 datatypes are currently supported");
 
   thread_local static GraphCache cache;
 
@@ -202,8 +200,9 @@ TORCH_API void gpu_float_sdpa(
   if (logical_tensor_dtype == data_type::f32) {
     // bit 3 corresponds to float32 dtype
     patternID.set(3, 1);
-  } else {
-    // bit 2 corresponds to float16 dtype
+  }
+  if (logical_tensor_dtype == data_type::bf16) {
+    // bit 2 corresponds to fp16/bf16 dtype
     patternID.set(2, 1);
   }
   // sdp pattern
