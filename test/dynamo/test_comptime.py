@@ -35,7 +35,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         class mylist(list):
             pass
 
-        @torch._dynamo.optimize(cnt, dynamic=True)
+        @torch.compile(backend=cnt, dynamic=True)
         def f(x):
             y = x * 2
             comptime_print(y)
@@ -76,7 +76,7 @@ s0""",
         FILE = StringIO()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
 
@@ -105,7 +105,7 @@ def forward(self, L_x_ : torch.Tensor):
         FILE = StringIO()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
 
@@ -149,7 +149,7 @@ def forward(self, L_x_ : torch.Tensor):
 
             return x
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x + g(x)
 
@@ -160,7 +160,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- TensorVariable()
+- FakeTensor(..., size=(2,))
 """,
         )
 
@@ -169,7 +169,7 @@ def forward(self, L_x_ : torch.Tensor):
         FILE = StringIO()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
 
@@ -186,8 +186,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = TensorVariable()
-y = TensorVariable()
+x = FakeTensor(..., size=(2,))
+y = FakeTensor(..., size=(2,))
 """,
         )
 
@@ -195,7 +195,7 @@ y = TensorVariable()
     def test_print_direct(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x, z):
             y = x * 2
             lambda: z
@@ -208,7 +208,7 @@ y = TensorVariable()
         sleep_time = 5
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x, z, should_sleep):
             if should_sleep:
                 comptime.sleep(sleep_time)
@@ -233,7 +233,7 @@ y = TensorVariable()
         SELF = self
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             z = 3
 
@@ -265,7 +265,7 @@ y = TensorVariable()
 
             return x + 3
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
             y = g(y)
@@ -284,7 +284,7 @@ y = TensorVariable()
         FILE = StringIO()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
 
@@ -349,7 +349,7 @@ y = TensorVariable()
     def test_graph_break(self):
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
 
@@ -363,7 +363,7 @@ y = TensorVariable()
         self.assertEqual(cnt.frame_count, 1)
         cnt.frame_count = 0
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def g(x):
             y = x * 2
 
@@ -386,7 +386,7 @@ y = TensorVariable()
         FILE = StringIO()
         cnt = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnt)
+        @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
             lit = 2

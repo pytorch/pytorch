@@ -1,6 +1,22 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
+
+from sympy import Expr
+
+from torch import dtype as torch_dtype
+from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
@@ -14,7 +30,13 @@ from ...ir import (
 )
 from ...utils import sympy_product
 from ...virtualized import V
-from ..common import IndentedBuffer, Kernel, OpOverrides
+from ..common import (
+    IndentedBuffer,
+    Kernel,
+    OpOverrides,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 
@@ -30,12 +52,108 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
+ValidLayoutSymbols = Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
+ValidLayoutAttrs = Literal["size", "stride"]
+
+
+@dataclass(frozen=True)
+class LayoutArg:
+    node: IRNode
+    symbol: ValidLayoutSymbols
+    attr: ValidLayoutAttrs
+    dim: int
+
+    def matches(self, node, attr, dim) -> bool:
+        return self.node == node and self.attr == attr and self.dim == dim
+
+
 class CUDAKernel(Kernel):
     """
     Baseclass for CUDA / Cutlass based Kernels
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.layout_args: Dict[str, LayoutArg] = {}
+        # Mapping from arg name to IRNode.
+        self.named_nodes: Dict[str, IRNode] = {}
+
+    def find_symbol(
+        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
+    ) -> Optional[str]:
+        arg = self.find_layout_arg(node, attr, dim)
+        return arg.symbol if arg else None
+
+    def find_layout_arg(
+        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
+    ) -> Optional[LayoutArg]:
+        matches = [
+            arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
+        ]
+        assert len(matches) <= 1, matches
+        return None if len(matches) == 0 else matches[0]
+
+    def add_layout_arg(
+        self, symbol: ValidLayoutSymbols, node: IRNode, attr: ValidLayoutAttrs, dim: int
+    ):
+        arg = LayoutArg(node, symbol, attr, dim)
+        self.layout_args.setdefault(symbol, arg)
+
+    def init_layout_args(self) -> None:
+        X = self.named_nodes["X"]
+        W = self.named_nodes["W"]
+        Y = self.named_nodes["Y"]
+        Bias = self.named_nodes.get("Bias", None)
+        mdim = _normalize_idx(-2, len(X.get_size()))
+        ndim = _normalize_idx(-1, len(W.get_size()))
+        kdim = _normalize_idx(-1, len(X.get_size()))
+        self.add_layout_arg("M", X, "size", mdim)
+        self.add_layout_arg("N", X, "size", ndim)
+        self.add_layout_arg("K", X, "size", kdim)
+
+        lda_dim = self.find_ld_idx(X)
+        ldb_dim = self.find_ld_idx(W)
+        ldc_dim = self.find_ld_idx(Y)
+        ldd_dim = self.find_ld_idx(Bias) if Bias else None
+        self.add_layout_arg("lda", X, "stride", lda_dim)
+        self.add_layout_arg("ldb", W, "stride", ldb_dim)
+        self.add_layout_arg("ldc", Y, "stride", ldc_dim)
+        if Bias and ldd_dim:
+            self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
+
+    def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
+        X = self.named_nodes["X"]
+        W = self.named_nodes["W"]
+        Y = self.named_nodes["Y"]
+        Bias = self.named_nodes.get("Bias", None)
+        mdim = _normalize_idx(-2, len(X.get_size()))
+        ndim = _normalize_idx(-1, len(W.get_size()))
+        kdim = _normalize_idx(-1, len(X.get_size()))
+
+        def get_ld(node) -> Union[Expr, int]:
+            dim = self.find_ld_idx(node)
+            return node.get_stride()[dim]
+
+        M = X.get_size()[mdim]
+        N = W.get_size()[ndim]
+        K = X.get_size()[kdim]
+        LDA = get_ld(X)
+        LDB = get_ld(W)
+        LDC = get_ld(Y)
+        LDD = get_ld(Bias) if Bias else 0
+        return (M, N, K, LDA, LDB, LDC, LDD)
+
+    @staticmethod
+    def find_ld_idx(node: IRNode) -> int:
+        strides = node.get_stride()
+        # Handle 1D tensor case
+        if V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return _normalize_idx(-2, len(strides))
+
+        assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+        return _normalize_idx(-1, len(strides))
 
 
 class CUDATemplateKernel(CUDAKernel):
@@ -54,8 +172,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         super().__init__()
         self.kernel_name = kernel_name
-        # Mapping from arg name to IRNode.
-        self.named_nodes: Dict[str, IRNode] = {}
 
     def arg_name(self, node: IRNode) -> Optional[str]:
         """
@@ -71,7 +187,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         Generates code to check that a node is not null.
         """
-
         if node is None:
             return ""
 
@@ -96,6 +211,9 @@ class CUDATemplateKernel(CUDAKernel):
         )
         return res.getvalue()
 
+    def get_signature(self) -> str:
+        return self.signature
+
     def def_kernel(
         self,
         inputs: List[IRNode],
@@ -116,7 +234,6 @@ class CUDATemplateKernel(CUDAKernel):
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
         """
-
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
@@ -141,7 +258,15 @@ class CUDATemplateKernel(CUDAKernel):
                 self.args.output_buffers[node.get_name()] = name
 
         arg_defs, *_ = self.args.cpp_argdefs()
-        return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
+
+        self.init_layout_args()
+        size_args = [
+            f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
+        ]
+
+        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
+        self.signature = signature
+        return signature
 
     def call_kernel(
         self,
@@ -150,42 +275,74 @@ class CUDATemplateKernel(CUDAKernel):
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
-        used from within torch._inductor.wrapper.WrapperCodeGen
+        used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
         node: The CUDATemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+
+        if V.graph.cpp_wrapper:
+            # Make sure we initialize these kernels since they're exported as
+            # C-style symbol names.
+            assert isinstance(wrapper, CppWrapperCpu)
+            wrapper.initialized_kernels[name] = self
+            # We always originally initialize name with "KERNEL_NAME". So, we
+            # we replace with the real kernel name passed as an arg to this function.
+            self.signature = self.signature.replace("KERNEL_NAME", name)
+            _, call_args, arg_types = self.args.cpp_argdefs()
+        else:
+            _, call_args, _, arg_types = self.args.python_argdefs()
+
+        layout_args = self.get_layout_args()
+        call_args.extend(layout_args)
+        arg_types.extend("int" for a in layout_args)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-            else:
-                call_args[i] = f"c_void_p({call_args[i]}.data_ptr())"
+            elif isinstance(arg_types[i], torch_dtype):
+                call_args[i] = (
+                    call_args[i]
+                    if V.graph.cpp_wrapper
+                    else f"c_void_p({call_args[i]}.data_ptr())"
+                )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
-        call_args.append("None")
+        # workspace_size is here.
+        call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            wrapper.generate_workspace_allocation(
-                node.get_workspace_size(), V.graph.scheduler.current_device, False
+            ws = WorkspaceArg(
+                count=node.get_workspace_size(),
+                device=V.graph.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
             )
-            call_args.append("c_void_p(workspace.data_ptr())")
+            wrapper.generate_workspace_allocation(ws)
+            data_ptr = f"{ws.outer_name}.data_ptr()"
+            call_args.append(
+                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+            )
         else:
-            call_args.append("None")
+            ws = None
+            call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
+        if V.graph.cpp_wrapper:
+            arg_types.append("uint8_t*")
 
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=True,
+            gpu=True,
             triton=False,
             arg_types=arg_types,
         )
-        if node.get_workspace_size() > 0:
-            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
+        if ws:
+            wrapper.generate_workspace_deallocation(ws)
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """
@@ -220,7 +377,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         if node is None:
             return "0"
-        return str(node.get_layout().offset)
+        return str(node.get_layout().offset)  # type: ignore[union-attr]
 
     def ptr(self, node: IRNode) -> str:
         """
@@ -257,13 +414,15 @@ class CUDATemplateKernel(CUDAKernel):
         if end_index is None:
             end_index = start_index
         end_index = _normalize_idx(end_index, len(node.get_size()))
-
-        sizes = node.get_size()[start_index : end_index + 1]
+        sizes = [
+            self.find_symbol(node, "size", dim=i) or node.get_size()[i]
+            for i in range(start_index, end_index + 1)
+        ]
         if len(sizes) == 0:
             return str(default_value)
 
         val = sympy_product(sizes)
-        return cexpr(self.rename_indexing(val))
+        return val
 
     def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
         """
@@ -282,7 +441,9 @@ class CUDATemplateKernel(CUDAKernel):
             return str(default_value)
 
         stride = node.get_stride()[index]
-        return cexpr(self.rename_indexing(stride))
+        if V.graph.sizevars.statically_known_leq(stride, 1):
+            return str(stride)
+        return self.find_symbol(node, "stride", dim=index) or str(stride)
 
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """
@@ -331,8 +492,9 @@ class CUDATemplateCaller(ChoiceCaller):
         bmreq: CUDABenchmarkRequest,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        description: str,
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq

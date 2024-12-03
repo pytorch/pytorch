@@ -138,7 +138,7 @@ void _record_memory_history(
   } else if (record_context) {
     when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when);
@@ -189,7 +189,7 @@ void _record_memory_history(
       when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
     }
   }
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   _initRecordAnnotations();
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when);
