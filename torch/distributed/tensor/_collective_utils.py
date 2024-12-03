@@ -64,7 +64,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
-        return out.contiguous() if not out.is_contiguous() else out
+        return out.contiguous()
 
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
