@@ -1274,6 +1274,8 @@ def compile_fx_aot(
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: dict[str, str] | None = None,
 ) -> list[str] | str:
+    assert isinstance(model_, GraphModule), model_
+
     config_patches: dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
