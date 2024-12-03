@@ -436,7 +436,9 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
                 V.graph.module, node.name
             ):  # candidate tensor might already be deleted
                 comp_tensor = getattr(V.graph.module, node.name)
-                if share_storage(candidate_tensor, comp_tensor):
+                if isinstance(comp_tensor, torch.Tensor) and share_storage(
+                    candidate_tensor, comp_tensor
+                ):
                     candidate_tensor_users += 1
 
         for node in reversed(V.graph.graph.nodes):

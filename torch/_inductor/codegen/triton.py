@@ -155,14 +155,14 @@ class TritonSymbols:
 
     block_offsets = {
         symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
-        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, SymT.RINDEX]
     }
 
     block_sizes = {
         symt: sympy.Symbol(
             f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True
         )
-        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, SymT.RINDEX]
     }
 
     @classmethod
@@ -1564,7 +1564,7 @@ class TritonKernel(SIMDKernel):
             else:
                 # var is one of xN, yN or rN
                 assert symbol_is_type(
-                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK)
                 ), var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
