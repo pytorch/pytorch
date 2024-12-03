@@ -16240,12 +16240,11 @@ op_db: List[OpInfo] = [
         decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0'), ],
         skips=(
             # Sample inputs isn't really parametrized on dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda'),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-            #              device_type='cpu'),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-            #              device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # "add_stub" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
+                         device_type='cpu'),
             # "mul_cuda" not implemented for float8_e4m3fn
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
@@ -19202,15 +19201,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # "where_cpu" not implemented for float8_e4m3fn
-            #    DecorateInfo(unittest.expectedFailure, 'TestCommonCPU', 'test_python_ref',
-            #                 dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            #    DecorateInfo(unittest.expectedFailure, 'TestCommonCPU', 'test_python_ref_torch_fallback',
-            #                 dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            #    DecorateInfo(unittest.expectedFailure, 'TestCommonCPU', 'test_python_ref_meta',
-            #                 dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            #    DecorateInfo(unittest.expectedFailure, 'TestDecompCPU', 'test_comprehensive',
-            #                 dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
            )),
     OpInfo('empty_permuted',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -24515,14 +24505,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
-            #              dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
-            #              dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_meta',
-            #              dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
-            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
-            #              dtypes=(torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)),
         ),
     ),
     PythonRefInfo(
