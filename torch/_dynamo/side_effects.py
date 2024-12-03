@@ -19,7 +19,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
-from .source import GlobalSource, LocalSource, Source
+from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -158,12 +158,12 @@ class SideEffects:
     def store_cell(self, cellvar, value):
         if cellvar.is_immutable():
             unimplemented("Dynamo currently doesn't support writing to such cell")
-        assert isinstance(cellvar, variables.NewCellVariable)
+        assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
-        assert isinstance(cellvar, variables.NewCellVariable)
+        assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -301,7 +301,7 @@ class SideEffects:
         self,
     ):
         obj = object()
-        variable = variables.NewCellVariable(
+        variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
         )
         self.id_to_variable[id(obj)] = variable
@@ -311,7 +311,7 @@ class SideEffects:
     def track_cell_existing(
         self, source: Optional[Source], cell: CellType, contents: VariableTracker
     ):
-        variable = variables.NewCellVariable(
+        variable = variables.CellVariable(
             # We don't support mutation to cell without source because we need
             # source to properly codegen the mutations.
             mutation_type=None if source is None else AttributeMutationExisting(),
@@ -425,19 +425,21 @@ class SideEffects:
         # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                var, variables.NewCellVariable
+                var, variables.CellVariable
             ):
                 # Cells created in the root frame are created either by
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
                 # TODO generalize this so we never need to call `make_cell`.
-                if not var.is_root_frame_cell():
+                if var.local_name is None:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "make_cell")
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
                     var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                elif var.source is None:
+                    var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -652,16 +654,13 @@ class SideEffects:
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
 
-            elif (
-                isinstance(var, variables.NewCellVariable) and var.is_root_frame_cell()
-            ):
+            elif isinstance(var, variables.CellVariable) and var.local_name is not None:
                 # Emit more readable and performant bytecode.
                 # TODO generalize this for cells created during inlining.
                 if var in self.store_attr_mutations:
                     contents_var = self.load_cell(var)
                     cg(contents_var)
-                    cell_name = var.source.local_name  # type: ignore[attr-defined]
-                    suffixes.append([cg.create_store_deref(cell_name)])
+                    suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
