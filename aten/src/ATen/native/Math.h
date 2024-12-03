@@ -3054,6 +3054,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
         return x + x;
     }
 
+    if (std::is_same_v<T, float> && n > 128) {
+        return std::numeric_limits<T>::quiet_NaN();
+    } else if (std::is_same_v<T, double> && n > 512) {
+        return std::numeric_limits<T>::quiet_NaN();
+    } else if (n > 1024) {
+        return std::numeric_limits<T>::quiet_NaN();
+    }
+
     T p = T(1.0);
     T q = x + x;
     T r = T(0.0);
@@ -3089,6 +3097,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
 
     if (n == 1) {
         return x;
+    }
+
+    if (std::is_same_v<T, float> && n > 128) {
+        return std::numeric_limits<T>::quiet_NaN();
+    } else if (std::is_same_v<T, double> && n > 512) {
+        return std::numeric_limits<T>::quiet_NaN();
+    } else if (n > 1024) {
+        return std::numeric_limits<T>::quiet_NaN();
     }
 
     T p = T(1.0);

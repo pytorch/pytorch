@@ -2147,6 +2147,14 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
             return x + x;
         }
 
+        if (sizeof(T) <= 4 && n > 128) {
+            return NAN;
+        } else if (sizeof(T) <= 8 && n > 512) {
+            return NAN;
+        } else if (n > 1024) {
+            return NAN;
+        }
+
         T p = T(1.0);
         T q = x + x;
         T r = T(0.0);
@@ -2179,6 +2187,14 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
 
         if (n == 1) {
             return x;
+        }
+
+        if (sizeof(T) <= 4 && n > 128) {
+            return NAN;
+        } else if (sizeof(T) <= 8 && n > 512) {
+            return NAN;
+        } else if (n > 1024) {
+            return NAN;
         }
 
         T p = T(1.0);
