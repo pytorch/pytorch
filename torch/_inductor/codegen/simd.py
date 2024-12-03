@@ -1872,7 +1872,9 @@ class SIMDScheduling(BaseScheduling):
             tiling_reduction_numel = sympy_product(
                 size for var, size in tiling.items() if var[0] == "r"
             )
-            tiling_pointwise_numel = tiling_total_numel / tiling_reduction_numel
+            tiling_pointwise_numel = sympy_product(
+                size for var, size in tiling.items() if var[0] != "r"
+            )
             sizevars = V.graph.sizevars
             return sizevars.statically_known_equals(
                 tiling_pointwise_numel, numel
