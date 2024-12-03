@@ -8733,6 +8733,12 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale1 = make_scale((1,))
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
+    # two e5m2
+    mat1 = make_mat_e5m2((M, K))
+    mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(SampleInput(mat1, mat2, scale1, scale2))
     # TODO: Will remove this after oneDNN v3.6
     # now oneDNN v3.5.3 only supports mat1 * mat2 with the same data types.
     if device != 'cpu':
@@ -16236,10 +16242,10 @@ op_db: List[OpInfo] = [
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                         device_type='cpu'),
+            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+            #              device_type='cpu'),
+            # DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
+            #              device_type='cpu'),
             # "mul_cuda" not implemented for float8_e4m3fn
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',

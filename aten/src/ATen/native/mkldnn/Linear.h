@@ -36,8 +36,7 @@ C10_API Tensor mkl_linear(
 
 #endif // AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 Tensor&
 mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a,
@@ -47,5 +46,4 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out);
-} // namespace native
-} // namespace at
+} // namespace at::native
