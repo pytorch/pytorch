@@ -845,7 +845,8 @@ class AOTAutogradCache:
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.warning("Bypassing autograd cache due to: %s", e)
-            log_cache_bypass("bypass_aot_autograd", str(e))
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
             return None
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
