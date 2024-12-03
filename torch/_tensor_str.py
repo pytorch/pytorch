@@ -335,7 +335,7 @@ def _tensor_str(self, indent):
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
     ]:
-        self = self.float()
+        self = self.half()
 
     if self.dtype.is_complex:
         # handle the conjugate bit
