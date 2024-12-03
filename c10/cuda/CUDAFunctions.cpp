@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/WaitCounter.h>
 
 #include <limits>
 
@@ -22,7 +23,7 @@ int device_count_impl(bool fail_if_no_driver) {
   // Clear out the error state, so we don't spuriously trigger someone else.
   // (This shouldn't really matter, since we won't be running very much CUDA
   // code in this regime.)
-  cudaError_t last_err C10_UNUSED = cudaGetLastError();
+  [[maybe_unused]] cudaError_t last_err = cudaGetLastError();
   switch (err) {
     case cudaErrorNoDevice:
       // Zero devices is ok here
@@ -138,6 +139,7 @@ void device_synchronize() {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
@@ -170,10 +172,10 @@ std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
 }
 
 namespace _internal {
-bool dummyHasPrimaryContext(C10_UNUSED DeviceIndex device_index) {
+bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
-bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
+static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 
 // Private api to be called from CUDAHooks.cpp
 C10_CUDA_API void setHasPrimaryContext(bool (*func)(DeviceIndex)) {
@@ -208,7 +210,7 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
-thread_local DeviceIndex targetDeviceIndex = -1;
+thread_local static DeviceIndex targetDeviceIndex = -1;
 
 cudaError_t GetDevice(DeviceIndex* device) {
   if (targetDeviceIndex >= 0) {

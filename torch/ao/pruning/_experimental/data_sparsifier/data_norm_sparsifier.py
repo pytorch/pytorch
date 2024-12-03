@@ -156,7 +156,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         ]  # squeeze only the first 2 dimension
         return mask
 
-    def update_mask(
+    def update_mask(  # type: ignore[override]
         self, name, data, sparsity_level, sparse_block_shape, zeros_per_block, **kwargs
     ):
         values_per_block = reduce(operator.mul, sparse_block_shape)

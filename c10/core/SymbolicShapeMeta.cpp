@@ -69,9 +69,8 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   for (const auto& s : strides) {
     stride_nodes.emplace_back(s.wrap_node(base));
   }
-  return std::make_optional(
-      std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
-          std::move(base), std::move(size_nodes), std::move(stride_nodes)));
+  return std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>(
+      std::move(base), std::move(size_nodes), std::move(stride_nodes));
 }
 
 // Special treatment because of numel
@@ -186,7 +185,6 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
   return is_contiguous() | compute_non_overlapping_and_dense();
 }
 
-// NOLINTNEXTLINE(performance-unnecessary-value-param)
 void SymbolicShapeMeta::set_numel(SymInt val) const {
   std::scoped_lock lock(mutables_);
   if (has_numel()) {

@@ -42,4 +42,8 @@ bool MPSGuardImpl::queryEvent(void* event) const {
   return mps_event->query();
 }
 
+void MPSGuardImpl::synchronizeDevice(const DeviceIndex device_index) const {
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+}
+
 } // namespace at::mps

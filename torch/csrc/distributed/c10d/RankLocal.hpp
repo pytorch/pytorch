@@ -55,7 +55,7 @@ class RankLocal {
   }
 
  private:
-  RankLocal(){};
+  RankLocal() = default;
   thread_local static T* cached_;
   static std::unordered_map<uint64_t, T> thread_id_to_rank_local_;
   static std::shared_mutex lock_;

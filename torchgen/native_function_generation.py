@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import string
 from collections import defaultdict
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -29,6 +30,10 @@ from torchgen.model import (
 from torchgen.utils import concatMap
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # This has a functional variant, but it's currently marked private.
@@ -52,6 +57,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_assert_tensor_metadata",  # no return
     "_cslt_sparse_mm_search",  # returns an int
     "_assert_scalar",  # no return
     "_dimI",  # returns an int
@@ -194,9 +200,7 @@ def generate_out_args_from_schema(
         lambda a: [] if a.annotation is None else a.annotation.alias_set,
         func.arguments.flat_all,
     )
-    valid_annotations = [
-        x for x in "abcdefghijklmnopqrstuvwxyz" if x not in used_annotations
-    ]
+    valid_annotations = [x for x in string.ascii_lowercase if x not in used_annotations]
 
     all_rets_are_tensors = all(r.type == BaseType(BaseTy.Tensor) for r in func.returns)
 
