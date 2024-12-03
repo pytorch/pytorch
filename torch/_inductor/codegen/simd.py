@@ -1648,8 +1648,7 @@ class SIMDScheduling(BaseScheduling):
         pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
         reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
         return immutable_dict(
-            list(zip(pw_prefixes, pw_tiling))
-            + list(zip(reduction_prefixes, reduction_tiling))
+            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
         )
 
     @classmethod
