@@ -123,8 +123,8 @@ class TestBenchmarker(TestCase):
             ("env_val", "1", True),
             ("env_val", "0", False),
             ("env_val", "", None),
-            ("oss_default", True, False),
-            ("oss_default", False, True),
+            ("oss_default", True, True),
+            ("oss_default", False, False),
         ],
     )
     def test_is_feature_enabled(
