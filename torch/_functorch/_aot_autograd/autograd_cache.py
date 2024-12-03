@@ -205,11 +205,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
             "Cannot cache a graph with compiled autograd enabled"
         )
 
-    if not torch._dynamo.config.specialize_float:
-        raise BypassAOTAutogradCache(
-            "Cannot cache a graph with specialize_float disabled"
-        )
-
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
     ):
@@ -359,8 +354,9 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
-        result._boxed_call = True
+        # TODO: How come cudagraphs could be None here?
+        # TODO: How come gm is None here?
+        result.post_compile(example_inputs, fx_config["cudagraphs"], None)  # type: ignore[arg-type]
         return result
 
 
