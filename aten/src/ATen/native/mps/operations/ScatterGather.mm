@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -339,4 +340,23 @@ TORCH_IMPL_FUNC(scatter_add_mps_out)
   scatter_mps_general(self, dim, index, src, output, "scatter_add_mps_out", "add");
 }
 
+static void scatter_reduce_two_mps_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
+                                   const Tensor& src, const ReductionType& reduce) {
+  switch (reduce) {
+  case ReductionType::MEAN:
+  case ReductionType::SUM :
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "add");
+  case ReductionType::PROD :
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "prod");
+  case ReductionType::MIN :
+      TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amin");
+  case ReductionType::MAX :
+      TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amax");
+  }
+  TORCH_CHECK(false, "Unsupported reduction type: ", static_cast<int>(reduce));
+}
+
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_mps_kernel);
 } // namespace at::native
