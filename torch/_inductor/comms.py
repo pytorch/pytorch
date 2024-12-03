@@ -16,6 +16,7 @@ from . import config, ir
 from .dependencies import WeakDep
 from .utils import (
     contains_collective,
+    contains_torchrec_collective,
     contains_wait,
     find_recursive_deps_of_node,
     find_recursive_users_of_node,
@@ -244,7 +245,7 @@ def decide_global_ordering_of_comms(
     ):
         nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
 
-    comm_nodes = [n for n in nodes if contains_collective(n)]
+    comm_nodes = [n for n in nodes if contains_collective(n) or contains_torchrec_collective(n)]
 
     for i in range(1, len(comm_nodes)):
         # Enforce ordering by making previous comm a `WeakDep` dependency of the next comm

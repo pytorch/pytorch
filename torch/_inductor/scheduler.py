@@ -1849,6 +1849,11 @@ class Scheduler:
         self.nodes = self.fuse_nodes(self.nodes)
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+            )
 
             self.nodes = reorder_for_peak_memory(
                 self.nodes,

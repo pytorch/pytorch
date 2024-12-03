@@ -1727,6 +1727,27 @@ def is_wait(node):
     return type(node) == ir._WaitKernel
 
 
+def is_torchrec_collective(ir_node) -> bool:
+    # TODO: this is a temporary solution to ensure that we can identify torchrec's
+    # communication ops. But in order to allow better communication and computation
+    # overlap, torchrec's communication ops should be not used.
+    return getattr(ir_node, "python_kernel_name", None) in (
+        "torch.ops.torchrec.all_to_all_single.default",
+        "torch.ops.torchrec.reduce_scatter_tensor",
+        "torch.ops.torchrec.all_gather_into_tensor",
+    )
+
+
+def contains_torchrec_collective(snode) -> bool:
+    from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
+
+    assert isinstance(snode, BaseSchedulerNode)
+    if isinstance(snode, GroupedSchedulerNode):
+        return any(contains_torchrec_collective(x) for x in snode.snodes)
+    else:
+        return is_torchrec_collective(snode.node)
+
+
 def contains_collective(snode):
     from torch._inductor.scheduler import BaseSchedulerNode, GroupedSchedulerNode
 
