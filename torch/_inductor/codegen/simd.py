@@ -1780,16 +1780,17 @@ class SIMDScheduling(BaseScheduling):
             # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
-                    if len(cls.candidate_tilings(node, is_pointwise)) > 0:
+                    if (
+                        not config.triton.tile_reductions
+                        and len(cls.candidate_tilings(node, is_pointwise)) > 0
+                    ):
                         perf_hint_log.info(
                             textwrap.dedent(
                                 """
                                 Reduction over non-contiguous dims.
                                 Consider setting config.triton.tile_reductions to True.
-                                Current value: %s
                                 """
-                            ),
-                            config.triton.tile_reductions,
+                            )
                         )
                         break
             return default_tiling
