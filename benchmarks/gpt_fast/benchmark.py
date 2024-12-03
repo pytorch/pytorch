@@ -9,10 +9,8 @@ from generate import (
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_llama2_7b_autoquant,
-    run_llama2_7b_autoquant_v2,
     run_mixtral_8x7b_int8,
     run_mixtral_8x7b_autoquant,
-    run_mixtral_8x7b_autoquant_v2,
 )
 
 import torch
@@ -318,11 +316,6 @@ all_experiments = {
     run_layer_norm,
     run_gather_gemv,
     run_gemv,
-}
-
-all_experiments = {
-    run_llama2_7b_autoquant_v2,
-    run_mixtral_8x7b_autoquant_v2,
 }
 
 
