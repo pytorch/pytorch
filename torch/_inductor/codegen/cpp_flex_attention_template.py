@@ -348,8 +348,8 @@ class CppFlexAttentionTemplate(CppTemplate):
         len_mask_other,
         kernel_input_name_to_buffer,
     ) -> None:
-        assert layout.dtype in [torch.float, torch.float16, torch.bfloat16]
-        super().__init__("mha", input_nodes, layout, parallel_num_threads())
+        assert layout.dtype in [torch.float, torch.bfloat16]
+        super().__init__("flex_attention", input_nodes, layout, parallel_num_threads())
         self.scale = scale
         self.score_mod = score_mod
         self.mask_mod = mask_mod
