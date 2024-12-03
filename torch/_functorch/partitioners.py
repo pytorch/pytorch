@@ -964,11 +964,15 @@ def solve_min_cut(
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats
             if not isinstance(node.meta["val"], torch.SymInt):
-                return INT_INF
+                return math.inf
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+
+        if node_info.is_unclaimed(node):
+            return math.inf
+
         if is_materialized(node):
             return mem_sz
         else:
@@ -1195,16 +1199,25 @@ def solve_min_cut(
     return saved_values, banned_nodes
 
 
-def visualize_min_cut_graph(nx_graph):
+def visualize_min_cut_graph(nx_graph, rescale_weights=True):
     import networkx as nx
     import pydot
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
     dot_graph = pydot.graph_from_dot_data(dot_format)[0]
+    # Normalize by max_weight so it's easier to read
+    max_weight = 1
+    if rescale_weights:
+        for edge in dot_graph.get_edges():
+            weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
+            if weight != float("inf"):
+                max_weight = max(max_weight, weight)
+        max_weight /= 100
+
     for edge in dot_graph.get_edges():
         weight = nx_graph[edge.get_source()][edge.get_destination()]["capacity"]
         # Set edge label to weight
-        edge.set_label(str(weight))
+        edge.set_label(str(weight/max_weight))
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
             edge.set_color("red")
@@ -1854,10 +1867,11 @@ def min_cut_rematerialization_partition(
     fx_g = joint_module.graph
 
     #  add the CSE pass
-    if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
-        joint_module.graph = cse_graph
+    # if config.cse:
+    #     cse_graph = fx_graph_cse(fx_g)
+    #     joint_module.graph = cse_graph
     joint_graph = joint_module.graph
+    draw_graph(joint_module, 'joint.svg', clear_meta=False)
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
