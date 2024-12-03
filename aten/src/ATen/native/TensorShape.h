@@ -11,41 +11,6 @@ inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.sym_numel() == 0 && t.dim() == 1;
 }
 
-// Check to see if the shape of tensors is compatible
-// for being concatenated along a given dimension.
-inline void check_cat_shape_except_dim(
-    const Tensor& first,
-    const Tensor& second,
-    int64_t dimension,
-    int64_t index) {
-  int64_t first_dims = first.dim();
-  int64_t second_dims = second.dim();
-  TORCH_CHECK(
-      first_dims == second_dims,
-      "Tensors must have same number of dimensions: got ",
-      first_dims,
-      " and ",
-      second_dims);
-  for (const auto dim : c10::irange(first_dims)) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(
-        first_dim_size == second_dim_size,
-        "Sizes of tensors must match except in dimension ",
-        dimension,
-        ". Expected size ",
-        static_cast<long long>(first_dim_size),
-        " but got size ",
-        static_cast<long long>(second_dim_size),
-        " for tensor number ",
-        index,
-        " in the list.");
-  }
-}
-
 inline void check_cat_no_zero_dim(const MaterializedITensorListRef& tensors) {
   [[maybe_unused]] int64_t i = 0;
   for (const Tensor& t : tensors) {
@@ -84,46 +49,45 @@ inline int64_t get_num_splits(
   return num_splits;
 }
 
-inline bool have_same_ndims(TensorList tensors) {
+inline bool have_same_ndims(const TensorList& tensors) {
   auto ndim = tensors[0].dim();
-  for (const auto tensor_idx : c10::irange(tensors.size())) {
-    if (tensors[tensor_idx].dim() != ndim) {
+  for (auto const& tensor : tensors) {
+    if (tensor.dim() != ndim) {
       return false;
     }
   }
   return true;
 }
 
-inline void leading_dimension_matches(TensorList tensors, int64_t dim) {
+inline void leading_dimension_matches(const TensorList& tensors, int64_t dim) {
   auto tensor_zero_size = tensors[0].sizes();
   std::vector<c10::SymInt> leading_dim_sizes(
       tensor_zero_size.begin(), tensor_zero_size.begin() + dim);
-  for (const auto i : c10::irange(tensors.size())) {
-    at::Tensor tensor = tensors[i];
+  for (const auto& tensor : tensors) {
     for (const auto j : c10::irange(dim)) {
       TORCH_CHECK(
-          tensor.size(j) == leading_dim_sizes[j],
+          tensor.size(j) == tensor_zero_size[j],
           "_chunk_cat expects same sizes of 0,...,dim-1 dimensions for all tensors");
     }
   }
 }
 
 inline int64_t preprocess_chunk_cat_inputs(
-    TensorList tensors,
+    const TensorList& tensors,
     int64_t dim,
     int64_t num_chunks) {
   TORCH_CHECK(num_chunks >= 1, "_chunk_cat expects positive num_chunks");
   TORCH_CHECK(
       !tensors.empty(), "_chunk_cat expects a non-empty input tensor list");
-  auto expected_dtype = tensors[0].dtype();
-  auto expected_device = tensors[0].device();
-  for (const auto i : c10::irange(tensors.size())) {
-    TORCH_CHECK(tensors[i].numel() > 0, "_chunk_cat expects non-empty tensor");
+  auto const& expected_dtype = tensors[0].dtype();
+  auto const& expected_device = tensors[0].device();
+  for (const auto& tensor : tensors) {
+    TORCH_CHECK(tensor.numel() > 0, "_chunk_cat expects non-empty tensor");
     TORCH_CHECK(
-        tensors[i].dtype() == expected_dtype,
+        tensor.dtype() == expected_dtype,
         "_chunk_cat expects all input tensors with the same dtype");
     TORCH_CHECK(
-        tensors[i].device() == expected_device,
+        tensor.device() == expected_device,
         "_chunk_cat expects all inputs tensors on the same device");
   }
   if (have_same_ndims(tensors)) {
@@ -132,9 +96,9 @@ inline int64_t preprocess_chunk_cat_inputs(
     TORCH_CHECK(
         dim >= 0,
         "_chunk_cat expects non-negative dim when input tensors have different ndims")
-    for (const auto i : c10::irange(tensors.size())) {
+    for (const auto& tensor : tensors) {
       TORCH_CHECK(
-          dim < tensors[i].ndimension(),
+          dim < tensor.ndimension(),
           "_chunk_cat expects dim < ndim for all input tensors");
     }
   }
