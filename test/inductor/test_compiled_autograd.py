@@ -3434,6 +3434,7 @@ skipped_tests = {
 
 known_failing_tests = {
     # Category: Compiled autograd
+    "test_not_implemented_grad",  # Dynamo raises Unsupported which is not a NotImplementedError
     "test_grad_mode_restored_reentrant",  # create_graph
     "test_reentrant_with_callbacks_both_depths",  # queue_callback
     "test_reentrant_with_callbacks_depth_0",  # queue_callback
