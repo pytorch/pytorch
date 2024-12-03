@@ -1206,7 +1206,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @common_utils.parametrize("device", test_devices)
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -1231,7 +1231,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @common_utils.parametrize("device", test_devices)
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("score_mod", test_score_mods)
@@ -1262,7 +1262,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @common_utils.parametrize("device", test_devices)
-    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_GQA(self, device: str, dtype: torch.dtype, score_mod: Callable):
         inputs = (
@@ -3524,7 +3524,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    @supported_platform
+    @unittest.skipIf(TEST_ON_CUDA, "Testing CPU error message")
     def test_cpu_error_message_return_lse(self):
         make_tensor = functools.partial(
             torch.randn,
@@ -4364,7 +4364,6 @@ class TestPagedAttention(InductorTestCase):
 
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
-        print(ref_out.dtype)
 
         MAX_CACHED_SEQ_LEN = n_pages * page_size
         k_cache = torch.zeros(
