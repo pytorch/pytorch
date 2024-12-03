@@ -666,6 +666,10 @@ class TestSetOps(TestCase):
 
 @instantiate_parametrized_tests
 class TestUnique(TestCase):
+    @skipIf(
+        TEST_WITH_TORCHDYNAMO and int(numpy.__version__[0]) >= 2,
+        "fails with dynamo and numpy >= 2.0",
+    )
     def test_unique_1d(self):
         def check_all(a, b, i1, i2, c, dt):
             base_msg = "check {0} failed for type {1}"
