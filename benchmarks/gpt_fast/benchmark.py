@@ -1,6 +1,7 @@
 import argparse
 import csv
 import dataclasses
+import json
 import os
 
 from generate import (
@@ -261,6 +262,39 @@ def output_csv(output_file, headers, row):
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
+def output_json(output_file, headers, row):
+    """
+    Write the result into JSON format, so that it can be uploaded to the benchmark database
+    to be displayed on OSS dashboard. The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    record = {
+        "benchmark": {
+            "name": "PyTorch gpt-fast benchmark",
+            "mode": "inference",
+            "dtype": mapping_headers["dtype"],
+            "extra_info": {
+                "device": mapping_headers["device"],
+                "arch": mapping_headers["arch"],
+            },
+        },
+        "model": {
+            "name": mapping_headers["name"],
+            "type": "OSS model" if mapping_headers["is_model"] else "micro-benchmark",
+            "origins": ["pytorch"],
+        },
+        "metric": {
+            "name": mapping_headers["metric"],
+            "benchmark_values": [mapping_headers["actual"]],
+            "target_value": mapping_headers["target"],
+        },
+    }
+
+    with open(f"{os.path.splitext(output_file)[0]}.json", "a") as f:
+        print(json.dumps(record), file=f)
+
+
 DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
@@ -302,6 +336,8 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
 
     for row in results:
         output_csv(output_file, headers, row)
+        # Also write the output in JSON format so that it can be ingested into the OSS benchmark database
+        output_json(output_file, headers, row)
 
 
 if __name__ == "__main__":

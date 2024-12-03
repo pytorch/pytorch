@@ -2195,8 +2195,8 @@ compute_bucket_assignment_by_size(
         result.end(),
         [](const std::tuple<std::vector<size_t>, size_t>& a,
            const std::tuple<std::vector<size_t>, size_t>& b) {
-          auto indices_a = std::get<0>(a);
-          auto indices_b = std::get<0>(b);
+          const auto& indices_a = std::get<0>(a);
+          const auto& indices_b = std::get<0>(b);
           const auto amin =
               std::min_element(indices_a.begin(), indices_a.end());
           const auto bmin =
