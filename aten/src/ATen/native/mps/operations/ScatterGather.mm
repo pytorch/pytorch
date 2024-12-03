@@ -1,7 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -340,20 +340,23 @@ TORCH_IMPL_FUNC(scatter_add_mps_out)
   scatter_mps_general(self, dim, index, src, output, "scatter_add_mps_out", "add");
 }
 
-static void scatter_reduce_two_mps_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
-                                   const Tensor& src, const ReductionType& reduce) {
+static void scatter_reduce_two_mps_kernel(const Tensor& self,
+                                          const int64_t dim,
+                                          const Tensor& index,
+                                          const Tensor& src,
+                                          const ReductionType& reduce) {
   static const bool is_macOS_15_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   switch (reduce) {
-  case ReductionType::MEAN:
-  case ReductionType::SUM :
+    case ReductionType::MEAN:
+    case ReductionType::SUM:
       return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "add");
-  case ReductionType::PROD :
+    case ReductionType::PROD:
       return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "prod");
-  case ReductionType::MIN :
+    case ReductionType::MIN:
       TORCH_CHECK(self.scalar_type() != kInt || is_macOS_15_or_newer, "torch.int32 is only supported on MacOS15+");
       TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
       return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amin");
-  case ReductionType::MAX :
+    case ReductionType::MAX:
       TORCH_CHECK(self.scalar_type() != kInt || is_macOS_15_or_newer, "torch.int32 is only supported on MacOS15+");
       TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
       return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amax");
