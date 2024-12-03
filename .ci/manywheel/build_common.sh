@@ -18,12 +18,14 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+PLATFORM="manylinux2014_x86_64"
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
     retry yum install -q -y zip openssl
 elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
+    PLATFORM="manylinux_2_28_x86_64"
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -419,9 +421,15 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     # zip up the wheel back
     zip -rq $(basename $pkg) $PREIX*
 
+    # tag the wheel with approproiate tags
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" ]]; then
+        auditwheel repair --inplace --plat ${PLATFORM} $(basename $pkg)
+    fi
+
     # replace original wheel
     rm -f $pkg
     mv $(basename $pkg) $pkg
+
     cd ..
     rm -rf tmp
 done
