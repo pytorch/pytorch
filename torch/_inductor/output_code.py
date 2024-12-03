@@ -30,11 +30,11 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
     TYPE_CHECKING,
+    Union,
 )
 from typing_extensions import TypeAlias
 
@@ -61,32 +61,30 @@ if TYPE_CHECKING:
     from .triton_bundler import TritonKernelArtifacts
 
 
-class OutputCode(Protocol):
+@dataclasses.dataclass
+class OutputCode:
+    # TODO: Remove underscores here
+
+    # None if the output is not remote cacheable
+    _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        ...
+        raise NotImplementedError(type(self))
 
-    # TODO: Not sure why we need two post_compile functions.  They're called
-    # in this order
-
-    def post_compile1(
-        self,
-        cudagraphs: BoxedBool,
-        example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        static_input_idxs: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-    ) -> None:
-        ...
-
-    def post_compile2(
+    def post_compile(
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
         gm: GraphModule,
     ) -> None:
-        ...
+        raise NotImplementedError(type(self))
+
+    # TODO: Get rid of this
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        raise NotImplementedError(type(self))
 
 
 _StrideExprStr: TypeAlias = str
@@ -135,7 +133,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
 
 
 @dataclasses.dataclass
-class CompiledFxGraph:
+class CompiledFxGraph(OutputCode):
     """
     Class holding a compiled FX graph. This is the object serialized on disk
     to support FxGraph caching.
@@ -175,9 +173,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
-    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
     _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
@@ -189,6 +185,12 @@ class CompiledFxGraph:
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
         counter_deltas: Counter[str],
+        cudagraphs: BoxedBool,
+        example_inputs: Sequence[InputType],
+        static_input_idxs: Sequence[int],
+        fx_kwargs: _CompileFxKwargs,
+        inputs_to_check: Sequence[int],
+        boxed_forward_device_index: Optional[BoxedDeviceIndex],
     ) -> None:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
@@ -218,23 +220,6 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def post_compile1(
-        self,
-        cudagraphs: BoxedBool,
-        example_inputs: Sequence[InputType],
-        gm: GraphModule,
-        static_input_idxs: Sequence[int],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        boxed_forward_device_index: Optional[BoxedDeviceIndex],
-    ) -> None:
         cudagraph_info = None
         if cudagraphs:
             # check cudagraph disabling reasons from inductor lowering
@@ -304,7 +289,14 @@ class CompiledFxGraph:
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
-    def post_compile2(
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        assert self.current_callable is not None
+        try:
+            return self.current_callable(inputs)
+        finally:
+            AutotuneCacheBundler.end_compile()
+
+    def post_compile(
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
@@ -314,6 +306,13 @@ class CompiledFxGraph:
         from torch._inductor.codecache import FxGraphCache
 
         FxGraphCache.post_compile(self, example_inputs, cudagraphs, gm)
+
+        # aot autograd needs to know to pass in inputs as a list
+        # TODO: Not sure why this isn't just set by default on CompiledFxGraph
+        self._boxed_call = True
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        self._triton_bundle = triton_bundle
 
     def get_constants(
         self, gm: Optional[torch.fx.GraphModule]
@@ -337,4 +336,31 @@ class CompiledFxGraph:
 
 
 def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
+    return h
+
+
+@dataclasses.dataclass
+class CompiledAOTI(OutputCode):
+    """
+    Class holding an AOTInductor compiled so.
+    """
+
+    filename: Union[str, List[str]]
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        raise NotImplementedError("NYI")
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        cudagraphs: BoxedBool,
+        gm: GraphModule,
+    ) -> None:
+        pass
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
+
+
+def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
     return h
