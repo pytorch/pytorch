@@ -431,6 +431,7 @@ def cudagraphify(
         "cudagraphify",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="runtime_cudagraphify_time_us",
+        compile_id=compile_id,
     ):
         metrics_context.update_outer(
             {"compile_id": compile_id, "is_forward": not is_backward}

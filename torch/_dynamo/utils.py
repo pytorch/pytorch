@@ -55,6 +55,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
     TypeVar,
     Union,
     ValuesView,
@@ -87,6 +88,9 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+
+if TYPE_CHECKING:
+    from torch._guards import CompileId
 
 try:
     import numpy as np
@@ -301,6 +305,7 @@ def dynamo_timed(
     log_pt2_compile_event: bool = False,
     metadata: Optional[Dict[str, object]] = None,
     dynamo_compile_column_us: Optional[str] = None,
+    compile_id: Optional[CompileId] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -334,6 +339,9 @@ def dynamo_timed(
     - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
+    - compile_id: In the typical case, this parameter should not be needed. Use to
+      supply the compile_id for those cases where we want to log a compile_id where
+      it's not naturally available, e.g., for runtime autotuning.
     """
     # We're standardizing on microseconds for dynamo_compile timings.
     if dynamo_compile_column_us is not None:
@@ -358,7 +366,7 @@ def dynamo_timed(
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
     chromium_log.log_event_start(
-        event_name, start_ns, event_metadata, log_pt2_compile_event
+        event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
     try:
@@ -369,7 +377,7 @@ def dynamo_timed(
         time_spent_ns = end_ns - start_ns
         compilation_time_metrics[key].append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
-            event_name, end_ns, {}, start_ns, log_pt2_compile_event
+            event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
         if dynamo_compile_column_us:
             metrics_context = get_metrics_context()
@@ -1165,15 +1173,18 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: Dict[str, Any],
         log_pt2_compile_event: bool = False,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the start of a single event.
         :param str event_name Name of event to appear in trace
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
+        :param log_pt_compile_event: If True, log to pt2_compile_events
+        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = str(torch._guards.CompileContext.current_compile_id())
-        metadata["compile_id"] = compile_id
+        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        metadata["compile_id"] = str(compile_id)
         self._log_timed_event(
             event_name,
             time_ns,
@@ -1203,6 +1214,7 @@ class ChromiumEventLogger:
         metadata: Dict[str, Any],
         start_time_ns: int,
         log_pt2_compile_event: bool,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1210,9 +1222,12 @@ class ChromiumEventLogger:
         :param event_name: Name of event to appear in trace
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
+        :param start_time_ns: The start time timestamp in nanoseconds
+        :param log_pt_compile_event: If True, log to pt2_compile_events
+        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = str(torch._guards.CompileContext.current_compile_id())
-        metadata["compile_id"] = compile_id
+        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        metadata["compile_id"] = str(compile_id)
 
         # Grab metadata collected during event span
         all_event_data = self.get_event_data()
