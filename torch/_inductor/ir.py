@@ -4800,7 +4800,7 @@ class ExternKernel(InputsKernel):
             )
         # assert that ordered_kwargs_for_cpp_kernel makes sense
         assert all(
-            x in self.allarg_properties for x in self.ordered_kwargs_for_cpp_kernel
+            x in (self.allarg_properties | self.kwargs) for x in self.ordered_kwargs_for_cpp_kernel
         )
 
     def decide_layout(self):  # type: ignore[no-untyped-def]
