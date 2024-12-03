@@ -3124,7 +3124,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
         when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
         The pattern is:
-            (no bias) _int_mm -> convert_element_type -> (expand_a) -> mul -> mul
+            (no bias) _int_mm -> convert_element_type -> ([expand_a] -> mul) -> mul
         or
             (with bias) pattern_no_bias -> add
         Expansion of the scale of activation is optional.
