@@ -3,7 +3,7 @@
 import copy
 import functools
 import itertools
-from typing import List, Union
+from typing import List
 
 import torch
 import torch.distributed as dist
@@ -42,7 +42,7 @@ class TestFullyShardFrozen(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "freeze_after_init": [False, True],
             },
@@ -51,7 +51,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_per_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         freeze_after_init: bool,
     ):
@@ -138,7 +138,7 @@ class TestFullyShardFrozen(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "unfreeze_params": [False, True],
             },
             self._test_train_mixed_requires_grad_across_groups,
@@ -146,7 +146,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_across_groups(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         unfreeze_params: bool,
     ):
         torch.manual_seed(42)
@@ -214,13 +214,13 @@ class TestFullyShardFrozen(FSDPTest):
         that participate multiple times in forward.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False]},
             self._test_multi_forward_mixed_requires_grad,
         )
 
     def _test_multi_forward_mixed_requires_grad(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
     ):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):

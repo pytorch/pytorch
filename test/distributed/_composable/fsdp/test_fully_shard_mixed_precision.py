@@ -2,7 +2,7 @@
 
 import copy
 import functools
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import torch
 import torch.distributed as dist
@@ -36,7 +36,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     def _init_models_and_optims(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         param_dtype: Optional[torch.dtype],
         reduce_dtype: Optional[torch.dtype],
         use_shard_placement_fn,
@@ -90,7 +90,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         self.run_subtests(
             {
                 "param_dtype": [torch.bfloat16, torch.float16],
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "use_shard_placement_fn": use_shard_placement_fn_vals,
             },
             self._test_compute_dtype,
@@ -99,7 +99,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         use_shard_placement_fn: bool,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -165,7 +165,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
     def test_reduce_dtype(self):
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "use_shard_placement_fn": [False, True],
             },
             self._test_reduce_dtype_fp32_reduce,
@@ -175,20 +175,16 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
         self.run_subtests(
             {
-                "reshard_after_forward": [False, True, 2],
+                "reshard_after_forward": [False, True],
                 "use_shard_placement_fn": use_shard_placement_fn_vals,
             },
             self._test_reduce_dtype_bf16_reduce,
         )
 
     def _test_reduce_dtype_fp32_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool, use_shard_placement_fn: bool
     ):
-        if (
-            self.world_size > 2
-            and isinstance(reshard_after_forward, int)
-            and use_shard_placement_fn
-        ):
+        if self.world_size > 2 and use_shard_placement_fn:
             return
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
@@ -237,7 +233,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
     def _test_reduce_dtype_bf16_reduce(
-        self, reshard_after_forward: Union[bool, int], use_shard_placement_fn: bool
+        self, reshard_after_forward: bool, use_shard_placement_fn: bool
     ):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(

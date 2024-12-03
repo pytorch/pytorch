@@ -5,7 +5,7 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Any, List, Optional, Type, Union
+from typing import Any, List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -49,11 +49,11 @@ class TestFullyShardAutograd(FSDPTest):
         https://github.com/pytorch/pytorch/pull/83195
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False]},
             self._test_unused_forward_output,
         )
 
-    def _test_unused_forward_output(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_output(self, reshard_after_forward: bool):
         torch.manual_seed(42)
         local_batch_size = 2
         global_batch_size, dim = (self.world_size * local_batch_size, 24)
@@ -95,11 +95,11 @@ class TestFullyShardAutograd(FSDPTest):
         https://github.com/pytorch/pytorch/pull/80245
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False]},
             self._test_unused_forward_module,
         )
 
-    def _test_unused_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_module(self, reshard_after_forward: bool):
         torch.manual_seed(42)
         local_batch_size, dim = (2, 24)
         global_batch_size = self.world_size * local_batch_size

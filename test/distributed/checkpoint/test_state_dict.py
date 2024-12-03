@@ -4,7 +4,7 @@ import copy
 import functools
 import sys
 from itertools import chain
-from typing import Callable, Tuple, Type, Union
+from typing import Callable, Tuple, Type
 
 import torch
 import torch.distributed as dist
@@ -231,7 +231,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_fsdp2(
         self,
         *,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         optimizer_class: Type[Optimizer],
         compile_model: bool,
         foreach: bool = True,

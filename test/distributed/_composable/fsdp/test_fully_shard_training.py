@@ -97,7 +97,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
         # Single FSDP group
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False):
             torch.manual_seed(42)
             model = MLP(3, device)
             # Since seed is per process, not per thread, we broadcast to ensure
@@ -117,7 +117,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
         # Multiple FSDP groups
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False):
             torch.manual_seed(42)
             model = nn.Sequential(MLP(3, device), MLP(3, device))
             for param in model.parameters():
@@ -151,7 +151,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
         # Single FSDP group
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False):
             model = MLP(8, device)
             fully_shard(model, reshard_after_forward=reshard_after_forward)  # root only
             inp = torch.randn((2, 8), device="cuda")
@@ -160,7 +160,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
 
         # Multiple FSDP groups
-        for reshard_after_forward in (True, False, 2):
+        for reshard_after_forward in (True, False):
             model = MLP(8, device)
             fully_shard(model.in_proj, reshard_after_forward=reshard_after_forward)
             fully_shard(model.out_proj, reshard_after_forward=reshard_after_forward)
@@ -325,7 +325,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 "device_type": ["cuda"],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
@@ -383,7 +383,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     def _test_train_parity_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         offload_policy: OffloadPolicy,
         device_type: str,
         delay_after_forward: bool,
@@ -525,7 +525,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         times in forward.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False]},
             self._test_multi_forward_module,
         )
 
@@ -666,7 +666,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
     def _test_train_parity_with_activation_checkpointing(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         checkpoint_impl: str,
         module_grouping: str,
     ):
@@ -918,7 +918,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         self.run_subtests(
             {
                 "mesh": meshes,
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 # "all": disable reduce-scatter for all modules
                 # "root_only": disable reduce-scatter for root's linear only
                 # "some_mlps": disable reduce-scatter for some MLPs
@@ -938,7 +938,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,
@@ -1051,7 +1051,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             # Expect one all-gather per MLP plus one for the root's linear in
             # the first microbatch's forward
             expected_all_gather_count = num_mlps + 1
-            if reshard_after_forward is not False:  # `True` or `2`
+            if reshard_after_forward:
                 # Add the number of MLPs without the +1 for the backward
                 # all-gathers since the root does not reshard after forward
                 expected_all_gather_count += num_mlps

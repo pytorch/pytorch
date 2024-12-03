@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 import functools
 import gc
-from typing import Union
 
 import torch
 import torch.nn as nn
@@ -72,7 +71,7 @@ class TestTrackerFullyShard1DTrainingCore(FSDPTest):
 
     def _test_tracker_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         offload_policy: OffloadPolicy,
         mp_policy: MixedPrecisionPolicy,
     ):
@@ -193,7 +192,7 @@ class TestTrackerFullyShard1DTrainingCompose(FSDPTest):
         )
 
     def _test_tracker_with_activation_checkpointing(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: str
+        self, reshard_after_forward: bool, checkpoint_impl: str
     ):
         assert checkpoint_impl in ("composable", "wrapper")
         debug = False

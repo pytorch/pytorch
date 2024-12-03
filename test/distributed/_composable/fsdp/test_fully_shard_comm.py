@@ -4,7 +4,7 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -96,7 +96,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: List[nn.Parameter], reshard_after_forward: Union[bool, int]
+        self, params: List[nn.Parameter], reshard_after_forward: bool
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -124,15 +124,9 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         for async_op, streams, reshard_after_forward in itertools.product(
             (False, True),
             ((default_stream, default_stream), (stream1, stream2)),
-            (True, 8),
+            (True,),
         ):
             all_gather_copy_in_stream, all_gather_stream = streams
-            # Save test time by only testing reshard after forward as an int
-            # for non-async and non-default streams (like in pre-backward)
-            if type(reshard_after_forward) is int and (
-                async_op or all_gather_stream is default_stream
-            ):
-                continue
             self._test_all_gather(
                 param_sizes,
                 reshard_after_forward=reshard_after_forward,
@@ -144,7 +138,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _test_all_gather(
         self,
         param_sizes: List[torch.Size],
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         async_op: bool,
         all_gather_copy_in_stream: torch.cuda.Stream,
         all_gather_stream: torch.cuda.Stream,
@@ -189,17 +183,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         all_gather(fsdp_param_group, fsdp_param_group.mesh_info.shard_process_group)
 
         # Check all-gather correctness
-        check_all_gathered_params(orig_params, module)
-
-        # For reshard after after forward as an int, further test emulating the
-        # pre-backward all-gather
-        if type(reshard_after_forward) is not int:
-            return
-        fsdp_param_group._to_sharded_post_forward()
-        all_gather(
-            fsdp_param_group,
-            fsdp_param_group.post_forward_mesh_info.shard_process_group,
-        )
         check_all_gathered_params(orig_params, module)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -303,14 +286,11 @@ class TestFullyShardCommunication(FSDPTest):
         reduce-scatters during forward and backward.
         """
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {"reshard_after_forward": [True, False]},
             self._test_communication_count,
         )
 
-    def _test_communication_count(
-        self,
-        reshard_after_forward: Union[bool, int],
-    ):
+    def _test_communication_count(self, reshard_after_forward: bool):
         torch.manual_seed(42)
         model_args = ModelArgs()
         model = Transformer(model_args)
@@ -432,14 +412,14 @@ class TestFullyShardPrefetch(FSDPTest):
         # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_forward_backward,
         )
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False, 2],
+                "reshard_after_forward": [True, False],
                 "checkpoint_impl": [None, "utils", "composable"],
             },
             self._test_backward_prefetch_multi_forward,
@@ -447,7 +427,7 @@ class TestFullyShardPrefetch(FSDPTest):
         self._test_backward_prefetch_unused_in_backward(True)
 
     def _test_backward_prefetch_forward_backward(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
+        self, reshard_after_forward: bool, checkpoint_impl: Optional[str]
     ):
         n_layers = 3
         model, optim, inp = self._init_transformer(
@@ -498,7 +478,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
     def _test_backward_prefetch_multi_forward(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
+        self, reshard_after_forward: bool, checkpoint_impl: Optional[str]
     ):
         n_layers = 3
         model, optim, inp = self._init_transformer(
@@ -566,9 +546,7 @@ class TestFullyShardPrefetch(FSDPTest):
             self.assertEqual(events, expected_events)
             events.clear()
 
-    def _test_backward_prefetch_unused_in_backward(
-        self, reshard_after_forward: Union[bool, int]
-    ):
+    def _test_backward_prefetch_unused_in_backward(self, reshard_after_forward: bool):
         """
         Test a model with a linear module then a split into two linear modules,
         where we run backward through one path first before the other, meaning
@@ -987,7 +965,7 @@ class TestFullyShardPrefetch(FSDPTest):
     def _init_transformer(
         self,
         n_layers: int,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool,
         checkpoint_impl: Optional[str],
     ):
         model_args = ModelArgs(
