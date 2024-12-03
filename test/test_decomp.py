@@ -547,6 +547,7 @@ comprehensive_failures = {
     ),  # off by one error
 }
 
+
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     longMessage = True
