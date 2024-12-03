@@ -18,6 +18,7 @@ from typing import (
     List,
     NewType,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Type,
@@ -69,6 +70,7 @@ DimList = List
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
 _T = TypeVar("_T")
 _TensorT = TypeVar("_TensorT", bound=torch.Tensor)
+_TensorT_cov = TypeVar("_TensorT_cov", bound=torch.Tensor, covariant=True)
 
 
 def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
@@ -545,6 +547,13 @@ class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
+class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
+    def __call__(
+        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+    ) -> _TensorT_cov:
+        ...
+
+
 @dataclass(frozen=True)
 class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
@@ -771,7 +780,7 @@ class MetaConverter(Generic[_TensorT]):
     def meta_storage(
         self,
         s: MetaStorageDesc,
-        callback: Callable[[Callable], _TensorT],
+        callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
     ) -> torch.UntypedStorage:
         # If we are fakeifying a tensor that has a secretly-zero-sized storage,
         # Need to make sure to resize the meta storage too.
@@ -797,7 +806,7 @@ class MetaConverter(Generic[_TensorT]):
 
     @classmethod
     def _identity_callable(
-        cls, t: Callable[[], torch.Tensor], device: torch.device
+        cls, t: Callable[[], torch.Tensor], device: Union[torch.device, str]
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -820,12 +829,11 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback: Callable[[Callable], _TensorT],
+        callback: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
-        override_device: Optional[Union[torch.device, str]],
     ) -> _TensorT:
-        callback = functools.partial(callback, device=t.device)  # type: ignore[call-arg]
+        callback = functools.partial(callback, device=t.device)
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -971,7 +979,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],
-                callback: Callable[[Callable], _TensorT],
+                callback: _MetaTensorCallback[_TensorT],
                 source: torch._guards.Source,
             ) -> _TensorT:
                 # We are hitting plain meta_desc tensor so actually
@@ -983,7 +991,6 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
-                        override_device,
                     )
 
                 inner_tensors = {}
@@ -1001,7 +1008,7 @@ class MetaConverter(Generic[_TensorT]):
 
                     current_source = AttrSource(source, attr)
                     inner_callback = functools.partial(
-                        callback, device=meta_tensor_desc.device  # type: ignore[call-arg]
+                        callback, device=meta_tensor_desc.device
                     )
                     new_empty_tensor = _empty_create_subclass(
                         meta_tensor_desc,
@@ -1045,7 +1052,7 @@ class MetaConverter(Generic[_TensorT]):
             t: MetaTensorDesc,
             source: torch._guards.Source,
             shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv],
-            callback: Callable[[Callable], _TensorT],
+            callback: _MetaTensorCallback[_TensorT],
         ) -> torch.fx.experimental.symbolic_shapes.SymbolicContext:
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
@@ -1207,7 +1214,7 @@ class MetaConverter(Generic[_TensorT]):
                 shape_env: Optional[
                     torch.fx.experimental.symbolic_shapes.ShapeEnv
                 ] = shape_env,
-                callback: Callable[[Callable], _TensorT] = callback,  # type: ignore[assignment]
+                callback: _MetaTensorCallback[_TensorT] = callback,
             ) -> torch.Tensor:
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:
@@ -1239,7 +1246,6 @@ class MetaConverter(Generic[_TensorT]):
                     all_dynamic_symbolic_context(
                         visited_desc, temp_source, shape_env, callback
                     ),
-                    override_device,
                 )
 
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
@@ -1445,7 +1451,6 @@ class MetaConverter(Generic[_TensorT]):
                                 # work, take a closer look.
                                 source,
                                 symbolic_context,
-                                override_device,
                             )
                             r = self._checked_cast_tensor_t(
                                 _wrap_functional_tensor(ft, t.current_level),
@@ -1462,7 +1467,8 @@ class MetaConverter(Generic[_TensorT]):
                                     strides,
                                     dtype=t.dtype,
                                     device="meta",
-                                )
+                                ),
+                                device="meta",
                             )
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
@@ -1487,7 +1493,6 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
-                        override_device,
                     )
                     r = self._checked_cast_tensor_t(
                         torch._to_functional_tensor(unwrapped)
@@ -1521,7 +1526,6 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         torch._dynamo.source.AttrSource(source, "_base"),
                         base_symbolic_context,
-                        override_device,
                     )
 
                     def is_c_of_r(
@@ -1643,7 +1647,7 @@ class MetaConverter(Generic[_TensorT]):
                                 sizes,
                                 strides,
                                 dtype=t.dtype,
-                                device=override_device or t.device,
+                                device="meta",
                             )
                         )
                         if self.copy_data:
@@ -1752,7 +1756,6 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         AttrSource(source, "grad"),
                         symbolic_context,
-                        override_device,
                     )
                 torch._C._set_conj(r, t.is_conj)
                 torch._C._set_neg(r, t.is_neg)
@@ -1786,7 +1789,7 @@ class MetaConverter(Generic[_TensorT]):
         t: torch.Tensor,
         shape_env: Optional[ShapeEnv] = None,
         *,
-        callback: Optional[Callable[[Callable], _TensorT]] = None,
+        callback: Optional[_MetaTensorCallback[_TensorT]] = None,
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
@@ -1794,9 +1797,9 @@ class MetaConverter(Generic[_TensorT]):
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
     ) -> _TensorT:
-        callback_: Callable[[Callable], _TensorT]
+        callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
-            callback_ = self._identity_callable  # type: ignore[assignment]
+            callback_ = self._identity_callable
         else:
             callback_ = callback
         # TODO: zero tensors?  We appear to have eliminated them by
@@ -1865,7 +1868,6 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
-                override_device="meta",
             )
 
         if type(t) is torch.nn.Parameter:

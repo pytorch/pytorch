@@ -1137,6 +1137,7 @@ class _WireProtocolInput:
     For _FxCompileSerialized - encapsulates all the data being transferred
     (sent) from the parent to the child.
     """
+
     gm: torch.fx.GraphModule
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
@@ -1175,6 +1176,7 @@ class _WireProtocolOutput:
     For _FxCompileSerialized - encapsulates all the data being transferred
     (returned) back from the child to the parent.
     """
+
     graph: OutputCode
 
     def serialize(self) -> _WireProtocolPickledOutput:

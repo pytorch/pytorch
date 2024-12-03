@@ -3,6 +3,7 @@ import importlib
 import io
 import pickle
 import typing
+from torch.utils._mode_utils import no_dispatch
 from abc import abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 from typing_extensions import override
@@ -96,9 +97,15 @@ class _TensorPickleData:
             fake_mode=unpickle_state.fake_mode,
         )
 
-        def with_fake(builder: Callable[[], torch.Tensor]) -> FakeTensor:
-            with unpickle_state.fake_mode:
-                return typing.cast(FakeTensor, builder())
+        def with_fake(
+            make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
+        ) -> FakeTensor:
+            with no_dispatch():
+                return FakeTensor(
+                    unpickle_state.fake_mode,
+                    make_meta_t(),
+                    device,
+                )
 
         return unpickle_state.meta_converter.meta_tensor(
             metadata,
@@ -106,22 +113,7 @@ class _TensorPickleData:
             with_fake,
             None,
             None,
-            None,
         )
-
-        with unpickle_state.fake_mode:
-            empty = torch.empty_strided(
-                self.metadata.shape,  # type: ignore[arg-type]
-                self.metadata.stride,  # type: ignore[arg-type]
-                dtype=self.metadata.dtype,
-                layout=self.metadata.layout,
-                device=self.metadata.device,
-                requires_grad=self.metadata.requires_grad,
-            )
-
-        # TODO: Weird storage stuff?
-
-        return empty
 
 
 class _TorchNumpyPickleData:
