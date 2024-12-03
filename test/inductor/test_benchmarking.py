@@ -122,7 +122,7 @@ class TestBenchmarker(TestCase):
         [
             ("env_val", "1", True),
             ("env_val", "0", False),
-            ("env_val", "", None),
+            ("env_val", None, None),
             ("oss_default", True, True),
             ("oss_default", False, False),
         ],
@@ -143,7 +143,7 @@ class TestBenchmarker(TestCase):
         else:
             self.assertEqual(
                 inner(),
-                getattr(config.benchmarking, self.feature_name).oss_default,
+                getattr(config.benchmarking, feature_name).oss_default,
             )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
