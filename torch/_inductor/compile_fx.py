@@ -371,7 +371,7 @@ def split_const_gm(
             gm,
             node,
             (
-                const_result[const_outputs[node.name]]
+                const_result[const_outputs[node.name]]  # type:ignore[index]
                 if lifted_constant_names is None
                 else None
             ),
