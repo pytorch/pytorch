@@ -3128,6 +3128,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         or
             (with bias) pattern_no_bias -> add
         Expansion of the scale of activation is optional.
+        The pattern depiction doesn't mean that convert_element_type output is fed into expand_a as input,
+        but simply that activation scale may be applied after an expand operation on it.
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
@@ -3161,7 +3163,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return c
 
         mod = Mod(dtype, has_bias).eval()
-        a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
+        a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
 
         def matcher_check_fn():
             self.assertEqual(
