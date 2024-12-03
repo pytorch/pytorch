@@ -98,6 +98,16 @@ class DtypePropagationOpsHandler:
     Propagate dtype from args to output
     """
 
+    # Singleton DtypePropagationOpsHandler, because we meta program over a number of op rules.
+    # Those are only defined after other inductor state has run.
+
+    _instance: Optional["DtypePropagationOpsHandler"] = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self) -> None:
         for op, rule in torch._inductor.utils.op_dtype_propagation_rules.items():
             fn = (
