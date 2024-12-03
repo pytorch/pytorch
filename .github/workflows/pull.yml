@@ -476,35 +476,35 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-sm86-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
+  linux-focal-cuda12_4-py3_10-gcc9-sm89-build:
+    name: linux-focal-cuda12.4-py3.10-gcc9-sm89
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
-      cuda-arch-list: 8.6
+      cuda-arch-list: 8.9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-sm86-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
+  linux-focal-cuda12_4-py3_10-gcc9-sm89-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9-sm89
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-sm86-build
+      - linux-focal-cuda12_4-py3_10-gcc9-sm89-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
+      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm89-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm89-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-py3-clang12-executorch-build:
