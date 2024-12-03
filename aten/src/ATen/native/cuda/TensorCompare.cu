@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -12,13 +13,14 @@ namespace at::native {
 namespace {
 
 void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool, iter.dtype(), "where_cuda", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "where_cuda", [&] {
       gpu_kernel(
         iter,
         [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase &iter) {

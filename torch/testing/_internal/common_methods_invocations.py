@@ -21,7 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    empty_types, complex_types_and, integral_types, custom_types,
+    empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -8733,18 +8733,27 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale1 = make_scale((1,))
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e4m3 mat2 e5m2
-    mat1 = make_mat_e4m3((M, K))
+    # two e5m2
+    mat1 = make_mat_e5m2((M, K))
     mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
     scale1 = make_scale((1,))
     scale2 = make_scale((1,))
     samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e5m2 mat2 e4m3
-    mat1 = make_mat_e5m2((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
+    # TODO: Will remove this after oneDNN v3.6
+    # now oneDNN v3.5.3 only supports mat1 * mat2 with the same data types.
+    if device != 'cpu':
+        # mat1 e4m3 mat2 e5m2
+        mat1 = make_mat_e4m3((M, K))
+        mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
+        scale1 = make_scale((1,))
+        scale2 = make_scale((1,))
+        samples.append(SampleInput(mat1, mat2, scale1, scale2))
+        # mat1 e5m2 mat2 e4m3
+        mat1 = make_mat_e5m2((M, K))
+        mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+        scale1 = make_scale((1,))
+        scale2 = make_scale((1,))
+        samples.append(SampleInput(mat1, mat2, scale1, scale2))
 
     yield from samples
 
@@ -16223,16 +16232,19 @@ op_db: List[OpInfo] = [
     OpInfo(
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
-        dtypes=empty_types(),
+        dtypes=float8_types(),
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
+        decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0'), ],
         skips=(
             # Sample inputs isn't really parametrized on dtype
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # "add_stub" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
+                         device_type='cpu'),
             # "mul_cuda" not implemented for float8_e4m3fn
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
@@ -19167,7 +19179,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('eye',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
