@@ -178,7 +178,6 @@ class CallgrindStats:
     stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
-        newline = "\n"  # `\` cannot appear in fstring code section.
         base_stats = self.baseline_exclusive_stats
         output = f"""
 {super().__repr__()}
@@ -458,7 +457,10 @@ class GlobalsBridge:
 
             elif wrapped_value.serialization == Serialization.TORCH:
                 path = os.path.join(self._data_dir, f"{name}.pt")
-                load_lines.append(f"{name} = torch.load({repr(path)})")
+                # TODO: Figure out if we can use torch.serialization.add_safe_globals here
+                # Using weights_only=False after the change in
+                # https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573
+                load_lines.append(f"{name} = torch.load({repr(path)}, weights_only=False)")
                 torch.save(wrapped_value.value, path)
 
             elif wrapped_value.serialization == Serialization.TORCH_JIT:
@@ -665,7 +667,7 @@ class _ValgrindWrapper:
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
             def parse_output(fpath: str, inclusive: bool) -> FunctionCounts:
-                annotate_invocation, annotate_invocation_output = run([
+                _annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
                     "--threshold=100",

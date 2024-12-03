@@ -8,8 +8,7 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
@@ -102,5 +101,4 @@ struct TORCH_API TensorList : public TsNode {
       TSLoweringContext* loctx) const override;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

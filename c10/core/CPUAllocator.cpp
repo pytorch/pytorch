@@ -75,9 +75,6 @@ ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {
 template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
-  DefaultMobileCPUAllocator() = default;
-  ~DefaultMobileCPUAllocator() override = default;
-
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
       return;
@@ -114,8 +111,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    void* data;
+    void* data = nullptr;
     auto allocator_ptr = GetThreadLocalCachingAllocator();
     auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
     if (allocator_ptr != nullptr) {

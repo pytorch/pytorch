@@ -15,8 +15,7 @@
 #include <stack>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 using graph_rewrite_helper::PatternInfo;
@@ -513,7 +512,6 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
   Node* pattern_choose_qparam = choose_qparam_val->node();
 
   std::vector<DynamicQuantOps> nodes_to_rewrite;
-  std::vector<Node*> choose_qparam_nodes_to_rewrite;
   for (const Match& match : matches) {
     Node* matched_dequantize = match.nodes_map.at(pattern_dequant);
     Node* matched_quantize = match.nodes_map.at(pattern_quant);
@@ -1557,7 +1555,6 @@ QuantOpParams InsertQuantDeQuantHelper::insertCalculateQParams(
       "getQSchemeAndParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
-  std::vector<Value*> qparams_graph_values;
   QuantOpParams quant_op_params;
 
   TORCH_CHECK(
@@ -1843,5 +1840,4 @@ Module InsertQuantDeQuantOnDevicePTQ(
   h.propagateQuantizationOps(module);
   return module;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

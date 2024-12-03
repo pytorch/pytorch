@@ -1,27 +1,31 @@
 # mypy: allow-untyped-defs
 import contextlib
-import copy
+import dataclasses
 import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch._prims_common import is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.printers import CppPrinter as _CppPrinter
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import ir
+from ..dependencies import Dep
+from ..loop_body import LoopBody
+from ..scheduler import BaseSchedulerNode, SchedulerBuffer
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import (
     CSEVariable,
     deduce_output_dtype_by_name,
-    ExprPrinter,
     Kernel,
     KernelArgs,
     OptimizationContext,
@@ -45,6 +49,8 @@ DTYPE_TO_CPP = {
     torch.complex64: "c10::complex<float>",
     torch.float8_e4m3fn: "float8_e4m3fn",
     torch.float8_e5m2: "float8_e5m2",
+    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -75,6 +81,7 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+    "xpu": "at::kXPU",
 }
 
 LAYOUT_TO_ATEN = {
@@ -170,10 +177,14 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self) -> str:
@@ -221,212 +232,12 @@ class CppCSEVariable(CSEVariable):
         return itervar in self.dependent_itervars
 
 
-class CppPrinter(ExprPrinter):
-    def _print_Integer(self, expr):
-        return (
-            f"{int(expr)}LL" if sys.platform in ["darwin", "win32"] else f"{int(expr)}L"
-        )
-
-    def _print_Where(self, expr):
-        c = self.paren(self.doprint(expr.args[0]))
-        p = self.paren(self.doprint(expr.args[1]))
-        q = self.paren(self.doprint(expr.args[2]))
-        return f"{c} ? {p} : {q}"
-
-    def _print_ModularIndexing(self, expr):
-        x, div, mod = expr.args
-        x = self.paren(self.doprint(x))
-        if div != 1:
-            div = self.paren(self.doprint(div))
-            if expr.is_integer:
-                x = f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
-            else:
-                x = f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-        mod = self.paren(self.doprint(mod))
-        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
-
-    def _print_FloorDiv(self, expr):
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        if expr.is_integer:
-            return f"c10::div_floor_integer(static_cast<int64_t>({x}), static_cast<int64_t>({div}))"
-        return f"c10::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
-
-    def _print_floor(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_FloorToInt(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_TruncToInt(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})"
-
-    def _print_TruncToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"std::trunc({self._print(expr.args[0])})"
-
-    def _print_ToFloat(self, expr):
-        assert len(expr.args) == 1
-        return f"static_cast<double>({self._print(expr.args[0])})"
-
-    # TODO: This is wrong if one of the inputs is negative.  This is hard to
-    # tickle though, as the inputs are typically positive (and if we can prove
-    # they are positive, we will have used Mod instead, for which this codegen
-    # is right).
-    def _print_PythonMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_CMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
-    def _print_IntTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        # TODO: This is only accurate up to 2**53
-        return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
-
-    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
-    # use std::pow, that operates on floats
-    def _print_PowByNatural(self, expr):
-        raise NotImplementedError(
-            f"_print_PowByNatural not implemented for {type(self)}"
-        )
-
-    def _print_FloatTrueDiv(self, expr):
-        lhs, rhs = expr.args
-        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
-
-    def _print_FloatPow(self, expr):
-        base, exp = expr.args
-        return f"std::pow({self._print(base)}, {self._print(exp)})"
-
-    def _print_Pow(self, expr):
-        # Uses float constants to perform FP div
-        base, exp = expr.args
-        base = self._print(base)
-
-        if exp == 0.5 or exp == -0.5:
-            return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        if exp.is_integer:
-            exp = int(exp)
-            if exp > 0:
-                r = "*".join([self.paren(base)] * exp)
-            elif exp < 0:
-                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-            else:  # exp == 0
-                r = "1.0"
-
-            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-        else:
-            # TODO: float vs double
-            return f"std::pow({base}, {float(exp)})"
-
-    def _print_Rational(self, expr):
-        # Uses float constants to perform FP div
-        if expr.q == 1:
-            r = f"{expr.p}"
-        else:
-            r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_CeilToInt(self, expr):
-        assert len(expr.args) == 1
-        r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
-
-    def _print_Min(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::min(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::min({il})"
-
-    def _print_Max(self, expr):
-        args = [self._print(a) for a in expr.args]
-        if len(args) == 2:
-            return f"std::max(static_cast<{INDEX_TYPE}>({args[0]}), static_cast<{INDEX_TYPE}>({args[1]}))"
-        else:
-            # Initializer list overload
-            il = "{" + ", ".join(args) + "}"
-            return f"std::max({il})"
-
-    def _print_Abs(self, expr):
-        assert len(expr.args) == 1
-        return f"std::abs({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_cosh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::cosh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_acos(self, expr):
-        assert len(expr.args) == 1
-        return f"std::acos({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sinh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::sinh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_asin(self, expr):
-        assert len(expr.args) == 1
-        return f"std::asin({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_tanh(self, expr):
-        assert len(expr.args) == 1
-        return f"std::tanh({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_atan(self, expr):
-        assert len(expr.args) == 1
-        return f"std::atan({self._print(expr.args[0])})"
-
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return f"std::sqrt({self._print(expr.args[0])})"
-
-    def _print_RoundToInt(self, expr):
-        assert len(expr.args) == 1
-        # TODO: dispatch to llrint depending on index type
-        return f"std::lrint({self._print(expr.args[0])})"
-
-    def _print_RoundDecimal(self, expr):
-        assert len(expr.args) == 2
-        number, ndigits = expr.args
-        if number.is_integer:
-            # ndigits < 0 should have been filtered by the sympy function
-            assert ndigits < 0
-            raise ValueError(
-                f"For integer inputs, only non-negative ndigits are currently supported, but got {ndigits}."
-            )
-        return f"static_cast<double>(std::nearbyint(1e{ndigits} * {self.paren(self._print(number))}) * 1e{-ndigits})"
-
-    def _print_BooleanTrue(self, expr):
-        return "true"
-
-    def _print_BooleanFalse(self, expr):
-        return "false"
+class CppPrinter(_CppPrinter):
+    def doprint(self, expr, *, simplify: bool = True, p=True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
 
 
 # A function to print, useful for printing sympy symbols.
@@ -488,7 +299,7 @@ def rewrite_index_for_nodes(
     for i in range(len(local_buf.get_size())):
         var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
         index_vars.append(var if var in used_vars else 0)
-    index = local_buf.layout.make_indexer()(index_vars)
+    index = local_buf.get_layout().make_indexer()(index_vars)
     return index
 
 
@@ -646,18 +457,19 @@ class LocalBufferContext:
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
-            new_loops = copy.copy(loops)
+            new_inner_fn = self.localize_function(
+                loops.inner_fn,
+                rewrite_index,
+            )
+
+            new_loops = dataclasses.replace(loops, inner_fn=new_inner_fn)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
-                    node.get_name(), node.get_layout(), new_loops
+                    name=node.get_name(), layout=node.get_layout(), data=new_loops
                 )
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = self.localize_function(
-                new_loops.inner_fn,
-                rewrite_index,
-            )
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]
@@ -880,3 +692,104 @@ def create_epilogue_with_attr(input_buffer, attr, **kwargs):
         inner_fn=inner_fn,
         ranges=input_buffer.get_size(),
     )
+
+
+def _get_loop_body(fn_list):
+    if all(isinstance(fn, LoopBody) for fn in fn_list):
+        loop_bodies = fn_list
+    else:
+        if hasattr(fn_list[0], "original_fn"):
+            # For the case of local buffer, we wrap the fn with localize_function
+            assert all(hasattr(fn, "original_fn") for fn in fn_list)
+            assert all(
+                isinstance(fn.original_fn.args[0]._body, LoopBody) for fn in fn_list
+            )
+            loop_bodies = [fn.original_fn.args[0]._body for fn in fn_list]
+        else:
+            assert all(isinstance(fn, functools.partial) for fn in fn_list)
+            assert all(isinstance(fn.args[0]._body, LoopBody) for fn in fn_list)
+            loop_bodies = [fn.args[0]._body for fn in fn_list]
+    assert loop_bodies is not None
+    return loop_bodies
+
+
+def _get_dtype_from_loopbodies(loop_bodies):
+    dtypes = set()
+    for loop_body in loop_bodies:
+        graphs = [loop_body.root_block.graph] + [
+            body.graph for body in list(loop_body.subblocks.values())
+        ]
+        for graph in graphs:
+            for node in graph.nodes:
+                if node.op != "call_method":
+                    continue
+                dtypes.add(node.meta[OptimizationContext.key].dtype)
+    return dtypes
+
+
+def template_fusion_with_epilogues_supported(
+    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
+) -> Tuple[bool, bool]:
+    def _get_indexes_of_template_buf_read(
+        epilogue_node: ir.Operation, template_buf_names: List[str]
+    ) -> List[sympy.Expr]:
+        return [
+            read.index
+            for read in epilogue_node.get_reads()
+            if read.name in template_buf_names
+        ]
+
+    def _check_supported_and_same_indexes(
+        index_of_template_buf_read: Sequence[sympy.Expr],
+        epilogue_writes: OrderedSet[Dep],
+    ) -> Tuple[bool, bool]:
+        num_indexes = len(set(index_of_template_buf_read))
+
+        if num_indexes > 1:
+            same_index = False
+            supported = False  # Different read indexes not supported
+        elif num_indexes == 0:
+            same_index = True
+            supported = True  # No reads, automatically supported
+        elif num_indexes == 1:
+            iotbr = index_of_template_buf_read[0]
+            same_index = all(write.index == iotbr for write in epilogue_writes)
+            # TODO: Add support of fusion when the read of template buffer and the write of epilogue output
+            # in the epilogue node don't have the same index and change supported to True
+            supported = same_index
+        else:
+            raise AssertionError("Should not reach here")
+
+        return supported, same_index
+
+    def _template_fusion_supported(
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
+    ) -> Tuple[bool, bool]:
+        template_buf_names = [x.get_name() for x in template_outputs]
+        indexes_of_template_buf_reads = [
+            _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)
+            for epilogue_node in epilogue_nodes
+        ]
+        epilogue_nodes_writes = [
+            epilogue_node.get_read_writes().writes for epilogue_node in epilogue_nodes
+        ]
+
+        results = [
+            _check_supported_and_same_indexes(reads, writes)
+            for reads, writes in zip(
+                indexes_of_template_buf_reads, epilogue_nodes_writes
+            )
+        ]
+        supported, same_indexes = zip(*results)
+        return all(supported), all(same_indexes)
+
+    assert template.is_template()
+    template_outputs = template.get_outputs()
+
+    epilogue_nodes = [
+        n.node
+        for epilogue in epilogues
+        for n in epilogue.get_nodes()
+        if n.node is not None
+    ]
+    return _template_fusion_supported(template_outputs, epilogue_nodes)

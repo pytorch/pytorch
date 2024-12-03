@@ -11,7 +11,8 @@
 namespace torch::autograd {
 
 struct THPCppFunction {
-  PyObject_HEAD std::shared_ptr<Node> cdata;
+  PyObject_HEAD
+  std::shared_ptr<Node> cdata;
 };
 
 template <typename Ctor>

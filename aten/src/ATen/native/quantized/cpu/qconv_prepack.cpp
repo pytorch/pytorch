@@ -343,6 +343,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
       "stride should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
   TORCH_CHECK(
+      std::all_of(stride.begin(), stride.end(), [](bool s) { return s > 0; }),
+      "quantized::conv_prepack: stride should be positive.");
+  TORCH_CHECK(
       padding.size() == kSpatialDim,
       "Specify front/top/left padding only. "
       "end/bottom/right padding assumed to be equal to front/top/left");
@@ -615,8 +618,7 @@ at::Tensor _qconv_prepack_onednn(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <int kSpatialDim = 2>
@@ -631,7 +633,7 @@ class QConvPackWeightInt8 final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
+    for ([[maybe_unused]] const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
@@ -855,5 +857,4 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
