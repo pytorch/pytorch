@@ -1,5 +1,5 @@
 from ._flat_param import FlatParameter as FlatParameter
-from .fully_shard import (
+from ._fully_shard import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
