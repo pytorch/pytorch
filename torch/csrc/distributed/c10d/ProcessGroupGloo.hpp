@@ -6,6 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -30,23 +31,8 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // All functions on this class are expected to be called in the same
 // order across processes in the group. This is the only way that we
 // can guarantee to match up the same calls across processes. For
-// multi-threaded usage of process groups, you can use consider using
+// multi-threaded usage of process groups, you can consider using
 // multiple process group instances.
-//
-// The Gloo algorithms that this class calls into are cached by their
-// signature (see description of AlgorithmKey above). This cache works
-// as follows: every function call instantiates an AlgorithmKey and
-// looks in the cache for existing entries. If there is one, it is
-// removed from the cache and returned to the caller. If there are
-// none, a new entry is created and returned. If an entry was created
-// before, but is still in use, the call will block and wait until the
-// entry is returned to the cache.
-//
-// In the future, we hope to extend this to allow multiple entries per
-// key, to enable parallelism for a single key. The number of entries
-// per key must always be identical for all processes. This maximum
-// number can be automatically tuned, but only if we let a single
-// process take charge, and have it broadcast the limits.
 //
 class TORCH_API ProcessGroupGloo : public Backend {
  public:
@@ -106,7 +92,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // Wrap c10d store as Gloo store
   class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
    public:
-    GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+    GlooStore(c10::intrusive_ptr<::c10d::Store> store)
+        : store_(std::move(store)) {}
 
     void setUint(const std::string& key, const std::vector<uint8_t>& value) {
       store_->set(key, value);

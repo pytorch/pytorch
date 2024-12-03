@@ -12,8 +12,11 @@ if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
-# TODO: add comments for TestTraverse
 class TestTraverse(TestCase):
+    """
+    Test class for util methods of _traverse
+    """
+
     def test_traverse_shallow(self) -> None:
         state_dict = {
             "key0": 1,

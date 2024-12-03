@@ -8,6 +8,7 @@ namespace torch::inductor {
 
 // NOTICE: Following APIs are subject to change due to active development
 // We provide NO BC guarantee for these APIs
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
  public:
   // @param device_str: cuda device string, e.g. "cuda", "cuda:0"
@@ -19,10 +20,10 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
 
   ~AOTIModelContainerRunnerCuda();
 
-  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs);
+  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs);
 
   std::vector<at::Tensor> run_with_cuda_stream(
-      std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& inputs,
       at::cuda::CUDAStream cuda_stream);
 };
 

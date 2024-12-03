@@ -38,9 +38,10 @@ TypePtr ScriptTypeParser::subscriptToType(
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
       if (!tup_literal.inputs().empty()) {
-        throw ErrorReport(tup_literal.range())
+        throw(
+            ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
-            << "have any elements!";
+            << "have any elements!");
       }
       return TupleType::create({});
     }
@@ -179,12 +180,12 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  char* end;
+  char* end = nullptr;
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
-    throw ErrorReport(subscript.subscript_exprs().range())
-        << "subscript of Broadcastable list must be a positive integer";
+    throw(
+        ErrorReport(subscript.subscript_exprs().range())
+        << "subscript of Broadcastable list must be a positive integer");
   }
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
