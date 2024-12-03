@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-expecttest!=0.2.0
+expecttest>=0.2.1
 hypothesis
 numpy
 psutil
@@ -8,16 +8,14 @@ pyyaml
 requests
 setuptools
 types-dataclasses
-typing-extensions>=4.8.0
-sympy==1.12.1 ; python_version == "3.8"
+typing-extensions>=4.10.0
 sympy==1.13.1 ; python_version >= "3.9"
 filelock
 networkx
 jinja2
 fsspec
-lintrunner
+lintrunner ; platform_system != "Windows"
 ninja
-# setuptools was removed from default python install
-setuptools ; python_version >= "3.12"
 packaging
-optree>=0.12.0 ; python_version <= "3.12"
+optree>=0.13.0
+cmake

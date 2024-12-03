@@ -68,7 +68,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.fake_tensor_mode: Optional[FakeTensorMode] = None
             self.submodules: Dict[torch.nn.Module, str] = {}
 
-        def trace(self) -> None:
+        def trace(self) -> None:  # type: ignore[override]
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
         def create_arg(self, a: Argument) -> torch.fx.Node:
@@ -160,7 +160,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def placeholder(
             self,
-            target: str,
+            target: str,  # type: ignore[override]
             args: Tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
@@ -186,7 +186,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             if target == operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
-            elif getattr(target, "__module__", None) in {"_operator", "math"}:
+            elif getattr(target, "__module__", None) in {"_operator", "builtins", "math"}:
                 assert callable(target)
                 return self.callback.call_sym(target, args, meta)
             elif target in _TORCH_SYM_OPS:
@@ -218,7 +218,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
         def get_attr(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
@@ -231,7 +231,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             raise ExportPassBaseError("call_module is not supported.")
 
         def call_method(
-            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]  # type: ignore[override]
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -394,7 +394,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
+        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(  # type: ignore[assignment]
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)

@@ -12,6 +12,7 @@ permissions: read-all
 
 jobs:
   update-commit-hash:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
@@ -41,6 +42,7 @@ jobs:
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-slow-tests:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
@@ -56,13 +58,15 @@ jobs:
       - name: Install requirements
         shell: bash
         run: |
-          pip install rockset==1.0.3 requests==2.32.2
+          pip install requests==2.32.2 clickhouse-connect==0.7.16
       - name: Update slow test file
         shell: bash
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
           UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
+          CLICKHOUSE_ENDPOINT: ${{ secrets.CLICKHOUSE_ENDPOINT }}
+          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_READONLY_USERNAME }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
         run: |
           git config --global user.name "PyTorch UpdateBot"
           git config --global user.email "pytorchupdatebot@users.noreply.github.com"

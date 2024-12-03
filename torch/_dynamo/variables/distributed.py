@@ -14,7 +14,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ class DistributedVariable(VariableTracker):
 def is_from_local(value):
     if not DistributedVariable.is_available():
         return False
-    from torch.distributed._tensor import DTensor
+    from torch.distributed.tensor import DTensor
 
     return inspect.isfunction(value) and value is DTensor.from_local
 
@@ -98,6 +98,10 @@ class WorldMetaClassVariable(DistributedVariable):
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return ProcessGroupVariable(self.value.WORLD)
+        elif name == "NON_GROUP_MEMBER":
+            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return EnumVariable(self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
@@ -108,7 +112,7 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
 
@@ -143,7 +147,7 @@ class PlacementVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return isinstance(value, Placement)
 
@@ -235,7 +239,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ConstantVariable.create(self.value.get_group())
+            return ProcessGroupVariable(self.value.get_group())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)

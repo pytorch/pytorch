@@ -323,7 +323,6 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
-        batch_size = qkv.size(0)
         max_seqlen = qkv._get_max_seqlen()
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())
@@ -568,8 +567,9 @@ def _sdpa_nested_preprocessing(query, key, value):
 
     output_nt_info = {
         "offsets": q_t.offsets(),
-        "_max_seqlen": q_t._get_max_seqlen(),
-        "_min_seqlen": q_t._get_min_seqlen(),
+        "lengths": q_t.lengths(),
+        "max_seqlen": q_t._get_max_seqlen(),
+        "min_seqlen": q_t._get_min_seqlen(),
     }
 
     return (
@@ -615,6 +615,20 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
+def _is_computing_meta_flops(x):
+    # Note: there's a use case of using meta tensors & the dispatch-based flop counter.
+    # We can use this function to check for this scenario in order to handle it specially.
+    if not torch.jit.is_scripting() and x.device.type == "meta":
+        torch_dispatch_mode_stack = (
+            torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+        )
+        return any(
+            type(x) == torch.utils.flop_counter.FlopCounterMode
+            for x in torch_dispatch_mode_stack
+        )
+    return False
+
+
 def _autocast(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -642,7 +656,8 @@ def _autocast(
     actual dtype conversions.
     """
     device_type = query.device.type
-    if not torch.is_autocast_enabled(device_type):
+    # meta device is not supported by autocast, so break early for it
+    if _is_computing_meta_flops(query) or not torch.is_autocast_enabled(device_type):
         return query, key, value, attn_mask
 
     def cvt(x):
@@ -678,7 +693,9 @@ def jagged_scaled_dot_product_attention(
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
     )
-    from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+    from torch.nested._internal.nested_tensor import (
+        nested_view_from_values_offsets_lengths,
+    )
 
     # Special path for non-ragged sequence length (e.g. for SAM where we have a ragged
     # second batch dim instead). For this case, we can just send the dense buffers through
@@ -695,13 +712,26 @@ def jagged_scaled_dot_product_attention(
             is_causal=is_causal,
             scale=scale,
         )
-        return nested_view_from_values_offsets(output, query.offsets())
+        return nested_view_from_values_offsets_lengths(
+            output,
+            query.offsets(),
+            query.lengths(),
+            min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+            max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+        )
 
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
         query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
     )
+
+    if _is_computing_meta_flops(query):
+        # Backend choice will probably not be correct if we have a meta device,
+        # because backend choice is device-aware. In this case, we mostly just
+        # want to avoid using math backend (which does a .item() call).
+        # Arbitrarily choose flash attention.
+        backend_choice = SDPBackend.FLASH_ATTENTION
 
     if backend_choice == SDPBackend.FLASH_ATTENTION:
         og_size = query.size(-1)
@@ -723,10 +753,10 @@ def jagged_scaled_dot_product_attention(
 
         (
             attention,
-            logsumexp,
-            philox_seed,
-            philox_offset,
-            debug_attn_mask,
+            _logsumexp,
+            _philox_seed,
+            _philox_offset,
+            _debug_attn_mask,
         ) = torch.ops.aten._flash_attention_forward(
             query_buffer_reshaped,
             key_buffer_reshaped,
@@ -742,11 +772,9 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = nested_view_from_values_offsets(
+        attention = nested_view_from_values_offsets_lengths(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
-            output_nt_info["offsets"],
-            min_seqlen=output_nt_info["_min_seqlen"],
-            max_seqlen=output_nt_info["_max_seqlen"],
+            **output_nt_info,
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
@@ -783,26 +811,20 @@ def jagged_scaled_dot_product_attention(
         )
 
         # Reshape output to convert nnz to batch_size and seq_len
-        return nested_view_from_values_offsets(
+        return nested_view_from_values_offsets_lengths(
             attention.squeeze(0),
-            output_nt_info["offsets"],
-            min_seqlen=output_nt_info["_min_seqlen"],
-            max_seqlen=output_nt_info["_max_seqlen"],
+            **output_nt_info,
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
         # save the offsets and shape of the inputs, so we can reshape the final output
         # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]
         offsets = query.offsets()
+        q_lengths = query.lengths()
+        min_seqlen = query._maybe_min_seqlen
+        max_seqlen = query._maybe_max_seqlen
         d1 = query._size[1]
         d2 = value._size[-1]
-
-        min_seqlen_tensor = query._metadata_cache.get(
-            "min_seqlen", None
-        )  # type: ignore[attr-defined]
-        max_seqlen_tensor = query._metadata_cache.get(
-            "max_seqlen", None
-        )  # type: ignore[attr-defined]
 
         # convert jagged layout Nested Tensor to strided layout Nested Tensor
         # which support the math implementation of SDPA
@@ -822,24 +844,15 @@ def jagged_scaled_dot_product_attention(
             query, key, value, attn_mask, dropout_p, is_causal, scale=scale
         )[0]
 
-        from torch.nested._internal.nested_tensor import _load_val_from_tensor
-
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, d1, d2)
-        attn_out = nested_view_from_values_offsets(
+        attn_out = nested_view_from_values_offsets_lengths(
             attn_out,
             offsets,
-            min_seqlen=(
-                None
-                if min_seqlen_tensor is None
-                else _load_val_from_tensor(min_seqlen_tensor)
-            ),
-            max_seqlen=(
-                None
-                if max_seqlen_tensor is None
-                else _load_val_from_tensor(max_seqlen_tensor)
-            ),
+            lengths=q_lengths,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
         ).transpose(1, 2)
 
         return attn_out

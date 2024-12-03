@@ -10,6 +10,7 @@ from torch.utils._sympy.symbol import SymT
 
 from .. import config, cpp_builder, ir, lowering as L
 from ..autotune_process import CppBenchmarkRequest
+from ..loop_body import LoopBody
 from ..select_algorithm import PartialRender
 from ..utils import sympy_index_symbol, sympy_index_symbol_with_prefix
 from ..virtualized import V
@@ -106,7 +107,9 @@ class CppTemplateKernel(CppKernel):
     def call_kernel(self, name: str, node: ir.CppTemplateBuffer):
         wrapper = V.graph.wrapper_code
         _, call_args, arg_types = self.args.cpp_argdefs()
-        wrapper.generate_kernel_call(name, call_args, cuda=False, arg_types=arg_types)
+        wrapper.generate_kernel_call(
+            name, call_args, triton=False, gpu=False, arg_types=arg_types
+        )
 
     def dtype(self, node: ir.Buffer) -> str:
         return DTYPE_TO_CPP[node.get_dtype()]
@@ -124,7 +127,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
 
     def index(self, node: ir.Buffer, indices: List[Any]) -> str:
-        indexer = node.layout.as_fixed().make_indexer()
+        indexer = node.get_layout().as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
         outer_name = node.get_name()
@@ -179,7 +182,9 @@ class CppTemplateKernel(CppKernel):
     def define_buffer(self, name, sizes: List[Any], dtype=torch.float) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(name, ir.FixedLayout(torch.device("cpu"), dtype, sizes))
+        buf = ir.Buffer(
+            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+        )
         self.local_buffers[name] = buf
         ctype = f"{DTYPE_TO_CPP[dtype]}"
         numel = f"{cexpr_index(buf.get_numel())}"
@@ -211,11 +216,11 @@ class CppTemplateKernel(CppKernel):
             for i, sz in enumerate(var_sizes[0])
         }
         if not offsets:
-            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+            offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()(var_ranges.keys())
+        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -239,7 +244,13 @@ class CppTemplateKernel(CppKernel):
                     node.make_loader()(new_args).value,
                 )
 
-            body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
+            body = LoopBody(
+                fn,
+                (list(var_ranges.keys()), ()),
+                var_ranges,
+                list(var_ranges.keys()),
+                tuple(),
+            )
             bodies.append(body)
             var_sizes_list.append(var_sizes)
 
@@ -337,7 +348,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
             Dict[str, Union[ir.PrimitiveInfoType, List[ir.PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description="")
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq

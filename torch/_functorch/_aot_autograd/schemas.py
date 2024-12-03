@@ -9,7 +9,7 @@ import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, NewType, Optional, Set, Union
+from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Set, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,6 +28,7 @@ from .utils import strict_zip
 
 
 zip = strict_zip
+
 
 OutputType = Enum(
     "OutputType",
@@ -154,6 +155,12 @@ class InputAliasInfo:
 
 
 @dataclass
+class PlainTensorMeta:
+    unwrapped_idx: int
+    memory_format: Optional[torch.memory_format] = None
+
+
+@dataclass
 class SubclassCreationMeta:
     """
     Used for AOTDispatch.
@@ -177,12 +184,15 @@ class SubclassCreationMeta:
     # both of its inner elements are TwoTensors, then the
     # arg_count of the outer-most sublass will be 4
     arg_count: int
+    # Mark where or not symints were included. This flag is only used in one assertion
+    # in "wrap_tensor_subclasses"
+    included_subclass_symints: bool
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: Dict[str, Union["SubclassCreationMeta", None]]
-    outer_size: List[int]
-    outer_stride: List[int]
+    attrs: Dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
+    outer_size: Iterable[Union[None, int, torch.SymInt]]
+    outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -193,17 +203,53 @@ class SubclassCreationMeta:
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
+    memory_format: Optional[torch.memory_format] = None
 
-    def creation_fn(self, all_args, *, is_runtime: bool):
+    def compute_outer_size_and_stride(
+        self,
+        all_args,
+        *,
+        curr_start_idx: int,
+    ):
+        from .subclass_utils import compute_symint_placeholders
+
+        def compute(outer, start_idx):
+            placeholders = compute_symint_placeholders(outer)
+            has_symbolic = any(placeholders)
+
+            if has_symbolic:
+                start = curr_start_idx
+                end = start_idx + sum(placeholders)
+                it_args = iter(all_args[start:end])
+                it_placeholders = iter(placeholders)
+                return pytree.tree_map_only(
+                    lambda _: next(it_placeholders), lambda _: next(it_args), outer
+                ), start + len(placeholders)
+            else:
+                return outer, start_idx
+
+        outer_size, next_idx = compute(self.outer_size, curr_start_idx)
+        outer_stride, _ = compute(self.outer_stride, next_idx)
+        return outer_size, outer_stride
+
+    def creation_fn(
+        self,
+        all_args,
+        *,
+        is_runtime: bool,
+    ):
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
-            if creation_meta is None:
+            if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
-                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                subclass = creation_meta.creation_fn(
+                    all_args,
+                    is_runtime=is_runtime,
+                )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
 
@@ -213,8 +259,16 @@ class SubclassCreationMeta:
         else:
             original_subclass_type = type(self.original_subclass)
 
+        if is_runtime:
+            outer_size, outer_stride = self.compute_outer_size_and_stride(
+                all_args,
+                curr_start_idx=curr_start_idx,
+            )
+        else:
+            outer_size, outer_stride = self.outer_size, self.outer_stride
+
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, self.outer_size, self.outer_stride
+            inner_tensors, self.meta, outer_size, outer_stride
         )
 
         if not is_runtime:
@@ -227,12 +281,29 @@ class SubclassCreationMeta:
         return rebuilt
 
     def make_runtime_safe(self):
+        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+            dummy = -1
+            if isinstance(x, torch.SymInt):
+                # Replace nested ints by a dummy value (-1) as NJT ignores
+                # the outer_size/outer_stride at runtime.
+                return dummy if x.node.is_nested_int() else None
+            return x
+
         assert self.original_subclass is not None
         self.original_subclass_type = type(self.original_subclass)
         self.original_subclass = None
+
+        # Note: NJT outer_size in AOTDispatcher
+        # `_make_size_runtime_safe` replaces any nested int with a dummy value (-1)
+        # to prevent serializing a SymInt at runtime. Internally, nested tensor __tensor_unflatten__
+        # is designed to safely ignore this dummy value.
+        # For more details, see: https://github.com/pytorch/pytorch/blob/5141ade8e30c64e873e14dcc8de233da45d15025/torch/nested/_internal/nested_tensor.py#L266-L299  # noqa: B950
+        self.outer_size = tuple(map(_make_size_runtime_safe, self.outer_size))
+        self.outer_stride = tuple(map(_make_size_runtime_safe, self.outer_stride))
+
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
-            if creation_meta is not None:
+            if isinstance(creation_meta, SubclassCreationMeta):
                 creation_meta.make_runtime_safe()
 
     def __post_init__(self):
@@ -291,7 +362,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_inp_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -299,9 +370,9 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # length = # backward graph inputs
-    subclass_tangent_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_tangent_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -350,6 +421,10 @@ class ViewAndMutationMeta:
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
     bw_donated_idxs: Optional[List[int]] = None
+
+    # Number of tokens used in backward, appended at the end of backward outputs.
+    # Filled after tracing joint function.
+    num_backward_tokens: int = 0
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -566,6 +641,7 @@ class ViewAndMutationMeta:
                 x.shape == y.shape and x.dtype == y.dtype
                 for x, y, in zip(self.traced_tangents, other.traced_tangents)
             )
+            and self.num_backward_tokens == other.num_backward_tokens
         )
 
 
@@ -600,7 +676,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
+    grad_input_metas: Optional[
+        List[Union[PlainTensorMeta, SubclassCreationMeta]]
+    ] = None
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -792,6 +870,12 @@ class GraphSignature:
 
 
 @dataclass
+class AOTAutogradCacheInfo:
+    cache_key: str
+    start_time_ns: int
+
+
+@dataclass
 class AOTConfig:
     """
     Configuration for AOTDispatcher
@@ -813,9 +897,8 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-
     # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
+    cache_info: Optional[AOTAutogradCacheInfo] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
