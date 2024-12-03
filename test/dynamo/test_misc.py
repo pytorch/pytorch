@@ -1780,6 +1780,39 @@ utils_device.CURRENT_DEVICE == None""".split(
             expected_ops=9,
         )
 
+    def test_range_iter_guards(self):
+        @torch.compile()
+        def func():
+            @torch._dynamo.disable(recursive=False)
+            def run(n):
+                # For python <= 3.11, list comprehension is implemented by
+                # desugaring to:
+                # 1. creation of an iterator object
+                # 2. calling a new `listcomp` function with (1)
+                #
+                # In this test we force Dynamo to trace through (2) as the root
+                # frame, thereby ensuring we have the right guards for range
+                # iterators.
+                xs = [torch.ones(1) for i in range(n)]
+                return torch.concat(xs)
+
+            return run(2), run(3)
+
+        res2, res3 = func()
+        self.assertTrue(same(res2, torch.ones(2)))
+        self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range_iter_side_effects(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, it):
+            n = next(it)
+            return x + n
+
+        it = iter(range(1, 3))
+        res = run(torch.zeros(1), it)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(next(it), 2)
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
@@ -2834,6 +2867,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_copy_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, d0):
+            d1 = d0.copy()
+            d1[0] = 1
+            return x + 1, d1
+
+        d0 = {}
+        res, d1 = run(torch.zeros(1), d0)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(d0, {})
+        self.assertEqual(d1, {0: 1})
 
     def test_dict_subclass_get_method(self):
         class dotdict(dict):
@@ -3923,10 +3969,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_writes_to_cells_across_frames2(self):
         # This regression test was added when Dynamo didn't fully account for
-        # already established `NewCellVariable` instance for pre-existing cell,
+        # already established `CellVariable` instance for pre-existing cell,
         # while encountering the same cell again (we should reuse the instance
         # rather than creating a new one). This caused buffered writes to escape
-        # the newly created `NewCellVariable`.
+        # the newly created `CellVariable`.
         x = 0
 
         def inc_x_and_get_x(obj):
@@ -9378,11 +9424,8 @@ def ___make_guard_fn():
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
-        d1 = collections.deque([a, b])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([a, b])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", a, b])
+        d2 = d1.copy()
 
         def fn(q):
             a = q.pop()
@@ -9391,16 +9434,14 @@ def ___make_guard_fn():
 
         eager = fn(d1)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
     def test_deque_append_left(self):
-        d1 = collections.deque([10, 10])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([10, 10])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", 10, 10])
+        d2 = d1.copy()
 
         def fn(q, a, b):
             q.appendleft(a)
@@ -9411,7 +9452,8 @@ def ___make_guard_fn():
         b = torch.randn([3, 3])
         eager = fn(d1, a, b)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2, a, b)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2, a, b)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
