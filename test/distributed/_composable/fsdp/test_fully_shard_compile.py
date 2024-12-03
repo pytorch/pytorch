@@ -23,8 +23,8 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.fully_shard._fsdp_common import TrainingState
-from torch.distributed.fsdp.fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,

@@ -18,20 +18,20 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed.fsdp.fully_shard._fsdp_collectives import (
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from torch.distributed.fsdp.fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
-from torch.distributed.fsdp.fully_shard._fsdp_init import (
+from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp.fully_shard._fsdp_param import ShardedState
-from torch.distributed.fsdp.fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
