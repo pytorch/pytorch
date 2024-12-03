@@ -12471,6 +12471,13 @@ class TestCommon(TestCase):
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
+class TestMetalLibrary(TestCaseMPS):
+    def test_metal_arange(self):
+       x = torch.empty(12, device="mps", dtype=torch.half)
+       lib = torch.mps._compile_shader("kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) { x[idx] = idx; }")
+       lib.arange(x)
+       self.assertEqual(x, torch.arange(12.0, device='mps', dtype=torch.half))
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the

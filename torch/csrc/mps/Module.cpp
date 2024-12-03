@@ -306,11 +306,30 @@ void initModule(PyObject* module) {
           [](MetalKernelFunction& self,
              const py::args& args,
              const py::kwargs& kwargs) {
-            auto t = THPVariable_Unpack(args[0].ptr());
+            std::optional<std::vector<uint64_t>> threads;
+            std::optional<std::vector<unsigned>> group_size;
+            if (kwargs.contains("threads")) {
+              auto py_threads = kwargs["threads"];
+              if (py::isinstance<py::int_>(py_threads)) {
+                threads = {py_threads.cast<uint64_t>()};
+              } else {
+                threads = py_threads.cast<std::vector<uint64_t>>();
+              }
+              TORCH_CHECK(threads->size() > 0 && threads->size() < 3);
+            }
             self.runCommandBlock([&] {
               self.startEncoding();
-              self.setArg(0, t);
-              self.dispatch(10);
+              for (auto idx : c10::irange(args.size())) {
+                if (THPVariable_Check(args[idx].ptr())) {
+                  auto t = THPVariable_Unpack(args[idx].ptr());
+                  self.setArg(idx, t);
+                  if (!threads) {
+                    threads = {static_cast<uint64_t>(t.numel())};
+                  }
+                }
+              }
+              TORCH_CHECK(threads.has_value() && threads->size() < 3);
+              self.dispatch(threads->at(0));
             });
           })
       .def_property_readonly(
