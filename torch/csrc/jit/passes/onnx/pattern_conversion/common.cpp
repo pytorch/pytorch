@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool IndexingPatternFinder::IsSameSource(const Node* n, const Node* m) {
   const auto source_n = n->sourceRange().source();
@@ -41,5 +40,4 @@ std::vector<Node*> IndexingPatternFinder::FetchSliceAndSelect(
   return slice_and_select_node;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

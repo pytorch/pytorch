@@ -366,9 +366,9 @@ def override_test_values(arg_map: dict[str, str], op_name: str, index: int) -> N
             arg_map["out_int32"] = "false"
         else:
             arg_map["crow_indices"] = "torch::tensor({0}, torch::kInt32)"
-            arg_map[
-                "col_indices"
-            ] = "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
+            arg_map["col_indices"] = (
+                "torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32)"
+            )
             arg_map["out_int32"] = "false"
         return
     if op_name == "_convert_indices_from_coo_to_csr":

@@ -32,9 +32,15 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   if (!PyDict_Check(dict())) {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
   }
-  PyObject* trace_stack = PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY);
+  PyObject* trace_stack = nullptr;
+  if (PyDict_GetItemStringRef(dict(), ANOMALY_TRACE_KEY, &trace_stack) < 0) {
+    throw python_error();
+  }
   _print_stack(trace_stack, current_node_name, false);
-  PyObject* pyparent(PyDict_GetItemString(dict(), ANOMALY_PARENT_KEY));
+  PyObject* pyparent = nullptr;
+  if (PyDict_GetItemStringRef(dict(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
+    throw python_error();
+  }
 
   // if there is no "parent_" in metadata, then it means this metadata's node
   // is the root and stop printing the traceback
@@ -52,12 +58,18 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
       throw python_error();
     }
     const std::string parent_name(parent_name_char);
-    PyObject* parent_stack =
-        PyDict_GetItemString(parent_metadata.get(), ANOMALY_TRACE_KEY);
+    PyObject* parent_stack = nullptr;
+    if (PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack) < 0) {
+      throw python_error();
+    }
     _print_stack(parent_stack, parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
-    pyparent = PyDict_GetItemString(parent_metadata.get(), ANOMALY_PARENT_KEY);
+    if (PyDict_GetItemStringRef(
+            parent_metadata.get(), ANOMALY_PARENT_KEY, &pyparent) < 0) {
+      throw python_error();
+    }
   }
 }
 

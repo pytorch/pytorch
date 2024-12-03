@@ -9,9 +9,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
-namespace SubgraphUtils {
+namespace torch::jit::SubgraphUtils {
 namespace {
 
 bool hasSubgraph(Node* n) {
@@ -133,7 +131,6 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
   }
   ++it;
 
-  std::vector<Node*> merged_nodes;
   while (it != end_it) {
     Node* node = *it;
     ++it;
@@ -634,6 +631,4 @@ std::string generateNameForGraph(
   return truncateStrWithHash(graph_name.str(), maxlen);
 }
 
-} // namespace SubgraphUtils
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::SubgraphUtils

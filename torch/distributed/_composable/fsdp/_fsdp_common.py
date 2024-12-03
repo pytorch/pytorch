@@ -6,12 +6,41 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed.tensor import DeviceMesh, DTensor
+from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+
+_compiled_autograd_enabled: bool = False
+
+if torch._running_with_deploy():
+
+    def detect_compiled_autograd():
+        pass
+
+    def compiled_autograd_enabled():
+        return False
+
+else:
+
+    def detect_compiled_autograd():
+        assert (
+            not torch.compiler.is_compiling()
+        ), "`detect_compiled_autograd()` is designed to be called in eager mode"
+        global _compiled_autograd_enabled
+        import torch._dynamo.compiled_autograd as ca
+
+        _compiled_autograd_enabled = (
+            ca.compiled_autograd_enabled
+            or ca.compiled_autograd_enabled_force_eager
+            or ca.in_compiled_autograd_region
+        )
+
+    def compiled_autograd_enabled():
+        global _compiled_autograd_enabled
+        return _compiled_autograd_enabled
 
 
 @dataclass
@@ -98,13 +127,15 @@ def _chunk_with_empty(
     return chunks
 
 
-def _get_dim0_chunked_size(
-    chunk: torch.Tensor, unchunked_size: torch.Size
+def _get_dim_chunked_size(
+    chunk: torch.Tensor, unchunked_size: torch.Size, dim: int
 ) -> torch.Size:
     if chunk.numel() > 0:
         return chunk.size()
-    # For 0 numel, we need to preserve trailing dims for DTensor APIs
-    return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
+    # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
+    return cast(
+        torch.Size, unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
+    )
 
 
 def _from_local_no_grad(
@@ -116,7 +147,7 @@ def _from_local_no_grad(
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
 
-    if not ca.compiled_autograd_enabled:
+    if not compiled_autograd_enabled():
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
