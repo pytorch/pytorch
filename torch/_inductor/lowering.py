@@ -2394,7 +2394,24 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         if effn_attn_fwd_bias:
-            return ir.ExternKernel.require_stride1(arg)
+            if arg.maybe_get_stride() is not None:
+                # We require a dense last dimension, but the other strides
+                # can be expanded, which results in a smaller tensor that gets
+                # written out.
+                orig_size = list(arg.get_size())
+                out_size = list(arg.get_size())
+                for i, s in enumerate(arg.get_stride()[0:-1]):
+                    if V.graph.sizevars.statically_known_equals(s, 0):
+                        arg = slice_(arg, i, 0, 1)
+                        out_size[i] = 1
+                out = ir.ExternKernel.require_exact_strides(
+                    arg, ir.FlexibleLayout.contiguous_strides(out_size)
+                )
+                return expand(out, orig_size)
+
+            return ir.ExternKernel.require_exact_strides(
+                arg, ir.FlexibleLayout.contiguous_strides(arg.get_size())
+            )
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
