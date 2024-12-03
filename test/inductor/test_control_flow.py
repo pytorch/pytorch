@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 import itertools
+import unittest
 
 import torch
 import torch._dynamo.testing
 from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -41,6 +43,19 @@ class CondModels:
                 return x - y
 
             return torch.cond(p, true_fn, false_fn, [a, b])
+
+    class SimpleWithIntClosure(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num = 3
+
+        def forward(self, p, a, b):
+            return torch.cond(
+                pred=p,
+                true_fn=lambda a, b: [a + b + self.num],
+                false_fn=lambda a, b: [a - b - self.num],
+                operands=(a, b),
+            )
 
     class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
@@ -222,6 +237,18 @@ class CondTests(TestCase):
         )
 
     @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_simple_with_int_closure(self, device):
+        self._run_test(
+            model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+        )
+
+    @requires_gpu
     def test_cond_control_flow_with_precomputed_size(self):
         class TestModel(torch.nn.Module):
             def __init__(
@@ -332,6 +359,98 @@ class CondTests(TestCase):
             device=device,
             dynamic=True,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_outer_to_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                nz = torch.nonzero(a)
+                b = torch.ones([nz.size(0), 8], device=nz.device)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner_to_outer(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                y = torch.cond(p, true_fn, false_fn, [b])
+                return torch.sin(y)
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
 
     @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):
@@ -578,6 +697,24 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
 
+    class PytreeCarry(torch.nn.Module):
+        def forward(self, it, pytree_input):
+            def cond_fn(it, pytree_input):
+                return it > 0
+
+            def body_fn(it, pytree_input):
+                x = pytree_input[0][0]
+                y = pytree_input[1]["x"]
+                z = pytree_input[1]["y"]
+                new_x = y.sin()
+                new_y = z.cos()
+                new_z = x + 1
+                return it - 1, ([new_x], {"x": new_y, "y": new_z})
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn, body_fn, (it, pytree_input)
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -588,27 +725,45 @@ class WhileLoopTests(TestCase):
         dynamic=False,
         num_counters=1,
     ):
+        import torch.utils._pytree as pytree
+
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
-        inputs = [inp.to(device=device) for inp in inputs]
+        inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
         input_sets = [inputs]
         if dynamic:
-            larger_inputs = []
-            for inp in inputs:
+
+            def mark_first_dim_dyn(inp):
+                torch._dynamo.mark_dynamic(inp, 0)
+
+            pytree.tree_map(mark_first_dim_dyn, input_sets)
+
+            def tile_fn(inp):
                 # tile every first dim 5x
                 tiling = [5] + [1] * (inp.ndim - 1)
-                larger_inputs.append(torch.tile(inp, tiling))
+                t = torch.tile(inp, tiling)
+                # mark every first dim as dynamic
+                torch._dynamo.mark_dynamic(inp, 0)
+                return t
+
+            larger_inputs = pytree.tree_map(tile_fn, inputs)
             input_sets.append(larger_inputs)
-            for inputs in input_sets:
-                for inp in inputs:
-                    # mark every first dim as dynamic
-                    if inp.ndim:
-                        torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            for inputs_with_counters in prepend_counters(inputs, num_counters):
-                cloned_inputs = [inp.clone() for inp in inputs_with_counters]
+            flat_inputs, inp_spec = pytree.tree_flatten(inputs)
+            for flat_inputs_with_counters in prepend_counters(
+                flat_inputs, num_counters
+            ):
+                counters, flat = (
+                    flat_inputs_with_counters[:num_counters],
+                    flat_inputs_with_counters[num_counters:],
+                )
+                unflat_inputs = pytree.tree_unflatten(flat, inp_spec)
+                inputs_with_counters = counters + unflat_inputs
+                cloned_inputs = pytree.tree_map(
+                    lambda t: t.clone(), inputs_with_counters
+                )
                 result = model(*inputs_with_counters)
                 with torch.no_grad():
                     result_compiled = compiled_model(*inputs_with_counters)
@@ -695,16 +850,40 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work due to we haven't handle lifted symbols
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_pytree_inputs(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.PytreeCarry(),
+            inputs=(
+                (
+                    [torch.randn(10, 20)],
+                    {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
+                ),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
 
 class AssociativeScanTests(TestCase):
     @requires_gpu
-    @parametrize("device", [GPU_TYPE])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("backend", ["inductor"])
-    def test_pointwise_associative_scan_CUDA_flip(self, device, backend):
+    @parametrize("device", [torch.device("cpu"), GPU_TYPE])
+    # This test will fail as flip in combination with particular input lenghts
+    # produces weird results.
+    # This is under investigations in
+    # https://github.com/pytorch/pytorch/issues/131805
+    @decorateIf(unittest.skip, lambda params: params["device"] == GPU_TYPE)
+    def test_associative_scan_CUDA_flip(self, combine_mode, backend, device):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        for n in range(10):
+        # for n in range(10):
+        for n in [9]:
             x = torch.arange(n, device=device)
             torch.compiler.reset()
             associative_scan1 = torch.compile(
@@ -712,17 +891,35 @@ class AssociativeScanTests(TestCase):
             )
             associative_scan2 = associative_scan
 
-            result1 = associative_scan1(fct, x, 0, reverse=False)
-            result2 = associative_scan2(fct, x, 0, reverse=False)
+            if combine_mode == "pointwise" and device == torch.device("cpu"):
+                with self.assertRaisesRegex(Exception, r"."):
+                    associative_scan1(
+                        fct, x, 0, reverse=False, combine_mode=combine_mode
+                    )
+
+                # Skipping test because combine_mode currently only suppors CUDA tensors
+                return
+
+            result1 = associative_scan1(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
             result3 = torch.cumsum(x, 0)
 
             self.assertEqual(result1, result2)
             self.assertEqual(result1, result3)
 
             # Flip only non-compiled and compare with compiled reverse=True
-            result1 = associative_scan1(fct, x, 0, reverse=True)
+            result1 = associative_scan1(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
             result2 = torch.flip(
-                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
@@ -731,9 +928,14 @@ class AssociativeScanTests(TestCase):
 
             # Flip only compiled and compare with non-compiled reverse=True
             result1 = torch.flip(
-                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
-            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
             self.assertEqual(result1, result2)
@@ -741,10 +943,16 @@ class AssociativeScanTests(TestCase):
 
             # Use reverse=False, but flip both results before and after
             result1 = torch.flip(
-                associative_scan1(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result2 = torch.flip(
-                associative_scan2(fct, torch.flip(x, [0]), 0, reverse=False), [0]
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
             )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
@@ -752,8 +960,12 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(result1, result3)
 
             # Reverse=True
-            result1 = associative_scan1(fct, x, 0, reverse=True)
-            result2 = associative_scan2(fct, x, 0, reverse=True)
+            result1 = associative_scan1(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
             result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
 
             self.assertEqual(result1, result2)

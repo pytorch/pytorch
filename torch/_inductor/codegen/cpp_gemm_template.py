@@ -13,10 +13,22 @@ from ..._dynamo.utils import counters
 from .. import config, ir, lowering as L
 from ..kernel.mm_common import mm_args
 from ..select_algorithm import DataProcessorTemplateWrapper
-from ..utils import cache_on_self, has_free_symbols, parallel_num_threads
+from ..utils import (
+    cache_on_self,
+    has_free_symbols,
+    is_same_mkldnn_tensor,
+    is_same_tensor,
+    parallel_num_threads,
+)
 from ..virtualized import ops, V
 from .cpp import get_export_declaration
-from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm, LayoutType
+from .cpp_micro_gemm import (
+    CppMicroBrgemm,
+    CppMicroGemm,
+    CppMicroGemmAMX,
+    create_micro_gemm,
+    LayoutType,
+)
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -28,6 +40,126 @@ from .cpp_utils import (
 
 
 log = logging.getLogger(__name__)
+
+GEMM_TEMPLATE_INIT_BLOCKING = r"""
+    constexpr int64_t num_threads = {{num_threads}};
+    constexpr int64_t N = {{N}};
+    constexpr int64_t K = {{K}};
+    constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
+    constexpr int64_t Nr = {{micro_gemm.register_blocking.block_n}};
+    constexpr int64_t Kr = {{micro_gemm.register_blocking.block_k}};
+    constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
+    constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
+
+{%- if is_dynamic_M %}
+    const int64_t M = {{kernel.size(GemmOut, 0)}};
+    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
+    {%- if num_threads > 1 %}
+    int64_t Mt_blocks, Nt_blocks, Kt_blocks;
+    mm_get_thread_blocking(num_threads, {{config.cpp.gemm_max_k_slices}}, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
+    {%- else %}
+    const auto Mt_blocks = Mr_blocks;
+    const auto Nt_blocks = Nr_blocks;
+    const auto Kt_blocks = Kr_blocks;
+    {%- endif %}
+    int64_t Mc_blocks, Nc_blocks, Kc_blocks;
+    uint32_t L1_cache_size = {{L1_cache_size}};
+    uint32_t L2_cache_size = {{L2_cache_size}};
+    mm_get_cache_blocking<{{kernel.dtype(X)}}, {{kernel.dtype(W)}}>(
+        num_threads,
+        M,
+        N,
+        K,
+        Mr,
+        Nr,
+        Kr,
+        Mt_blocks,
+        Nt_blocks,
+        Kt_blocks,
+        Mc_blocks,
+        Nc_blocks,
+        Kc_blocks,
+        L1_cache_size,
+        L2_cache_size
+    );
+    const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
+    const int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
+    const int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
+    const int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
+    const int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+{%- else %}
+    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
+    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
+    constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
+    constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
+    constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
+    constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
+    constexpr int64_t Nc_blocks = {{template.cache_blocking().block_n}};
+    constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
+    constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
+    constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
+    constexpr int64_t num_Mt_blocks = (Mr_blocks + Mt_blocks - 1) / Mt_blocks;
+    constexpr int64_t num_Nt_blocks = (Nr_blocks + Nt_blocks - 1) / Nt_blocks;
+    constexpr int64_t num_Kt_blocks = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
+{%- endif %}
+
+    // make sure all partitions are assigned
+    {{kernel.assert_function}}(
+        Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= Mr_blocks * Nr_blocks * Kr_blocks,
+        "Not all partitions are assigned."
+    );
+"""
+
+GEMM_TEMPLATE_MULTI_THREADS_PARAMS = r"""
+const int tid = omp_get_thread_num();
+const int64_t k_group_id = tid / num_Kt_blocks;
+const int64_t k_slice_id = tid % num_Kt_blocks;
+const int64_t n_group_id = k_group_id / num_Nt_blocks;
+const int64_t n_slice_id = k_group_id % num_Nt_blocks;
+const int64_t k_block_start = k_slice_id * Kt_blocks;
+const int64_t k_block_end = std::min(k_block_start + Kt_blocks, Kr_blocks);
+const int64_t n_block_start = n_slice_id * Nt_blocks;
+const int64_t n_block_end = std::min(n_block_start + Nt_blocks, Nr_blocks);
+const int64_t m_block_start = std::min(n_group_id * Mt_blocks, Mr_blocks);
+const int64_t m_block_end = std::min(m_block_start + Mt_blocks, Mr_blocks);
+const int64_t num_Mc_blocks_per_thread = (m_block_end - m_block_start + Mc_blocks - 1) / Mc_blocks;
+"""
+
+GEMM_TEMPLATE_SINGLE_THREAD_PARAMS = r"""
+constexpr int tid = 0;
+constexpr int64_t k_group_id = 0;
+constexpr int64_t k_slice_id = 0;
+constexpr int64_t n_group_id = 0;
+constexpr int64_t n_slice_id = 0;
+constexpr int64_t m_block_start = 0;
+constexpr int64_t n_block_start = 0;
+constexpr int64_t n_block_end = Nr_blocks;
+constexpr int64_t k_block_start = 0;
+constexpr int64_t k_block_end = Kr_blocks;
+{%- if is_dynamic_M %}
+const int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+const int64_t m_block_end = Mr_blocks;
+{%- else %}
+constexpr int64_t num_Mc_blocks_per_thread = num_Mc_blocks;
+constexpr int64_t m_block_end = Mr_blocks;
+{%- endif %}
+"""
+
+GEMM_TEMPLATE_M_LOOP_PARAMS = r"""
+const int64_t my_mc_block_id = (mc_block_id + n_slice_id) % num_Mc_blocks_per_thread;
+const int64_t mc = m_block_start + my_mc_block_id * Mc_blocks;
+const int64_t m_start = mc * Mr;
+const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
+const int64_t m_size = m_end - m_start;
+"""
+
+GEMM_TEMPLATE_N_LOOP_PARAMS = r"""
+const int64_t n_start = nc * Nr;
+const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
+const int64_t n_size = n_end - n_start;
+// NB: assume we pad N, nc_block_end won't exceed padded N here.
+const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+"""
 
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
@@ -43,97 +175,35 @@ GEMM_TEMPLATE = r"""
 extern "C" {{export_declaration}}
 {{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y}, aliases=aliases)}}
 {
-    {{kernel.maybe_codegen_profile()}}
-    constexpr int64_t num_threads = {{num_threads}};
-    constexpr int64_t N = {{N}};
-    constexpr int64_t K = {{K}};
-    constexpr int64_t Mr = {{micro_gemm.register_blocking.block_m}};
-    constexpr int64_t Nr = {{micro_gemm.register_blocking.block_n}};
-    constexpr int64_t Kr = {{micro_gemm.register_blocking.block_k}};
-    constexpr int64_t Nr_blocks = (N + Nr - 1) / Nr;
-    constexpr int64_t Kr_blocks = (K + Kr - 1) / Kr;
-
-{%- if is_dynamic_M %}
-    const int64_t M = {{kernel.size(GemmOut, 0)}};
-    const int64_t Mr_blocks = (M + Mr - 1) / Mr;
-    {%- if num_threads > 1 %}
-    int64_t Mt_blocks, Nt_blocks, Kt_blocks;
-    mm_get_thread_blocking(num_threads, M, N, K, Mr, Nr, Kr, Mt_blocks, Nt_blocks, Kt_blocks);
-    {%- else %}
-    const auto Mt_blocks = Mr_blocks;
-    const auto Nt_blocks = Nr_blocks;
-    const auto Kt_blocks = Kr_blocks;
-    {%- endif %}
-    const int64_t Mc_blocks = Mt_blocks;
-    const int64_t Nc_blocks = 1;
-    const int64_t Kc_blocks = Kt_blocks;
-    const int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    const int64_t num_Nc_blocks = Nr_blocks;
-    const int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
-{%- else %}
-    constexpr int64_t M = {{kernel.size(GemmOut, 0)}};
-    constexpr int64_t Mr_blocks = (M + Mr - 1) / Mr;
-    constexpr int64_t Mt_blocks = {{template.thread_blocking().block_m}};
-    constexpr int64_t Nt_blocks = {{template.thread_blocking().block_n}};
-    constexpr int64_t Kt_blocks = {{template.thread_blocking().block_k}};
-    constexpr int64_t Mc_blocks = {{template.cache_blocking().block_m}};
-    constexpr int64_t Nc_blocks = {{template.cache_blocking().block_n}};
-    constexpr int64_t Kc_blocks = {{template.cache_blocking().block_k}};
-    constexpr int64_t num_Mc_blocks = (Mr_blocks + Mc_blocks - 1) / Mc_blocks;
-    constexpr int64_t num_Nc_blocks = (Nr_blocks + Nc_blocks - 1) / Nc_blocks;
-    constexpr int64_t num_k_slices = (Kr_blocks + Kt_blocks - 1) / Kt_blocks;
-{%- endif %}
-
-    // make sure all partitions are assigned
-    {{kernel.assert_function}}(
-        Mt_blocks * Nt_blocks * Kt_blocks * {{num_threads}} >= Mr_blocks * Nr_blocks * Kr_blocks,
-        "Not all partitions are assigned."
-    );
+    {{ kernel.maybe_codegen_profile() }}
+    {{ template.codegen_blocks(
+        num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOut, config, L1_cache_size, L2_cache_size, X, W
+    ) }}
 
 {%- if maybe_k_slicing %}
     std::unique_ptr<std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[]> local_buf_ptrs;
-    if (num_k_slices > 1) {
-        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_k_slices]);
+    if (num_Kt_blocks > 1) {
+        local_buf_ptrs.reset(new std::unique_ptr<{{DTYPE_TO_CPP[acc_buf_dtype]}}[]>[num_Mc_blocks * num_Nc_blocks * num_Kt_blocks]);
     }
 {%- endif %}
 
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        const int tid = omp_get_thread_num();
-        int64_t m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end;
-        mm_get_thread_blocks(
-            tid, Mr_blocks, Nr_blocks, Kr_blocks, Mt_blocks, Nt_blocks, Kt_blocks,
-            m_block_start, m_block_end, n_block_start, n_block_end, k_block_start, k_block_end);
-    {%- if maybe_k_slicing %}
-        const int64_t k_group_id = tid / num_k_slices;
-        const int64_t k_slice_id = tid % num_k_slices;
-    {%- endif %}
+        {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
     {
-        const int tid = 0;
-        const int64_t m_block_start = 0;
-        const int64_t m_block_end = Mr_blocks;
-        const int64_t n_block_start = 0;
-        const int64_t n_block_end = Nr_blocks;
-        const int64_t k_block_start = 0;
-        const int64_t k_block_end = Kr_blocks;
+        {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
-        for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
-            const int64_t m_start = mc * Mr;
-            const int64_t m_end = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
-            const int64_t m_size = m_end - m_start;
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
-            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "Nc_blocks*Nr"], acc_buf_dtype) }}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
 {%- endif %}
+        for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
+            {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                const int64_t n_start = nc * Nr;
-                const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
-                const int64_t n_size = n_end - n_start;
-                // NB: assume we pad N, nc_block_end won't exceed padded N here.
-                const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
+                {{ template.codegen_n_loop_params()|indent(16, false) }}
 {%- if use_local_acc %}
     {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {{ kernel.reinit_buffer_if_null(acc_buf_name) }}
@@ -145,7 +215,7 @@ extern "C" {{export_declaration}}
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
-{%- set acc_slice = kernel.slice_nd(acc, [(), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
                         if (kc == k_block_start) {
@@ -156,14 +226,15 @@ extern "C" {{export_declaration}}
                     }
                 }
 {%- if maybe_k_slicing %}
-                if (num_k_slices > 1) {
+                if (num_Kt_blocks > 1) {
                     const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    local_buf_ptrs[mxn_cache_block_id * num_k_slices + k_slice_id].reset({{ kernel.release_buffer(acc_buf_name) }});
+                    local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + k_slice_id].reset(
+                        {{ kernel.release_buffer(acc_buf_name) }});
                 } else
 {%- endif %}
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_acc = kernel.slice_nd(acc, [(), ("0", "n_end - n_start")]) %}
+{%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
                     {{ kernel.store_output(
                         tile_Y, tile_acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
@@ -172,14 +243,14 @@ extern "C" {{export_declaration}}
             }
         }
 {%- if maybe_k_slicing %}
-        if (num_k_slices > 1) {
+        if (num_Kt_blocks > 1) {
             #pragma omp barrier
             for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
                 // We slice M-dim and each thread in the k-slicing group works on a slice
                 const int64_t m_start_unsliced = mc * Mr;
                 const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
                 const int64_t m_size_unsliced = m_end_unsliced - m_start_unsliced;
-                const int64_t m_slice_size = (m_size_unsliced + num_k_slices - 1) / num_k_slices;
+                const int64_t m_slice_size = (m_size_unsliced + num_Kt_blocks - 1) / num_Kt_blocks;
                 const int64_t m_start = std::min(m_start_unsliced + m_slice_size * k_slice_id, m_end_unsliced);
                 const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
                 const int64_t m_size = m_end - m_start;
@@ -189,9 +260,9 @@ extern "C" {{export_declaration}}
                     const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
                     const int64_t n_size = n_end - n_start;
                     const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_k_slices].get();
-                    for (int64_t other_slice = 1; other_slice < num_k_slices; other_slice++) {
-                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_k_slices + other_slice].get();
+                    auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
+                    for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
+                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
                         for (int64_t m = m_offset; m < m_offset + m_size; m++) {
                             #pragma omp simd
                             for (int64_t n = 0; n < n_size; n++) {
@@ -216,6 +287,243 @@ extern "C" {{export_declaration}}
 
 def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
+
+
+def transpose_w(
+    W: Union[ir.IRNode, torch.Tensor], trans_w: bool
+) -> Union[ir.IRNode, torch.Tensor]:
+    """
+    Transpose W based on the trans_w flag.
+    """
+    if isinstance(W, ir.IRNode):
+        if trans_w:
+            if not isinstance(W, ir.TensorBox):
+                W = ir.TensorBox(W)
+            W = L.permute(W, [1, 0])
+    else:
+        if trans_w:
+            assert isinstance(W, torch.Tensor)
+            W = W.transpose(0, 1)
+    return W
+
+
+def expand_bias(
+    B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
+) -> Optional[Union[ir.IRNode, torch.Tensor]]:
+    """
+    Expand Bias to the same size of X.
+    """
+    if B is not None:
+        if isinstance(B, ir.IRNode):
+            if not isinstance(B, ir.TensorBox):
+                B = ir.TensorBox(B)
+            assert hasattr(X, "get_size")
+            B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
+        else:
+            assert isinstance(B, torch.Tensor)
+            assert isinstance(X, torch.Tensor)
+            B = B.expand(X.shape[0], B.shape[-1])
+    return B
+
+
+def pack_w(
+    W: Union[ir.IRNode, torch.Tensor],
+    padded_n: int,
+    block_n: int,
+    k: int,
+    n: int,
+    micro_gemm: CppMicroGemm,
+) -> Union[ir.IRNode, torch.Tensor]:
+    """
+    Pack W into block format of [padded_n // block_n, k, block_n] and VNNI Layout.
+    """
+    blocked_w: Union[ir.IRNode, torch.Tensor] = W
+    if isinstance(W, ir.IRNode):
+        new_size = [padded_n // block_n, k, block_n]
+        blocked_w = ir.Buffer(
+            name=W.get_name(),  # Borrow the registered buffer name
+            layout=ir.FixedLayout(
+                W.get_device_or_error(),
+                W.get_dtype(),
+                new_size,
+                ir.FlexibleLayout.contiguous_strides(new_size),
+                0,
+            ),
+        )
+    else:
+        blocked_w = (
+            torch.nn.functional.pad(W, (0, padded_n - n))
+            .reshape(k, padded_n // block_n, block_n)
+            .transpose(0, 1)
+            .contiguous()
+        )
+        if micro_gemm.get_b_layout() != LayoutType.NORMAL:
+            layout_str = (
+                "VNNI4" if micro_gemm.get_b_layout() == LayoutType.VNNI4 else "VNNI2"
+            )
+            assert micro_gemm.get_b_layout() in [
+                LayoutType.VNNI2,
+                LayoutType.VNNI4,
+            ], f"We only support {layout_str} for now"
+            vnni_size = 4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
+            assert (
+                k % vnni_size == 0
+            ), f"k should be divisible by vnni_size for {layout_str} layout"
+            blocked_w = (
+                blocked_w.view(padded_n // block_n, k // vnni_size, vnni_size, block_n)
+                .transpose(-1, -2)
+                .contiguous()
+                .view(padded_n // block_n, k, block_n)
+            )
+        # normalize stride to be "contiguous_strides" per size
+        # this avoids the problems in L.view during template codegen
+        new_stride = [1]
+        for sz in reversed(blocked_w.shape[1:]):
+            new_stride.insert(0, new_stride[0] * sz)
+        blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
+    return blocked_w
+
+
+def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
+    """
+    Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
+    """
+
+    def share_storage(base_tensor: torch.Tensor, comp_tensor: torch.Tensor):
+        return base_tensor.is_mkldnn == comp_tensor.is_mkldnn and (
+            is_same_tensor(base_tensor, comp_tensor)
+            or is_same_mkldnn_tensor(base_tensor, comp_tensor)
+        )
+
+    def get_candidates(input_nodes, new_input_nodes):
+        # Only Constant Buffer like weight and bias might be changed in GEMM Template.
+        # The Inductor IR Node may changed, but still share the storage. For example:
+        # bias in bfloat16 case which only do the expand
+        return [
+            node
+            for node in input_nodes
+            if (
+                node not in new_input_nodes
+                and isinstance(node, (ir.TensorBox, ir.StorageBox))
+                and node.get_name() in V.graph.constants
+                and not any(
+                    (
+                        isinstance(new_node, (ir.TensorBox, ir.StorageBox))
+                        and new_node.get_name() in V.graph.constants
+                        and share_storage(
+                            V.graph.constants[node.get_name()],
+                            V.graph.constants[new_node.get_name()],
+                        )
+                    )
+                    for new_node in new_input_nodes
+                )
+            )
+        ]
+
+    for candidate_node in get_candidates(input_nodes, new_input_nodes):
+        # By using the new packed weight for the GEMM template, we can prune the
+        # old weight if it has no other users. This saves memory but makes the FX graph
+        # non-retraceable. To support retracing, we can add a repack node to the
+        # FX graph. For example:
+        # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
+        candidate_tensor_users = 0
+        candidate_tensor = V.graph.constants[candidate_node.get_name()]
+        for node in reversed(V.graph.graph.nodes):
+            # Case may happen when the candidate tensor is used by more than 1 get_attr node
+            # https://github.com/pytorch/pytorch/issues/134998
+            if node.op == "get_attr" and hasattr(
+                V.graph.module, node.name
+            ):  # candidate tensor might already be deleted
+                comp_tensor = getattr(V.graph.module, node.name)
+                if isinstance(comp_tensor, torch.Tensor) and share_storage(
+                    candidate_tensor, comp_tensor
+                ):
+                    candidate_tensor_users += 1
+
+        for node in reversed(V.graph.graph.nodes):
+            # The get_attr node has only 1 user fx node
+            # The candidate tensor has been used by only 1 get_attr node
+            if (
+                node.name == candidate_node.get_name()
+                and len(node.users) == 1
+                and candidate_tensor_users == 1
+            ):
+                del V.graph.constants[node.name]
+                delattr(V.graph.module, node.name)
+                delattr(V.graph.graph.owning_module, node.name)
+
+
+def gen_2d_view_of_epilogue_buf(
+    Y: ir.Buffer,
+    template_buffer: ir.Buffer,
+    epilogue_nodes: List[ir.IRNode],
+    reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+) -> tuple[
+    Union[ir.Buffer, ir.ReinterpretView],
+    List[Optional[Callable[[List[Any]], List[Any]]]],
+]:
+    """
+    The dimension and the indexing could be different between the GEMM output, i.e. `template_buffer`, which is
+    2D with MxN) and the output from the template after epilogues, i.e. `Y`. In the GEMM template code,
+    we are not aware of the dimension and the indexing of the epilogues and always work on 2D tiles according to
+    the indexing of the GEMM output.
+    In this function, we return a 2D buffer (`Y_2d`) according to GEMM output (reinterpreted from `Y` if needed) and
+    build a reindexer that converts the indexing of `Y` into `Y_2d`.
+    """
+    Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+    if (
+        Y.get_size() == template_buffer.get_size()
+        and Y.get_stride() == template_buffer.get_stride()
+    ):
+        reindexers.extend([None] * len(epilogue_nodes))
+        Y_2d = Y
+    else:
+
+        def get_reindexer(epilogue_node):
+            # From template_buffer to epilogue_node_ordered (ordered by stride decreasingly, in dense format), for example:
+            #   template_buffer:
+            #       size (324, 512), stride (512, 1)
+            #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+            #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+            stride_order = list(
+                ir.get_stride_order(
+                    V.graph.sizevars.size_hints(epilogue_node.get_stride())
+                )
+            )
+            fill_order = ir.stride_order2fill_order(stride_order)
+            reversed_fill_order = list(reversed(fill_order))
+            size_with_stride_ordered_decreasingly = [
+                epilogue_node.get_size()[i] for i in reversed_fill_order
+            ]
+            reshape_reindex = ir.View.dynamic_reshape_indexer(
+                size_with_stride_ordered_decreasingly,
+                template_buffer.get_size(),
+            )
+
+            # From epilogue_node_ordered (ordered by stride decreasingly, in dense format) to epilogue_node, for example:
+            #   epilogue_node_ordered (ordered by stride decreasingly, in dense format):
+            #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
+            #   epilogue_node:
+            #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
+            from_stride_ordered_decreasingly_to_epilogue_node_order = [
+                (len(stride_order) - 1) - stride_order[i]
+                for i in range(len(stride_order))
+            ]
+            stride_reindex = ir.same_reorder(
+                from_stride_ordered_decreasingly_to_epilogue_node_order
+            )
+
+            reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+            return reindexer
+
+        reindexers.extend([get_reindexer(epilogue_node) for epilogue_node in epilogue_nodes])  # type: ignore[list-item]
+        if isinstance(Y, ir.BaseView):
+            storage = ir.StorageBox(Y.unwrap_view())
+        else:
+            assert isinstance(Y, ir.Buffer)
+            storage = ir.StorageBox(Y)
+        Y_2d = ir.ReinterpretView(data=storage, layout=template_buffer.get_layout())
+    return Y_2d, reindexers
 
 
 class CppPackedGemmTemplate(CppTemplate):
@@ -377,7 +685,7 @@ class CppPackedGemmTemplate(CppTemplate):
             # The ratios below are empirically determined to decide
             # the effective sizes of L1 and L2.
             # TODO: tune the factor here
-            L1_limit_factor = 1
+            L1_limit_factor = 0.8
             L2_limit_factor = 0.5
 
             L1_cache_size = (
@@ -399,8 +707,16 @@ class CppPackedGemmTemplate(CppTemplate):
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
 
-            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
-            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+            dtype_A = self.input_nodes[0].get_dtype()
+            dtype_B = self.input_nodes[1].get_dtype()
+            num_byte_A = get_num_byte(dtype_A)
+            num_byte_B = get_num_byte(dtype_B)
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+                # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
+                # In this case, the choice of the micro-kernel being used can't be decoupled from
+                # the cache blocking.
+                # TODO: Decouple the choice of micro-kernel from cache blocking
+                num_byte_B *= num_byte_A
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -412,6 +728,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
@@ -518,6 +835,19 @@ class CppPackedGemmTemplate(CppTemplate):
                 assert len(input_indices) >= 2
                 return [inputs[idx] for idx in input_indices], layout_or_out
 
+        new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
+        assert new_inputs[1].get_name() in V.graph.constants
+        is_mkldnn_wgt = V.graph.constants[new_inputs[1].get_name()].is_mkldnn
+        if is_mkldnn_wgt:
+            # It shouldn't happen as viewing an mkldnn tensor, we can extend the
+            # implementation if it does.
+            assert not isinstance(new_inputs[1], ir.BaseView)
+        assert isinstance(new_inputs[1].layout, ir.FixedLayout)
+        # Note that the layout of MKLDNN Tensor is with the wrong stride
+        view_size = new_inputs[1].layout.size
+        view_stride = new_inputs[1].layout.stride
+        view_offset = new_inputs[1].layout.offset
+
         def maybe_to_dense(inputs, layout_or_out):
             new_inputs = list(inputs)
             if isinstance(inputs[1], torch.Tensor):
@@ -526,29 +856,21 @@ class CppPackedGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def normalize_shapes(inputs, layout_or_out):
-            if not trans_w:
-                return inputs, layout_or_out
             new_inputs = list(inputs)
-            X = inputs[0]
-            W = inputs[1]
-            B = inputs[2] if len(inputs) > 2 else None
-            if isinstance(W, ir.IRNode):
-                if trans_w:
-                    if not isinstance(W, ir.TensorBox):
-                        W = ir.TensorBox(W)
-                    W = L.permute(W, [1, 0])
-            else:
-                if trans_w:
-                    assert isinstance(W, torch.Tensor)
-                    W = W.transpose(0, 1)
-            if B is not None:
-                if isinstance(B, ir.IRNode):
-                    if not isinstance(B, ir.TensorBox):
-                        B = ir.TensorBox(B)
-                    B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
-                else:
-                    assert isinstance(B, torch.Tensor)
-                    B = B.expand(X.shape[0], B.shape[-1])
+            if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
+                # With the assumptation that W is the storage of unwrap view
+                # thus view it back here
+                new_inputs[1] = new_inputs[1].as_strided(
+                    view_size, view_stride, view_offset
+                )
+
+            if not trans_w:
+                return new_inputs, layout_or_out
+            X = new_inputs[0]
+            W = new_inputs[1]
+            B = new_inputs[2] if has_bias else None
+            W = transpose_w(W, trans_w)
+            B = expand_bias(B, X)  # type:ignore[arg-type]
             new_inputs[1] = W
             if B is not None:
                 new_inputs[2] = B
@@ -556,9 +878,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
-        new_inputs, _ = normalize_shapes(
-            *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
-        )
+        new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             new_inputs[0].get_dtype()
@@ -582,57 +902,7 @@ class CppPackedGemmTemplate(CppTemplate):
         def pack_weight(inputs, layout_or_out):
             W = inputs[1]
             new_inputs = list(inputs)
-            blocked_w: Union[ir.IRNode, torch.Tensor] = W
-            if isinstance(W, ir.IRNode):
-                new_size = [padded_n // block_n, k, block_n]
-                blocked_w = ir.Buffer(
-                    W.get_name(),  # Borrow the registered buffer name
-                    ir.FixedLayout(
-                        W.get_device(),
-                        W.get_dtype(),
-                        new_size,
-                        ir.FlexibleLayout.contiguous_strides(new_size),
-                        0,
-                    ),
-                )
-            else:
-                blocked_w = (
-                    torch.nn.functional.pad(W, (0, padded_n - n))
-                    .reshape(k, padded_n // block_n, block_n)
-                    .transpose(0, 1)
-                    .contiguous()
-                )
-                if micro_gemm.get_b_layout() != LayoutType.NORMAL:
-                    layout_str = (
-                        "VNNI4"
-                        if micro_gemm.get_b_layout() == LayoutType.VNNI4
-                        else "VNNI2"
-                    )
-                    assert micro_gemm.get_b_layout() in [
-                        LayoutType.VNNI2,
-                        LayoutType.VNNI4,
-                    ], f"We only support {layout_str} for now"
-                    vnni_size = (
-                        4 if micro_gemm.get_b_layout() == LayoutType.VNNI4 else 2
-                    )
-                    assert (
-                        k % vnni_size == 0
-                    ), f"k should be divisible by vnni_size for {layout_str} layout"
-                    blocked_w = (
-                        blocked_w.view(
-                            padded_n // block_n, k // vnni_size, vnni_size, block_n
-                        )
-                        .transpose(-1, -2)
-                        .contiguous()
-                        .view(padded_n // block_n, k, block_n)
-                    )
-                # normalize stride to be "contiguous_strides" per size
-                # this avoids the problems in L.view during template codegen
-                new_stride = [1]
-                for sz in reversed(blocked_w.shape[1:]):
-                    new_stride.insert(0, new_stride[0] * sz)
-                blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
-            new_inputs[1] = blocked_w
+            new_inputs[1] = pack_w(W, padded_n, block_n, k, n, micro_gemm)
 
             def _is_int8_gemm(inputs):
                 return (
@@ -674,20 +944,13 @@ class CppPackedGemmTemplate(CppTemplate):
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
-
-                # By using the new packed weight for the GEMM template, we can prune the
-                # old weight if it has no other users. This saves memory but makes the FX graph
-                # non-retraceable. To support retracing, we can add a repack node to the
-                # FX graph. For example:
-                # mkldnn._linear_pointwise <- repack_linear_wgt <- packed_wgt_for_template
-                for node in reversed(V.graph.graph.nodes):
-                    if node.name == W_node.get_name() and len(node.users) == 1:
-                        del V.graph.constants[node.name]
-                        delattr(V.graph.module, node.name)
-                        delattr(V.graph.graph.owning_module, node.name)
-
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
+                new_input_nodes[1] = W_packed_constant
+
+                # Prune unused tensors
+                prune_tensors(input_nodes, new_input_nodes)
+
                 template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
                     W_packed_constant
                 )
@@ -759,6 +1022,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         use_local_acc = (
             self.layout.dtype != torch.float
+            or template_buffer_has_other_users
             or int8_gemm
             or self.padded_n != self.n
             or self.maybe_k_slicing()
@@ -819,7 +1083,7 @@ class CppPackedGemmTemplate(CppTemplate):
                     return result
 
                 return ir.Pointwise(
-                    device=input_buffer.get_device(),
+                    device=input_buffer.get_device_or_error(),
                     dtype=self.layout.dtype,
                     inner_fn=copy_inner,
                     ranges=input_buffer.get_size(),
@@ -834,14 +1098,16 @@ class CppPackedGemmTemplate(CppTemplate):
         #     --> zero or more out-of-template epilogues (`epilogue_nodes`) -->
         #   Y
         if epilogue_creators:
-            gemm_output_name = "buf_GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
+            gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
+            gemm_output_buffer = ir.Buffer(
+                name=gemm_output_name, layout=template_buffer.layout
+            )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
                     buffer_name = template_buffer.get_name()
                 else:
-                    buffer_name = f"buf_GemmOut_epilogue_{i}"
+                    buffer_name = f"{gemm_output_name}_epilogue_{i}"
                 epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
@@ -854,64 +1120,23 @@ class CppPackedGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        buffer_name, template_buffer.layout
+                        name=buffer_name, layout=template_buffer.layout
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
 
         if epilogue_nodes:
+            if not template_buffer_has_other_users:
+                Y_aliases.add(template_buffer.get_name())
             epilogues.extend(epilogue_nodes)
             assert Y.get_numel() == epilogues[-1].get_numel()
             Y = cast(ir.Buffer, epilogues[-1])
-
-            if not template_buffer_has_other_users:
-                Y_aliases.add(template_buffer.get_name())
-
-            if (
-                Y.get_size() == template_buffer.get_size()
-                and Y.get_stride() == template_buffer.get_stride()
-            ):
-                reindexers.extend([None] * len(epilogue_nodes))
-                Y_2d = Y
-            else:
-                # From template_buffer to Y_ordered (ordered by stride decreasingly, in dense format), for example:
-                #   template_buffer:
-                #       size (324, 512), stride (512, 1)
-                #   Y_ordered (ordered by stride decreasingly, in dense format):
-                #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                stride_order = list(
-                    ir.get_stride_order(V.graph.sizevars.size_hints(Y.get_stride()))
-                )
-                fill_order = ir.stride_order2fill_order(stride_order)
-                reversed_fill_order = list(reversed(fill_order))
-                size_with_stride_ordered_decreasingly = [
-                    Y.get_size()[i] for i in reversed_fill_order
-                ]
-                reshape_reindex = ir.View.dynamic_reshape_indexer(
-                    size_with_stride_ordered_decreasingly, template_buffer.get_size()
-                )
-
-                # From Y_ordered (ordered by stride decreasingly, in dense format) to Y, for example:
-                #   Y_ordered (ordered by stride decreasingly, in dense format):
-                #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
-                #   Y:
-                #       size (1, 18, 18, 512), stride (165888, 1, 9216, 512)
-                from_stride_ordered_decreasingly_to_Y_order = [
-                    (len(stride_order) - 1) - stride_order[i]
-                    for i in range(len(stride_order))
-                ]
-                stride_reindex = ir.same_reorder(
-                    from_stride_ordered_decreasingly_to_Y_order
-                )
-
-                reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
-                reindexers.extend([reindexer] * len(epilogue_nodes))  # type: ignore[list-item]
-                if isinstance(Y, ir.BaseView):
-                    storage = ir.StorageBox(Y.unwrap_view())
-                else:
-                    assert isinstance(Y, ir.Buffer)
-                    storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
+            Y_2d, reindexers = gen_2d_view_of_epilogue_buf(
+                Y,
+                template_buffer,
+                epilogue_nodes,
+                reindexers,
+            )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
@@ -933,6 +1158,14 @@ class CppPackedGemmTemplate(CppTemplate):
         self.log_blockings()
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
+        if isinstance(micro_gemm, CppMicroBrgemm):
+            counters["inductor"]["cpp_micro_brgemm_counter"] += 1
+
+        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
+
+        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         options = dict(
             X=X,
@@ -963,6 +1196,9 @@ class CppPackedGemmTemplate(CppTemplate):
             w_zp=w_zp,
             acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
+            config=config,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:
@@ -970,3 +1206,52 @@ class CppPackedGemmTemplate(CppTemplate):
                     patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
                 )
             return self._template_from_string(GEMM_TEMPLATE).render(**options)
+
+    def codegen_blocks(
+        self,
+        num_threads,
+        N,
+        K,
+        micro_gemm,
+        is_dynamic_M,
+        kernel,
+        GemmOut,
+        config,
+        L1_cache_size,
+        L2_cache_size,
+        X,
+        W,
+    ):
+        options = dict(
+            num_threads=num_threads,
+            N=N,
+            K=K,
+            micro_gemm=micro_gemm,
+            is_dynamic_M=is_dynamic_M,
+            kernel=kernel,
+            GemmOut=GemmOut,
+            config=config,
+            L1_cache_size=L1_cache_size,
+            L2_cache_size=L2_cache_size,
+            template=self,
+            X=X,
+            W=W,
+        )
+        return self._template_from_string(GEMM_TEMPLATE_INIT_BLOCKING).render(options)
+
+    def codegen_multi_threads_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_MULTI_THREADS_PARAMS).render()
+
+    def codegen_single_thread_params(self, is_dynamic_M):
+        options = dict(
+            is_dynamic_M=is_dynamic_M,
+        )
+        return self._template_from_string(GEMM_TEMPLATE_SINGLE_THREAD_PARAMS).render(
+            options
+        )
+
+    def codegen_m_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_M_LOOP_PARAMS).render()
+
+    def codegen_n_loop_params(self):
+        return self._template_from_string(GEMM_TEMPLATE_N_LOOP_PARAMS).render()

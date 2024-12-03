@@ -3,9 +3,7 @@
 #include <torch/nn/options/vision.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 inline Tensor affine_grid(
     const Tensor& theta,
@@ -60,8 +58,7 @@ inline Tensor grid_sample(
     GridSampleFuncOptions::mode_t mode,
     GridSampleFuncOptions::padding_mode_t padding_mode,
     std::optional<bool> align_corners) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t mode_enum, padding_mode_enum;
+  int64_t mode_enum = 0, padding_mode_enum = 0;
 
   if (std::holds_alternative<enumtype::kBilinear>(mode)) {
     mode_enum = 0;
@@ -119,6 +116,4 @@ inline Tensor grid_sample(
       options.align_corners());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

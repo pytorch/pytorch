@@ -5,14 +5,23 @@
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
+#ifndef _WIN32
+#include <sys/stat.h>
+#else
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
 #endif
+
+namespace {
+bool file_exists(std::string& path) {
+#ifdef _WIN32
+  return fs::exists(path);
+#else
+  struct stat rc {};
+  return lstat(path.c_str(), &rc) == 0;
+#endif
+}
+} // namespace
 
 namespace torch::inductor {
 
@@ -57,14 +66,16 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       model_so_->sym("AOTInductorModelContainerGetCallSpec"));
 
   // Hack to find the json file name from the model so file
-  size_t lastindex = model_so_path.find_last_of(".");
+  size_t lastindex = model_so_path.find_last_of('.');
   std::string json_filename = model_so_path.substr(0, lastindex) + ".json";
 
-  if (fs::exists(json_filename)) {
+  if (file_exists(json_filename)) {
     proxy_executor_ = std::make_unique<torch::aot_inductor::OSSProxyExecutor>(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
@@ -81,7 +92,7 @@ AOTIModelContainerRunner::~AOTIModelContainerRunner() {
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run(
-    std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& inputs,
     AOTInductorStreamHandle cuda_stream_handle) {
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
@@ -153,6 +164,21 @@ void AOTIModelContainerRunner::update_constant_buffer(
       check_full_update));
 }
 
+void AOTIModelContainerRunner::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TensorConstantMap const_map;
+  for (auto& [k, v] : tensor_map) {
+    const_map.emplace(k, &v);
+  }
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
+}
+
 void AOTIModelContainerRunner::update_inactive_constant_buffer(
     const TensorConstantMap& const_map) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
@@ -174,8 +200,8 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
 }
 
 std::vector<std::string> AOTIModelContainerRunner::get_call_spec() {
-  const char* in_spec;
-  const char* out_spec;
+  const char* in_spec = nullptr;
+  const char* out_spec = nullptr;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       get_call_spec_func_(container_handle_, &in_spec, &out_spec));
   return {in_spec, out_spec};

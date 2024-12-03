@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 
+import torch
 from torch._dynamo import device_interface  # noqa: PLC2701 import-private-name
 
 
@@ -13,9 +14,7 @@ class DeviceProperties:
 
 
 class DeviceInterface(device_interface.DeviceInterface):
-    class Event(
-        device_interface._EventBase
-    ):  # pyright: ignore [reportPrivateImportUsage]
+    class Event(torch.Event):
         def __init__(
             self,
             enable_timing: bool = False,

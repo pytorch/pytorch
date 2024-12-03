@@ -1,8 +1,7 @@
-"""Build decomp table from PyTorch."""
-
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import itertools
 from typing import Callable, TYPE_CHECKING
 
 import torch
@@ -41,7 +40,7 @@ def get_onnx_implemented_overloads(
 
 
 def create_onnx_friendly_decomposition_table(
-    registry,
+    onnx_registered_ops: set[torch._ops.OperatorBase],
 ) -> dict[torch._ops.OperatorBase, Callable]:
     """
     This function creates a dictionary of op overloads and their decomposition functions
@@ -50,24 +49,26 @@ def create_onnx_friendly_decomposition_table(
     built-in aten-to-aten decomposition.
 
     Args:
-        registry: The ONNX registry for PyTorch.
+        onnx_registered_ops: All ops that have an ONNX decomposition implemented.
 
     Returns:
         Dict[torch._ops.OperatorBase, Callable]: A dictionary that maps op overloads to their corresponding
         decomposition functions.
     """
     decomposition_table: dict[torch._ops.OperatorBase, Callable] = {}
-    onnx_registered_ops = set(get_onnx_implemented_overloads(registry))
 
-    # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
-    # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
-    # definitions in a single TORCH_LIBRARY block.
-    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():  # type: ignore[attr-defined]
+    for op_overload, decomp_fn in itertools.chain(
+        torch.export.default_decompositions().items(),  # type: ignore[attr-defined]
+        torch._decomp.decomposition_table.items(),  # type: ignore[attr-defined]
+    ):
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
         # symbolic function.
         # NOTE: Do not skip torch._refs decomps. They are fine because otherwise the model is
         # not exportable anyways.
         if op_overload in onnx_registered_ops:
+            continue
+        # If it is HOP, we filter those out as well.
+        if not hasattr(op_overload, "_schema"):
             continue
         decomposition_table[op_overload] = decomp_fn
 
