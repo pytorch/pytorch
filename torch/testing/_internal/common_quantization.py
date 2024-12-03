@@ -1333,7 +1333,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         m = convert_pt2e(m)
         return m
 
-    def _get_pt2e_quantized_linear(self, is_per_channel=False, quantizer=None) -> torch.fx.GraphModule:
+    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1341,10 +1341,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
             def forward(self, x):
                 return self.linear(x)
-        if quantizer is None:
-            quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
-            quantizer.set_global(operator_config)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+        quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         return self._quantize(m, quantizer, example_inputs)
