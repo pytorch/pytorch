@@ -402,8 +402,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-    iter.dtype(), "masked_select", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "masked_select", AT_WRAP([&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_serial_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
@@ -414,7 +413,13 @@ void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
           *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
-    });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 template <typename scalar_t, typename mask_t, typename func_t>
@@ -440,8 +445,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-    iter.dtype(), "masked_select", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "masked_select", AT_WRAP([&] {
       auto mask_dtype = iter.input_dtype(1);
       if (mask_dtype == ScalarType::Bool) {
         cpu_masked_select_kernel<scalar_t, bool>(iter, [result_stride](char* dst, char* src, int64_t offset) {
@@ -452,7 +456,13 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
           *(scalar_t*)(dst + offset*result_stride) = *(scalar_t*)src;
         });
       }
-    });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 template <typename scalar_t>
