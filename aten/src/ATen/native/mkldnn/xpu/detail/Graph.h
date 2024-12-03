@@ -65,7 +65,7 @@ struct GraphCache {
   // The first 8 bits are reserved
   // bit 0: is int8
   // bit 1: is uint8
-  // bit 2: is fp16
+  // bit 2: fp16(0) / bf16(1)
   // bit 3: is fp32
   // bit 4: is sdp pattern
   // bit 5-7: N/A
