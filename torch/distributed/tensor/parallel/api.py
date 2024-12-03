@@ -63,7 +63,7 @@ def parallelize_module(  # type: ignore[return]
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-    _validate_tp_mesh_dim(device_mesh)
+    # _validate_tp_mesh_dim(device_mesh)
 
     if parallelize_plan is None:
         warnings.warn(

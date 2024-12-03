@@ -88,6 +88,10 @@ class Shard(Placement):
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
         # chunk tensor over dimension `dim` into n slices
+
+        if isinstance(tensor, torch.distributed.tensor.DTensor):
+            tensor = tensor._local_tensor
+
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
         num_empty_tensors = num_chunks - len(tensor_list)
 
