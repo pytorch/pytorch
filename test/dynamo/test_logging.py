@@ -69,7 +69,6 @@ def multi_record_test(num_records, **kwargs):
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
-        breakpoint()
         self.assertEqual(len(records), num_records)
 
     return fn
