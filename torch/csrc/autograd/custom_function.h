@@ -220,39 +220,41 @@ struct CppNode : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
-    saved.before(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.before(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.before(ctx_.materialize_grads_);
-    saved.before(ctx_.has_freed_buffers_);
-    saved.before(input_info_);
-    saved.before(output_info_);
+    // saved.before(ctx_.saved_data);
+    // TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    // TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    // saved.before(ctx_.saved_variables_);
+    // TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    // saved.before(ctx_.materialize_grads_);
+    // saved.before(ctx_.has_freed_buffers_);
+    // saved.before(input_info_);
+    // saved.before(output_info_);
 
-    auto results = apply(variable_list(inputs));
+    // auto results = apply(variable_list(inputs));
+
+    // saved.after(ctx_.saved_data);
+    // TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    // TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    // saved.after(ctx_.saved_variables_);
+    // TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    // saved.after(ctx_.materialize_grads_);
+    // saved.after(ctx_.has_freed_buffers_);
+    // saved.after(input_info_);
+    // saved.after(output_info_);
+    // return results;
+
     // TODO(rzou): following is problematic
-    // auto stack = retrieve_saved(saved);
-    // const auto& interface =
-    // torch::dynamo::autograd::getPyCompilerInterface(); variable_list results
-    // = interface->call_function(
-    //     saved.get_py_compiler(),
-    //     "apply_functional",
-    //     get_functional().value(),
-    //     inputs,
-    //     stack,
-    //     num_outputs(),
-    //     name());
-
-    saved.after(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.after(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.after(ctx_.materialize_grads_);
-    saved.after(ctx_.has_freed_buffers_);
-    saved.after(input_info_);
-    saved.after(output_info_);
+    auto stack = retrieve_saved(saved);
+    const auto& interface =
+    torch::dynamo::autograd::getPyCompilerInterface(); variable_list results
+    = interface->call_function(
+        saved.get_py_compiler(),
+        "apply_functional",
+        get_functional().value(),
+        inputs,
+        stack,
+        num_outputs(),
+        name());
     return results;
   }
 
