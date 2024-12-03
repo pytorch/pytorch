@@ -348,11 +348,9 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
+        # Avoid VT cycles from e.g., recursive function.
+        visited: Set[VariableTracker] = set()
         live_new_objects: Set[VariableTracker] = set()
-
-        # use this to avoid cycles in mutation_type (though I'm not sure if that
-        # can actually happen).
-        visited: Set[VariableTracker] = set({})
 
         def visit(var: VariableTracker):
             if var in visited:
@@ -564,6 +562,36 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.lists.DequeVariable):
+                # For limited maxlen, the order of operations matter for side
+                # effect, but we currently don't track the order, so no support.
+                if not (
+                    isinstance(var.maxlen, variables.ConstantVariable)
+                    and var.maxlen.value is None
+                ):
+                    unimplemented("side effect on existing deque with limited maxlen")
+
+                # old.extend(new), this runs last
+                cg(var.source)
+                cg.load_method("extend")
+                cg(var, allow_cache=False)  # Don't codegen via source
+                suffixes.append(
+                    [
+                        *create_call_method(1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
+                # old.clear(), this runs first
+                cg(var.source)
+                cg.load_method("clear")
+                suffixes.append(
+                    [
+                        *create_call_method(0),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
             elif isinstance(var, variables.CustomizedDictVariable):
                 # need to update the dict manually since update method may be invalid
                 varname_map = {}
@@ -599,34 +627,38 @@ class SideEffects:
 
             elif isinstance(var, variables.ConstDictVariable):
                 # Reconstruct works as follow:
-                # (1) codegen(...) each pair of key/value
-                # (2) create a new dictionary with the pairs of key/values above
-                # (3) clear the original dictionary
+                # (1) Skip codegen if there are no new items
+                # (2) codegen(...) each pair of key/value
+                # (3) create a new dictionary with the pairs of key/values above
+                # (4) clear the original dictionary
                 #   + only if a key was removed from the input dict
-                # (4) update the original dictionary with the dict created in (2)
+                # (5) update the original dictionary with the dict created in (2)
 
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("update")
-                cg(var, allow_cache=False)  # Don't codegen via source
-
-                if var.should_reconstruct_all:
+                if var.has_new_items():
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("clear")
+                    cg.load_method("update")
+                    cg(var, allow_cache=False)  # Don't codegen via source
 
-                suffixes.append(
-                    [
-                        *create_call_method(1),  # update
-                        create_instruction("POP_TOP"),
-                    ]
-                )
+                    if var.should_reconstruct_all:
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg.load_method("clear")
 
-                if var.should_reconstruct_all:
                     suffixes.append(
                         [
-                            *create_call_method(0),  # clear
+                            *create_call_method(1),  # update
                             create_instruction("POP_TOP"),
                         ]
                     )
+
+                    if var.should_reconstruct_all:
+                        # clear will appear before "update" as the suffixes are
+                        # applied in reverse order.
+                        suffixes.append(
+                            [
+                                *create_call_method(0),  # clear
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
 
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
@@ -716,7 +748,7 @@ class SideEffects:
                         cg(value)
                         cg(var.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-            elif isinstance(var, variables.TupleIteratorVariable):
+            elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")
