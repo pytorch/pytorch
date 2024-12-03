@@ -20,6 +20,10 @@
 #include <fbgemm/Utils.h>
 #endif
 
+#ifdef __GNUC__
+#include <parallel/algorithm>
+#endif
+
 namespace at::native {
 
 namespace {
@@ -139,6 +143,37 @@ static void parallel_sort1d_kernel(
 }
 #endif
 
+template< class RandomIt, class Compare>
+static void inline parallel_sort( RandomIt first, RandomIt last, Compare comp, std::function<void(RandomIt, RandomIt, Compare)> sort_f ) {
+  int64_t n = last - first;
+  const int64_t chunk_size = std::max(at::divup(n, at::get_num_threads()), at::divup(n, at::divup(n, 512)));
+  const int64_t num_threads = at::divup(n, chunk_size);
+
+  at::parallel_for(
+    0, n, chunk_size, [&](int64_t begin, int64_t end) {
+      sort_f(first + begin, first + end, comp);
+    }
+  );
+
+  if (num_threads > 1) {
+    const int64_t merge_threads = (num_threads - ((int) chunk_size * num_threads != n)) / 2;
+    at::parallel_for(
+      0, chunk_size * 2 * merge_threads, chunk_size * 2, [&](int64_t begin, int64_t end) {
+        std::inplace_merge(first + begin, first + begin + chunk_size, first + end, comp);
+      }
+    );
+
+    for (int i=0; i < merge_threads - 1; i++) {
+      std::inplace_merge(first, first + chunk_size * 2 * (i + 1), first + chunk_size * 2 * (i + 2), comp);
+    }
+
+    int last_tails = num_threads - 1 - merge_threads - (merge_threads - 1);
+    for (int i=0; i < last_tails; i++) {
+      std::inplace_merge(first, first + merge_threads * chunk_size * 2 + i * chunk_size, i == last_tails - 1 ? last : first + merge_threads * chunk_size * 2 + i * chunk_size, comp);
+    }
+  }
+}
+
 template <typename scalar_t, typename value_accessor_t, typename indices_accessor_t>
 static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
             const indices_accessor_t& indices_accessor,
@@ -146,23 +181,44 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
   auto composite_accessor = CompositeRandomAccessorCPU<
     value_accessor_t, indices_accessor_t
   >(value_accessor, indices_accessor);
+#ifdef __GNUC__
   if (descending) {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      __gnu_parallel::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      __gnu_parallel::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
     }
   } else {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      __gnu_parallel::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      __gnu_parallel::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
     }
   }
+#else
+  using CompositeIt = CompositeRandomAccessorCPU<value_accessor_t, indices_accessor_t>;
+  if (descending) {
+    if (stable) {
+      parallel_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>(), std::stable_sort<CompositeIt, KeyValueCompDesc<scalar_t>>);
+    } else {
+      parallel_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>(), std::sort<CompositeIt, KeyValueCompDesc<scalar_t>>);
+    }
+  } else {
+    if (stable) {
+      parallel_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>(), std::stable_sort<CompositeIt, KeyValueCompAsc<scalar_t>>);
+    } else {
+      parallel_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>(), std::sort<CompositeIt, KeyValueCompAsc<scalar_t>>);
+    }
+  }
+#endif
 }
 
 static void sort_kernel(
