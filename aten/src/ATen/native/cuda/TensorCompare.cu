@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
