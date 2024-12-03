@@ -49,6 +49,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    skipIfRocm,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
@@ -509,6 +510,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -829,6 +831,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 new_op_st = op(st, dtype=dtype)
                 self.assertEqual(new_op_st.local_tensor(), expect_tensor)
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -882,6 +885,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -937,6 +941,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 )
                 self.assertEqual((5, 20), shard.tensor.size())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -1477,6 +1482,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 10, pin_memory=True, init_rrefs=True)
         self.assertTrue(st.is_pinned())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -1994,6 +2000,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             verify_size(rank, shard_metadata.shard_sizes)
             self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2060,6 +2067,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2128,6 +2136,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2212,6 +2221,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2345,6 +2355,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
                         rank_to_metadata[rpc_rank].shard_sizes, shard.tensor.size()
                     )
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2423,6 +2434,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 metadata=wrong_local_shard_metadata,
             )
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2541,6 +2553,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
             self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
+    @skipIfRocm
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
