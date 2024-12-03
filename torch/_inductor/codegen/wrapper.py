@@ -1218,8 +1218,7 @@ class PythonWrapperCodegen(CodeGen):
                 f.write(tuning_code.encode("utf-8"))
                 file_path = f.name
             output_code_log.debug(
-                "\nCompile-time auto-tuning code: \n%s\nAuto-tuning code written to %s",
-                tuning_code,
+                "Auto-tuning code written to %s",
                 file_path,
             )
         # Execute the code to autotune kernels

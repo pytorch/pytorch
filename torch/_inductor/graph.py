@@ -2008,7 +2008,15 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-
+        if config.triton.autotune_at_compile_time:
+            tuning_code = (
+                '"""\n'
+                + "Autotune code block: \n"
+                + self.wrapper_code.kernel_autotune_defs.getvalue()
+                + self.wrapper_code.kernel_autotune_calls.getvalue()
+                + '"""\n'
+            )
+            code = tuning_code + code
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 

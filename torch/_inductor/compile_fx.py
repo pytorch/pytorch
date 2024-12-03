@@ -84,6 +84,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
+from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -1446,7 +1447,7 @@ def get_cpp_wrapper_config() -> Dict[str, object]:
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        else True,
+        else has_triton(),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
