@@ -15,11 +15,7 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.common_utils import (
-    NAVI_ARCH,
-    skipIfRocm,
-    skipIfRocmArch, 
-)
+from torch.testing._internal.common_utils import skipIfRocm
 
 
 class TestKernelBenchmark(TestCase):
@@ -374,7 +370,6 @@ class TestKernelBenchmark(TestCase):
         self.check_bandwidth(compiled_module, "0.006")
 
     @expectedFailureXPU
-    @skipIfRocmArch(NAVI_ARCH)
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000
