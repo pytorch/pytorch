@@ -6,6 +6,7 @@ import functools
 import typing
 import warnings
 import weakref
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -24,7 +25,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
+from typing_extensions import override, TypeGuard, TypeIs
 
 import torch
 from torch._C._autograd import CreationMeta
@@ -50,11 +51,19 @@ from torch.utils.weak import WeakIdKeyDictionary
 if TYPE_CHECKING:
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
     # Import here to avoid cycle
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+
+
+def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    return isinstance(t, FakeTensor)
+
 
 DimList = List
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
@@ -345,9 +354,11 @@ class MetaTensorDescriber:
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
+        view_func = _ViewFunc.from_tensor(t)
+
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
-        r = MetaTensorDesc(
+        r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
             is_inference=t.is_inference(),
@@ -439,7 +450,7 @@ class MetaTensorDescriber:
                 else None
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
-            view_func=t._view_func_unsafe,
+            view_func=view_func,
             attrs=attrs,
             ctx=ctx,
             type=type_v,
@@ -474,6 +485,64 @@ class MetaStorageDesc:
             "describer_id": describer_id,
             "size": self.size if isinstance(self.size, int) else repr(self.size),
         }
+
+
+@dataclass(frozen=True)
+class _ViewFunc(Generic[_TensorT]):
+    @abstractmethod
+    def apply(
+        self,
+        t: _TensorT,
+        new_base: _TensorT,
+        symint_visitor_fn: Optional[Callable[[int], int]] = None,
+        tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
+    ) -> _TensorT:
+        ...
+
+    @staticmethod
+    def from_tensor(t: torch.Tensor) -> _ViewFunc:
+        if _is_fake_tensor(t):
+            return _FakeTensorViewFunc()
+        else:
+            return _CustomViewFunc(t._view_func_unsafe)
+
+
+@dataclass(frozen=True)
+class _FakeTensorViewFunc(_ViewFunc["FakeTensor"]):
+    @override
+    def apply(
+        self,
+        t: torch.Tensor,
+        new_base: torch.Tensor,
+        symint_visitor_fn: Optional[Callable[[int], int]] = None,
+        tensor_visitor_fn: Optional[Callable[[torch.Tensor], FakeTensor]] = None,
+    ) -> FakeTensor:
+        return torch._subclasses.fake_tensor.FakeTensor._view_func_unsafe(
+            t, new_base, symint_visitor_fn, tensor_visitor_fn
+        )
+
+
+@dataclass(frozen=True)
+class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
+    func: Callable[
+        [
+            torch.Tensor,
+            Optional[Callable[[int], int]],
+            Optional[Callable[[torch.Tensor], _TensorT]],
+        ],
+        _TensorT,
+    ]
+
+    @override
+    def apply(
+        self,
+        t: torch.Tensor,
+        new_base: torch.Tensor,
+        symint_visitor_fn: Optional[Callable[[int], int]] = None,
+        tensor_visitor_fn: Optional[Callable[[torch.Tensor], _TensorT]] = None,
+    ) -> _TensorT:
+        # ignore `t`
+        return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
 @dataclass(frozen=True)
@@ -543,10 +612,11 @@ class MetaTensorDesc(Generic[_TensorT]):
 
     # Everything below is NOT serializable, need some more work
 
-    _UNSERIALIZABLE: ClassVar[List[str]] = [
+    _UNSERIALIZABLE: ClassVar[Set[str]] = {
         "ctx",
         "type",
         "fake_mode",
+        # view_func isn't serializable when it's a _CustomViewFunc
         "view_func",
         "level",
         "current_level",
@@ -554,21 +624,12 @@ class MetaTensorDesc(Generic[_TensorT]):
         "autograd_meta_from",
         "data",
         "nested_int",
-    ]
+    }
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
-    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode] = None
-    view_func: Optional[
-        Callable[
-            [
-                torch.Tensor,
-                Callable[[int], int],
-                Callable[[torch.Tensor], _TensorT],
-            ],
-            _TensorT,
-        ]
-    ] = None
+    fake_mode: Optional[FakeTensorMode] = None
+    view_func: Optional[_ViewFunc] = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
@@ -599,7 +660,7 @@ class MetaTensorDesc(Generic[_TensorT]):
             # fields (feel free to add other special cases as appropriate)
             if k in ["data", "autograd_meta_from"]:
                 return None  # never repr these
-            if k in set(MetaTensorDesc._UNSERIALIZABLE):
+            if k in MetaTensorDesc._UNSERIALIZABLE:
                 return repr(v)
             if isinstance(v, (torch.device, torch.dtype, torch.layout)):
                 return repr(v)
@@ -762,6 +823,7 @@ class MetaConverter(Generic[_TensorT]):
         callback: Callable[[Callable], _TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
+        override_device: Optional[Union[torch.device, str]],
     ) -> _TensorT:
         callback = functools.partial(callback, device=t.device)  # type: ignore[call-arg]
         if source is None:
@@ -921,6 +983,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
+                        override_device,
                     )
 
                 inner_tensors = {}
@@ -1176,6 +1239,7 @@ class MetaConverter(Generic[_TensorT]):
                     all_dynamic_symbolic_context(
                         visited_desc, temp_source, shape_env, callback
                     ),
+                    override_device,
                 )
 
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
@@ -1183,7 +1247,7 @@ class MetaConverter(Generic[_TensorT]):
             assert t.view_func is not None
             # NB: we do NOT suppress guards here, we need to remove ephemeral
             # sources
-            fake_t = t.view_func(base, symint_visitor_fn, tensor_visitor_fn)
+            fake_t = t.view_func.apply(t, base, symint_visitor_fn, tensor_visitor_fn)
 
             # Ensure the output has symbolic shapes according to the outer symbolic context.
             # These checks should simplify out any symbols created for closed-over view func
@@ -1217,9 +1281,7 @@ class MetaConverter(Generic[_TensorT]):
                         # Pray that sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            assert isinstance(
-                                r, torch._subclasses.fake_tensor.FakeTensor
-                            )
+                            assert _is_fake_tensor(r)
                             r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     # Note [is_coalesced is dispatched]
@@ -1272,9 +1334,7 @@ class MetaConverter(Generic[_TensorT]):
                         # Pray sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            assert isinstance(
-                                r, torch._subclasses.fake_tensor.FakeTensor
-                            )
+                            assert _is_fake_tensor(r)
                             r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
@@ -1308,9 +1368,7 @@ class MetaConverter(Generic[_TensorT]):
                         with torch.no_grad(), no_dispatch():
                             assert t.size is not None
                             assert t.stride is not None
-                            assert isinstance(
-                                r, torch._subclasses.fake_tensor.FakeTensor
-                            )
+                            assert _is_fake_tensor(r)
                             r.real_tensor = torch.empty_strided(
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
@@ -1387,6 +1445,7 @@ class MetaConverter(Generic[_TensorT]):
                                 # work, take a closer look.
                                 source,
                                 symbolic_context,
+                                override_device,
                             )
                             r = self._checked_cast_tensor_t(
                                 _wrap_functional_tensor(ft, t.current_level),
@@ -1428,6 +1487,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         source,
                         symbolic_context,
+                        override_device,
                     )
                     r = self._checked_cast_tensor_t(
                         torch._to_functional_tensor(unwrapped)
@@ -1461,6 +1521,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         torch._dynamo.source.AttrSource(source, "_base"),
                         base_symbolic_context,
+                        override_device,
                     )
 
                     def is_c_of_r(
@@ -1582,16 +1643,14 @@ class MetaConverter(Generic[_TensorT]):
                                 sizes,
                                 strides,
                                 dtype=t.dtype,
-                                device="meta",
+                                device=override_device or t.device,
                             )
                         )
                         if self.copy_data:
                             with torch.no_grad(), no_dispatch():
                                 assert t.size is not None
                                 assert t.stride is not None
-                                assert isinstance(
-                                    r, torch._subclasses.fake_tensor.FakeTensor
-                                )
+                                assert _is_fake_tensor(r)
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
@@ -1624,9 +1683,7 @@ class MetaConverter(Generic[_TensorT]):
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
-                            assert isinstance(
-                                r, torch._subclasses.fake_tensor.FakeTensor
-                            )
+                            assert _is_fake_tensor(r)
                             assert r.real_tensor is not None
                             _set_real_storage(
                                 r.untyped_storage(), r.real_tensor.untyped_storage()
@@ -1674,9 +1731,7 @@ class MetaConverter(Generic[_TensorT]):
                                 r.set_(r_s, storage_offset, sizes, strides)
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
-                                    assert isinstance(
-                                        r, torch._subclasses.fake_tensor.FakeTensor
-                                    )
+                                    assert _is_fake_tensor(r)
                                     assert r.real_tensor is not None
                                     assert t.stride is not None
                                     r.real_tensor.set_(
@@ -1697,6 +1752,7 @@ class MetaConverter(Generic[_TensorT]):
                         callback,
                         AttrSource(source, "grad"),
                         symbolic_context,
+                        override_device,
                     )
                 torch._C._set_conj(r, t.is_conj)
                 torch._C._set_neg(r, t.is_neg)
@@ -1716,7 +1772,7 @@ class MetaConverter(Generic[_TensorT]):
 
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
-                assert isinstance(r, torch._subclasses.fake_tensor.FakeTensor)
+                assert _is_fake_tensor(r)
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
@@ -1809,6 +1865,7 @@ class MetaConverter(Generic[_TensorT]):
                 callback_,
                 source,
                 symbolic_context,
+                override_device="meta",
             )
 
         if type(t) is torch.nn.Parameter:
