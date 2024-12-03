@@ -943,10 +943,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
         elif isinstance(value, (torch.SymBool, torch.SymInt)):
-            assert torch.compiler.is_compiling(), (
-                "We only expect to receive torch.SymBool and torch.SymInt input during export."
-                " Please file an issue if you see this error message."
-            )
             # Note: the idea for supporting SymBool input is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.
 
