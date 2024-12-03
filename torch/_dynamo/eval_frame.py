@@ -992,7 +992,7 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
