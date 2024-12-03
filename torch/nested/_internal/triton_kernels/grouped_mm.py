@@ -140,12 +140,6 @@ def grouped_matmul_kernel(
         tl.store(c_ptrs, c, mask=c_mask)
 
 
-lib = torch.library.Library("triton_kernels", "FRAGMENT")
-lib.define(
-    "group_gemm_fn(Tensor a_values, Tensor a_offsets, int max_M, Tensor tensor_b) -> Tensor"
-)
-
-
 def group_gemm_fn_kernel(a_values, a_offsets, max_M, tensor_b, c_values, config):
     B, K, N = tensor_b.shape
     group_size = a_offsets.size(0)
@@ -194,8 +188,11 @@ def gen_config_key(a_values, a_offsets, max_M, tensor_b):
     return (a_values.size(), a_offsets.size(), max_M, tensor_b.size())
 
 
-@torch.library.impl(lib, "group_gemm_fn", "CUDA")
-def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
+@torch.library.custom_op("triton_kernels::group_gemm_fn", mutates_args=())
+def group_gemm_fn(a_values: torch.Tensor,
+                  a_offsets: torch.Tensor,
+                  max_M: int,
+                  tensor_b: torch.Tensor) -> torch.Tensor:
     assert not tensor_b.is_nested
     group_size = a_offsets.size(0)
 
@@ -263,8 +260,11 @@ def group_gemm_fn(a_values, a_offsets, max_M, tensor_b):
     )
 
 
-@torch.library.impl(lib, "group_gemm_fn", "Meta")
-def group_gemm_fn_meta(a_values, a_offsets, max_M, tensor_b):
+@group_gemm_fn.register_fake
+def group_gemm_fn_meta(a_values: torch.Tensor,
+                       a_offsets: torch.Tensor,
+                       max_M: int,
+                       tensor_b: torch.Tensor) -> torch.Tensor:
     B, K, N = tensor_b.shape
     c_values = a_values.new_empty((a_values.size(0), N))
     return c_values
@@ -285,7 +285,7 @@ def grouped_mm(tensor_a, tensor_b):
 
     max_M = tensor_a._max_seqlen
 
-    c_values = torch.ops.triton_kernels.group_gemm_fn(
+    c_values = group_gemm_fn(
         a_values, a_offsets, max_M, tensor_b
     )
 
