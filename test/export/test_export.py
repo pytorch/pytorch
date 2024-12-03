@@ -30,6 +30,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.wrap import wrap
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -8177,6 +8178,31 @@ def forward(self, x, y):
             )
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_wrap_hop_basic(self):
+        def f_a(x):
+            return x @ torch.randn(4, 4)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                def f_b(x):
+                    return x * 2
+
+                x = wrap(f_a, x)
+                x = wrap(f_b, x)
+                return wrap(lambda x: x + 4, x)
+
+        mod = Foo()
+        x = torch.randn(4, 4)
+        ep = export(mod, (x,))
 
     @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
