@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import weakref
-from typing import List, Set
+from typing import List, Set, TYPE_CHECKING
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -10,7 +10,9 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
-from torch.utils.hooks import RemovableHandle
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 logger = logging.getLogger(__name__)
