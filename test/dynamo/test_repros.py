@@ -6402,6 +6402,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    @requires_cuda
     def test_sdpa_dynamic_shapes(self):
         def f(x, s0, s1, s2):
             q = x.view(2, s0, s2, s0)
