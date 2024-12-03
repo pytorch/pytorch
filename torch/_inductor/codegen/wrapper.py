@@ -652,7 +652,6 @@ class PythonWrapperCodegen(CodeGen):
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
@@ -1304,9 +1303,7 @@ class PythonWrapperCodegen(CodeGen):
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
-            self.writeline(
-                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-            )
+            self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
         pass
@@ -1684,14 +1681,7 @@ class PythonWrapperCodegen(CodeGen):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
-        if (expr, V.graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
-            self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(
-                f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
-            )
-        else:
-            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
+        self.writeline(f"{expr} = {pexpr(tree.numel)}")
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -1811,7 +1801,7 @@ class PythonWrapperCodegen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return self.expr_printer(V.graph.sizevars.simplify(arg))
+                return pexpr(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
