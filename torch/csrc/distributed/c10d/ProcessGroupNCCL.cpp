@@ -4494,8 +4494,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
-  check_gpu_single_tensor(outputTensor, true);
-  check_gpu_single_tensor(inputTensor, true);
+  check_gpu_single_tensor(outputTensor);
+  check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     RECORD_PARAM_COMMS_DATA(
         std::make_tuple(
@@ -4607,8 +4607,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
-    check_gpu_single_tensor(outputTensors[r], true);
-    check_gpu_single_tensor(inputTensors[r], true);
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
     TORCH_CHECK(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
