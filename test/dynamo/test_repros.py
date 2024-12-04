@@ -6402,6 +6402,27 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    @requires_cuda
+    def test_sdpa_dynamic_shapes(self):
+        def f(x, s0, s1, s2):
+            q = x.view(2, s0, s2, s0)
+            return torch._C._nn.scaled_dot_product_attention(
+                q, q, q, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
+
+        x = torch.randn(2, 32, 4096, dtype=torch.bfloat16, device="cuda")
+        x_ref = x.clone().detach().requires_grad_()
+        s0 = 32
+        s1 = 64
+        s2 = 128
+
+        f_compiled = torch.compile(f, dynamic=True)
+
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            out_ref = f(x_ref, s0, s1, s2)
+            out = f_compiled(x, s0, s1, s2)
+            self.assertEqual(out_ref, out)
+
     def test_bitwise_op_guard(self):
         # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
         def fn(x):
