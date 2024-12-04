@@ -193,7 +193,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
             assert isinstance(
                 nodes,
                 (
-                    torch._inductor.ir.ExpandView,
+                    ExpandView,
                     DynamicScalar,
                     AssertScalar,
                     TensorBox,
@@ -354,6 +354,58 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
+
+
+def try_match_insignificant_strides(
+    tensor: Union[TensorBox, BaseView],
+    strides: Sequence[Union[int, torch.SymInt]],
+) -> Union[TensorBox, BaseView]:
+    """
+    Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+    dimensions - size 0 or 1 - will be updated.
+
+    If there are real stride differences (NHWC vs NCHW), or the tensor is not realized, then the input will be returned
+    """
+    if not is_storage_and_layout(tensor):
+        return tensor
+
+    if all(
+        V.graph.sizevars.statically_known_equals(s1, s2)
+        for s1, s2 in zip(strides, tensor.get_stride())
+    ):
+        return tensor  # type: ignore[arg-type]
+
+    def significant_strides_equal(
+        shape: Sequence[Union[Expr, int]],
+        meta_strides: Sequence[Union[Expr, int]],
+        tensor_strides: Sequence[Union[Expr, int]],
+    ) -> bool:
+        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                continue
+
+            if not V.graph.sizevars.statically_known_equals(s1, s2):
+                return False
+
+        return True
+
+    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+        return tensor
+
+    storage, old_layout = as_storage_and_layout(tensor)
+    new_stride = [*old_layout.stride]
+    for i, s in enumerate(tensor.get_size()):
+        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+            new_stride[i] = strides[i]
+
+    new_layout = FixedLayout(
+        old_layout.device,
+        old_layout.dtype,
+        old_layout.size,
+        new_stride,
+        old_layout.offset,
+    )
+    return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
 class IRNode:
@@ -5141,7 +5193,11 @@ class ExternKernel(InputsKernel):
                     )
                 )
             ):
-                return x
+                return (
+                    try_match_insignificant_strides(x, exact_strides)
+                    if exact_strides
+                    else x
+                )
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(

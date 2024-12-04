@@ -1218,10 +1218,15 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
+
+                # should have already been realized
+                assert torch._inductor.ir.is_storage_and_layout(r)
+                meta_strides = [
+                    s.node.expr if isinstance(s, torch.SymInt) else s
+                    for s in fx_node.meta["val"].stride()
+                ]
                 result_correct_strides.append(
-                    self.try_match_insignificant_strides(
-                        r, fx_node.meta["val"].stride()
-                    )
+                    ir.try_match_insignificant_strides(r, meta_strides)
                 )
 
         self.graph_outputs = result_correct_strides
@@ -1269,67 +1274,6 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_node = old
-
-    def try_match_insignificant_strides(
-        self,
-        tensor: Union[ir.TensorBox, ir.BaseView],
-        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
-    ) -> Union[ir.TensorBox, ir.BaseView]:
-        """
-        Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
-        dimensions - size 0 or 1 - will be updated.
-
-        If there are real stride differences (NHWC vs NCHW) then the input will be returned.
-        """
-
-        # should have already been realized
-        assert torch._inductor.ir.is_storage_and_layout(tensor)
-
-        meta_strides = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
-        ]
-
-        if all(
-            self.sizevars.statically_known_equals(s1, s2)
-            for s1, s2 in zip(meta_strides, tensor.get_stride())
-        ):
-            return tensor  # type: ignore[arg-type]
-
-        def significant_strides_equal(
-            shape: Sequence[Union[Expr, int]],
-            meta_strides: Sequence[Union[Expr, int]],
-            tensor_strides: Sequence[Union[Expr, int]],
-        ) -> bool:
-            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
-                    continue
-
-                if not self.sizevars.statically_known_equals(s1, s2):
-                    return False
-
-            return True
-
-        if not significant_strides_equal(
-            tensor.get_size(), meta_strides, tensor.get_stride()
-        ):
-            return tensor
-
-        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
-        new_stride = [*old_layout.stride]
-        for i, s in enumerate(tensor.get_size()):
-            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
-                new_stride[i] = meta_strides[i]
-
-        new_layout = torch._inductor.ir.FixedLayout(
-            old_layout.device,
-            old_layout.dtype,
-            old_layout.size,
-            new_stride,
-            old_layout.offset,
-        )
-        return ir.TensorBox(
-            torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)
-        )
 
     def propagate_mutation(
         self,
