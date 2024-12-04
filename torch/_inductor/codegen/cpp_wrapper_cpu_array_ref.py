@@ -63,7 +63,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.allow_stack_allocation: Optional[bool] = config.allow_stack_allocation
+        self.allow_stack_allocation: Optional[
+            bool
+        ] = config.aot_inductor.allow_stack_allocation
         self.stack_allocated_buffers: Dict[BufferName, BufferLike] = {}
 
     @staticmethod
@@ -76,7 +78,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     @staticmethod
     def get_input_cpp_type(input):
-        assert config.use_minimal_arrayref_interface
+        assert config.aot_inductor.use_minimal_arrayref_interface
 
         if isinstance(input, sympy.Expr):
             from ..graph import may_get_constant_buffer_dtype
@@ -164,7 +166,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            if config.use_minimal_arrayref_interface and not V.graph.is_const_graph:
+            if (
+                config.aot_inductor.use_minimal_arrayref_interface
+                and not V.graph.is_const_graph
+            ):
                 input_cpp_types = ", ".join(
                     f"{CppWrapperCpuArrayRef.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
@@ -228,7 +233,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                     run_impl_proto += """
                         __check_inputs_outputs(input_handles, output_handles);
                     """
-                if config.use_minimal_arrayref_interface:
+                if config.aot_inductor.use_minimal_arrayref_interface:
                     self.prefix.splice(
                         """
                         template <>
@@ -290,7 +295,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             )
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
-            if not config.use_minimal_arrayref_interface:
+            if not config.aot_inductor.use_minimal_arrayref_interface:
                 if not V.graph.is_const_graph:
                     if V.graph.aot_mode:
                         num_args = len(V.graph.graph_inputs)
@@ -308,7 +313,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
-                    if config.use_minimal_arrayref_interface:
+                    if config.aot_inductor.use_minimal_arrayref_interface:
                         self.prefix.writeline(
                             f"auto {input_key} = std::get<{idx}>(inputs);"
                         )
@@ -352,7 +357,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
-                    if config.use_minimal_arrayref_interface:
+                    if config.aot_inductor.use_minimal_arrayref_interface:
                         # TODO: input shape checking for regular tensor interface as well?
                         self.codegen_input_numel_asserts()
                     else:
@@ -364,7 +369,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
-            not V.graph.is_const_graph and config.use_minimal_arrayref_interface
+            not V.graph.is_const_graph
+            and config.aot_inductor.use_minimal_arrayref_interface
         )  # For brevity.
 
         def use_thread_local_cached_output_tensor(idx, output):
@@ -530,7 +536,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         self.allow_stack_allocation = (
             self.allow_stack_allocation is not False
-            and config.allow_stack_allocation
+            and config.aot_inductor.allow_stack_allocation
             and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
         )
 
@@ -550,7 +556,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or (V.graph.aot_mode and buffer.get_name() in self.stack_allocated_buffers)
             or (
-                config.use_minimal_arrayref_interface
+                config.aot_inductor.use_minimal_arrayref_interface
                 and V.graph.aot_mode
                 and buffer.get_name() in V.graph.graph_inputs
             )
@@ -978,7 +984,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # type_ is Optional[Tensor]
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                 base_handle = self.val_to_arg_str(val, element_type)
-                if config.use_minimal_arrayref_interface:
+                if config.aot_inductor.use_minimal_arrayref_interface:
                     base_handle = f"convert_arrayref_tensor_to_tensor({base_handle})"
                 (
                     tmp_raii_handle_var,
