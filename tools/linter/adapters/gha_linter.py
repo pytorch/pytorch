@@ -5,12 +5,10 @@ TODO
 
 from __future__ import annotations
 
-import os.path
 import argparse
 import json
-import sys
+import os.path
 from enum import Enum
-from io import StringIO
 from typing import NamedTuple
 
 import ruamel.yaml  # type: ignore[import]
@@ -71,7 +69,7 @@ if __name__ == "__main__":
             print(json.dumps(msg._asdict()), flush=True)
             continue
 
-        for job_name, job in r.get('jobs', {}).items():
+        for job_name, job in r.get("jobs", {}).items():
             # This filter is flexible, the idea is to avoid catching all of
             # the random label jobs that don't need secrets
             # TODO: binary might be good to have too, but it's a lot and
@@ -91,9 +89,7 @@ if __name__ == "__main__":
                         name="missing secrets: inherit",
                         original=None,
                         replacement=None,
-                        description=(
-                            f"GitHub actions job '{job_name}' {desc}"
-                        ),
+                        description=(f"GitHub actions job '{job_name}' {desc}"),
                     )
 
                     print(json.dumps(msg._asdict()), flush=True)

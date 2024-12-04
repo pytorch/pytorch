@@ -23,6 +23,10 @@ serialized format:
 from __future__ import annotations
 
 import dataclasses
+import logging
+import os
+import re
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -30,7 +34,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
@@ -61,10 +64,21 @@ if TYPE_CHECKING:
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
 
+log = logging.getLogger(__name__)
 
-class OutputCode(Protocol):
+
+@dataclasses.dataclass
+class OutputCode:
+    # TODO: Remove underscores here
+
+    # None if the output is not remote cacheable
+    _fx_graph_cache_key: Optional[str] = dataclasses.field(default=None, init=False)
+
+    # How long it took to compile this OutputCode, end to end
+    _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        ...
+        raise NotImplementedError(type(self))
 
     def post_compile(
         self,
@@ -72,22 +86,11 @@ class OutputCode(Protocol):
         cudagraphs: BoxedBool,
         gm: GraphModule,
     ) -> None:
-        ...
-
-    # TODO: Not sure if I really want these to be properties, this is easy
-    # though
-    #
-    # TODO: Remove leading underscores
-
-    # None if the output is not remote cacheable
-    _fx_graph_cache_key: Optional[str]
-
-    # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: Optional[int]
+        raise NotImplementedError(type(self))
 
     # TODO: Get rid of this
     def set_triton_bundle(self, triton_bundle: Any) -> None:
-        ...
+        raise NotImplementedError(type(self))
 
 
 _StrideExprStr: TypeAlias = str
@@ -136,7 +139,7 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
 
 
 @dataclasses.dataclass
-class CompiledFxGraph:
+class CompiledFxGraph(OutputCode):
     """
     Class holding a compiled FX graph. This is the object serialized on disk
     to support FxGraph caching.
@@ -176,9 +179,7 @@ class CompiledFxGraph:
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
-    _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
     _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
@@ -339,22 +340,76 @@ class CompiledFxGraph:
         }
         return constants
 
+    def prepare_for_serialization(self) -> None:
+        # We can't really serialize callables that may be C++/Triton/etc.,
+        # so we serialize their PyCodeCache disk cache location instead.
+        # TODO: This could be better if we're ever able to serialize compiled
+        # models to disk.
+        self.current_callable = None
+
+    def after_deserialization(self, gm: Optional[torch.fx.GraphModule]) -> str:
+        from torch._dynamo.utils import counters, dynamo_timed
+        from torch._inductor.codecache import (
+            cpp_prefix_path,
+            get_path,
+            PyCodeCache,
+            write_atomic,
+        )
+
+        # See _save_graph(); we don't store the callable in the cache entry so
+        # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(self.cache_key, "py")[2]
+        code = self.source_code
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+                    self.source_code = code
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
+        from .graph import GraphLowering
+
+        # This is used by tests to check the output for specific details.
+        GraphLowering.save_output_code(code)
+
+        try:
+            with dynamo_timed(
+                "PyCodeCache.load_by_key_path",
+                log_pt2_compile_event=True,
+            ):
+                self.current_callable = PyCodeCache.load_by_key_path(
+                    self.cache_key,
+                    artifact_path,
+                    self.cache_linemap,
+                    self.get_constants(gm),
+                ).call
+        except OSError:
+            log.error("Failed to load artifact: %s", artifact_path)
+            raise
+
+        return artifact_path
+
 
 def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
     return h
 
 
 @dataclasses.dataclass
-class CompiledAOTI:
+class CompiledAOTI(OutputCode):
     """
     Class holding an AOTInductor compiled so.
     """
 
     filename: Union[str, List[str]]
-
-    # TODO: Figure out if these make sense or not here
-    _fx_graph_cache_key: Optional[str] = None
-    _time_taken_ns: Optional[int] = None
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         raise NotImplementedError("NYI")
