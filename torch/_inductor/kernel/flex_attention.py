@@ -4,7 +4,6 @@
 import logging
 import math
 from dataclasses import dataclass
-from enum import auto, Enum
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import sympy
@@ -672,17 +671,12 @@ _rocm_default_config = {
 }
 
 
-class Mode(Enum):
-    fwd = auto()
-    bwd = auto()
-
-
-def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
 
-    if mode == Mode.fwd:
+    if mode == "fwd":
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 1)
@@ -696,7 +690,6 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 32, 4, 1)
         return fwd_config
     else:  # bwd
-        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256:
@@ -710,14 +703,14 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
 
-    if mode == Mode.fwd:
+    if mode == "fwd":
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 3)
@@ -735,7 +728,6 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
         return fwd_config
 
     else:  # bwd
-        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
@@ -758,16 +750,16 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.fwd)
+        return _get_nv_config(query, "fwd")
     else:
-        return _get_rocm_config(query, mode=Mode.fwd)
+        return _get_rocm_config(query, "fwd")
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.bwd)
+        return _get_nv_config(query, "bwd")
     else:
-        return _get_rocm_config(query, mode=Mode.bwd)
+        return _get_rocm_config(query, "bwd")
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -2028,7 +2020,7 @@ def flex_attention_backward(*args, **kwargs):
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
-                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
+                for w in [4, 8]
                 for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
