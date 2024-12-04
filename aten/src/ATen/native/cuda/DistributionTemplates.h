@@ -123,10 +123,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     return;
   }
 
-  auto execution_policy = calc_execution_policy(numel, unroll_factor);
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
