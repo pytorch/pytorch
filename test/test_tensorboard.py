@@ -250,6 +250,10 @@ recall = [1.0, 0.8533334, 0.28, 0.0666667, 0.0]
 
 
 class TestTensorBoardWriter(BaseTestCase):
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "numpy failure, likely caused by old tensorboard version",
+    )
     def test_writer(self):
         with self.createSummaryWriter() as writer:
             sample_rate = 44100
