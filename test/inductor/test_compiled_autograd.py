@@ -3083,7 +3083,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
     # https://github.com/pytorch/pytorch/issues/138920
-    @unittest.expectedFailure # TODO: needs a better repro now that we're hiding AOT in the initial capture
+    @unittest.expectedFailure  # TODO: needs a better repro now that we're hiding AOT in the initial capture
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):

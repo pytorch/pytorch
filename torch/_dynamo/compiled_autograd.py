@@ -61,7 +61,15 @@ def maybe_clone(x):
 counter = 0
 
 
-def copy_slices_prologue(inputs, base_sizes, base_strides, base_storage_offset, view_sizes, view_strides, view_storage_offset):
+def copy_slices_prologue(
+    inputs,
+    base_sizes,
+    base_strides,
+    base_storage_offset,
+    view_sizes,
+    view_strides,
+    view_storage_offset,
+):
     grad = inputs[0]
     result = grad.new_empty_strided(base_sizes, base_strides)
     assert grad is not None
@@ -162,8 +170,8 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        self.sizes_proxy_lookup = {}
-        args_proxy, self.sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        self.symnode_proxy_lookup = {}
+        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -186,9 +194,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        for i, symint in enumerate(sizes):
-            self.sizes_proxy_lookup[id(symint.node)] = i
         self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+        for i, symint in enumerate(sizes):
+            self.symnode_proxy_lookup[id(symint.node)] = self.sizes_proxy[i]
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -210,7 +218,9 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy, scalars_origins)
+        self.bind_tensors_to_proxies(scalars, self.scalars_proxy, scalars_origins)
+        for i, symval in enumerate(scalars):
+            self.symnode_proxy_lookup[id(symval.node)] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -353,7 +363,15 @@ class AutogradCompilerInstance:
         return tuple(grad_ins)
 
     def call_copy_slices_prologue(self, inputs, base, view):
-        args = (inputs, base.sizes(), base.strides(), base.storage_offset(), view.sizes(), view.strides(), view.storage_offset())
+        args = (
+            inputs,
+            base.sizes(),
+            base.strides(),
+            base.storage_offset(),
+            view.sizes(),
+            view.strides(),
+            view.storage_offset(),
+        )
         if self.old_inline_behavior:
             return copy_slices_prologue(*args)
         return self.proxy_call(copy_slices_prologue, args, 3)
@@ -361,7 +379,11 @@ class AutogradCompilerInstance:
     def call_copy_slices_epilogue(self, needs_input_grad, result, res, grad_slice):
         if self.old_inline_behavior:
             return copy_slices_epilogue(needs_input_grad, result, res, grad_slice)
-        return self.proxy_call(copy_slices_epilogue, (needs_input_grad, result, res, grad_slice), len(needs_input_grad))
+        return self.proxy_call(
+            copy_slices_epilogue,
+            (needs_input_grad, result, res, grad_slice),
+            len(needs_input_grad),
+        )
 
     def allocate_dummy(self, *examples):
         with disable_proxy_modes_tracing():
@@ -389,7 +411,9 @@ class AutogradCompilerInstance:
     def proxy_call(self, fn, args, num_outputs):
         flat_args, _ = pytree.tree_flatten(args)
         proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
-        proxy_out = self.fx_tracer.create_proxy("call_function", fn, args=proxy_args, kwargs={})
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function", fn, args=proxy_args, kwargs={}
+        )
         result = [self.allocate_dummy(*flat_args) for _ in range(num_outputs)]
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
@@ -957,8 +981,7 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         if isinstance(t, torch.SymInt):
-            idx = self.sizes_proxy_lookup[id(t.node)]
-            return self.sizes_proxy[idx]
+            return self.symnode_proxy_lookup[id(t.node)]
         if not isinstance(t, torch.Tensor):
             return t
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)

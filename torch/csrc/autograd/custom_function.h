@@ -245,9 +245,8 @@ struct CppNode : public Node {
 
     // TODO(rzou): following is problematic
     auto stack = retrieve_saved(saved);
-    const auto& interface =
-    torch::dynamo::autograd::getPyCompilerInterface(); variable_list results
-    = interface->call_function(
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    variable_list results = interface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
         get_functional().value(),
@@ -346,11 +345,22 @@ struct CppNode : public Node {
     saved.before(output_info_);
 
     SavedState state;
+    // std::cout << "start, stack=" << state.stack.size() << std::endl;
     state.enqueue(ctx_.saved_data);
+    // std::cout << "enqueued saved_data, stack=" << state.stack.size() <<
+    // std::endl;
     state.enqueue(ctx_.saved_variables_, shared_from_this());
+    // std::cout << "enqueued saved_variables_, stack=" << state.stack.size() <<
+    // std::endl;
     state.enqueue(ctx_.materialize_grads_);
+    // std::cout << "enqueued materialize_grads_, stack=" << state.stack.size()
+    // << std::endl;
     state.enqueue(output_info_);
+    // std::cout << "enqueued output_info_, stack=" << state.stack.size() <<
+    // std::endl;
     state.enqueue(is_variable_input_);
+    // std::cout << "enqueued is_variable_input_, stack=" << state.stack.size()
+    // << std::endl;
 
     saved.after(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
