@@ -1439,7 +1439,7 @@ class TritonKernel(SIMDKernel):
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
-        self.triton_meta: Optional[Dict[str, object]] = None
+        self.triton_meta: Optional[Dict[str, Any]] = None
 
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
@@ -3027,7 +3027,7 @@ class TritonKernel(SIMDKernel):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": triton_meta_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
