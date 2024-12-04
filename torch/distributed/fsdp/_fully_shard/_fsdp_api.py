@@ -57,7 +57,10 @@ class MixedPrecisionPolicy:
 
 @dataclass
 class OffloadPolicy:
-    """This base class represents the policy of no offloading."""
+    """
+    This base class represents the policy of no offloading and is only used as
+    the default value for the ``offload_policy`` arg.
+    """
 
 
 @dataclass
@@ -71,10 +74,10 @@ class CPUOffloadPolicy(OffloadPolicy):
 
     Attributes:
         pin_memory (bool): Whether to pin sharded parameter and gradient
-            memory. Pinning memory allows H2D/D2H copying without blocking the
-            CPU and in turn, overlap with compute, but pinned memory cannot be
-            used by other processes. Set this to ``False`` if you have
-            insufficient CPU memory. (Default: ``True``)
+            memory. Pinning memory allows both more efficient H2D/D2H copies
+            and for the copies to overlap with compute. However, the pinned
+            memory cannot be used by other processes. Set this to ``False`` if
+            you have insufficient CPU memory. (Default: ``True``)
     """
 
     pin_memory: bool = True
