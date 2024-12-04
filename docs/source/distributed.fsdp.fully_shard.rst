@@ -20,6 +20,18 @@ usability. Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
 - FSDP2 exposes APIs for manual control over prefetching and collective
   scheduling, allowing power users more customization. See the methods on
   ``FSDPModule`` below for details.
+- FSDP2 simplifies some of the API surface: e.g. FSDP2 does not directly
+  support full state dicts. Instead, users can reshard the sharded state dicts
+  containing ``DTensor`` s to full state dicts themselves using ``DTensor``
+  APIs like ``DTensor.full_tensor()`` or by using higher-level APIs like
+  `PyTorch Distributed Checkpoint <https://pytorch.org/docs/stable/distributed.checkpoint.html>`_ 's
+  distributed state dict APIs. Also, some other args have been removed; see
+  `here <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`_ for details.
+
+.. note::
+  ``torch.distributed.fsdp.fully_shard`` is currently in prototype state and
+  under development. The core API will likely not change, but we may make some
+  API changes if necessary.
 
 .. currentmodule:: torch.distributed.fsdp
 

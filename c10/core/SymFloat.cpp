@@ -146,7 +146,7 @@ SymFloat SymFloat::sqrt() const {
   if (!is_symbolic()) {
     return SymFloat(std::sqrt(data_));
   }
-  auto other = SymFloat(-0.5);
+  auto other = SymFloat(0.5);
   auto res = normalize_symfloats(*this, other);
   return SymFloat(res[0]->pow(res[1]));
 }
