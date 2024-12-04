@@ -525,7 +525,18 @@ void AutogradContext::save_variables() {
   to_save_.clear();
 }
 
+// AutogradContext AutogradContext::functional(variable_list saved_tensors) {
+//   auto result = AutogradContext();
+//   result.is_functional_ = true;
+//   result.saved_variables_override_ = saved_tensors;
+//   return result;
+//
+// }
+
 variable_list AutogradContext::get_saved_variables() const {
+  if (is_functional_) {
+    return saved_variables_override_.value();
+  }
   TORCH_CHECK(!has_freed_buffers_, ERR_BACKWARD_TWICE);
   variable_list saved;
   saved.reserve(saved_variables_.size());

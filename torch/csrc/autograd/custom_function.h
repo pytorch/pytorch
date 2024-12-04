@@ -153,6 +153,8 @@ struct TORCH_API AutogradContext {
   bool needs_input_grad(size_t output_edge_index) const;
   bool needs_input_grad(std::initializer_list<IndexRange> idxs) const;
 
+  static AutogradContext functional(variable_list saved_tensors);
+
  private:
   std::unordered_set<at::TensorImpl*> non_differentiable_;
   std::unordered_set<at::TensorImpl*> dirty_inputs_;
@@ -165,6 +167,10 @@ struct TORCH_API AutogradContext {
   // will always be alive when we want to use it.
   std::weak_ptr<Node> grad_fn_;
   bool has_freed_buffers_{false};
+
+  // If we're constructing an AutogradContext on the fly for Compiled Autograd.
+  bool is_functional_{false};
+  std::optional<variable_list> saved_variables_override_;
 
   void save_variables();
 
@@ -267,10 +273,16 @@ struct CppNode : public Node {
       SavedState state;
       state.stack = saved;
       auto ctx = AutogradContext();
+      ctx.is_functional_ = true;
       std::vector<VariableInfo> output_info;
       std::vector<bool> is_variable_input;
+
       state.dequeue(ctx.saved_data);
-      state.dequeue(ctx.saved_variables_);
+
+      variable_list saved_variables;
+      state.dequeue(saved_variables);
+      ctx.saved_variables_override_ = saved_variables;
+
       state.dequeue(ctx.materialize_grads_);
       state.dequeue(output_info);
       state.dequeue(is_variable_input);
@@ -349,7 +361,9 @@ struct CppNode : public Node {
     state.enqueue(ctx_.saved_data);
     // std::cout << "enqueued saved_data, stack=" << state.stack.size() <<
     // std::endl;
-    state.enqueue(ctx_.saved_variables_, shared_from_this());
+
+    variable_list saved_variables = ctx_.get_saved_variables();
+    state.enqueue(saved_variables);
     // std::cout << "enqueued saved_variables_, stack=" << state.stack.size() <<
     // std::endl;
     state.enqueue(ctx_.materialize_grads_);
