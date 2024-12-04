@@ -10,9 +10,14 @@ usability. Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
 
 - FSDP2 uses ``DTensor``-based dim-0 per-parameter sharding for a simpler
   sharding representation compared to FSDP1's flat-parameter sharding, while
-  preserving similar throughput performance. This provides a more intuitive
-  user experience, relaxes constraints around frozen parameters, and allows for
-  communication-free sharded state dicts.
+  preserving similar throughput performance. More specifically, FSDP2 chunks
+  each parameter on dim-0 across the data parallel workers (using
+  ``torch.chunk(dim=0)``), whereas FSDP1 flattens, concatenates, and chunks a
+  group of tensors together, making reasoning about what data is present on
+  each worker and resharding to different parallelisms complex. Per-parameter
+  sharding provides a more intuitive user experience, relaxes constraints
+  around frozen parameters, and allows for communication-free (sharded) state
+  dicts, which otherwise require all-gathers in FSDP1.
 - FSDP2 implements a different memory management approach to handle the
   multi-stream usages that avoids ``torch.Tensor.record_stream``. This ensures
   deterministic and expected memory usage and does not require blocking the CPU
@@ -27,6 +32,9 @@ usability. Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
   `PyTorch Distributed Checkpoint <https://pytorch.org/docs/stable/distributed.checkpoint.html>`_ 's
   distributed state dict APIs. Also, some other args have been removed; see
   `here <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`_ for details.
+
+See `here <https://github.com/pytorch/pytorch/issues/114299>`_ for details on
+system design and implementation.
 
 .. note::
   ``torch.distributed.fsdp.fully_shard`` is currently in prototype state and
