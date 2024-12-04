@@ -62,34 +62,6 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _vjp_treespec_compare(primals_out, cotangents):
-    # Revert this once #116264 gets fixed
-    _, primals_out_spec = tree_flatten(primals_out)
-    _, cotangents_spec = tree_flatten(cotangents)
-    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
-    # function is not inlined.
-    if primals_out_spec != cotangents_spec:
-        raise RuntimeError(
-            f"Expected pytree structure of cotangents to be the same "
-            f"as pytree structure of outputs to the function. "
-            f"cotangents: {treespec_pprint(cotangents_spec)}, "
-            f"primal output: {treespec_pprint(primals_out_spec)}"
-        )
-
-
-def _jvp_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    _, primals_spec = tree_flatten(primals)
-    _, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f"{jvp_str}: Expected primals and tangents to have the same python "
-            f"structure. For example, if primals is a tuple of 3 tensors, "
-            f"tangents also must be. Got primals with structure {primals_spec} "
-            f"and tangents with structure {tangents_spec}"
-        )
-
-
 def _linearize_treespec_compare(primals, tangents):
     # Revert this once #116264 gets fixed
     _, primals_argspec = tree_flatten(primals)
@@ -388,10 +360,7 @@ def _vjp_with_argnums(
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            # Note for the reviewer: This is extremely odd but it passes the
-            # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-            # The equivalent "if argnums is None" fails for some reason
-            if not isinstance(argnums, int) and not argnums:
+            if argnums is None:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
@@ -426,7 +395,13 @@ def _vjp_with_argnums(
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            _vjp_treespec_compare(primals_out, cotangents)
+            if primals_out_spec != cotangents_spec:
+                raise RuntimeError(
+                    f"Expected pytree structure of cotangents to be the same "
+                    f"as pytree structure of outputs to the function. "
+                    f"cotangents: {treespec_pprint(cotangents_spec)}, "
+                    f"primal output: {treespec_pprint(primals_out_spec)}"
+                )
             result = _autograd_grad(
                 flat_primals_out,
                 flat_diff_primals,
@@ -1116,7 +1091,13 @@ def _jvp_with_argnums(
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    _jvp_treespec_compare(diff_args, tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f"{jvp_str}: Expected primals and tangents to have the same python "
+            f"structure. For example, if primals is a tuple of 3 tensors, "
+            f"tangents also must be. Got primals with structure {primals_spec} "
+            f"and tangents with structure {tangents_spec}"
+        )
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
 
@@ -1130,10 +1111,7 @@ def _jvp_with_argnums(
                     fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
                 )
                 duals = tree_unflatten(flat_duals, primals_spec)
-                # Note for the reviewer: This is extremely odd but it passes the
-                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-                # The equivalent "if argnums is not None" fails for some reason
-                if isinstance(argnums, (int, tuple)):
+                if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
