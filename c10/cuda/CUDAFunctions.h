@@ -107,7 +107,6 @@ C10_CUDA_API void __inline__ memcpy2d_conditional_sync(
     cudaMemcpyKind kind,
     cudaStream_t stream,
     bool non_blocking = false) {
-
   if (C10_UNLIKELY(
           warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
@@ -119,7 +118,8 @@ C10_CUDA_API void __inline__ memcpy2d_conditional_sync(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
 
-  C10_CUDA_CHECK(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
+  C10_CUDA_CHECK(cudaMemcpy2DAsync(
+      dst, dst_pitch, src, src_pitch, width_in_bytes, height, kind, stream));
 
   if (!non_blocking) {
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
