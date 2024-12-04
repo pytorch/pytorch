@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    HAS_HIPCC,
 )
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -186,9 +187,14 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
 ]
+
 # Remove test_typing if python version is 3.9.* or less
 if Version(numpy.__version__) < Version('1.21'):
-    ROCM_BLOCKLIST.extend(["test_typing"])
+    ROCM_BLOCKLIST.append("test_typing")
+
+# Remove test_tensorexpr for WHL builds since there is no compiler
+if not HAS_HIPCC:
+    ROCM_BLOCKLIST.append("cpp/test_tensorexpr")
 
 XPU_BLOCKLIST = [
     "test_autograd",
