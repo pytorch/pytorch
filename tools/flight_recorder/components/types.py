@@ -286,7 +286,6 @@ class EntryState:
                 expected_ranks=self.expected_ranks,
                 collective_state=self.collective_state,
                 collective_frames=self.collective_frames,
-                missing_ranks=getattr(self, "missing_ranks", None),
             )
         else:
             assert idx_map is not None, "idx_map is None"
