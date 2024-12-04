@@ -56,7 +56,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
 

@@ -10,7 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -28,6 +27,7 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.fsdp import (
+    fully_shard,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
     StateDictType,
