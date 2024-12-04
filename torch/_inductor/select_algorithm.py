@@ -35,18 +35,24 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.common import (
+    CSEVariable,
+    IndentedBuffer,
+    KernelTemplate,
+    OpOverrides,
+    WorkspaceArg,
+)
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
     TritonKernel,
-    TritonPrinter,
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .utils import (
@@ -175,6 +181,61 @@ SubgraphInfo = namedtuple(
         "template_out",
     ],
 )
+
+
+class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
+    """Handles placeholder substitutions during subgraph processing."""
+
+    def __init__(
+        self,
+        kernel,
+        subgraph_number: int,
+        fixed_inputs: Dict[str, Any],
+        mask: Optional[str],
+    ):
+        super().__init__(V.ops)
+        self.name = f"PlaceholderSubstitution_{subgraph_number}"
+        self.kernel = kernel
+        self.fixed_inputs = fixed_inputs
+        self.mask = mask
+
+    def load(self, name: str, index: sympy.Expr):
+        """Handle loading from tensor or fixed input."""
+        if name not in self.fixed_inputs:
+            index_str = self._process_indexing(index)
+            var = self._add_kernel_input(name)
+            return f"tl.load({var} + {index_str})"
+        return f"({self.fixed_inputs[name]})"
+
+    def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
+        """Convert index variable to symbolic form."""
+        return sympy_index_symbol(str(index_var))
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> str:
+        """Currently only supports stores for atomic adds coming from scatter nodes
+        This is used by flex_attention's backwards grad for captured buffers, see
+        zeros_and_scatter lowering
+        """
+        assert (
+            self.mask is not None
+        ), "Mask is required for inner stores in modifications"
+        assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
+
+        buf_name = self._add_kernel_input(name)
+        index_str = self._process_indexing(index)
+        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
+        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
+        return store
+
+    def _add_kernel_input(self, name: str):
+        """Add name as input to kernel and return input ref."""
+        return self.kernel.args.input(name)
+
+    def _process_indexing(self, index):
+        """Process and rename indexing, adding symbols as kernel inputs."""
+        return self.kernel.kexpr(self.kernel.rename_indexing(index))
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -411,69 +472,83 @@ class TritonTemplateKernel(TritonKernel):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
+    def _get_subgraph(self, subgraph_number: int):
+        assert isinstance(subgraph_number, int)
+        assert isinstance(self.subgraphs, list)
+        assert subgraph_number < len(
+            self.subgraphs
+        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        assert (
+            self.body.getvalue() == ""
+        ), "Body should be clear before adding a modification"
+        return self.subgraphs[subgraph_number]
+
+    def _handle_scatter_graph(self, scatter_graph):
+        """Handle processing for a single scatter graph.
+
+        Args:
+            scatter_graph: The scatter graph to process
+        """
+        assert isinstance(
+            scatter_graph, ir.ComputedBuffer
+        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+
+        def contiguous_strides(x):
+            # We always create a fresh contiguous grad for scattering into
+            return sum(
+                x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
+            )
+
+        return scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
+
     def modification(
-        self, subgraph_number: int, output_name: str, **fixed_inputs
+        self,
+        subgraph_number: int,
+        output_name: Optional[str],
+        mask: Optional[str] = None,
+        **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
         To use this inside a template, the first argument should specify which subgraph to codegen for
 
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
+            output_name (Optional[str]): The name of the output variable to store the result in
+            mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
+                will be applied to the store.
         """
-        outer_self = self
         num = 0
+        out = None
+        scatters = []
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
-            assert isinstance(subgraph_number, int)
-            assert isinstance(self.subgraphs, list)
-            assert (
-                self.body.getvalue() == ""
-            ), "Body should be clear before adding a modification"
-            assert subgraph_number < len(
-                self.subgraphs
-            ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-
-            subgraph = self.subgraphs[subgraph_number]
-
-            def add_input(name):
-                # This also implicitly adds name as an input to the kernel
-                return self.args.input(name)
-
-            def print_and_rename_indexing(index):
-                # This also implicitly adds the indexing symbols as an input to
-                # the kernel
-                return self.kexpr(self.rename_indexing(index))
-
-            name = f"PlaceholderSubstitution_{subgraph_number}"
-
-            class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
-                self.name = name
-
-                def load(self, name: str, index: sympy.Expr):
-                    if name not in fixed_inputs:
-                        # If it's not a fixed input, it's a load from a captured
-                        # tensor
-                        index_str = print_and_rename_indexing(index)
-                        var = add_input(name)
-                        return f"tl.load({var} + {index_str})"
-
-                    return f"({fixed_inputs[name]})"
-
-                def indirect_indexing(self, index_var, size, check, wrap_neg=True):
-                    return sympy_index_symbol(str(index_var))
-
-            with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+            subgraph = self._get_subgraph(subgraph_number)
+            modification_handler = ModificationWrapper(
+                self, subgraph_number, fixed_inputs, mask
+            )
+            with V.set_ops_handler(modification_handler):
                 assert isinstance(
-                    subgraph, ir.ComputedBuffer
-                ), f"Expected the subgraph to be a ComputedBuffer, got {type(subgraph)}"
-                if isinstance(subgraph.data, ir.InputBuffer):
+                    subgraph, (ir.ComputedBuffer, List)
+                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                # Handle scatter stores
+                if isinstance(subgraph, list):
+                    for scatter_graph in subgraph:
+                        scatters.append(self._handle_scatter_graph(scatter_graph))
+                elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
                     out = subgraph.data.inner_fn(())
 
             self.codegen_body()
-            self.body.writeline(f"{output_name} = {out.value}")
+            if output_name is not None:
+                assert isinstance(output_name, str)
+                assert out is not None
+                self.body.writeline(f"{output_name} = {out.value}")
+            else:
+                assert out is None
+                for scatter in scatters:
+                    self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
             self.cse.invalidate(set())  # type: ignore[arg-type]
@@ -502,7 +577,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
-            indices = list(map(TritonPrinter.paren, indices))
+            indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
@@ -570,7 +645,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(name, str)
         assert isinstance(mask, str)
         stride = self.named_input_nodes[name].get_stride()
-        indices = list(map(TritonPrinter.paren, indices))
+        indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
@@ -783,18 +858,12 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        output_call_args = tuple(kernel.args.output_buffers.keys())
 
         # We expect the input_buffer order to be [*input_nodes, *captured_buffers]
         expected_input_args = tuple(unique(x.get_name() for x in input_nodes))
-        expected_output_args = (fake_out.get_name(),)
         assert input_call_args[: len(expected_input_args)] == expected_input_args, (
             input_call_args,
             expected_input_args,
-        )
-        assert output_call_args == expected_output_args, (
-            output_call_args,
-            expected_output_args,
         )
 
         full_input_nodes = tuple([V.graph.get_buffer(k) for k in input_call_args])
@@ -1675,9 +1744,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+        if config.autotune_num_choices_displayed == 0:
+            return
+        elif config.autotune_num_choices_displayed is None:
+            n = -1
+        else:
+            n = config.autotune_num_choices_displayed
 
-        n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
+
         best = top_k[0]
 
         def get_choice_info(choice):
