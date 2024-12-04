@@ -5479,7 +5479,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 f.seek(0)
                 nt2 = torch.load(f, weights_only=False)
                 self._validate_nt(
-                    nt,
+                    nt2,
                     device,
                     dtype,
                     torch.jagged,
