@@ -980,7 +980,7 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        if isinstance(t, torch.SymInt):
+        if isinstance(t, torch.SymInt) or isinstance(t, torch.SymFloat):
             return self.symnode_proxy_lookup[id(t.node)]
         if not isinstance(t, torch.Tensor):
             return t
