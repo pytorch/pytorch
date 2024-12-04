@@ -527,16 +527,26 @@ template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename V
 inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
   TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
+#if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
       keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+#else
+  CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
+      keys, input, output, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
+#endif
 }
 
 template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
 inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
   TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
+#if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
       keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+#else
+  CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
+      keys, input, output, scan_op, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
+#endif
 }
 
 #endif
