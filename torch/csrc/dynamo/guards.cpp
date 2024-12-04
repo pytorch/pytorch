@@ -3335,7 +3335,7 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
     if (!PyDict_Check(obj)) {
       // This should not cause guard failure.
       // If this error is encountered, it probably means
-      // we did not convert FrameLocalsMapping properly.
+      // we did not convert FrameLocalsMapping to dict (using to_dict()).
       throw std::runtime_error(
           "FrameLocalsGuardAccessor check expected dict() input");
     }

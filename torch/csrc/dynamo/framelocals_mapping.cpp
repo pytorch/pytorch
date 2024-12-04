@@ -84,7 +84,7 @@ void FrameLocalsMapping::_realize_dict() {
           value = PyCell_GET(value);
         }
         if (value == nullptr) {
-          _dict.pop(name);
+          _dict.attr("pop")(name);
         } else {
           _dict[name] = value;
         }
