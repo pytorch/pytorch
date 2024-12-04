@@ -403,7 +403,7 @@ class SIMDKernel(Kernel):
         active_prefixes = OrderedSet(
             prefix for prefix in prefixes if prefix in self.numels
         )
-        no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
+        no_r_dim = not self.inside_reduction or not self.features.is_reduction()
 
         def filtered_index_map(seq, mask) -> Dict[Any, int]:
             return {
