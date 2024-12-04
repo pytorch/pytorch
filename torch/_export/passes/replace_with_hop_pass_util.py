@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 def _replace_with_hop_helper(
     node: torch.fx.Node,
     enter_block_node: torch.fx.Node,
-    node_filter: Callable,
     wrap_hoo: HigherOrderOperator,
 ) -> None:
     graph: torch.fx.Graph = node.graph
