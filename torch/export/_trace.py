@@ -410,7 +410,7 @@ def _remap_constants(
 
 def _produce_aten_artifact(
     *,
-    gm: torch.fx.GraphModule,
+    gm,
     mod,
     constant_attrs,
     graph_signature,
@@ -443,7 +443,6 @@ def _produce_aten_artifact(
     )
     set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
 
-    export_graph_signature: Optional[ExportGraphSignature]
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
@@ -484,7 +483,6 @@ def _produce_aten_artifact(
                 node.meta.pop("stack_trace", None)
 
     # Prettify names for placeholder nodes.
-    assert export_graph_signature is not None
     placeholder_naming_pass(
         gm,
         export_graph_signature,
@@ -703,8 +701,8 @@ def _export_to_aten_ir(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
     decomp_table=None,
-    _check_autograd_state: bool = True,
-    _is_torch_jit_trace: bool = False,
+    _check_autograd_state=True,
+    _is_torch_jit_trace=False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -854,7 +852,7 @@ def _rewrite_dynamo_tensor_constants(
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-) -> None:
+):
     """
     Dynamo erroneously marks tensor attributes on modules as buffers.
     Rewrite them to be tensor constants.
@@ -875,7 +873,7 @@ def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-) -> None:
+):
     """
     Moves non-persistent buffers to tensor constants.
     """
@@ -955,9 +953,7 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
                     )
 
 
-def _verify_placeholder_names(
-    gm: torch.fx.GraphModule, sig: ExportGraphSignature
-) -> None:
+def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
     """
     Performs a sanity check on the placeholder node names.
     - User input nodes: no restrictions, should match the original forward() signature
@@ -1091,7 +1087,7 @@ def _get_module_call_graph(
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
     forward_arg_names: Optional[List[str]] = None,
-) -> Tuple[torch.fx.GraphModule, List[ModuleCallEntry]]:
+):
     """
     In-place modify the graph module in export_artifact, remove _export_tracepoint nodes and
     return module_call_graph.
@@ -1104,7 +1100,7 @@ def _get_module_call_graph(
     out_spec: TreeSpec = export_artifact.out_spec
 
     # Make module signatures.
-    module_call_signatures: Dict[str, ModuleCallSignature] = {}
+    module_call_signatures = {}
     for fqn, specs in module_call_specs.items():
         mod_fqn = _strip_root(fqn) if not strict_mode_export else fqn
         module_call_signatures[mod_fqn] = ModuleCallSignature(

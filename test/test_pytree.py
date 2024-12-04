@@ -1,7 +1,6 @@
 # Owner(s): ["module: pytree"]
 
 import collections
-import enum
 import inspect
 import os
 import re
@@ -10,7 +9,6 @@ import sys
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
-from enum import auto
 from typing import Any, NamedTuple
 
 import torch
@@ -948,15 +946,6 @@ TreeSpec(tuple, None, [*,
         serialized_spec = py_pytree.treespec_dumps(spec)
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
-
-    def test_pytree_serialize_enum(self):
-        class TestEnum(enum.Enum):
-            A = auto()
-
-        spec = py_pytree.TreeSpec(dict, TestEnum.A, [py_pytree.LeafSpec()])
-
-        serialized_spec = py_pytree.treespec_dumps(spec)
-        self.assertIsInstance(serialized_spec, str)
 
     def test_pytree_serialize_namedtuple(self):
         Point1 = namedtuple("Point1", ["x", "y"])
