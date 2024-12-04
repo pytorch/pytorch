@@ -24,7 +24,6 @@ import threading
 import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
-from enum import Enum
 from typing import (
     Any,
     Callable,
@@ -109,13 +108,6 @@ class KeyEntry(Protocol):
 
     def get(self, parent: Any) -> Any:
         ...
-
-
-class EnumEncoder(json.JSONEncoder):
-    def default(self, obj: object) -> str:
-        if isinstance(obj, Enum):
-            return obj.value  # type: ignore[no-any-return]
-        return super().default(obj)  # type: ignore[no-any-return]
 
 
 Context = Any
@@ -1377,7 +1369,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec.context, cls=EnumEncoder)
+            serialized_context = json.dumps(treespec.context)
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
