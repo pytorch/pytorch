@@ -2135,9 +2135,6 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
     constexpr auto getHermitianLimit() {
-        // Not the most universal way, but it will work
-        // properly because x is always of a floating
-        // point type.
         if constexpr (sizeof(T) <= sizeof(float)) {
             return 128;
         } else if constexpr (sizeof(T) <= sizeof(double)) {
@@ -2187,9 +2184,6 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 const auto hermite_polynomial_he_string = jiterator_stringify(
     template<typename T>
     constexpr auto getHermitianLimit() {
-        // Not the most universal way, but it will work
-        // properly because x is always of a floating
-        // point type.
         if constexpr (sizeof(T) <= sizeof(float)) {
             return 128;
         } else if constexpr (sizeof(T) <= sizeof(double)) {
