@@ -181,14 +181,14 @@ class TestBenchmarker(TestCase):
             benchmarker.should_fallback = lambda: True
             _ = benchmarker.benchmark_gpu(_callable)
             self.assertEqual(
-                self.counter_value(InductorBenchmarker, "triton_do_bench"), 1
+                self.get_counter_value(InductorBenchmarker, "triton_do_bench"), 1
             )
             self.assertEqual(
-                self.counter_value(InductorBenchmarker, "benchmark_gpu"), 1
+                self.get_counter_value(InductorBenchmarker, "benchmark_gpu"), 1
             )
         else:
             benchmarker.should_fallback = lambda: False
-            self.assertEqual(self.counter_value(benchmarker_cls, "benchmark_gpu"), 1)
+            self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
 
 
 if __name__ == "__main__":
