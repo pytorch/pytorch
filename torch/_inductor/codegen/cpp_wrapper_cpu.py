@@ -1825,6 +1825,11 @@ if (custom_op_wrapper.get() == NULL) {
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
         def generate_py_arg_inner(lines, raw_arg, arg_type):
+            def add_py_newref():
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+
             if raw_arg is None:
                 # Py_None is a singleton, so we have to explicitly incref it here
                 lines.append("Py_INCREF(Py_None);\n")
@@ -1877,16 +1882,17 @@ if (custom_op_wrapper.get() == NULL) {
                     )
             elif isinstance(raw_arg, torch.dtype):
                 # dtype
-                if sys.version_info < (3, 10):
-                    # Py_NewRef is only available since Python 3.10
-                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+                add_py_newref()
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
+            elif isinstance(raw_arg, torch.layout):
+                # memory layout
+                add_py_newref()
+                self.include_extra_header("torch/csrc/DynamicTypes.h")
+                return f"Py_NewRef(torch::getTHPLayout(static_cast<c10::Layout>({self.codegen_layout(raw_arg)})))"
             elif isinstance(raw_arg, torch.memory_format):
                 # memory_format
-                if sys.version_info < (3, 10):
-                    # Py_NewRef is only available since Python 3.10
-                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+                add_py_newref()
                 self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
                 return (
                     "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
@@ -2075,6 +2081,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
+        elif isinstance(val, torch.layout):
+            return self.codegen_layout(val)
         elif isinstance(val, torch.memory_format):
             return self.codegen_memory_format(val)
         elif isinstance(val, float):
