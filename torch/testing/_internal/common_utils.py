@@ -47,6 +47,7 @@ from itertools import product, chain
 from pathlib import Path
 from statistics import mean
 from typing import (
+    overload,
     Any,
     Callable,
     Dict,
@@ -59,6 +60,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import MagicMock
 
 import expecttest
@@ -108,6 +110,9 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1983,20 +1988,24 @@ class DeterministicGuard:
         self.warn_only = warn_only
         self.fill_uninitialized_memory = fill_uninitialized_memory
 
-    def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
-        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory
-        torch.use_deterministic_algorithms(
-            self.deterministic,
-            warn_only=self.warn_only)
+    @classmethod
+    def _current_state(cls):
+        return cls(
+            torch.are_deterministic_algorithms_enabled(),
+            warn_only=torch.is_deterministic_algorithms_warn_only_enabled(),
+            fill_uninitialized_memory=torch.utils.deterministic.fill_uninitialized_memory,
+        )
+
+    def _update(self):
+        torch.use_deterministic_algorithms(self.deterministic, warn_only=self.warn_only)
         torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory
 
+    def __enter__(self):
+        self._restore = self._current_state()
+        self._update()
+
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(
-            self.deterministic_restore,
-            warn_only=self.warn_only_restore)
-        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore
+        self._restore._update()
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -5558,3 +5567,74 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
+
+
+@overload
+def skip_if_async_compile(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    ...
+
+@overload
+def skip_if_async_compile(*args: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    ...
+
+def skip_if_async_compile(*skip_args: Any) -> Any:
+    if skip_args and callable(skip_args[0]):
+        sub = skip_if_async_compile()
+        return sub(skip_args[0])
+
+    for arg in skip_args:
+        assert arg in ('cpu', 'cuda', 'dynamic-shapes', 'dynamic-shapes-cpu', 'dynamic-shapes-cuda')
+
+    skip_args = set(skip_args)
+
+    # 'dynamic-shapes' means both 'dynamic-shapes-cpu' and 'dynamic-shapes-cuda'
+    if 'dynamic-shapes' in skip_args:
+        skip_args.add('dynamic-shapes-cpu')
+        skip_args.add('dynamic-shapes-cuda')
+
+    # 'cpu' means both 'cpu' and 'dynamic-shapes-cpu'
+    if 'cpu' in skip_args:
+        skip_args.add('dynamic-shapes-cpu')
+
+    # 'cuda' means both 'cuda' and 'dynamic-shapes-cuda'
+    if 'cuda' in skip_args:
+        skip_args.add('dynamic-shapes-cuda')
+
+    def outer(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+        @functools.wraps(fn)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            import torch._inductor.utils
+            if not torch._inductor.utils.should_use_fx_graph_async_compile():
+                return fn(*args, **kwargs)
+
+            if not skip_args:
+                raise unittest.SkipTest("this test doesn't work on async compile")
+
+            # Use the current test name and the test method name to try to
+            # figure out what parameters our test specialization is running.
+            current_test = fn.__name__
+
+            if args and hasattr(args[0], "_testMethodName"):
+                current_test_with_params = args[0]._testMethodName
+            else:
+                raise NotImplementedError("TODO: no test method name")
+
+            params = ''
+            if current_test != current_test_with_params:
+                assert current_test_with_params.startswith(current_test + '_')
+                params = current_test_with_params[len(current_test) + 1:]
+
+            # The name uses underscores to split parameters, but dynamic shapes
+            # tests also use underscores in the name ("dynamic_shapes_cpu").
+            params = params.replace("dynamic_shapes_cuda", "dynamic-shapes-cuda")
+            params = params.replace("dynamic_shapes_cpu", "dynamic-shapes-cpu")
+            params = params.split('_')
+
+            for arg in skip_args:
+                if arg in params:
+                    raise unittest.SkipTest(f"this test doesn't work on async compile with {arg!r}")
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+    return outer

@@ -984,6 +984,12 @@ class {module_name}(torch.nn.Module):
         assert callable(f), "erase_node hook must be a callable."
         self._erase_node_hooks.remove(f)
 
+    def _for_each_node(self):
+        for module in self.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
+            yield from module.graph.nodes
+
 
 # workarounds for issues in __torch_function__
 

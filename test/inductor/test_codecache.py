@@ -123,6 +123,7 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"fx_graph_async_compile": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -222,6 +223,7 @@ class TestFxGraphCache(TestCase):
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
+    @config.patch({"fx_graph_async_compile": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
@@ -640,6 +642,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"fx_graph_async_compile": False})
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
@@ -669,6 +672,7 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"fx_graph_async_compile": False})
     def test_inductor_counters(self):
         """
         Test that we bump the inductor counters on a cache hit.
@@ -1231,6 +1235,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_remote_cache": True})
     @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
+    @config.patch({"fx_graph_async_compile": False})
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
             def forward(self, x, y, a, b):
@@ -1270,6 +1275,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"autotune_remote_cache": False})
     @config.patch({"bundled_autotune_remote_cache": True})
     @config.patch({"max_autotune": True})
+    @config.patch({"fx_graph_async_compile": False})
     def test_bundled_autotune_remote_cache(self):
         class Model(torch.nn.Module):
             def forward(self, a, b, c, d, e, f):
@@ -1314,6 +1320,7 @@ class TestRemoteAOTAutogradCache(TestCase):
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
+    @config.patch({"fx_graph_async_compile": False})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
     def test_autograd_remote_cache(self):
@@ -1347,6 +1354,7 @@ class TestRemoteAOTAutogradCache(TestCase):
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
     @config.patch({"fx_graph_cache": False})
     @config.patch({"fx_graph_remote_cache": True})
+    @config.patch({"fx_graph_async_compile": False})
     @torch._functorch.config.patch({"enable_autograd_cache": False})
     @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
     def test_autograd_remote_lazy_backward(self):

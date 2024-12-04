@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import atexit
 import functools
 import logging
 import multiprocessing
@@ -30,6 +31,7 @@ from torch._inductor.codecache import (
 from torch._inductor.compile_worker.subproc_pool import (
     _warm_process_pool,
     AnyPool,
+    SubprocKind,
     SubprocPool,
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
@@ -138,6 +140,9 @@ def get_compile_threads() -> int:
     """
     if config.compile_threads is None:
         config.compile_threads = config.decide_compile_threads()
+    if config.fx_graph_async_compile:
+        # TODO: fix this - but it's much faster because of the caching or something?
+        return 2
     return config.compile_threads
 
 
@@ -162,9 +167,16 @@ class AsyncCompile:
         assert get_compile_threads() > 1
         pool: AnyPool
         if get_worker_start_method() == "subprocess":
+            import torch.fx._graph_pickler
+
             # Wrapper around ProcessPoolExecutor forks in a new process we control
             log.info("Creating subprocess pool with %d workers", get_compile_threads())
-            pool = SubprocPool(get_compile_threads())
+            # "fork" causes CUDA problems.
+            pool = SubprocPool(
+                get_compile_threads(),
+                pickler=torch.fx._graph_pickler.SubprocGraphPicker(),
+                kind=SubprocKind.SPAWN,
+            )
         else:
             pre_fork_setup()
             ctx = multiprocessing.get_context(get_worker_start_method())
@@ -350,3 +362,10 @@ if (
     pass
 else:
     AsyncCompile.warm_pool()
+
+# On exit give the workers a chance to clean themselves up. Without this the
+# resource_tracker can complain about leaked semaphores coming from the
+# ProcessPoolExecutor:
+#   UserWarning: resource_tracker: There appear to be 5 leaked semaphore objects
+#   to clean up at shutdown
+atexit.register(shutdown_compile_workers)

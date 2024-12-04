@@ -339,9 +339,11 @@ class ConfigModule(ModuleType):
         for key in self._config:
             if ignored_keys and key in ignored_keys:
                 if skip_default and not self._is_default(key):
-                    warnings.warn(
-                        f"Skipping serialization of {key} value {getattr(self, key)}"
-                    )
+                    # TODO: re-enable
+                    # warnings.warn(
+                    #     f"Skipping serialization of {key} value {getattr(self, key)}"
+                    # )
+                    pass
                 continue
             if ignored_prefixes:
                 if any(key.startswith(prefix) for prefix in ignored_prefixes):

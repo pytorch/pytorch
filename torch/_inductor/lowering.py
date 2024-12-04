@@ -7,7 +7,6 @@ import logging
 import math
 import operator
 import os
-import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from unittest.mock import patch
@@ -1798,9 +1797,11 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
 @functools.lru_cache(None)
 def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    )
+    # TODO: replace
+    # warnings.warn(
+    # "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    # )
+    pass
 
 
 # There are some types (CPU) which we accept as input but not as

@@ -1384,6 +1384,9 @@ class DebugDirManager:
 
 
 def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+    assert (
+        not torch._inductor.utils.should_use_fx_graph_async_compile()
+    ), "TODO: Bad async compile - run_and_get_code (disable this test)"
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -2179,6 +2182,18 @@ def should_use_remote_fx_graph_cache():
     return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:fx_graph_memcache_version"
     )
+
+
+def should_use_fx_graph_async_compile():
+    if config.fx_graph_async_compile is not None:
+        return config.fx_graph_async_compile
+    if not config.is_fbcode():
+        return False
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    # TODO: JK
+    return False
 
 
 def normalize_name(name: str) -> str:

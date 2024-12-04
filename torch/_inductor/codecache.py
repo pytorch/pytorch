@@ -84,6 +84,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
+    from torch.fx import GraphModule
+
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
     from .output_code import OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
@@ -784,7 +786,7 @@ class FxGraphHashDetails:
 
     def __init__(
         self,
-        gm: torch.fx.GraphModule,
+        gm: GraphModule,
         example_inputs: Sequence[InputType],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
@@ -886,7 +888,7 @@ class FxGraphHashDetails:
 
 
 def compiled_fx_graph_hash(
-    gm: torch.fx.GraphModule,
+    gm: GraphModule,
     example_inputs: Sequence[InputType],
     fx_kwargs: _CompileFxKwargs,
     inputs_to_check: Sequence[int],
@@ -1354,7 +1356,22 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_write_error"] += 1
 
     @staticmethod
-    def _check_can_cache(gm: torch.fx.GraphModule) -> None:
+    def _check_for_hop(gm: GraphModule) -> None:
+        for node in gm._for_each_node():
+            if (
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and not node.target.cacheable()
+            ):
+                raise BypassFxGraphCache(
+                    f"Can't cache HigherOrderOperator: {node.target.name()}"
+                )
+            if node.op == "getattr" and isinstance(
+                getattr(gm, node.target), torch._C.ScriptObject
+            ):
+                raise BypassFxGraphCache("Can't cache torchbind objects")
+
+    @staticmethod
+    def _check_can_cache(gm: GraphModule) -> None:
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
@@ -1391,26 +1408,12 @@ class FxGraphCache:
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache("No shape env")
 
-        # We skip caching if there are any torchbind objects.
-        for module in gm.modules():
-            if not isinstance(module, torch.fx.GraphModule):
-                continue
-            for node in module.graph.nodes:
-                if (
-                    isinstance(node.target, torch._ops.HigherOrderOperator)
-                    and not node.target.cacheable()
-                ):
-                    raise BypassFxGraphCache(
-                        f"Can't cache HigherOrderOperator: {node.target.name()}"
-                    )
-                if node.op == "getattr" and isinstance(
-                    getattr(gm, node.target), torch._C.ScriptObject
-                ):
-                    raise BypassFxGraphCache("Can't cache torchbind objects")
+        # We skip caching if there are any HOPs or torchbind objects.
+        FxGraphCache._check_for_hop(gm)
 
     @staticmethod
     def prepare_key(
-        gm: torch.fx.GraphModule,
+        gm: GraphModule,
         example_inputs: Sequence[InputType],
         fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
