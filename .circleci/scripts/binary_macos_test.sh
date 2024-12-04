@@ -19,8 +19,6 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="$(ls $workdir/final_pkgs/*-latest.zip)"
   unzip "$pkg" -d /tmp
   cd /tmp/libtorch
-elif [[ "$PACKAGE_TYPE" == conda ]]; then
-  conda install -y "$pkg"
 else
   pip install "$pkg" -v
 fi
