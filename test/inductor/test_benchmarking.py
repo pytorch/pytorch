@@ -166,7 +166,9 @@ class TestBenchmarker(TestCase):
         else:
             benchmarker.should_fallback = lambda: False
             _ = benchmarker.benchmark_gpu(_callable)
-            self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1)
+            self.assertEqual(
+                self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1
+            )
 
 
 if __name__ == "__main__":
