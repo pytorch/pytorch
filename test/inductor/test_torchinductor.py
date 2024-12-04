@@ -12737,15 +12737,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             inp = torch.randn(4, 4, device=GPU_TYPE)
             code = run_and_get_triton_code(fn, inp)
             fn(inp)
-            self.assertTrue("Graph fragment" in code)
-            self.assertTrue(
-                "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
-                in code
-            )
-            self.assertTrue(
-                "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
-                in code
-            )
+            if config.cpp_wrapper:
+                self.assertTrue("fused_relu_sin" in code)
+            else:
+                self.assertTrue("Graph fragment" in code)
+                self.assertTrue(
+                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                    in code
+                )
+                self.assertTrue(
+                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                    in code
+                )
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
@@ -13031,10 +13034,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
             code = code[0]
             if config.cpp_wrapper:
                 self.assertIn("aoti_torch_check_inf_and_nan", code)
-
-            self.assertIn("# make sure graph inputs are not nan/inf", code)
-            self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-            self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+            else:
+                self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
