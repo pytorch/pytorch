@@ -77,6 +77,13 @@ input[type="radio"] {
     height: 44px !important;
     padding: 0 !important;
 }
+
+@media (max-width: 768px) {
+  #___gcse_0 {
+    height: 34px !important;
+  }
+}
+
 table.gsc-search-box td.gsc-input {
     padding-right: 0 !important;
 }
@@ -98,6 +105,7 @@ table.gsc-search-box td {
 .gs_id50 {
     width: 308px;
 }
+
 .gsib_a {
     padding: 0px 8px 4px 9px !important;
 }
@@ -105,6 +113,20 @@ table.gsc-search-box td {
     border-radius: 0px !important;
     border: none !important;
 }
+
+@media (max-width: 768px) {
+  .gsc-input-box {
+     padding-top: 0px;
+     padding-bottom: 0px;
+  }
+}
+
+@media (max-width: 768px) {
+   .searchbox {
+     height: 34px;
+}
+
+
 form.gsc-search-box {
     margin-bottom 0px;
 }
