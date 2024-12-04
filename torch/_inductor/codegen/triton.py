@@ -1957,9 +1957,11 @@ class TritonKernel(SIMDKernel):
             or not is_coalesced 
             or self.inside_reduction
             or has_read_deps
-        ) and config.triton.skip_l1_cache
-        # note: must be enabled via env variable
-        # export TORCHINDUCTOR_SKIP_L1=1
+        ) and (
+            config.triton.skip_l1_cache
+            and (torch.version.hip is not None)
+        )
+        # NOTE: can be disabled with export TORCHINDUCTOR_SKIP_L1=0
 
         cachemod = ""
         if skip_l1_cache:
