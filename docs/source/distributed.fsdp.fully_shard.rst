@@ -31,10 +31,14 @@ usability. Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
   APIs like ``DTensor.full_tensor()`` or by using higher-level APIs like
   `PyTorch Distributed Checkpoint <https://pytorch.org/docs/stable/distributed.checkpoint.html>`_ 's
   distributed state dict APIs. Also, some other args have been removed; see
-  `here <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`_ for details.
+  `here <https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md>`_ for
+  details.
 
-See `here <https://github.com/pytorch/pytorch/issues/114299>`_ for details on
-system design and implementation.
+If you are onboarding FSDP for the first time or if any of the above appeals to
+your use case, we recommend that you consider using FSDP2.
+
+See `this RFC <https://github.com/pytorch/pytorch/issues/114299>`_ for details
+on system design and implementation.
 
 .. note::
   ``torch.distributed.fsdp.fully_shard`` is currently in prototype state and
