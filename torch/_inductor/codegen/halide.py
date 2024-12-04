@@ -673,10 +673,10 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        *groups,
         **kwargs,
     ) -> None:
-        super().__init__(tiling, **kwargs)
+        super().__init__(*groups, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
