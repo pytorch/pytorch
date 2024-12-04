@@ -8,7 +8,6 @@ import functools
 import itertools
 import logging
 import os
-import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -65,6 +64,7 @@ from ..utils import (
     sympy_dot,
     sympy_product,
     sympy_subs,
+    triton_type,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
@@ -667,22 +667,6 @@ class TritonPrinter(PythonPrinter):
 
 
 texpr = TritonPrinter().doprint
-
-# correct cases where Triton types names don't match PyTorch
-_triton_type_mapping = {
-    "tl.bool": "tl.int1",
-    "tl.float8_e4m3fn": "tl.float8e4nv",
-    "tl.float8_e5m2": "tl.float8e5",
-    "tl.float8_e4m3fnuz": "tl.float8e4b8",
-    "tl.float8_e5m2fnuz": "tl.float8e5b16",
-}
-_triton_type_re = re.compile(r"^.*[.]")
-
-
-def triton_type(dtype: torch.dtype) -> str:
-    """Convert torch.dtype to triton type"""
-    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
-    return _triton_type_mapping.get(triton_type_name, triton_type_name)
 
 
 def triton_compute_type(dtype: torch.dtype) -> str:
@@ -1431,7 +1415,7 @@ class TritonKernel(SIMDKernel):
 
     def __init__(
         self,
-        tiling: Dict[str, sympy.Expr],
+        *groups,
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
@@ -1439,7 +1423,7 @@ class TritonKernel(SIMDKernel):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
-        super().__init__(tiling, **kwargs)
+        super().__init__(*groups, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -1478,7 +1462,7 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 tree.grid_dim += 1
 
-        sem_count = self.numels["x"]
+        sem_count, _ = self.numels
         if self.fixed_config:
             sem_count = CeilDiv(sem_count, self.fixed_config["XBLOCK"])
         self.semaphores_name = self.args.semaphores(sem_count)
@@ -2472,7 +2456,7 @@ class TritonKernel(SIMDKernel):
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
         value independently.
         """
-        xnumel = self.numels["x"]
+        xnumel, rnumel = self.numels
         mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
         expand = "" if self.no_x_dim else "[None,:]"
 
@@ -2980,7 +2964,7 @@ class TritonKernel(SIMDKernel):
         code = IndentedBuffer()
 
         size_hints = []
-        for numel in self.numels.values():
+        for numel in self.numels:
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
@@ -3381,9 +3365,22 @@ class TritonKernel(SIMDKernel):
 
         # Optional optimization: if block divides numel exactly, we will
         # never need to do a masked load to handle stragglers at the end.
+        # If this tree is for the y dimension, we should only use a constant
+        # mask if it can be guaranteed that:
+        # 1. (ynumel / YBLOCK) < max_ygrid or
+        # 2. (ynumel / YBLOCK) % max_ygrid == 0
+        # Because YBLOCK is not constant, use a conservative heuristic:
+        # only use a constant mask if ynumel < max_ygrid.
         # It's faster to avoid masking at all.  But it is sound to always
         # mask.
-        return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
+        if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
+            return (
+                tree.grid_dim != 1
+                or tree.has_zdim
+                or V.graph.sizevars.statically_known_leq(tree.numel, get_max_y_grid())
+            )
+
+        return False
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
@@ -3486,7 +3483,7 @@ class TritonKernel(SIMDKernel):
 
 
 class TritonScheduling(SIMDScheduling):
-    kernel_type: Type[Any] = TritonKernel
+    kernel_type = TritonKernel
     backend_features = dict.fromkeys(  # dict for deterministic order
         [
             BackendFeature.FOREACH,
