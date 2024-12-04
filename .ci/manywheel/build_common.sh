@@ -420,15 +420,18 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
 
     # zip up the wheel back
     zip -rq $(basename $pkg) $PREIX*
+    # remove original wheel
+    rm -f $pkg
 
     # tag the wheel with approproiate tags
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" ]]; then
-        auditwheel repair --inplace --plat ${PLATFORM} $(basename $pkg)
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" ]]; then
+        auditwheel repair --plat ${PLATFORM} $(basename $pkg)
+        # replace original wheel with audited
+        mv //wheelhouse/*.whl /$WHEELHOUSE_DIR/
+    else
+        # replace original wheel
+        mv $(basename $pkg) $pkg
     fi
-
-    # replace original wheel
-    rm -f $pkg
-    mv $(basename $pkg) $pkg
 
     cd ..
     rm -rf tmp
