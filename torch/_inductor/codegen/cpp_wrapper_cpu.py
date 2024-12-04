@@ -60,6 +60,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_dtypes = set()
         self.used_cached_layouts = set()
         self.used_cached_memory_formats = set()
+        self.used_cond_predicate = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -1565,11 +1566,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in ABI-compatible mode, we need to use the ABI shim function
             # to extract a C++ bool from the unrelying scalar bool Tensor
             predicate = f"{conditional.predicate.get_name()}_scalar"
-            self.codegen_tensor_item(
-                torch.bool,
-                conditional.predicate.codegen_reference(),
-                predicate,
-            )
+            if predicate not in self.used_cond_predicate:
+                self.codegen_tensor_item(
+                    torch.bool,
+                    conditional.predicate.codegen_reference(),
+                    predicate,
+                )
+                self.used_cond_predicate.add(predicate)
         else:
             # the predicate is not a Tensor: SymBool or Python bool
             predicate = conditional.predicate.codegen_reference()
