@@ -1460,7 +1460,7 @@ PyTypeObject Tensor::Type = {
 
 
 // dim() --------------------
-#if IS_PYTHON_3_12_PLUS
+#if !IS_PYTHON_3_12_PLUS
 static bool relevant_op(_Py_CODEUNIT c) {
 #else
 static bool relevant_op(uint8_t c) {
