@@ -6,7 +6,14 @@ PyTorch FSDP2 (``fully_shard``)
 
 PyTorch FSDP2 provides a fully sharded data parallelism (FSDP) implementation
 targeting performant eager-mode while using per-parameter sharding for improved
-usability. Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
+usability.
+
+- If you are new to FSDP, we recommend that you start with FSDP2 due to improved
+  usability.
+- If you are currently using FSDP1, consider evaluating the following
+  differences to see if you should switch to FSDP2:
+
+Compared to PyTorch FSDP1 (``FullyShardedDataParallel``):
 
 - FSDP2 uses ``DTensor``-based dim-0 per-parameter sharding for a simpler
   sharding representation compared to FSDP1's flat-parameter sharding, while
