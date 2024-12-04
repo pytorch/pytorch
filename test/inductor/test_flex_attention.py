@@ -4633,7 +4633,7 @@ class TestLearnableBiases(InductorTestCase):
         def bias_func(score, b, h, q_idx, kv_idx):
             return score + bias[q_idx] + bias[kv_idx]
 
-        flex_compiled = torch.compile(flex_attention)
+        flex_compiled = torch.compile(flex_attention, mode="max-autotune-no-cudagraphs")
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
         out_gold = flex_attention(
