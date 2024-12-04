@@ -26,13 +26,27 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
 
   switch (schema_arg_type->kind()) {
     case c10::TypeKind::TensorType: {
-      TORCH_CHECK(serialized_arg_type == "as_tensor");
+      TORCH_CHECK(
+          serialized_arg_type == "as_tensor",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_tensor for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::TensorType, 1);
       break;
     }
     case c10::TypeKind::IntType: {
-      TORCH_CHECK(serialized_arg_type == "as_int");
+      TORCH_CHECK(
+          serialized_arg_type == "as_int",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_int for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
@@ -40,18 +54,38 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     case c10::TypeKind::SymIntType: {
       TORCH_CHECK(
           serialized_arg_type == "as_int" ||
-          serialized_arg_type == "as_sym_int");
+              serialized_arg_type == "as_sym_int",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_int or as_sym_int for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back();
       dynamic_args.emplace_back(index, DynamicArgType::IntType, 1);
       break;
     }
     case c10::TypeKind::FloatType: {
-      TORCH_CHECK(serialized_arg_type == "as_float");
+      TORCH_CHECK(
+          serialized_arg_type == "as_float",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_float for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back(serialized_arg_val.get<double>());
       break;
     }
     case c10::TypeKind::BoolType: {
-      TORCH_CHECK(serialized_arg_type == "as_bool");
+      TORCH_CHECK(
+          serialized_arg_type == "as_bool",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_bool for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back(serialized_arg_val.get<bool>());
       break;
     }
@@ -67,18 +101,36 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       } else {
         TORCH_CHECK(
             false,
-            "Invalid serialized argument type found for Scalar input: ",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have a scalar input for argument ",
+            index,
+            " but got ",
             serialized_arg_type);
       }
       break;
     }
     case c10::TypeKind::StringType: {
-      TORCH_CHECK(serialized_arg_type == "as_string");
+      TORCH_CHECK(
+          serialized_arg_type == "as_string",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_string for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
       stack.emplace_back(serialized_arg_val.get<std::string>());
       break;
     }
     case c10::TypeKind::DeviceObjType: {
-      TORCH_CHECK(serialized_arg_type == "as_device");
+      TORCH_CHECK(
+          serialized_arg_type == "as_device",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_device for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
 
       std::string device_string = serialized_arg_val["type"].get<std::string>();
       if (serialized_arg_val["index"].is_number()) {
@@ -99,31 +151,66 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     }
     case c10::TypeKind::ListType: {
       if (schema_arg_type->isSubtypeOf(at::ListType::ofTensors())) {
+        TORCH_CHECK(
+            serialized_arg_type == "as_tensors",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_tensors for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         TORCH_CHECK(serialized_arg_type == "as_tensors");
         stack.emplace_back();
         dynamic_args.emplace_back(
             index, DynamicArgType::ListTensorType, serialized_arg_val.size());
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofInts())) {
-        TORCH_CHECK(serialized_arg_type == "as_ints");
+        TORCH_CHECK(
+            serialized_arg_type == "as_ints",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_ints for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
         stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofSymInts())) {
         TORCH_CHECK(
             serialized_arg_type == "as_ints" ||
-            serialized_arg_type == "as_sym_ints");
+                serialized_arg_type == "as_sym_ints",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_ints or as_sym_ints for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         dynamic_args.emplace_back(
             index, DynamicArgType::ListIntType, serialized_arg_val.size());
         stack.emplace_back();
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofFloats())) {
-        TORCH_CHECK(serialized_arg_type == "as_floats");
+        TORCH_CHECK(
+            serialized_arg_type == "as_floats",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_floats for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         std::vector<double> ret;
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<double>());
         }
         stack.emplace_back(ret);
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofBools())) {
-        TORCH_CHECK(serialized_arg_type == "as_bools");
+        TORCH_CHECK(
+            serialized_arg_type == "as_bools",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_bools for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         std::vector<bool> ret;
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<bool>());
@@ -149,7 +236,11 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         } else {
           TORCH_CHECK(
               false,
-              "Invalid serialized argument type found for List[Scalar] ",
+              "Expected extern kernel ",
+              op_kernel.target_,
+              " to have a List[Scalar] input for argument ",
+              index,
+              " but got ",
               serialized_arg_type);
         }
       } else if (schema_arg_type->isSubtypeOf(
@@ -172,18 +263,36 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
         } else {
           TORCH_CHECK(
               false,
-              "Invalid serialized type found for argument of type `Tensor?[]`",
+              "Expected extern kernel ",
+              op_kernel.target_,
+              " to have a Tensor?[] input for argument ",
+              index,
+              " but got ",
               serialized_arg_type);
         }
       } else if (schema_arg_type->isSubtypeOf(at::ListType::ofStrings())) {
-        TORCH_CHECK(serialized_arg_type == "as_strings");
+        TORCH_CHECK(
+            serialized_arg_type == "as_strings",
+            "Expected extern kernel ",
+            op_kernel.target_,
+            " to have serialized argument type as_strings for argument ",
+            index,
+            " but got ",
+            serialized_arg_type);
         std::vector<std::string> ret;
         for (const auto& arg : serialized_arg_val) {
           ret.push_back(arg.get<std::string>());
         }
         stack.emplace_back(ret);
       } else {
-        TORCH_CHECK(false, "NYI: Unsupported list type ", serialized_arg_type);
+        TORCH_CHECK(
+            false,
+            "NYI: Unsupported list type ",
+            serialized_arg_type,
+            " for extern kernel ",
+            op_kernel.target_,
+            " argument ",
+            index);
       }
       break;
     }
@@ -220,7 +329,14 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
     }
     // TODO: handle the other input types
     default:
-      TORCH_CHECK(false, "Unsupported input type ", serialized_arg_type);
+      TORCH_CHECK(
+          false,
+          "Unsupported input type ",
+          serialized_arg_type,
+          " for extern kernel ",
+          op_kernel.target_,
+          " argument ",
+          index);
   }
 }
 
@@ -250,7 +366,9 @@ void OSSProxyExecutor::get_output_info_from_serialized(
 
   TORCH_CHECK(
       schema_returns.size() == serialized_node["outputs"].size(),
-      "Serialized node doesn't match op's schema outputs.");
+      "Serialized node doesn't match operator ",
+      serialized_node["target"],
+      "'s schema outputs.");
 
   size_t output_index = 0;
   for (const auto& serialized_output : serialized_node["outputs"]) {
@@ -265,8 +383,10 @@ void OSSProxyExecutor::get_output_info_from_serialized(
       case c10::TypeKind::TensorType: {
         TORCH_CHECK(
             serialized_output_type == "as_tensor",
+            "Expected extern kernel ",
             serialized_node["target"],
-            " got serialized_output_type of ",
+            " to have serialized output type as_tensor, ",
+            " but got ",
             serialized_output_type);
         outputs.emplace_back(output_index, DynamicArgType::TensorType, 1);
         break;
@@ -275,8 +395,10 @@ void OSSProxyExecutor::get_output_info_from_serialized(
         if (schema_return_type->isSubtypeOf(at::ListType::ofTensors())) {
           TORCH_CHECK(
               serialized_output_type == "as_tensors",
+              "Expected extern kernel ",
               serialized_node["target"],
-              " got serialized_output_type of ",
+              " to have serialized output type as_tensors, ",
+              " but got ",
               serialized_output_type);
           outputs.emplace_back(
               output_index,
@@ -292,7 +414,11 @@ void OSSProxyExecutor::get_output_info_from_serialized(
       }
       default: {
         TORCH_CHECK(
-            false, "Unsupported return type ", schema_return_type->repr_str());
+            false,
+            "Unsupported return type ",
+            schema_return_type->repr_str(),
+            " for extern kernel ",
+            op_kernel.target_);
       }
     }
 
@@ -311,7 +437,7 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
   std::string extern_kernel_nodes_serialized;
 
   std::ifstream json_file(json_path);
-  TORCH_CHECK(json_file.is_open());
+  TORCH_CHECK(json_file.is_open(), "Unable to open file ", json_path);
 
   // Parse file into a json object
   nlohmann::json json_obj;
