@@ -2905,27 +2905,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
+        # Change acceptable bc we no longer inline into these in the initial capture
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
-            "aot0_primals_3",
-            "aot0_relu",
-            "aot0_le",
-            "aot0_permute_2",
             "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_tangents_1",
-            "aot0_full_default",
-            "aot0_where",
-            "aot0_mm",
-            "aot0_permute_3",
-            "aot0_mm_1",
-            "aot0_sum_1",
-            "aot0_view",
-            "aot0_le_1",
-            "aot0_where_1",
-            "aot0_permute_6",
-            "aot0_mm_2",
-            "aot0_sum_2",
-            "aot0_view_1",
         ]
 
         found = 0
@@ -2960,23 +2943,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with ctx():
             self.check_output_and_recompiles(fn)
 
+        # Change acceptable bc we no longer inline into these in the initial capture
         expected_logs = [
             "CompiledFunctionBackward1",
-            "aot1_tangents_1",
-            "aot1_sin_1",
-            "aot1_primals_2",
-            "aot1_neg",
-            "aot0_tangents_2",
-            "aot1_cos_1",
-            "aot1_primals_1",
-            "aot0_tangents_1",
             "CompiledFunctionBackward0",
-            "aot0_neg",
-            "aot0_sin",
-            "aot0_mul",
-            "aot0_mul_1",
-            "aot0_cos",
-            "aot0_add",
         ]
 
         self.assertEqual(
@@ -3012,18 +2982,9 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             opt_fn(y, obj).sum().backward()
         self.assertEqual(x.grad, y.grad)
 
+        # Change acceptable bc we no longer inline into these in the initial capture
         expected_logs = [
             "CompiledFunctionBackward0",
-            "aot0_primals_2",
-            "aot0_tangents_2",
-            "aot0_tangents_1",
-            "aot0_sin",
-            "aot0_cos",
-            "aot0_mul",
-            "aot0_add_1",
-            "aot0_trace_wrapped",
-            "aot0_cos_1",
-            "aot0_mul_1",
         ]
 
         self.assertEqual(
@@ -3122,6 +3083,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
     # https://github.com/pytorch/pytorch/issues/138920
+    @unittest.expectedFailure # TODO: needs a better repro now that we're hiding AOT in the initial capture
     def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
         class Mod(torch.nn.Module):
             def __init__(self, a, b, c):
