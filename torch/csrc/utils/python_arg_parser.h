@@ -285,7 +285,7 @@ struct PythonArgs {
   inline std::string_view stringViewWithDefault(
       int i,
       const std::string_view default_str);
-  inline std::optional<c10::string_view> stringViewOptional(int i);
+  inline std::optional<std::string_view> stringViewOptional(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline c10::SymInt toSymInt(int i);
@@ -511,7 +511,8 @@ inline PyObject* toPyObject(const c10::SymInt& symint) {
     return r;
   } else {
     auto m = symint.maybe_as_int();
-    return THPUtils_packInt64(*m);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return THPUtils_packInt64(m.value());
   }
 }
 
@@ -812,6 +813,7 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 inline at::Device deviceFromLong(int64_t device_index) {
   TORCH_CHECK(device_index >= 0, "Device index must not be negative");
   return at::Device(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       at::getAccelerator(true).value(),
       static_cast<c10::DeviceIndex>(device_index));
 }
@@ -947,7 +949,7 @@ inline std::string_view PythonArgs::stringViewWithDefault(
   return THPUtils_unpackStringView(args[i]);
 }
 
-inline std::optional<c10::string_view> PythonArgs::stringViewOptional(int i) {
+inline std::optional<std::string_view> PythonArgs::stringViewOptional(int i) {
   if (!args[i])
     return std::nullopt;
   return THPUtils_unpackStringView(args[i]);

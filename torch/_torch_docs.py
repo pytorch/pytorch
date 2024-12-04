@@ -1900,7 +1900,7 @@ Example::
 add_docstr(
     torch.chunk,
     r"""
-chunk(input, chunks, dim=0) -> List of Tensors
+chunk(input: Tensor, chunks: int, dim: int = 0) -> Tuple[Tensor, ...]
 
 Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
@@ -9122,6 +9122,12 @@ Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
+Note: When using floating-point dtypes (especially reduced precision types like ``bfloat16``),
+the results may be affected by floating-point rounding behavior. Some values in the sequence
+might not be exactly representable in certain floating-point formats, which can lead to
+repeated values or unexpected rounding. For precise sequences, it is recommended to use
+integer dtypes instead of floating-point dtypes.
+
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
 comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
@@ -10591,6 +10597,9 @@ Args:
 
 Keyword args:
     {dtype}
+
+.. note:: Use the `dtype` argument if you need the result in a specific tensor type.
+          Otherwise, the result type may be automatically promoted (e.g., from `torch.int32` to `torch.int64`).
 
 Example::
 
@@ -12670,14 +12679,14 @@ the default computation is
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{1}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{1}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`dx` is specified the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{\Delta x}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{\Delta x}{2} (y_i + y_{i-1})
     \end{aligned}
 
 effectively multiplying the result by :attr:`dx`. When :attr:`x` is specified,
@@ -12686,7 +12695,7 @@ elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
 
 .. math::
     \begin{aligned}
-        \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
+        \sum_{i = 1}^{n} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
     \end{aligned}
 
 When :attr:`x` and :attr:`y` have the same size, the computation is as described above and no broadcasting is needed.
@@ -13829,7 +13838,7 @@ are freshly created instead of aliasing the input.
 add_docstr(
     torch.expand_copy,
     r"""
-Performs the same operation as :func:`torch.expand`, but all output tensors
+Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )

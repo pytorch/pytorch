@@ -168,7 +168,9 @@ def _get_allowed_globals():
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
+        "builtins.complex": complex,  # for complex
     }
+
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
@@ -317,6 +319,30 @@ class Unpickler:
                     self.append(_get_allowed_globals()[full_path])
                 elif full_path in _get_user_allowed_globals():
                     self.append(_get_user_allowed_globals()[full_path])
+                elif full_path in (
+                    [
+                        "torch.nested._internal.nested_tensor.NestedTensor",
+                        "torch.nested._internal.nested_tensor._rebuild_njt",
+                        "torch._dynamo.decorators._DimRange",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.nested`` and ``torch._dynamo`` must be imported to load nested jagged tensors (NJTs)"
+                    )
+                elif full_path in (
+                    [
+                        "torch.distributed.device_mesh.DeviceMesh",
+                        "torch.distributed.tensor._dtensor_spec.DTensorSpec",
+                        "torch.distributed.tensor._dtensor_spec.TensorMeta",
+                        "torch.distributed.tensor.DTensor",
+                        "torch.distributed.tensor.placement_types.Partial",
+                        "torch.distributed.tensor.placement_types.Replicate",
+                        "torch.distributed.tensor.placement_types.Shard",
+                    ]
+                ):
+                    raise UnpicklingError(
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
@@ -329,7 +355,10 @@ class Unpickler:
                 cls = self.stack.pop()
                 if cls is torch.nn.Parameter:
                     self.append(torch.nn.Parameter(*args))
-                elif cls in _get_user_allowed_globals().values():
+                elif (
+                    cls in _get_user_allowed_globals().values()
+                    or cls in _get_allowed_globals().values()
+                ):
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
@@ -357,7 +386,10 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
+                elif (
+                    type(inst) in _get_user_allowed_globals().values()
+                    or type(inst) in _get_allowed_globals().values()
+                ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:

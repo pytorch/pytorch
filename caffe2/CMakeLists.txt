@@ -325,6 +325,10 @@ set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
 
+set(GENERATED_CXX_TORCH_XPU
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
@@ -333,6 +337,10 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
   )
+
+if(USE_XPU)
+  list(APPEND TORCH_GENERATED_CODE ${GENERATED_CXX_TORCH_XPU})
+endif()
 
 set(GEN_PER_OPERATOR_FLAG)
 if(USE_PER_OPERATOR_HEADERS)
@@ -1041,9 +1049,13 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+  if(WIN32)
+    target_compile_options(torch_xpu PRIVATE /permissive-)
+  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1104,6 +1116,10 @@ if(USE_XPU)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+    message(INFO "Install ${TORCH_XPU_OPS_DIR}/src/ATen/xpu to ${TORCH_INSTALL_INCLUDE_DIR}/ATen/xpu")
+    install(DIRECTORY "${TORCH_XPU_OPS_DIR}/src/ATen/xpu"
+        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/ATen/
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
   endif()
 endif()
@@ -1210,7 +1226,7 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/miniz-2.1.0)
+  ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
@@ -1822,9 +1838,6 @@ if(BUILD_TEST)
         endif()
       endif()
     endforeach()
-    if(TARGET context_gpu_test)
-      target_link_libraries(context_gpu_test caffe2::curand caffe2::cublas)
-    endif()
   endif()
 
   if(USE_XPU)

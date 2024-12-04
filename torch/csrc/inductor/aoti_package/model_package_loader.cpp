@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 
+#include <c10/util/error.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -49,7 +50,7 @@ std::string create_temp_dir() {
   if (mkdtemp(temp_dir.data()) == nullptr) {
     throw std::runtime_error(
         std::string("Failed to create temporary directory: ") +
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
   return temp_dir;
 #endif
@@ -202,19 +203,15 @@ std::string compile_so(
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
-  auto compile_result =
+  auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
-  std::string compile_cmd = std::get<0>(compile_result);
-  std::string output_o = std::get<1>(compile_result);
 
   std::string linker_flags_path =
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
+  auto [link_cmd, output_so] = get_cpp_compile_command(
       filename, {output_o, consts_filename}, linker_flags);
-  std::string link_cmd = std::get<0>(link_result);
-  std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -327,7 +324,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       std::string parent_path = output_path_str.substr(0, parent_path_idx);
       if (!recursive_mkdir(parent_path.c_str())) {
         throw std::runtime_error(fmt::format(
-            "Failed to create directory {}: {}", parent_path, strerror(errno)));
+            "Failed to create directory {}: {}",
+            parent_path,
+            c10::utils::str_error(errno)));
       }
 
       // Extracts file to the temp directory
@@ -397,7 +396,7 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    std::vector<at::Tensor>& inputs) {
+    const std::vector<at::Tensor>& inputs) {
   return runner_->run(inputs);
 }
 

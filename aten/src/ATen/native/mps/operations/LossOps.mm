@@ -995,7 +995,7 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 
 // MSELoss
 TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
-  string op_name = __func__;
+  string op_name = "mse_loss_out_mps";
   using namespace mps;
   bool contiguousOutput = !needsGather(output_);
   Tensor output = output_;
@@ -1003,7 +1003,9 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     output = output_.contiguous();
   }
 
-  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
+  TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes");
+  TORCH_CHECK(c10::isFloatingType(input.scalar_type()) && c10::isFloatingType(target.scalar_type()),
+              op_name + ": only defined for floating types");
   TORCH_CHECK(output.is_mps());
 
   struct CachedGraph : public MPSCachedGraph {
