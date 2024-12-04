@@ -262,7 +262,7 @@ class FloorDiv(sympy.Function):
                     quotients += quotient
 
             if len(terms) != 0:
-                # Passing evaluate = False since expression will be optimized during the - post its construction.
+                # Passing evaluate = False since expression will be optimized during the subtraction post its construction.
                 return (
                     FloorDiv(base - sympy.Add(*terms, evaluate=False), divisor)
                     + quotients
