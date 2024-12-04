@@ -1968,6 +1968,9 @@ PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
 // Call the custom op in Python
 RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
 if (py_{buf_name}.get() == NULL) {{
+if (PyErr_Occurred()) {{
+return;
+}}
 throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
 }}"""
 
