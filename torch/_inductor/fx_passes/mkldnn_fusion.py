@@ -385,7 +385,7 @@ if torch._C._has_mkldnn:
             computation_node = (
                 n.args[0] if n.args[1] is match.kwargs["other"] else n.args[1]
             )
-            assert computation_node == computation_op
+            assert computation_node.target == computation_op
             computation_node_size = get_meta_value(computation_node).size()
             if computation_op is mkldnn._linear_pointwise.default:
                 broadcast_sizes = [
