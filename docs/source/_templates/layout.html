@@ -65,11 +65,14 @@
         sphinxSearchBox.style.display = searchType === 'sphinx' ? 'block' : 'none';
       }
       // Determine the default search type
-      let defaultSearchType = 'google';
-      if (window.location.href.startsWith('https://docs-preview.pytorch.org/')) {
-        defaultSearchType = 'sphinx';
-      } else {
+      let defaultSearchType;
+      const currentUrl = window.location.href;
+      if (currentUrl.startsWith('https://pytorch.org/docs/stable')) {
+        // For the stable documentation, default to Google
         defaultSearchType = localStorage.getItem('searchType') || 'google';
+      } else {
+        // For any other version, including docs-preview, default to Sphinx
+        defaultSearchType = 'sphinx';
       }
       // Set the default search type
       document.querySelector(`input[name="searchType"][value="${defaultSearchType}"]`).checked = true;
