@@ -479,6 +479,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self.source = source
         self.mutation_type = mutation_type
 
+        # NOTE sometimes mutation_type is set afterwards for implementation
+        # convenience, we don't validate those cases at the moment.
+        if mutation_type is not None:
+            if isinstance(mutation_type, (ValueMutationNew, AttributeMutationNew)):
+                # If this fails, it's either
+                # 1. one mistakenly passed in a source
+                # 2. `mutation_type` is incorrect
+                assert source is None
+            else:
+                assert isinstance(
+                    mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+                )
+                # If this fails, it's either
+                # 1. one forgot to pass in a source
+                # 2. `mutation_type` is incorrect
+                assert source is not None
+
 
 def typestr(*objs):
     if len(objs) == 1:
