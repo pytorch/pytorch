@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -761,7 +761,7 @@ class TestUnique(TestCase):
     #    assert_equal(a3_idx.dtype, np.intp)
     #    assert_equal(a3_inv.dtype, np.intp)
 
-    @xpassIfTorchDynamo  # (reason="unique with nans")
+    @xpassIfTorchDynamo_np  # (reason="unique with nans")
     def test_unique_1d_2(self):
         # test for ticket 2111 - float
         a = [2.0, np.nan, 1.0, np.nan]
@@ -807,7 +807,7 @@ class TestUnique(TestCase):
         assert_array_equal(unique(inp, axis=0), unique(inp_arr, axis=0), msg)
         assert_array_equal(unique(inp, axis=1), unique(inp_arr, axis=1), msg)
 
-    @xpassIfTorchDynamo  # _run_axis_tests xfails with the message
+    @xpassIfTorchDynamo_np  # _run_axis_tests xfails with the message
     #   torch has different unique ordering behaviour"
     def test_unique_axis(self):
         types = []
@@ -833,7 +833,7 @@ class TestUnique(TestCase):
         uniq = unique(x, axis=axis)
         assert_array_equal(uniq, [1, 2, 3, 4])
 
-    @xpassIfTorchDynamo  # (reason="unique / return_index")
+    @xpassIfTorchDynamo_np  # (reason="unique / return_index")
     def test_unique_axis_zeros(self):
         # issue 15559
         single_zero = np.empty(shape=(2, 0), dtype=np.int8)
@@ -941,7 +941,7 @@ class TestUnique(TestCase):
         assert_array_equal(cnt, np.array([2, 1, 1]), msg)
 
     @skipIf(True, reason="NP_VER: fails on CI with older NumPy")
-    @xpassIfTorchDynamo  # (reason="unique / return_index / nans")
+    @xpassIfTorchDynamo_np  # (reason="unique / return_index / nans")
     def test_unique_nanequals(self):
         # issue 20326
         a = np.array([1, 1, np.nan, np.nan, np.nan])
