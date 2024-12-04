@@ -8933,11 +8933,8 @@ class CommonTemplate:
 
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
-        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(len(source_codes), 1)
         self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
-        if config.cpp_wrapper:
-            # The second pass should not involve triton at all.
-            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -12994,13 +12991,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-
-            if config.cpp_wrapper:
-                # when using cpp_wrapper, backward triton code is in code[2]
-                self.assertTrue("in_out_ptr" in code[2])
-            else:
-                # when not using cpp_wrapper, backward triton code is in code[1]
-                self.assertTrue("in_out_ptr" in code[1])
+            self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
@@ -13032,11 +13023,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
             actual, code = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
 
-            if config.cpp_wrapper:
-                code_cpp = code[1]
-                self.assertIn("aoti_torch_check_inf_and_nan", code_cpp)
-
             code = code[0]
+            if config.cpp_wrapper:
+                self.assertIn("aoti_torch_check_inf_and_nan", code)
+
             self.assertIn("# make sure graph inputs are not nan/inf", code)
             self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
             self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")

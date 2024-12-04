@@ -2011,7 +2011,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.triton.autotune_at_compile_time:
             tuning_code = (
                 '"""\n'
-                + "Autotune code block: \n"
+                + "Compile-time auto-tuning block: \n"
                 + self.wrapper_code.kernel_autotune_defs.getvalue()
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
                 + '"""\n'

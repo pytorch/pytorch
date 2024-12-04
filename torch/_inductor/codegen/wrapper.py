@@ -808,12 +808,14 @@ class PythonWrapperCodegen(CodeGen):
             """
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.splice(import_str)
-            self.write_get_raw_stream_header_once()
-            if V.graph.cpp_wrapper:
-                # For cpp wrapper, no need to continue codegen for the main body
-                return
-        self.imports.splice(import_str, strip=True)
-        self.write_get_raw_stream_header_once()
+            self.kernel_autotune_calls.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
+        if not V.graph.cpp_wrapper:
+            self.imports.splice(import_str, strip=True)
+            self.imports.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
 
     @cache_on_self
     def write_get_raw_stream_header_once(self) -> None:
@@ -821,12 +823,10 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
-            if V.graph.cpp_wrapper:
-                # For cpp wrapper, no need to continue codegen for the main body
-                return
-        self.imports.writeline(
-            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
-        )
+        if not V.graph.cpp_wrapper:
+            self.imports.writeline(
+                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+            )
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         meta = repr(meta)
