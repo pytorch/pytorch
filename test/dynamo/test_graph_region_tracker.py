@@ -222,7 +222,9 @@ class GraphRegionTrackerTests(TestCase):
                 torch.rand(10, 20),
                 torch.ones(10, 20),
             ),
-            """[[['sum_1', 'o0'], ['sum_2', 'o2'], ['sum_3', 'o4'], ['sum_4', 'o5']]]""",
+            """[[['getitem_1', '_foreach_add', 'sum_1', 'getitem', 'o0'], ['getitem_3', \
+'_foreach_add_1', 'sum_2', 'getitem_2', 'o2'], ['getitem_5', '_foreach_add_2',\
+ 'sum_3', 'getitem_4', 'o4'], ['getitem_7', '_foreach_add_3', 'sum_4', 'getitem_6', 'o5']]]""",
         )
 
     def test_mismatched_global_state(self):
