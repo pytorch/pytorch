@@ -34,7 +34,10 @@ from torch.profiler import (
     supported_activities,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCPUIf,
+)
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -248,6 +251,7 @@ class TestExecutionTrace(TestCase):
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
     )
+    @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
