@@ -432,9 +432,7 @@ class GraphModule(torch.nn.Module):
 
 
 class GeneratorTestsNewBehavior(GeneratorTests):
-    expected_failures = [
-        # "test_graph_break_outside_generator",
-    ]
+    expected_failures = []
 
     def setUp(self):
         super().setUp()
