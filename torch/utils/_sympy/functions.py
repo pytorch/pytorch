@@ -252,20 +252,21 @@ class FloorDiv(sympy.Function):
         # Expands (x + y) // b into x // b + y // b.
         # This only works if floor is an identity, i.e. x / b is an integer.
         if isinstance(divisor, sympy.Integer):
-            quotients = []
+            quotients = 0
             terms = []
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
 
                 if quotient.is_integer:
                     terms.append(term)
-                    quotients.append(quotient)
+                    quotients += quotient
 
             if len(terms) != 0:
-                # Passing evaluate = False since those will be optimized during the +, - post construction.
-                return FloorDiv(
-                    base - sympy.Add(*terms, evaluate=False), divisor
-                ) + sympy.Add(*quotients, evaluate=False)
+                # Passing evaluate = False since expression will be optimized during the - post its construction.
+                return (
+                    FloorDiv(base - sympy.Add(*terms, evaluate=False), divisor)
+                    + quotients
+                )
 
         try:
             gcd = simple_floordiv_gcd(base, divisor)
