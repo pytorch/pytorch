@@ -767,7 +767,7 @@ REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallbac
 
 // MetalShaderLibrary implementation
 MetalShaderLibrary::~MetalShaderLibrary() {
-  for(const auto& it: cplMap) {
+  for (const auto& it : cplMap) {
     auto [cpl, func] = it.second;
     [cpl release];
     [func release];
