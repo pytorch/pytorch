@@ -69,16 +69,6 @@ DynamicType::Arguments::Arguments(
   }
 }
 
-DynamicType::Arguments::Arguments(
-    const std::vector<c10::string_view>& names,
-    c10::ArrayRef<TypePtr> args)
-    : Arguments(args) {
-  TORCH_INTERNAL_ASSERT(names.size() == args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    elems[i].label = std::string{names[i]};
-  }
-}
-
 DynamicType::~DynamicType() {
   if (tag_ == Tag::Class) {
     class_.~ClassTypePtr();
@@ -268,7 +258,7 @@ TypePtr DynamicType::fallback() const {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
-        std::vector<c10::string_view> fields;
+        std::vector<std::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -392,7 +382,7 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(
   return nullptr;
 #else
   const auto& dyn = type.expectRef<DynamicType>();
-  std::vector<c10::string_view> fields;
+  std::vector<std::string_view> fields;
   std::vector<TypePtr> types;
 
   for (const auto& elem : dyn.arguments().elems) {

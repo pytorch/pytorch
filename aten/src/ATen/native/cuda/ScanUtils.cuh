@@ -447,7 +447,20 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   if (self.numel() == self.size(dim)) {
-    cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
+    if constexpr (std::is_same<BinaryFunction, std::plus<scalar_t>>::value) {
+      if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms()) && (self.is_floating_point() || self.is_complex())) {
+# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
+        cuda::cub::inclusive_deterministic_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
+#else
+        globalContext().alertNotDeterministic("cumsum_cuda_kernel");
+        cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
+#endif
+      } else {
+        cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
+      }
+    } else {
+      cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
+    }
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(*self_, result, init, binary_op);
   } else {

@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -57,6 +57,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_devices = set()
         self.used_cached_dtypes = set()
         self.used_cached_layouts = set()
+        self.used_cached_memory_formats = set()
+        self.used_cond_predicate = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -198,11 +200,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             }}
             """
         )
-        extend_aoti_path = (
+        extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
-        if os.path.exists(extend_aoti_path):
-            self.header.splice(f"#include <{extend_aoti_path}>")
+        extend_aoti_c_shim_path = os.path.join(
+            os.path.dirname(torch.__file__),
+            "include",
+            extend_aoti_c_shim_include,
+        )
+        if os.path.exists(extend_aoti_c_shim_path):
+            self.header.splice(f"#include <{extend_aoti_c_shim_include}>")
 
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
@@ -793,6 +800,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
             cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
         for layout in self.used_cached_layouts:
             cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
+        for memory_format in self.used_cached_memory_formats:
+            cached_dtypes_buffer.writeline(
+                f"CACHE_TORCH_MEMORY_FORMAT({memory_format});"
+            )
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1101,15 +1112,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x) if simplify else x)
+
     def codegen_sizevar(self, x: Expr) -> str:
-        return self.expr_printer(V.graph.sizevars.simplify(x))
+        return self.codegen_cpp_sizevar(x)
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         # in the abi_compatible mode, outputs are returned via arguments
         return name
 
-    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        parts = list(map(self.codegen_sizevar, shape))
+    def codegen_shape_tuple(self, shape: Sequence[Expr]) -> str:
+        parts = [*map(self.codegen_sizevar, shape)]
         if len(parts) == 0:
             return "{}"
         if len(parts) == 1:
@@ -1138,7 +1152,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def make_buffer_free(self, buffer):
         return (
             ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            if isinstance(buffer.get_output_spec(), ir.MultiOutputLayout)
             or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
@@ -1188,6 +1202,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
         layout_str = str(layout).split(".")[-1]
         self.used_cached_layouts.add(layout_str)
         return f"cached_torch_layout_{layout_str}"
+
+    def codegen_memory_format(self, memory_format):
+        memory_format_str = str(memory_format).split(".")[-1]
+        self.used_cached_memory_formats.add(memory_format_str)
+        return f"cached_torch_memory_format_{memory_format_str}"
 
     @functools.lru_cache(None)  # noqa: B019
     def codegen_int_array_var(
@@ -1362,7 +1381,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             if dtype is not None and dtype != data.dtype:
                 # wrap it with dtypeview
-                final_tmp_name, tmp_call_strs = create_dtypeview_call(reinterpret_call)
+                final_tmp_name, tmp_call_strs = create_dtypeview_call(final_tmp_name)
                 call_strs.extend(tmp_call_strs)
             else:
                 call_strs.append(
@@ -1467,11 +1486,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in ABI-compatible mode, we need to use the ABI shim function
             # to extract a C++ bool from the unrelying scalar bool Tensor
             predicate = f"{conditional.predicate.get_name()}_scalar"
-            self.codegen_tensor_item(
-                torch.bool,
-                conditional.predicate.codegen_reference(),
-                predicate,
-            )
+            if predicate not in self.used_cond_predicate:
+                self.codegen_tensor_item(
+                    torch.bool,
+                    conditional.predicate.codegen_reference(),
+                    predicate,
+                )
+                self.used_cond_predicate.add(predicate)
         else:
             # the predicate is not a Tensor: SymBool or Python bool
             predicate = conditional.predicate.codegen_reference()
@@ -1861,6 +1882,16 @@ if (custom_op_wrapper.get() == NULL) {
                     self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
                 self.include_extra_header("torch/csrc/DynamicTypes.h")
                 return f"Py_NewRef(torch::getTHPDtype(static_cast<c10::ScalarType>({self.codegen_dtype(raw_arg)})))"
+            elif isinstance(raw_arg, torch.memory_format):
+                # memory_format
+                if sys.version_info < (3, 10):
+                    # Py_NewRef is only available since Python 3.10
+                    self.include_extra_header("torch/csrc/utils/pythoncapi_compat.h")
+                self.include_extra_header("torch/csrc/utils/tensor_memoryformats.h")
+                return (
+                    "Py_NewRef(torch::utils::getTHPMemoryFormat(static_cast<c10::MemoryFormat>("
+                    f"{self.codegen_memory_format(raw_arg)})))"
+                )
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
@@ -1906,7 +1937,7 @@ if (custom_op_wrapper.get() == NULL) {
         py_args_var = f"py_args_{next(self.arg_var_id)}"
         # First arg is always the python op name
         lines = f"""
-RAIIPyObject {py_args_var}(PyTuple_New({num_args+1}));
+RAIIPyObject {py_args_var}(PyTuple_New({num_args + 1}));
 if ({py_args_var}.get() == NULL) {{
 throw std::runtime_error("PyTuple_New {py_args_var} failed");
 }}
@@ -2044,6 +2075,8 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return self.codegen_dtype(val)
+        elif isinstance(val, torch.memory_format):
+            return self.codegen_memory_format(val)
         elif isinstance(val, float):
             return self.generate_float_value(val)
         elif isinstance(val, (list, tuple)):
