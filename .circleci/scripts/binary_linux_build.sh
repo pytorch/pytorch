@@ -16,9 +16,7 @@ if [[ "${DESIRED_CUDA}" =~ cu1[1-2][0-9] ]]; then
 fi
 
 # Parse the parameters
-if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-  build_script='conda/build_pytorch.sh'
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
+if [[ "$DESIRED_CUDA" == cpu ]]; then
   build_script='manywheel/build_cpu.sh'
 elif [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
   build_script='manywheel/build_rocm.sh'
