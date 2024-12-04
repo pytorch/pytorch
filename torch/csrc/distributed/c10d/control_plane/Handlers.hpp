@@ -4,7 +4,6 @@
 #include <map>
 #include <string>
 #include <utility>
-#include <unordered_map>
 #include <vector>
 
 #include <c10/macros/Export.h>
