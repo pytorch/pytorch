@@ -5224,19 +5224,21 @@ class ShapeEnv:
             return " and ".join(produced_guards)
         return None
 
-    def evaluate_symexpr(
-        self, code: str, *, return_symints: bool
-    ) -> Union[int, float, bool]:
+    def evaluate_symexpr(self, code: str) -> Union[int, float, bool]:
         """
         To be used by compile_fx to evaluate symexprs
         """
-        if return_symints:
-            args = {
-                str(e): SymInt(SymNode(e, self, int, int(val), fx_node=None))
-                for e, val in self.var_to_val.items()
-            }
-        else:
-            args = {str(e): val for e, val in self.var_to_val.items()}
+        args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
+
+    def deserialize_symexpr(self, code: str) -> Union[SymInt, SymFloat, SymBool]:
+        """
+        To be used by compile_fx to deserialize symexprs
+        """
+        args = {
+            str(e): SymInt(SymNode(e, self, int, int(val), fx_node=None))
+            for e, val in self.var_to_val.items()
+        }
         return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:

@@ -2153,18 +2153,15 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
                 fakify_first_call = False
                 if ctx := torch._guards.TracingContext.try_get():
                     fakify_first_call = ctx.fakify_first_call
-                context.output_strides.append(
-                    tuple(
-                        (
-                            shape_env.evaluate_symexpr(
-                                e, return_symints=fakify_first_call
-                            )
-                            if shape_env is not None
-                            else int(e)
-                        )
-                        for e in exprs
-                    )
-                )
+
+                def map_expr(e):
+                    if shape_env is None:
+                        return int(e)
+                    if fakify_first_call:
+                        return shape_env.deserialize_symexpr(e)
+                    return shape_env.evaluate_symexpr(e)
+
+                context.output_strides.append(tuple(map_expr(e) for e in exprs))
 
 
 def should_use_remote_fx_graph_cache():
