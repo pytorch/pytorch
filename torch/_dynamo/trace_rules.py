@@ -2270,7 +2270,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
         "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",

@@ -62,19 +62,6 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _jvp_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    _, primals_spec = tree_flatten(primals)
-    _, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f"{jvp_str}: Expected primals and tangents to have the same python "
-            f"structure. For example, if primals is a tuple of 3 tensors, "
-            f"tangents also must be. Got primals with structure {primals_spec} "
-            f"and tangents with structure {tangents_spec}"
-        )
-
-
 def _linearize_treespec_compare(primals, tangents):
     # Revert this once #116264 gets fixed
     _, primals_argspec = tree_flatten(primals)
@@ -1104,7 +1091,13 @@ def _jvp_with_argnums(
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    _jvp_treespec_compare(diff_args, tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f"{jvp_str}: Expected primals and tangents to have the same python "
+            f"structure. For example, if primals is a tuple of 3 tensors, "
+            f"tangents also must be. Got primals with structure {primals_spec} "
+            f"and tangents with structure {tangents_spec}"
+        )
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
 
@@ -1118,10 +1111,7 @@ def _jvp_with_argnums(
                     fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
                 )
                 duals = tree_unflatten(flat_duals, primals_spec)
-                # Note for the reviewer: This is extremely odd but it passes the
-                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-                # The equivalent "if argnums is not None" fails for some reason
-                if isinstance(argnums, (int, tuple)):
+                if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)

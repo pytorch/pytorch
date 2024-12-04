@@ -3620,8 +3620,6 @@ class GraphModule(torch.nn.Module):
 
         child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
 
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (child_1,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -3749,8 +3747,6 @@ class GraphModule(torch.nn.Module):
         _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
 
         child_1: "f32[3, 4]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_y_,), (child_1,));  _jvp_treespec_compare = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5116,8 +5112,6 @@ class GraphModule(torch.nn.Module):
 
         child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
 
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (child_1,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5198,8 +5192,6 @@ class GraphModule(torch.nn.Module):
         _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
 
         child_1: "f32[3, 4]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_y_,), (child_1,));  _jvp_treespec_compare = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5282,8 +5274,6 @@ class GraphModule(torch.nn.Module):
         _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error');  _vmap_increment_nesting = None
 
         child_1: "f32[3, 4]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_y_,), (child_1,));  _jvp_treespec_compare = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5372,8 +5362,6 @@ class GraphModule(torch.nn.Module):
 
         child_1: "f32[4, 3]" = torch._C._functorch._add_batch_dim(child, 0, 1);  child = None
 
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (child_1,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5452,8 +5440,6 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_v_ = L_v_
 
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (l_v_,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5505,8 +5491,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3]", L_v_: "f32[3, 3]"):
         l_x_ = L_x_
         l_v_ = L_v_
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (l_v_,));  _jvp_treespec_compare = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5563,8 +5547,6 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
         l_y_ = L_y_
         l_v_ = L_v_
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_, l_y_), (l_v_, l_v_));  _jvp_treespec_compare = None
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
@@ -5628,9 +5610,6 @@ class GraphModule(torch.nn.Module):
         l_v_ = L_v_
 
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(False);  _set_fwd_grad_enabled = None
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (l_v_,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5699,9 +5678,6 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(False);  _set_fwd_grad_enabled = None
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
         _set_fwd_grad_enabled_2 = torch._C._set_fwd_grad_enabled(False);  _set_fwd_grad_enabled_2 = None
-
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (l_v_,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled_3 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_3 = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5773,8 +5749,6 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3, 3]"):
         l_x_ = L_x_
 
-        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((l_x_,), (l_x_,));  _jvp_treespec_compare = None
-
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting = None
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled = None
         _enter_dual_level = torch._C._enter_dual_level();  _enter_dual_level = None
@@ -5782,8 +5756,6 @@ class GraphModule(torch.nn.Module):
         _maybe_load_decompositions = torch.autograd.forward_ad._maybe_load_decompositions();  _maybe_load_decompositions = None
 
         child: "f32[3, 3, 3]" = torch._make_dual(l_x_, l_x_, level = 0);  l_x_ = None
-
-        _jvp_treespec_compare_1 = torch._functorch.eager_transforms._jvp_treespec_compare((child,), (child,));  _jvp_treespec_compare_1 = None
 
         _jvp_increment_nesting_1 = torch._C._functorch._jvp_increment_nesting();  _jvp_increment_nesting_1 = None
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_1 = None
