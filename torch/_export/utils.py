@@ -19,7 +19,6 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
-    Union,
 )
 
 import torch
@@ -503,10 +502,7 @@ def get_lifted_tensor_constant(
     return None
 
 
-def sequential_split(
-    gm: torch.fx.GraphModule,
-    node_call_back: Callable[[torch.fx.Node], Union[torch.fx.Node, bool]],
-) -> torch.fx.GraphModule:
+def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
     based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
@@ -539,7 +535,7 @@ def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
-def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
+def apply_runtime_assertion_pass(gm, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
         _set_node_metadata_hook,
@@ -614,14 +610,13 @@ def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) 
         gm.meta.update({"custom": mod.meta["custom"]})
 
 
-def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]:
+def node_inline_(call_mod_node: torch.fx.Node) -> None:
     """
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
     """
     assert call_mod_node.op == "call_module"
     gm = call_mod_node.graph.owning_module
-    assert gm is not None
 
     assert isinstance(call_mod_node.target, str)
     sub_gm = getattr(gm, call_mod_node.target)
@@ -693,7 +688,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
     return gm
 
 
-def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Signature:
+def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
     """
     Get source code and parse argument names using AST. The function returns
     a signature of the forward() function.
