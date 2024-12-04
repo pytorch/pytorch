@@ -13,7 +13,7 @@ in this file and seeing what breaks.
 """
 
 from enum import auto, Enum
-from typing import Sequence, Union
+from typing import Iterable, Union
 
 import sympy
 
@@ -36,9 +36,10 @@ class SymT(Enum):
     # Inductor: An indexing variable i0 in loops IR which ranges over non-reduced
     # dim in the loop
     INDEX = auto()
-    # Inductor: A reduction indexing r0 variable in loops IR which ranges over
-    # reduced dim in the loop
-    RINDEX = auto()
+    # Inductor: A reduction indexing (r0, r1) variables in loops IR which ranges over
+    # reduced dim(s) in the loop
+    R0_INDEX = auto()
+    R1_INDEX = auto()
     # Inductor: In templated kernels torch._inductor.kernel, we have a hook to
     # store the final output and append epilogue fusions.  To do this, we must
     # know what the indexes the outputs range over.  NB: These will also
@@ -67,7 +68,8 @@ prefix_str = {
     SymT.TMP: "tmp",
     SymT.PRECOMPUTED_SIZE: "ps",
     SymT.INDEX: "i",
-    SymT.RINDEX: "r",
+    SymT.R0_INDEX: "r0_",
+    SymT.R1_INDEX: "r1_",
     SymT.TEMPLATE_INDEX: "idx",
     SymT.XBLOCK: "x",
     SymT.YBLOCK: "y",
@@ -85,7 +87,7 @@ def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
 
 # This type is a little wider than it should be, because free_symbols says
 # that it contains Basic, rather than Symbol
-def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Sequence[SymT]]) -> bool:
+def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Iterable[SymT]]) -> bool:
     assert isinstance(sym, sympy.Symbol)
     name_str = sym.name.lower()  # Match capitalized names like XBLOCK, RBLOCK
     if isinstance(prefix, SymT):
@@ -94,5 +96,5 @@ def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Sequence[SymT]]) -> boo
         return name_str.startswith(tuple(prefix_str[p] for p in prefix))
 
 
-def free_symbol_is_type(e: sympy.Expr, prefix: SymT) -> bool:
+def free_symbol_is_type(e: sympy.Expr, prefix: Union[SymT, Iterable[SymT]]) -> bool:
     return any(symbol_is_type(v, prefix) for v in e.free_symbols)
