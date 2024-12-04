@@ -49,7 +49,7 @@ def patches(fn):
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()
-        if not is_big_gpu(0):
+        if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
     @patches
@@ -361,5 +361,5 @@ class TestSelectAlgorithm(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_CUDA and is_big_gpu():
         run_tests()

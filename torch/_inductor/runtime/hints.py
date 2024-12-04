@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import typing
 from enum import auto, Enum
 from typing import Dict, List, Optional, Union
@@ -121,6 +122,7 @@ class DeviceProperties(typing.NamedTuple):
     warp_size: Optional[int] = None
 
     @classmethod
+    @functools.lru_cache(None)
     def create(cls, device):
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
@@ -137,17 +139,17 @@ class DeviceProperties(typing.NamedTuple):
                 type=device_type,
                 index=device.index,
                 cc=device_interface.get_compute_capability(device),
-                major=props.major if hasattr(props, "major") else None,
-                regs_per_multiprocessor=props.regs_per_multiprocessor
-                if hasattr(props, "regs_per_multiprocessor")
-                else None,
-                max_threads_per_multi_processor=props.max_threads_per_multi_processor
-                if hasattr(props, "max_threads_per_multi_processor")
-                else None,
-                multi_processor_count=props.multi_processor_count
-                if hasattr(props, "multi_processor_count")
-                else None,
-                warp_size=props.warp_size if hasattr(props, "warp_size") else 32,
+                major=getattr(props, "major", None),
+                regs_per_multiprocessor=getattr(props, "regs_per_multiprocessor", None),
+                max_threads_per_multi_processor=getattr(
+                    props, "max_threads_per_multi_processor", None
+                ),
+                multi_processor_count=getattr(
+                    props,
+                    "multi_processor_count",
+                    props.gpu_subslice_count if device_type == "xpu" else None,
+                ),
+                warp_size=getattr(props, "warp_size", 32),
             )
         return cls(
             type=device_type,

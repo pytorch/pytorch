@@ -22,7 +22,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()
-        if not is_big_gpu(0):
+        if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
