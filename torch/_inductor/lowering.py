@@ -3018,7 +3018,7 @@ def new_constant(fill_value):
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        return _full(fill_value, decode_device(device), dtype, size)
 
     return _new_constant
 
@@ -3030,7 +3030,12 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        None,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
@@ -3044,6 +3049,7 @@ def empty_strided(
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
+    device = decode_device(device)
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
     pointwise.realize()
     buffer = pointwise.data.data
