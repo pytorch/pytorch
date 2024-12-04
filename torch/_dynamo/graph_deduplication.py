@@ -74,18 +74,16 @@ def _replace_region_with_subgraph(
 
 def _get_external_inputs(
     region: Region,
-) -> Tuple[DefaultDict[Node, List[Tuple[int, int]]], Set[Node]]:
+) -> DefaultDict[Node, List[Tuple[int, int]]]:
     external_node_to_indices = defaultdict(list)
     nodes_unique = set(region)
-    external_nodes = set()
     for node_ind, node in enumerate(region):
         flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if in_node not in nodes_unique and isinstance(in_node, Node):
                 external_node_to_indices[in_node].append((node_ind, arg_ind))
-                external_nodes.add(in_node)
 
-    return external_node_to_indices, external_nodes  # type: ignore[return-value]
+    return external_node_to_indices
 
 
 def _get_all_output_indices(regions: List[Region]) -> List[int]:
@@ -109,10 +107,10 @@ def _get_inds_with_external_users(region: Region, inds_unique: Set[int]) -> None
 def _copy_nodes_and_remap_inputs(
     subgraph: torch.fx.Graph, region: Region
 ) -> Dict[Tuple[int, int], Any]:
-    external_inputs_to_indices, external_inputs = _get_external_inputs(region)
+    external_inputs_to_indices = _get_external_inputs(region)
     indices_to_placeholder_ind: Dict[Tuple[int, int], Any] = {}
     region_to_subgraph_node = {}
-    for arg_ind, node in enumerate(external_inputs):
+    for arg_ind, node in enumerate(external_inputs_to_indices.keys()):
         placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
         region_to_subgraph_node[node] = placeholder
         arg_indices = external_inputs_to_indices[node]
