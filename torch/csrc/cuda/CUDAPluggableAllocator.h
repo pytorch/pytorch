@@ -112,6 +112,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void raw_delete(void* ptr) override;
   void init(int device_count) override;
   bool initialized() override;
+  double getMemoryFraction(c10::DeviceIndex device) override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
   void enable(bool) override {}
