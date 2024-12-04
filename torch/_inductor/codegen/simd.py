@@ -541,7 +541,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.features.reduction_numel == 1:
+            if not self.features.is_reduction():
                 assert not self.inside_reduction
                 yield
                 return
