@@ -255,17 +255,20 @@ def maybe_fallback(
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        if not is_feature_enabled(self.feature_name):
-            fallback_fn = getattr(super(self.__class__, self), fn.__name__)
-            counters["inductor"]["benchmarking." + self.feature_name + ".disabled"] += 1
+        fn_class = inspect._findclass(fn)
+        feature_name = fn_class.feature_name
+        if not is_feature_enabled(feature_name):
+            fallback_fn = getattr(super(fn_class, self), fn.__name__)
+            counters["inductor"]["benchmarking." + feature_name + ".disabled"] += 1
             logger.debug(
                 "Feature `%s` is disabled, `benchmarking.%s.%s` will fallback to `benchmarking.%s.%s`.",
-                self.feature_name,
-                self.__class__.__name__,
+                feature_name,
+                fn_class.__name__,
                 fn.__name__,
-                self.__class__.__base__.__name__,
+                fn_class.__base__.__name__,
                 fallback_fn.__name__,
             )
+            # don't need `self` since we called `getattr`
             return fallback_fn(*args, **kwargs)
         return fn(self, *args, **kwargs)
 
