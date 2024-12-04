@@ -75,6 +75,10 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 pexpr = PythonPrinter().doprint
 
 
+def prefix_is_reduction(prefix: str) -> bool:
+    return prefix[0] == "r"
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -114,6 +118,12 @@ class IterationRanges:
         self.length = length
         self.kernel = kernel
         self.root = root
+
+    @property
+    @cache_on_self
+    @no_type_check  # https://github.com/python/mypy/issues/17184
+    def is_reduction(self) -> bool:
+        return prefix_is_reduction(self.prefix)
 
     def symbol(self):
         return sympy_index_symbol(self.name)
@@ -162,7 +172,7 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
-        assert not is_loop or (prefix == "r" and grid_dim is None)
+        assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
         self.tensor_dim = tensor_dim
@@ -399,7 +409,7 @@ class SIMDKernel(Kernel):
         tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
 
         for i, prefix in enumerate(active_prefixes):
-            is_reduction = prefix == "r"
+            is_reduction = prefix_is_reduction(prefix)
             tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
             grid_dim = None if is_reduction else grid_dims.find(prefix)
             index = i if grid_dim is None else grid_dim
@@ -459,7 +469,7 @@ class SIMDKernel(Kernel):
             if tree.tensor_dim is None:
                 continue
 
-            if tree.prefix != "r" or self.inside_reduction:
+            if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
 
@@ -734,7 +744,7 @@ class SIMDKernel(Kernel):
 
     def active_range_trees(self, reorder=False):
         trees = [
-            t for t in self.range_trees if t.prefix != "r" or self.inside_reduction
+            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
         ]
         if reorder and len(trees) > 1:
             count = sum(t.prefix in "xyz" for t in trees)
@@ -896,11 +906,14 @@ class SIMDKernel(Kernel):
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
-            if buf and len(buf.layout.size) == 4:
+            if not buf:
+                continue
+            layout = buf.get_layout()
+            if len(layout.size) == 4:
                 # ignore the tensor if only 1 dimension is non-zero
-                if len([x for x in buf.layout.size if x == 1]) == 3:
+                if len([x for x in layout.size if x == 1]) == 3:
                     continue
-                stride_order = ir.get_stride_order(buf.layout.stride)
+                stride_order = ir.get_stride_order(layout.stride)
                 if uniform_stride_order is None:
                     uniform_stride_order = stride_order
                 elif uniform_stride_order != stride_order:
@@ -911,13 +924,15 @@ class SIMDKernel(Kernel):
                     log.warning(msg)
 
                     stride_order_list = [
-                        ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
+                        ir.get_stride_order(
+                            V.graph.get_buffer(name).get_layout().stride
+                        )
                         if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
                     ]
                     size_list = [
-                        V.graph.get_buffer(name).layout.size
+                        V.graph.get_buffer(name).get_layout().size
                         if V.graph.try_get_buffer(name)
                         else None
                         for name in call_args
@@ -1216,7 +1231,7 @@ class SIMDScheduling(BaseScheduling):
         buf_sizes = [
             buf.get_layout().storage_size()
             for buf in buffers
-            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+            if buf.has_tensor_output()
         ]
 
         if not all(expr_fits_within_32bit(size) for size in buf_sizes):

@@ -18,7 +18,6 @@ try:
     try:
         from .test_aot_inductor import (
             AOTInductorTestsTemplate,
-            AOTITestCase,
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
@@ -27,7 +26,6 @@ try:
     except ImportError:
         from test_aot_inductor import (  # @manual
             AOTInductorTestsTemplate,
-            AOTITestCase,
             check_model,
             check_model_with_multiple_inputs,
             code_check_count,
@@ -75,6 +73,7 @@ CPU_TEST_FAILURES = {
     "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
+    "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
     "test_foreach_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
     "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
@@ -161,18 +160,6 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_add": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_all_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_with_multiple_outputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_reinterpret_view_inputs": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
-    "test_custom_op_with_concat_inputs": fail_minimal_arrayref_interface(is_skip=True),
-    "test_custom_op_missing_arg_with_default_value": fail_minimal_arrayref_interface(
-        is_skip=True
-    ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
     "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
@@ -181,10 +168,11 @@ CPU_TEST_FAILURES = {
     # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
     "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
     "test_issue_140766": fail_minimal_arrayref_interface(),
+    "test_update_constant_buffer": fail_stack_allocation(is_skip=True),
 }
 
 
-class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
+class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     device = "cpu"
     device_type = "cpu"
     check_model = check_model

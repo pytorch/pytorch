@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
-    TEST_WITH_UBSAN,
     TestCase,
     unMarkDynamoStrictTest,
 )
@@ -634,6 +633,11 @@ class TestCommon(TestCase):
         # Direct calls to refs and prims are not translated
         if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
             self.skipTest("Skipped on ROCm")
+        if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
+            self.skipTest(
+                "Skipped _refs.div.floor_rounding with bfloat16"
+                "Divide by 0: _refs produces NaN, torch produces +/-inf"
+            )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -648,16 +652,6 @@ class TestCommon(TestCase):
             and dtype == torch.float16
         ):
             self.skipTest("Skipped on ROCm")
-        # skip zero-dim tensors for some composites of reduction operations and view
-        skip_zero_dim_ops = [
-            "_refs.logsumexp",
-            "_refs.log_softmax",
-            "_refs.native_group_norm",
-            "_refs.softmax",
-            "_refs.sum_to_size",
-            "ops.nvprims.view",
-        ]
-
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -1045,7 +1039,7 @@ class TestCommon(TestCase):
                 try:
                     info = torch.iinfo(t.dtype)
                     return torch.full_like(t, info.max)
-                except TypeError as te:
+                except TypeError:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
 
@@ -1082,17 +1076,15 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
-            if torch.device(device).type != "cpu":
-                wrong_device = "cpu"
-            elif torch.cuda.is_available():
-                wrong_device = "cuda"
-
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
             )
-            if wrong_device is not None:
+
+            if torch.device(device).type != "cpu":
+                wrong_device = "cpu"
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
@@ -1442,7 +1434,6 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -2751,7 +2742,7 @@ class TestFakeTensor(TestCase):
 
             try:
                 op(input, *args, **kwargs)
-            except Exception as e:
+            except Exception:
                 continue
 
             with TestPointwiseMode():

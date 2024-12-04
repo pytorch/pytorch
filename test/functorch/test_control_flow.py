@@ -113,10 +113,19 @@ def get_scan_combine_fn(name, associative=True):
     def div(x: torch.Tensor, y: torch.Tensor):
         return x / y
 
-    def s5_operator(x, y):
+    def s5_operator(x: torch.Tensor, y: torch.Tensor):
         A_i, Bu_i = x
         A_j, Bu_j = y
         return A_j * A_i, A_j * Bu_i + Bu_j
+
+    def different_input_size_operator(x: torch.Tensor, y: torch.Tensor):
+        x_o, dA_o, dB_o, C_o, y_o = x
+        x_n, dA_n, dB_n, C_n, y_n = y
+
+        x_new = x_n + x_o
+        y_new = torch.einsum("bdn,bn->bd", x_new, C_n)
+
+        return x_new, dA_n + 0.0, dB_n + 0.0, C_n + 0.0, y_new
 
     def tuple_fct(x, y):
         return (x[0] + y[0], x[1] * y[1])
@@ -144,6 +153,8 @@ def get_scan_combine_fn(name, associative=True):
         fct = div
     elif name == "s5_operator":
         fct = s5_operator
+    elif name == "different_input_size_operator":
+        fct = different_input_size_operator
     elif name == "tuple_fct":
         fct = tuple_fct
     elif name == "complex_pointwise":
@@ -2414,8 +2425,6 @@ def forward(self, fct_1, init_1, xs_1):
     add_1 = torch.ops.aten.add.Tensor(init_1, select);  select = add_1 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(init_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(init_1, 2)
-    clone = torch.ops.aten.clone.default(init_1);  clone = None
-    select_copy = torch.ops.aten.select_copy.int(xs_1, 0, 0);  select_copy = None
     sym_size_int_3 = torch.ops.aten.sym_size.int(xs_1, 1)
     sym_size_int_4 = torch.ops.aten.sym_size.int(xs_1, 2)
     scan_combine_graph_0 = self.scan_combine_graph_0
@@ -2439,8 +2448,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     select = l_xs_.select(0, 0)
     new_carry = l_init_ + select;  new_carry = None
     add_1 = l_init_ + select;  select = add_1 = None
-    child = l_init_.clone();  child = None
-    child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, True, []);  scan_combine_fn_0 = l_init_ = l_xs_ = None
     getitem = scan[0]
@@ -3256,6 +3263,82 @@ class AssociativeScanTests(TestCase):
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=elements,
         )
+
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        C = torch.randn((batch, dstate, length), requires_grad=True, device=device)
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        y = torch.randn((batch, hidden_dim, length), requires_grad=True, device=device)
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("different_input_size_operator", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_different_input_size_wrong_dim(self):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        y = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # ValueError,
+            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            out = associative_scan(
+                get_scan_combine_fn("different_input_size_operator", True),
+                elements,
+                3,
+                combine_mode="pointwise",
+            )
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -5932,8 +6015,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     r_2 = r_1.matmul(r);  r_1 = r = None
     r_3 = r_2.add(l_add_closure_0_cell_contents_1_0_);  r_2 = None
     r_4 = r_3.sum();  r_3 = r_4 = None
-    r_5 = l_init_.clone();  r_5 = None
-    r_6 = torch.select_copy(l_xs_, 0, 0);  r_6 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
@@ -5955,8 +6036,6 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
     matmul_1 = matmul @ select;  matmul = select = None
     ret = matmul_1 + l_add_closure_0_cell_contents_1_0_;  matmul_1 = None
     sum_1 = ret.sum();  ret = sum_1 = None
-    child = l_init_.clone();  child = None
-    child_1 = torch.select_copy(l_xs_, 0, 0);  child_1 = None
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], 0, False, [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
