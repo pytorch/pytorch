@@ -21,13 +21,13 @@
 // frame_get_var fetches the variable value from the frame given the index
 // NOTE: hidden variables are not included.
 // Returns a new reference.
-FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
-  if (!frame->stacktop) {
-    return new FrameLocalsMapping();
+void FrameLocalsMapping::_realize_dict() {
+  _dict = py::dict();
+  if (!_frame->stacktop) {
+    return;
   }
 
-  PyCodeObject* co = F_CODE(frame);
-  FrameLocalsMapping* map = new FrameLocalsMapping();
+  PyCodeObject* co = F_CODE(_frame);
 
   auto update_mapping = [&](int i, PyObject* value) {
     _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
@@ -48,17 +48,17 @@ FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
     }
 
     if (value != nullptr) {
-      auto name = PyUnicode_AsUTF8(PyTuple_GET_ITEM(co->co_localsplusnames, i));
-      map->set(name, value);
+      auto name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
+      _dict[name] = value;
     }
   };
 
   int offset = co->co_nlocalsplus - co->co_nfreevars;
   for (int i = 0; i < offset; i++) {
-    update_mapping(i, frame->localsplus[i]);
+    update_mapping(i, _frame->localsplus[i]);
   }
   // Get references to closure variables
-  PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
+  PyObject* closure = ((PyFunctionObject*)FUNC(_frame))->func_closure;
   for (int i = 0; i < co->co_nfreevars; ++i) {
     update_mapping(offset + i, PyTuple_GET_ITEM(closure, i));
   }
@@ -66,29 +66,27 @@ FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
   // NOTE no need to move the instruction pointer to after COPY_FREE_VARS
   // since we don't actually copy free vars from the closure to the frame
   // localsplus.
-
-  return map;
 }
 
 #else
 
 // Based on
 // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1016
-FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
-  PyCodeObject* co = F_CODE(frame);
-  FrameLocalsMapping* map = new FrameLocalsMapping();
+void FrameLocalsMapping::_realize_dict() {
+  _dict = py::dict();
+  PyCodeObject* co = F_CODE(_frame);
 
   auto update_mapping =
       [&](PyObject* names, int i, PyObject* value, bool deref) {
-        auto name = PyUnicode_AsUTF8(PyTuple_GET_ITEM(names, i));
+        auto name = PyTuple_GET_ITEM(names, i);
         if (deref) {
           CHECK(value != nullptr && PyCell_Check(value));
           value = PyCell_GET(value);
         }
         if (value == nullptr) {
-          map->erase(name);
+          _dict.pop(name);
         } else {
-          map->set(name, value);
+          _dict[name] = value;
         }
       };
 
@@ -98,14 +96,14 @@ FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
     nlocals = co->co_nlocals;
   }
   for (int i = 0; i < nlocals; i++) {
-    update_mapping(co->co_varnames, i, frame->f_localsplus[i], false);
+    update_mapping(co->co_varnames, i, _frame->f_localsplus[i], false);
   }
 
   // cellvars
   int ncells = PyTuple_GET_SIZE(co->co_cellvars);
   for (int i = 0; i < ncells; i++) {
     update_mapping(
-        co->co_cellvars, i, frame->f_localsplus[co->co_nlocals + i], true);
+        co->co_cellvars, i, _frame->f_localsplus[co->co_nlocals + i], true);
   }
 
   // freevars
@@ -115,15 +113,25 @@ FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
       update_mapping(
           co->co_freevars,
           i,
-          frame->f_localsplus[co->co_nlocals + ncells + i],
+          _frame->f_localsplus[co->co_nlocals + ncells + i],
           true);
     }
   }
-
-  return map;
 }
 
 #endif
+
+PyObject* FrameLocalsMapping::get(uint64_t idx) {
+#if IS_PYTHON_3_11_PLUS
+  return _frame->localsplus[idx];
+#else
+  return _frame->f_localsplus[idx];
+#endif // IS_PYTHON_3_11_PLUS
+}
+
+FrameLocalsMapping* get_framelocals_mapping(FrameLocalsFrameType* frame) {
+  return new FrameLocalsMapping(frame);
+}
 
 void framelocals_mapping_free(FrameLocalsMapping* map) {
   delete map;
