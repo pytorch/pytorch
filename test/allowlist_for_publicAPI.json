@@ -2001,6 +2001,7 @@
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "StrictMinMaxConstraint",
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
