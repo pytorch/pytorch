@@ -35,7 +35,13 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, OpOverrides, WorkspaceArg
+from .codegen.common import (
+    CSEVariable,
+    IndentedBuffer,
+    KernelTemplate,
+    OpOverrides,
+    WorkspaceArg,
+)
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
@@ -46,6 +52,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .utils import (
@@ -204,19 +211,23 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
-    def store(self, name, index, value, mode):
-        """Store value and track the store's mask and output value on the kernel.
-
-        The template_mask and template_out are used by the indexing() method to properly
-        mask store operations in the generated Triton code. The mask ensures stores only
-        affect elements matching the mask condition. This is currently only used for scatter node's store
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> str:
+        """Currently only supports stores for atomic adds coming from scatter nodes
+        This is used by flex_attention's backwards grad for captured buffers, see
+        zeros_and_scatter lowering
         """
         assert (
             self.mask is not None
         ), "Mask is required for inner stores in modifications"
-        self.kernel.template_out = value
-        self.kernel.template_mask = self.mask
-        return self._inner.store(name, index, value, mode)
+        assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
+
+        buf_name = self._add_kernel_input(name)
+        index_str = self._process_indexing(index)
+        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
+        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
+        return store
 
     def _add_kernel_input(self, name: str):
         """Add name as input to kernel and return input ref."""
@@ -490,7 +501,7 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
+        return scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
 
     def modification(
         self,
@@ -510,6 +521,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         num = 0
         out = None
+        scatters = []
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
@@ -524,7 +536,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
-                        self._handle_scatter_graph(scatter_graph)
+                        scatters.append(self._handle_scatter_graph(scatter_graph))
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
@@ -535,6 +547,10 @@ class TritonTemplateKernel(TritonKernel):
                 assert isinstance(output_name, str)
                 assert out is not None
                 self.body.writeline(f"{output_name} = {out.value}")
+            else:
+                assert out is None
+                for scatter in scatters:
+                    self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
             self.cse.invalidate(set())  # type: ignore[arg-type]
