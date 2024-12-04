@@ -73,23 +73,25 @@ def fully_shard(
 
     This implementation represents the sharded parameters as :class:`DTensor` s
     sharded on dim-0, while the unsharded parameters will be like the original
-    parameters on ``module`` (not necessarily :class:`DTensor`). A module
-    forward pre-hook on ``module`` all-gathers the parameters, and a module
-    forward hook on ``module`` frees them (if needed). Similar backward
-    hooks all-gather parameters and later free parameters and reduce-scatter
-    gradients.
+    parameters on ``module`` (e.g. :class:`torch.Tensor` if originally
+    :class:`torch.Tensor`). A module
+    `forward pre-hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook>`_
+    on ``module`` all-gathers the parameters, and a module
+    `forward hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook>`_
+    on ``module`` frees them (if needed). Similar backward hooks all-gather
+    parameters and later free parameters and reduce-scatter gradients.
 
-    Since grouping tensors together for one collective is critical for
+    Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
     class. Calling :meth:`fully_shard` on ``module`` constructs one group that
     includes the parameters in ``module.parameters()`` except those already
-    assigned to a group from an earlier call on a submodule. This suggests that
+    assigned to a group from an earlier call on a submodule. This means that
     :meth:`fully_shard` should be called bottom-up on your model. Each group's
     parameters are all-gathered in one collective, and its gradients are
-    reduce-scattered in one collective. Constructing multiple groups across the
-    model ("layer by layer") allows for peak memory savings and communication/
-    computation overlap. Users should *not* call :meth:`fully_shard` only on
-    the topmost root module.
+    reduce-scattered in one collective. Partitioning the model into multiple
+    groups ("layer by layer") allows for peak memory savings and communication/computation
+    overlap. Users generally should *not* call :meth:`fully_shard` only on the
+    topmost root module.
 
     Args:
         module (Union[nn.Module, List[nn.Module]): The module or modules to
@@ -104,26 +106,27 @@ def fully_shard(
             current device.
         reshard_after_forward (Union[bool, int]): This controls the parameter
             behavior after forward and can trade off memory and communication:
+
             - If ``True``, then this reshards parameters after forward and
-            all-gathers in backward.
+              re-all-gathers in backward.
             - If ``False``, then this keeps the unsharded parameters in memory
-            after forward and avoids the all-gather in backward.
+              after forward and avoids the all-gather in backward.
             - If an ``int``, then this represents the world size to reshard to
-            after forward. It should be a non-trivial divisor of the ``mesh``
-            shard dim size (i.e. excluding 1 and the dim size itself). A choice
-            may be the intra-node size (e.g. ``torch.cuda.device_count()``).
-            This allows the all-gather in backward to be over a smaller world
-            size at the cost of higher memory usage than setting to ``True``.
+              after forward. It should be a non-trivial divisor of the ``mesh``
+              shard dim size (i.e. excluding 1 and the dim size itself). A
+              choice may be the intra-node size (e.g. ``torch.cuda.device_count()``).
+              This allows the all-gather in backward to be over a smaller world
+              size at the cost of higher memory usage than setting to ``True``.
             - The root FSDP state has its value specially set to ``False`` as a
-            heuristic since its parameters would typically be immediately
-            all-gathered for backward.
+              heuristic since its parameters would typically be immediately
+              all-gathered for backward.
             - After forward, the parameters registered to the module depend on
-            to this: The registered parameters are the sharded parameters if
-            ``True``; unsharded parameters if ``False``; and the paramters
-            resharded to the smaller mesh otherwise. To modify the parameters
-            between forward and backward, the registered parameters must be the
-            sharded parameters. For ``False`` or an ``int``, this can be done
-            by manually resharding via :meth:`reshard`.
+              to this: The registered parameters are the sharded parameters if
+              ``True``; unsharded parameters if ``False``; and the paramters
+              resharded to the smaller mesh otherwise. To modify the parameters
+              between forward and backward, the registered parameters must be
+              the sharded parameters. For ``False`` or an ``int``, this can be
+              done by manually resharding via :meth:`reshard`.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard]]]):
             This callable can be used to override the sharding placement for a
             parameter to shard a parameter on a dimension other than dim-0. If
@@ -260,7 +263,8 @@ class FSDPModule:
         """
         Sets whether the next backward is the last one. On the last backward,
         FSDP waits on pending gradient reduction and clears internal data
-        data structures for backward prefetching.
+        data structures for backward prefetching. This can be useful for
+        microbatching.
         """
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
