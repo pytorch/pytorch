@@ -388,7 +388,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,  # type: ignore[arg-type]
+            callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -542,7 +542,7 @@ class FakeTensorConfig:
 #
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to ensure access to FakeTensor during access, which is
-# required for testing version counter and epoch validity.​
+# required for testing version counter and epoch validity.
 class SymNumberMemoDescriptor:
     _name: str
 

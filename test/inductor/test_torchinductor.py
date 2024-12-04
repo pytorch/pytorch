@@ -868,6 +868,16 @@ class CommonTemplate:
             ),
         )
 
+    @patch("torch._inductor.compile_fx._debug_serde_compile", True)
+    def test_serde_compile(self):
+        # Make sure that compiling works when we pass the input + output from
+        # fx_codegen_and_compile() through serde.
+
+        def fn(a, b):
+            return a + b
+
+        self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
+
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_triton_cpu  # aoti
