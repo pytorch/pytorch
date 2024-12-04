@@ -16,8 +16,3 @@ __all__ = [
     "register_fsdp_forward_method",
     "UnshardHandle",
 ]
-
-# Set namespace for exposed private names
-CPUOffloadPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
-MixedPrecisionPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
-OffloadPolicy.__module__ = "torch.distributed.fsdp._fully_shard"
