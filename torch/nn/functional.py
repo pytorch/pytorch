@@ -6316,10 +6316,18 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert key_padding_mask.shape == (
-            bsz,
-            src_len,
-        ), f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+        if not torch.jit.is_scripting():
+            torch._check_with(
+                AssertionError,
+                key_padding_mask.shape[0] == bsz,
+                None,
+            )
+            torch._check_with(
+                AssertionError,
+                key_padding_mask.shape[1] == src_len,
+                None,
+            )
+
         key_padding_mask = (
             key_padding_mask.view(bsz, 1, 1, src_len)
             .expand(-1, num_heads, -1, -1)

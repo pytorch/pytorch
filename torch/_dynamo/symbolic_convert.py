@@ -55,10 +55,10 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    AutoDerefLocalSource,
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalCellSource,
     LocalSource,
     Source,
 )
@@ -99,8 +99,8 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    CellVariable,
     GetAttrVariable,
-    NewCellVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -435,7 +435,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
             user_stack_trace,
-            exc_info=exc_info,
         )
     else:
         # This log line MUST not contain the string "Graph break in user code",
@@ -1133,9 +1132,9 @@ class InstructionTranslatorBase(
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
-        assert isinstance(cell, NewCellVariable)  # tame mypy
-        if cell.is_root_frame_cell():
-            val.set_name_hint(cell.source.local_name)  # type: ignore[attr-defined]
+        assert isinstance(cell, CellVariable)  # tame mypy
+        if cell.local_name is not None:
+            val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
     LOAD_CLOSURE = LOAD_FAST
 
@@ -2772,7 +2771,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # 1. Dynamo only uses these cell objects for their ids, so that
                     # if we encounter the same cell (if it's captured by some
                     # pre-existing function), we'll reuse the original
-                    # `NewCellVariable` instance we created for the cell object.
+                    # `CellVariable` instance we created for the cell object.
                     #
                     # 2. In this case the original cell object should've
                     # never been accessed by anyone else, as Dynamo intercepts
@@ -2780,30 +2779,26 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # after these cell objects are created. Thus they cannot be
                     # captured by any pre-existig function.
                     dummy_cell = types.CellType(value)
-                    cell_source = LocalSource(
-                        name, is_input=True, is_root_frame_cell=True
+                    cell_source = LocalCellSource(name)
+                    contents_source = LocalSource(
+                        name, is_input=True, is_derefed_cell_contents=True
                     )
-                    contents_source = AutoDerefLocalSource(cell_source)
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
                     )
                     cell_var = side_effects.track_cell_existing(
                         cell_source, dummy_cell, contents_var
                     )
-                    self.symbolic_locals[name] = cell_var
                 else:
                     cell_var = side_effects.track_cell_new()
-                    self.symbolic_locals[name] = cell_var
-                    # We conveniently piggyback on `LocalSource.reconstruct` so
-                    # we don't have to plumb extra stuff down to simplify
-                    # codegen of `cell_var` and its side effects.
-                    cell_var.source = LocalSource(name, is_root_frame_cell=True)
+                cell_var.local_name = name
+                self.symbolic_locals[name] = cell_var
 
             # Populate `symbolic_locals` with cells captured by this frame,
             # effectively implementing the `COPY_FREE_VARS` instruction.
             for name, cell in zip(self.freevars(), closure):
-                cell_source = LocalSource(name, is_root_frame_cell=True)
-                contents_source = AutoDerefLocalSource(cell_source)
+                cell_source = LocalCellSource(name)
+                contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
                         cell.cell_contents, contents_source
@@ -2814,6 +2809,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
+                cell_var.local_name = name
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
@@ -3260,7 +3256,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             distributed_state=parent.distributed_state,
         )
         self.parent = parent
-        self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph

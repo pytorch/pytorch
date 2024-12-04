@@ -71,7 +71,7 @@ from torch.testing._internal.opinfo.core import (
     XFailRule,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map_only
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -3969,7 +3969,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split\(\): not supported for NestedTensor on dim=1",
+            r"split\(\): not supported for NestedTensor on ragged dim",
         ):
             torch.split(nt, 2, 1)
 
@@ -3995,7 +3995,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): not supported for NestedTensor on dim=1",
+            r"split_with_sizes\(\): not supported for NestedTensor on ragged dim",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -4201,7 +4201,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # chunk on ragged dim not supported
         with self.assertRaisesRegex(
-            RuntimeError, "chunk.* not supported for NestedTensor on dim=1"
+            RuntimeError, "chunk.* not supported for NestedTensor on ragged dim"
         ):
             nt.chunk(2, dim=1)
 
@@ -4238,7 +4238,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         # squeeze on ragged dim not supported
         with self.assertRaisesRegex(
-            RuntimeError, "squeeze.* not supported for NestedTensor on dim=1"
+            RuntimeError, "squeeze.* not supported for NestedTensor on ragged dim"
         ):
             nt.squeeze(1)
 
@@ -7954,24 +7954,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="no_linear_noncontig_holes_support",
     ),
-    # Some kinda reduction bug that needs to be fixed!
-    XFailRule(
-        error_type=IndexError,
-        error_msg="tuple index out of range",
-        op_match_fn=lambda device, op: (
-            # min.reduction_with_dim and max.reduction_with_dim aren't associated with
-            # ReductionOpInfo entries sadly even though they're reductions
-            isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name
-        ),
-        sample_match_fn=lambda device, sample: (
-            sample.name
-            == (
-                "3D_noncontig_transposed_with_seqlen_cache: "
-                "normal dim reduction with keepdim=False"
-            )
-        ),
-        name="transposed_reduction_bug",
-    ),
     # nanmean sometimes hits an unimplemented nansum() path and other times hits an
     # unimplemented sum() path
     XFailRule(
@@ -8035,13 +8017,81 @@ FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="index_put_noncontig_holes_no_ragged_dim_indices",
     ),
-    # expected: masked_select() doesn't work on non-contiguous NJTs
+    # select() only supports dim=0 for non-contiguous with holes NJTs for now
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs["dim"] != 0 and "noncontig_holes" in sample.name
+        ),
+        name="unsupported_select_on_non_batch_dim_with_noncontig_holes",
+    ),
+    # these don't work on non-contiguous NJTs yet
     XFailRule(
         error_type=ValueError,
         error_msg="expected self to be a contiguous jagged layout NestedTensor",
-        op_match_fn=lambda device, op: (op.full_name == "masked_select"),
-        sample_match_fn=lambda device, sample: (not sample.input.is_contiguous()),
-        name="masked_select_noncontig",
+        op_match_fn=lambda device, op: (
+            op.full_name
+            in {
+                "chunk",
+                "masked_select",
+                "narrow",
+                "split",
+                "split_with_sizes",
+                "squeeze",
+            }
+        ),
+        sample_match_fn=lambda device, sample: (
+            sample.input._lengths is not None or sample.input._ragged_idx != 1
+        ),
+        name="missing_noncontig_support",
+    ),
+    # these don't work on the ragged dim yet
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not supported for NestedTensor on ragged dim",
+        op_match_fn=lambda device, op: (
+            op.full_name
+            in {
+                "chunk",
+                "narrow",
+                "select",
+                "split",
+            }
+        ),
+        sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
+        name="ragged_dim_unsupported",
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        # error comes from usage of view() in the decomp
+        error_msg="does not support ragged_idx != 1 except when",
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
+        sample_match_fn=lambda device, sample: "noncontig_transposed" in sample.name,
+        name="unflatten_ragged_dim_unsupported",
+    ),
+    # these don't work on the batch dim yet
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not supported for NestedTensor on dim=0",
+        op_match_fn=lambda device, op: (
+            op.full_name
+            in {
+                "narrow",
+                "split",
+                "split_with_sizes",
+                "unsqueeze",
+            }
+        ),
+        sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
+        name="batch_dim_unsupported",
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        # error comes from usage of view() in the decomp
+        error_msg="cannot view shape",
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
+        sample_match_fn=lambda device, sample: "batch_dim" in sample.name,
+        name="unflatten_batch_dim_unsupported",
     ),
     # expected: bmm / matmul sometimes use a to_padded_tensor() fallback which isn't
     # supported for non-contig NJTs with holes
@@ -8196,18 +8246,31 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
+    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
+    # data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        op_match_fn=lambda device, op: (op.full_name == "chunk"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="chunk_batch_dim_data_dependency",
+    ),
+    # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: (sample.kwargs["dim"] == 0),
+        name="select_unbind_data_dependency",
+    ),
     # Bug: no idea what's going on here; needs investigation within AOTAutograd
     XFailRule(
-        error_type=ValueError,
-        error_msg="has length 1 but the spec refers to a pytree that holds 3 items",
         op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug1",
     ),
     # Bug: also no idea what's going on here: needs investigation within AOTAutograd
     XFailRule(
-        error_type=AssertionError,
-        error_msg="Expected 5 == 4",
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
@@ -8330,6 +8393,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
                 self.assertEqualIgnoringNestedInts(out, out_ref)
+                if op._extra_op_data.is_view:
+                    tree_map_only(
+                        NestedTensor, lambda x: self.assertTrue(x._is_view()), out
+                    )
 
                 # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
                 # TODO: Add xfails for other inplace ops instead of hardcoding
@@ -8351,6 +8418,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
                 self.assertEqualIgnoringNestedInts(out, out_ref)
+                if op._extra_op_data.is_view:
+                    tree_map_only(
+                        NestedTensor, lambda x: self.assertTrue(x._is_view()), out
+                    )
 
                 inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
                 g_inps = [
@@ -8395,6 +8466,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
                 out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+                if op._extra_op_data.is_view:
+                    tree_map_only(
+                        NestedTensor, lambda x: self.assertTrue(x._is_view()), out_ref
+                    )
 
                 if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
                     self.assertEqualIgnoringNestedInts(out_compile, out_ref)
@@ -8452,6 +8527,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
                 out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+                if op._extra_op_data.is_view:
+                    tree_map_only(
+                        NestedTensor, lambda x: self.assertTrue(x._is_view()), out_ref
+                    )
 
                 if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
                     self.assertEqualIgnoringNestedInts(out_compile, out_ref)
@@ -8478,6 +8557,101 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
+
+
+from torch.nested._internal.nested_int import NestedIntNode
+
+
+class TestNestedInt(torch.testing._internal.common_utils.TestCase):
+    def test_comparisons(self):
+        a = torch.SymInt(NestedIntNode(1, 1))
+        b = torch.SymInt(NestedIntNode(1, 1))
+        c = torch.SymInt(NestedIntNode(2, 1))
+        d = 3
+
+        self.assertTrue(a == a)
+        self.assertTrue(a == b)
+        self.assertFalse(a != a)
+        self.assertFalse(a != b)
+        self.assertFalse(a == c)
+        self.assertTrue(a != c)
+
+        self.assertFalse(a == d)
+        self.assertTrue(a != d)
+        self.assertFalse(d == a)
+        self.assertTrue(d != a)
+
+        # ge
+        self.assertTrue(a >= a)
+        self.assertTrue(a >= b)
+        self.assertTrue(b >= a)
+        with self.assertRaises(ValueError):
+            _ = a >= c
+        with self.assertRaises(ValueError):
+            _ = c >= a
+        with self.assertRaises(ValueError):
+            _ = c >= 3
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # lt
+        self.assertFalse(a < a)
+        self.assertFalse(a < b)
+        self.assertFalse(b < a)
+        with self.assertRaises(ValueError):
+            _ = a < c
+        with self.assertRaises(ValueError):
+            _ = c < a
+        with self.assertRaises(ValueError):
+            _ = 3 < a
+        with self.assertRaises(ValueError):
+            _ = 2 < a
+        self.assertTrue(a > 1)
+
+        # le
+        self.assertTrue(a <= a)
+        self.assertTrue(b <= a)
+        self.assertTrue(a <= b)
+        with self.assertRaises(ValueError):
+            _ = a <= c
+        with self.assertRaises(ValueError):
+            _ = c <= a
+        with self.assertRaises(ValueError):
+            _ = 3 <= c
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # gt
+        self.assertFalse(a > a)
+        self.assertFalse(b > a)
+        self.assertFalse(a > b)
+        with self.assertRaises(ValueError):
+            _ = a > c
+        with self.assertRaises(ValueError):
+            _ = c > a
+        with self.assertRaises(ValueError):
+            _ = a > 3
+        with self.assertRaises(ValueError):
+            _ = a > 2
+        self.assertTrue(a > 1)
+
+    def test_with_factor(self):
+        a = torch.SymInt(NestedIntNode(1, 5))
+        b = torch.SymInt(NestedIntNode(1, 10))
+        # eq
+        self.assertFalse(a == b)
+        self.assertFalse(a >= b)
+        self.assertTrue(b >= a)
+        self.assertTrue(a <= b)
+        self.assertFalse(b <= a)
+        # ne
+        self.assertTrue(a != b)
+        # mul
+        self.assertTrue(a * 2 == b)
+        self.assertTrue(a * 3 >= b)
+        self.assertTrue(a * 2 == 2 * a)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

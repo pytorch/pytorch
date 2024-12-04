@@ -1659,7 +1659,7 @@ def choose_saved_values_set(
 
     input_storages = {get_node_storage(node) for node in node_info.inputs}
 
-    def get_recomputable_banned_nodes(banned_nodes: List[fx.Node]) -> List[fx.Node]:
+    def get_recomputable_banned_nodes(banned_nodes: Set[fx.Node]) -> List[fx.Node]:
         return [
             i
             for i in banned_nodes
@@ -1671,6 +1671,8 @@ def choose_saved_values_set(
         ]
 
     recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
+    # sort first by name, to ensure determinism when multiple nodes have same size
+    recomputable_banned_nodes = sorted(recomputable_banned_nodes, key=lambda x: x.name)
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values

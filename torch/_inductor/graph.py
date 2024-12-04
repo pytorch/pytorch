@@ -74,6 +74,7 @@ from .exc import (
 )
 from .ir import (
     Constant,
+    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -103,6 +104,7 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_cloned_parameter_buffer_name,
+    get_donated_idxs,
     get_sympy_Expr_dtype,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
@@ -485,6 +487,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
+
+        # track the current placeholder index that we are processing
+        self.placeholder_idx = -1
+
+        self.bw_donated_idxs = get_donated_idxs()
 
     def has_feature(
         self,
@@ -967,6 +974,7 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
+        self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
@@ -997,13 +1005,27 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
-        # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                name=target,
-                layout=FixedLayout(example.device, example.dtype, sizes, strides),
+
+        if (
+            self.is_backward
+            and self.bw_donated_idxs
+            and self.placeholder_idx in self.bw_donated_idxs
+        ):
+            tensor = TensorBox.create(
+                DonatedBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
             )
-        )
+        else:
+            # TODO(jansel): handle input aliasing
+            tensor = TensorBox.create(
+                InputBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
+
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
@@ -1865,9 +1887,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
-                        materialize(x)
+                        materialize(x)  # type:ignore[arg-type]
                         for x in (
-                            self.example_inputs
+                            self.example_inputs  # type:ignore[union-attr]
                             if isinstance(V.real_inputs, NullHandler)
                             else V.real_inputs
                         )
@@ -2000,6 +2022,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
+            output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
@@ -2039,42 +2062,6 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.output_code(mod.__file__)
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
-
-    def compile_to_fn(self) -> Any:
-        with dynamo_timed("GraphLowering.compile_to_fn", log_pt2_compile_event=True):
-            return self._compile_to_fn()
-
-    def _compile_to_fn(self) -> Any:
-        if self.aot_mode:
-            from .codecache import AotCodeCompiler
-
-            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
-            code, linemap = self.codegen_with_cpp_wrapper()
-            output_code_log.debug("Output code: \n%s", code)
-
-            serialized_extern_kernel_nodes = None
-            if self.extern_kernel_nodes:
-                serialized_extern_kernel_nodes = self.extern_node_serializer(
-                    self.extern_kernel_nodes
-                )
-                output_code_log.debug(
-                    "Serialized Extern Kernel Nodes: \n%s",
-                    serialized_extern_kernel_nodes,
-                )
-
-            additional_files = self.wrapper_code.additional_files
-
-            with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
-                # Directly return the file path with the compiled code
-                return AotCodeCompiler.compile(
-                    self,
-                    code,
-                    serialized_extern_kernel_nodes,
-                    device_type=self.device_type,
-                    additional_files=additional_files,
-                )
-        else:
-            return self.compile_to_module().call
 
     def get_output_names(self) -> List[str]:
         return [
