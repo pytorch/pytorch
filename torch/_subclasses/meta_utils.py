@@ -356,7 +356,7 @@ class MetaTensorDescriber:
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
-        view_func = _ViewFunc.from_tensor(t)
+        view_func = ViewFunc.from_tensor(t)
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -490,7 +490,7 @@ class MetaStorageDesc:
 
 
 @dataclass(frozen=True)
-class _ViewFunc(Generic[_TensorT]):
+class ViewFunc(Generic[_TensorT]):
     @abstractmethod
     def apply(
         self,
@@ -502,7 +502,7 @@ class _ViewFunc(Generic[_TensorT]):
         ...
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> _ViewFunc:
+    def from_tensor(t: torch.Tensor) -> ViewFunc:
         if _is_fake_tensor(t):
             return _FakeTensorViewFunc()
         else:
@@ -510,7 +510,7 @@ class _ViewFunc(Generic[_TensorT]):
 
 
 @dataclass(frozen=True)
-class _FakeTensorViewFunc(_ViewFunc["FakeTensor"]):
+class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
     @override
     def apply(
         self,
@@ -525,7 +525,7 @@ class _FakeTensorViewFunc(_ViewFunc["FakeTensor"]):
 
 
 @dataclass(frozen=True)
-class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
+class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
             torch.Tensor,
@@ -547,11 +547,27 @@ class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
+# A callback where the device is either optional or required.
+# All of these satisfy this protocol:
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str])
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
+#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
+    def __call__(
+        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+    ) -> _TensorT_cov:
+        ...
+
+
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: Union[torch.device, str]
 
 
-class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
+# A callback where the device may not be provided (is optional).
+# All of these satisfy this protocol:
+#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
+#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
+class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self,
         arg: Callable[[], torch.Tensor],
@@ -645,7 +661,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
     fake_mode: Optional[FakeTensorMode] = None
-    view_func: Optional[_ViewFunc] = None
+    view_func: Optional[ViewFunc] = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
@@ -838,11 +854,13 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback: _MetaTensorCallback[_TensorT],
+        callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
     ) -> _TensorT:
-        callback = functools.partial(callback, device=t.device)
+        callback: _MetaTensorCallbackOptDevice = functools.partial(
+            callback_, device=t.device
+        )
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -988,7 +1006,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],
-                callback: _MetaTensorCallback[_TensorT],
+                callback: _MetaTensorCallbackOptDevice[_TensorT],
                 source: torch._guards.Source,
             ) -> _TensorT:
                 # We are hitting plain meta_desc tensor so actually
@@ -1223,7 +1241,7 @@ class MetaConverter(Generic[_TensorT]):
                 shape_env: Optional[
                     torch.fx.experimental.symbolic_shapes.ShapeEnv
                 ] = shape_env,
-                callback: _MetaTensorCallback[_TensorT] = callback,
+                callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
             ) -> torch.Tensor:
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:

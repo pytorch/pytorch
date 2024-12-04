@@ -1165,9 +1165,9 @@ class _WireProtocolInput:
         Turns this object into a _WireProtocolPickledInput which can be
         directly transferred across a stream.
         """
-        from torch.fx._graph_pickler import _GraphPickler
+        from torch.fx._graph_pickler import GraphPickler
 
-        return _WireProtocolPickledInput(_GraphPickler.dumps(self))
+        return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
 @dataclass
@@ -1178,11 +1178,10 @@ class _WireProtocolPickledInput:
         """
         Turn this streamable object back into a _WireProtocolInput.
         """
-        from torch.fx._graph_pickler import _GraphUnpickler, _UnpickleState
+        from torch.fx._graph_pickler import GraphPickler
 
         fake_mode = _current_fake_mode()
-        state = _UnpickleState(fake_mode)
-        result = _GraphUnpickler.loads(self.value, state)
+        result = GraphPickler.loads(self.value, fake_mode)
         assert isinstance(result, _WireProtocolInput)
         return result
 
@@ -1203,11 +1202,11 @@ class _WireProtocolOutput:
         Turns this object into a _WireProtocolPickledOutput which can be
         directly transferred across a stream.
         """
-        from torch.fx._graph_pickler import _GraphPickler
+        from torch.fx._graph_pickler import GraphPickler
 
         if isinstance(self.graph, CompiledFxGraph):
             self.graph.prepare_for_serialization()
-        return _WireProtocolPickledOutput(_GraphPickler.dumps(self))
+        return _WireProtocolPickledOutput(GraphPickler.dumps(self))
 
 
 @dataclass
@@ -1218,11 +1217,10 @@ class _WireProtocolPickledOutput:
         """
         Turn this streamable object back into a _WireProtocolOutput.
         """
-        from torch.fx._graph_pickler import _GraphUnpickler, _UnpickleState
+        from torch.fx._graph_pickler import GraphPickler
 
         fake_mode = _current_fake_mode()
-        state = _UnpickleState(fake_mode)
-        result = _GraphUnpickler.loads(self.value, state)
+        result = GraphPickler.loads(self.value, fake_mode)
         assert isinstance(result, _WireProtocolOutput)
         if isinstance(result.graph, CompiledFxGraph):
             # NOTE: This is kind of slow in the async case. Check that it's
@@ -1562,7 +1560,7 @@ def fx_codegen_and_compile(
         scheme = _DebugSerdeFxCompile()
     else:
         scheme = _InProcessFxCompile()
-    if should_use_fx_graph_async_compile():
+    if True: # should_use_fx_graph_async_compile():
         try:
             FxGraphCache._check_for_hop(gm)
 
@@ -1576,9 +1574,7 @@ def fx_codegen_and_compile(
             # think the overhead of sending the graph to a remote worker will be
             # more than just compiling ourselves.
 
-            # scheme = _DebugFileFxCompile()
-            scheme = _DebugFxCompile()
-            # scheme = _SubprocessFxCompile()
+            scheme = _SubprocessFxCompile()
         except BypassFxGraphCache as e:
             log.debug("Skipping async compile: %s", e)
 

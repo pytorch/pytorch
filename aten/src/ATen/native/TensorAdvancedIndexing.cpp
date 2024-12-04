@@ -1047,7 +1047,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
             scalar_t *self_ip = result_ptr + self_i * result_stride;
-            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
+            *self_ip += c10::load(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });

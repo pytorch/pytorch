@@ -113,3 +113,7 @@ Prob. move ahead w/ AOTI
 Use the AOTI compiled products
 Useful to have end-to-end.
 = async + parallel
+
+12/4/24 Meeting w/ Ed
+
+Use AOTI - if loading the triton cache is a blocker
