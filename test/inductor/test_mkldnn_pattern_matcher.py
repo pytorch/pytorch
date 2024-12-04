@@ -3208,7 +3208,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("has_bias", [True, False])
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("dynamic", [True, False])
-    def test_da8w8_sym_act_sym_wgt_with_int_mm(self, has_bias, dtype, dynamic):
+    @parametrize("reshape_a", [True, False])
+    def test_da8w8_sym_act_sym_wgt_with_int_mm(
+        self, has_bias, dtype, dynamic, reshape_a
+    ):
         r"""
         This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
         when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
@@ -3241,7 +3244,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
 
             def forward(self, a):
-                c = torch._int_mm(a, self.b)
+                if reshape_a:
+                    a_reshaped = a.reshape(-1, a.size(-1))
+                else:
+                    a_reshaped = a
+                c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
                 a_scale = self.a_scale.expand(c.shape)
                 c = c * a_scale
