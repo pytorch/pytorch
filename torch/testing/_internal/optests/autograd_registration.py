@@ -83,7 +83,6 @@ def autograd_registration_check(op, args, kwargs):
 
     # Determine which AutogradBACKEND key to check
     all_device_types = {arg.device.type for arg in all_tensors}
-    # Added mps device.
     if not all_device_types.issubset(["cpu", "cuda", "mps"]):
         # Don't want to support other keys yet
         raise NotImplementedError(
