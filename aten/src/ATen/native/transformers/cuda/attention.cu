@@ -814,7 +814,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                       philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   Tensor debugmask;
 
   run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
@@ -913,7 +913,7 @@ _flash_attention_forward(
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
   std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
@@ -1160,7 +1160,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
@@ -1293,7 +1293,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (window_size.has_value()) {
       p.window_size = *window_size;
     }
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
