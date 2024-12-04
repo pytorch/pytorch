@@ -165,11 +165,15 @@ class Benchmarker:
     @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
-    
+
     @maybe_time
     @count
-    def benchmark_many_gpu(self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any) -> List[float]:
-        return [self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables]
+    def benchmark_many_gpu(
+        self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
+    ) -> List[float]:
+        return [
+            self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
+        ]
 
 
 class TritonBenchmarker(Benchmarker):
@@ -255,7 +259,7 @@ def maybe_fallback(
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        fn_class = inspect._findclass(fn)
+        fn_class = inspect._findclass(fn)  # type: ignore
         feature_name = fn_class.feature_name
         if not is_feature_enabled(feature_name):
             fallback_fn = getattr(super(fn_class, self), fn.__name__)
@@ -424,7 +428,8 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         return [self.get_event_pairs(num_callables) for _ in range(iters)]
 
     def get_interleaved_event_pairs_min_timing(
-        self: Self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]
+        self: Self,
+        interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
         """Get the interleaved minimum timings, in milliseconds, for an interleaved
         grouping of CUDA event pairs.
@@ -494,7 +499,9 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         buffer.zero_()
 
         # estimate the runtime of `_callable`
-        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
         # we want to sleep here and not in `benchmark_gpu` because we may return these estimated
         # timings if we are ranking. 100us per iteration is good enough for most cases, this is
         # really a "best effort" type of thing since we have no way of knowing how long to actually
@@ -510,7 +517,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
                 end_event.record()
         cpu_t_per_iter = (time.perf_counter() - start_t) * MILLISECONDS_PER_SECOND
         torch.cuda.synchronize()
-        estimated_timings = self.get_interleaved_min_timings_ms(
+        estimated_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
         )
 
@@ -549,7 +556,9 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
             buffer.zero_()
 
         # benchmark `_callable`
-        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
         # this sleep duration should be a close enough approximation to more or less overlap
         # the time spent on the CPU queueing up all the L2 cache flushes and kernel calls
         torch.cuda._sleep(int((cpu_t_per_iter * len(callables) * benchmark_iters) / self.gpu_t_per_clock_cycle))
@@ -560,7 +569,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
                 _callable()
                 end_event.record()
         torch.cuda.synchronize()
-        benchmarked_timings = self.get_interleaved_min_timings_ms(
+        benchmarked_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
         )
 
