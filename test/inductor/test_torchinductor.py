@@ -3756,7 +3756,12 @@ class CommonTemplate:
         with torch.no_grad():
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
-            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+            if config.cpp_wrapper:
+                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                    code[0]
+                )
+            else:
+                FileCheck().check_not(".run(").check(".convolution(").run(code[0])
 
         # in out should do channels last in inference
         in_channels = 8
@@ -3776,7 +3781,7 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check(".convolution(").run(code[0])
+                FileCheck().check(".run(").check("convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
