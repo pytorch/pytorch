@@ -90,9 +90,7 @@ def _replace_with_hop(node: torch.fx.Node) -> None:
         exit_autocast_node = autocast_nodes[-1]
         _check_valid_autocast_block(enter_autocast_node, exit_autocast_node)
 
-        _replace_with_hop_helper(
-            node, enter_autocast_node, _is_autocast_node, wrap_with_autocast
-        )
+        _replace_with_hop_helper(node, enter_autocast_node, wrap_with_autocast)
         sub_graph.erase_node(exit_autocast_node)
         sub_graph.erase_node(enter_autocast_node)
 
