@@ -168,8 +168,7 @@ GEM
       trailblazer-option (>= 0.1.1, < 0.2.0)
       uber (< 0.2.0)
     retriable (3.1.2)
-    rexml (3.3.3)
-      strscan
+    rexml (3.3.9)
     rouge (2.0.7)
     ruby2_keywords (0.0.5)
     rubyzip (2.3.2)
@@ -182,7 +181,6 @@ GEM
     simctl (1.6.8)
       CFPropertyList
       naturally
-    strscan (3.1.0)
     terminal-notifier (2.0.0)
     terminal-table (1.8.0)
       unicode-display_width (~> 1.1, >= 1.1.1)
@@ -196,7 +194,7 @@ GEM
       unf_ext
     unf_ext (0.0.8.2)
     unicode-display_width (1.8.0)
-    webrick (1.7.0)
+    webrick (1.8.2)
     word_wrap (1.0.0)
     xcodeproj (1.19.0)
       CFPropertyList (>= 2.3.3, < 4.0)

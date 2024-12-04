@@ -194,8 +194,9 @@ struct CppNode : public Node {
     if (!T::is_traceable) {
       throw std::runtime_error(
           std::string(
-              "compiled_args not implemented for non-traceable node: ") +
-          name());
+              "Attempting to trace a potentially unsafe C++ autograd function: ") +
+          name() +
+          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
     }
 
     // although neither of the 2 methods below have uniqueness guarantees

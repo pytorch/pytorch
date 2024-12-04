@@ -568,10 +568,11 @@ def _root_pre_forward(
             state._needs_buffer_dtype_restore_check = False
 
         if state.forward_prefetch:
-            handles = []
-            for fsdp_state in state._all_fsdp_states:
-                if fsdp_state._handle:
-                    handles.append(fsdp_state._handle)
+            handles = [
+                fsdp_state._handle
+                for fsdp_state in state._all_fsdp_states
+                if fsdp_state._handle
+            ]
             for handle in handles:
                 handle._needs_pre_forward_unshard = True
                 handle._prefetched = False

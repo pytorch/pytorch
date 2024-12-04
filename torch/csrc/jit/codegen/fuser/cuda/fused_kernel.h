@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 
@@ -50,11 +49,11 @@ struct TORCH_CUDA_CU_API FusedKernelCUDA
   // Note: per device to store device properties and compute launch heuristics
   //  Acquiring these values at launch time would be too slow
   at::DeviceIndex device_;
-  int maxBlocks_;
-  cudaDeviceProp* prop_;
+  int maxBlocks_{};
+  cudaDeviceProp* prop_{};
   std::vector<char> ptx_;
-  CUmodule module_;
-  CUfunction function_;
+  CUmodule module_{};
+  CUfunction function_{};
 };
 
 } // namespace torch::jit::fuser::cuda

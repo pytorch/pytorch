@@ -312,7 +312,6 @@ class Wishart(ExponentialFamily):
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1)
             * (

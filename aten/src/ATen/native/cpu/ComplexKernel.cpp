@@ -25,7 +25,7 @@ void polar_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(complex_stub, &complex_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(polar_stub, &polar_kernel);
+REGISTER_DISPATCH(complex_stub, &complex_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(polar_stub, &polar_kernel)
 
 } // namespace at::native

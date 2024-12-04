@@ -7,8 +7,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/metrics.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct TORCH_API TrieNode {
   static size_t GetNextUniqueId() {
@@ -75,5 +74,4 @@ NodePtr LookupNodeFromTrieCache(Args&&... args) {
   return nullptr;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

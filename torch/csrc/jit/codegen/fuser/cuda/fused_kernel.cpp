@@ -16,13 +16,9 @@
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
-#include <tuple>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace cuda {
+namespace torch::jit::fuser::cuda {
 
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
 const at::cuda::NVRTC& nvrtc() {
@@ -85,7 +81,6 @@ void codegenOutputQuery(
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FusedKernelCUDA::FusedKernelCUDA(
     at::DeviceIndex device,
     std::string name,
@@ -114,6 +109,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 
   // Acquires device and NVRTC properties (for compile arch and occupancy
   // calculations)
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   prop_ = at::cuda::getCurrentDeviceProperties();
   int major = 0, minor = 0;
   bool compile_to_sass = false;
@@ -197,8 +193,7 @@ static int ceilDiv(const int a, const int b) {
 void FusedKernelCUDA::launch_raw(
     const uint32_t numel,
     std::vector<void*>& arguments) const {
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  at::cuda::CUDAGuard{device_};
+  at::cuda::CUDAGuard guard{device_};
   // Hacked at::DeviceGuard (see note above)
   const auto prior_device = at::cuda::current_device();
   at::cuda::set_device(device_);
@@ -269,7 +264,4 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
 
 RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
-} // namespace cuda
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::cuda

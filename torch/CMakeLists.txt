@@ -309,6 +309,11 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+torch_compile_options(torch_python)  # see cmake/public/utils.cmake
+if(NOT WIN32)
+  target_compile_options(torch_python PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
+endif()
 
 if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
 
@@ -337,11 +342,17 @@ endif()
 
 # in case of the split build we need to add compile definitions
 if(BUILD_LIBTORCHLESS)
+
+  if(USE_UCC)
+    target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+    target_compile_definitions(torch_python PRIVATE USE_UCC)
+  endif()
+
   if(USE_UCC AND USE_C10D_UCC)
     target_compile_definitions(torch_python PRIVATE USE_C10D_UCC)
   endif()
 
-  if(USE_UCC AND USE_C10D_NCCL)
+  if(USE_NCCL AND USE_C10D_NCCL)
     target_compile_definitions(torch_python PRIVATE USE_C10D_NCCL)
   endif()
 
@@ -409,6 +420,12 @@ if(USE_ROCM)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
 endif()
 
+# Preserve XPU arch flags
+if(USE_XPU)
+  string(REPLACE "," " " _ARCH_FLAGS_readable "${TORCH_XPU_ARCH_LIST}")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python PRIVATE ${TORCH_LIB} ${TORCH_PYTHON_LINK_LIBRARIES})
@@ -450,20 +467,16 @@ else()
   set(TORCH_VERSION_DEBUG 0)
 endif()
 
-add_custom_command(
-  OUTPUT ${TORCH_SRC_DIR}/version.py
-  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
-  COMMAND
-    "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
-      --is-debug=${TORCH_VERSION_DEBUG}
-      --cuda-version=${CUDA_VERSION}
-      --hip-version=${HIP_VERSION}
-  DEPENDS ${TOOLS_PATH}/generate_torch_version.py
-  WORKING_DIRECTORY ${TORCH_ROOT}
-)
 add_custom_target(
   gen_torch_version ALL
-  DEPENDS ${TORCH_SRC_DIR}/version.py
+  "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+    --is-debug=${TORCH_VERSION_DEBUG}
+    --cuda-version=${CUDA_VERSION}
+    --hip-version=${HIP_VERSION}
+    --xpu-version=${SYCL_COMPILER_VERSION}
+  BYPRODUCTS ${TORCH_SRC_DIR}/version.py
+  COMMENT "Regenerating version file..."
+  WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_dependencies(torch_python gen_torch_version)
 

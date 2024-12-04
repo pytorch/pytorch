@@ -501,6 +501,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
         self.is_user_annotation: Optional[bool] = is_user_annotation
+        self.self_cpu_percent = -1
+        self.total_cpu_percent = -1
+        self.total_device_percent = -1
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -853,10 +856,9 @@ def _build_table(
     flops_column_width = DEFAULT_COLUMN_WIDTH
 
     src_column_width = None
-    stacks = []
-    for evt in events:
-        if evt.stack is not None and len(evt.stack) > 0:
-            stacks.append(evt.stack)
+    stacks = [
+        evt.stack for evt in events if evt.stack is not None and len(evt.stack) > 0
+    ]
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = (
@@ -944,10 +946,7 @@ def _build_table(
 
     if with_flops:
         # Auto-scaling of flops header
-        raw_flops = []
-        for evt in events:
-            if evt.flops > 0:
-                raw_flops.append(evt.flops)
+        raw_flops = [evt.flops for evt in events if evt.flops > 0]
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
             headers.append(f"Total {flops_header}")
@@ -1017,26 +1016,33 @@ def _build_table(
         name = evt.key
         if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
             name = name[: (max_name_column_width - 3)] + "..."
+        evt.self_cpu_percent = _format_time_share(
+            evt.self_cpu_time_total, sum_self_cpu_time_total
+        )
+        evt.total_cpu_percent = (
+            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
+            if not evt.is_async
+            else 0
+        )
         row_values = [
             name,
             # Self CPU total %, 0 for async events.
-            _format_time_share(evt.self_cpu_time_total, sum_self_cpu_time_total),
+            evt.self_cpu_percent,
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
-            _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total)
-            if not evt.is_async
-            else 0,
+            evt.total_cpu_percent,
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
         if has_device_time:
+            evt.total_device_percent = _format_time_share(
+                evt.self_device_time_total, sum_self_device_time_total
+            )
             row_values.extend(
                 [
                     evt.self_device_time_total_str,
                     # device time total %
-                    _format_time_share(
-                        evt.self_device_time_total, sum_self_device_time_total
-                    ),
+                    evt.total_device_percent,
                     evt.device_time_total_str,
                     evt.device_time_str,  # device time avg
                 ]

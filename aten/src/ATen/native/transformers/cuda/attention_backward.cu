@@ -77,7 +77,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
@@ -195,7 +195,28 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     const int64_t num_heads = query.size(1);
     const int64_t head_dim_qk = query.size(3);
     const int64_t head_dim_v = value.size(3);
-    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    const int64_t max_seqlen_batch_q = query.size(2);
+    const int64_t max_seqlen_batch_k = key.size(2);
+
+    // This is needed because SaveVariable automatically converts
+    // std::optional to undefined tensor
+    std::optional<Tensor> attn_bias_;
+    if (attn_bias.defined()) {
+      attn_bias_ = attn_bias;
+    }
+    if (attn_bias_.has_value()) {
+      const auto bias_dim = attn_bias_.value().dim();
+      if (bias_dim == 2) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else if (bias_dim == 3) {
+        attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+      } else {
+        TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+        attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+      }
+    }
+
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
     auto dv = at::empty_like(value);
@@ -211,6 +232,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         query /*const Tensor& q*/,
                         key /*const Tensor& k*/,
                         value /*const Tensor& v*/,
+                        attn_bias_ /*const std::optional<Tensor>& attn_bias*/,
                         out /*const Tensor& o*/,
                         grad_out/*const Tensor& dO*/,
                         logsumexp.unsqueeze(-1)/*const Tensor& softmaxstats*/,
@@ -219,7 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
                         dv/*Tensor& dV*/,
                         philox_seed/*Tensor& dropoutseed*/,
                         philox_offset/*Tensor& dropoutoffset*/);
-    return std::make_tuple(dq, dk, dv);
+    return std::make_tuple(std::move(dq), std::move(dk), std::move(dv));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -394,9 +416,10 @@ _efficient_attention_backward(
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
     TORCH_CHECK(false,
-                "[AOTriton] Accelerated SDPA only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
+                "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
+                " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   bool is_causal;
   if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
     is_causal = true;
@@ -419,6 +442,7 @@ _efficient_attention_backward(
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
   using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
   err = attn_bwd(mk_aotensor(q_t, "q"),
@@ -435,8 +459,9 @@ _efficient_attention_backward(
                  mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
-                 rng_engine_inputs.seed_.val,
-                 rng_engine_inputs.offset_.val,
+                 mk_aoscalartensor(philox_seed),
+                 mk_aoscalartensor(philox_offset),
+                 0,
                  is_causal,
                  stream);
 #else
@@ -513,7 +538,7 @@ _efficient_attention_backward(
     p.num_batches = cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     p.num_heads = nH;
     p.custom_mask_type = custom_mask_type;
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
     if (cu_seqlens_q.has_value()) {
       p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
       p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();

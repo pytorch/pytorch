@@ -36,6 +36,28 @@ __all__ = [
 PROFILER_STEP_NAME = "ProfilerStep"
 
 
+class _NumpyEncoder(json.JSONEncoder):
+    """
+    Json encoder for numpy types (np.int, np.float, np.array etc.)
+    Returns default encoder if numpy is not available
+    """
+
+    def default(self, obj):
+        """Encode NumPy types to JSON"""
+        try:
+            import numpy as np
+        except ImportError:
+            return json.JSONEncoder.default(self, obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return json.JSONEncoder.default(self, obj)
+
+
 def supported_activities():
     """
     Returns a set of supported profiler tracing activities.
@@ -119,6 +141,7 @@ class _KinetoProfile:
         experimental_config: Optional[_ExperimentalConfig] = None,
         execution_trace_observer: Optional[_ITraceObserver] = None,
         acc_events: bool = False,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -129,6 +152,7 @@ class _KinetoProfile:
         self.experimental_config = experimental_config
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
+        self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
@@ -164,6 +188,7 @@ class _KinetoProfile:
                 use_kineto=True,
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
+                custom_trace_id_callback=self.custom_trace_id_callback,
             )
         self.profiler._prepare_trace()
 
@@ -187,7 +212,9 @@ class _KinetoProfile:
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:
-                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+                self.add_metadata_json(
+                    "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
+                )
 
             if hasattr(torch, "_inductor"):
                 import torch._inductor.config as inductor_config
@@ -218,11 +245,11 @@ class _KinetoProfile:
         """
         assert self.profiler
         if path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
+            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
             fp.close()
             retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name) as fin:
-                with gzip.open(path, "wt") as fout:
+            with open(fp.name, "rb") as fin:
+                with gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
             return retvalue
@@ -407,7 +434,13 @@ class ProfilerAction(Enum):
 
 
 def schedule(
-    *, wait: int, warmup: int, active: int, repeat: int = 0, skip_first: int = 0
+    *,
+    wait: int,
+    warmup: int,
+    active: int,
+    repeat: int = 0,
+    skip_first: int = 0,
+    skip_first_wait: int = 0,
 ) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
@@ -415,6 +448,13 @@ def schedule(
     then do the active recording for the next ``active`` steps and then repeat the cycle starting with ``wait`` steps.
     The optional number of cycles is specified with the ``repeat`` parameter, the zero value means that
     the cycles will continue until the profiling is finished.
+
+    The ``skip_first_wait`` parameter controls whether the first ``wait`` stage should be skipped.
+    This can be useful if a user wants to wait longer than ``skip_first`` between cycles, but not
+    for the first profile. For example, if ``skip_first`` is 10 and ``wait`` is 20, the first cycle will
+    wait 10 + 20 = 30 steps before warmup if ``skip_first_wait`` is zero, but will wait only 10
+    steps if ``skip_first_wait`` is non-zero. All subsequent cycles will then wait 20 steps between the
+    last active and warmup.
     """
 
     def schedule_fn(step: int) -> ProfilerAction:
@@ -423,6 +463,9 @@ def schedule(
             return ProfilerAction.NONE
         else:
             step -= skip_first
+        # If wait >> skip_first and we want to grab profiling early, shift left by wait if skip_first_wait is True
+        if skip_first_wait != 0:
+            step += wait
         num_steps = wait + warmup + active
         if repeat > 0 and step / num_steps >= repeat:
             return ProfilerAction.NONE
@@ -637,6 +680,7 @@ class profile(_KinetoProfile):
         acc_events: bool = False,
         # deprecated:
         use_cuda: Optional[bool] = None,
+        custom_trace_id_callback: Optional[Callable[[], str]] = None,
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
@@ -661,6 +705,7 @@ class profile(_KinetoProfile):
             experimental_config=experimental_config,
             execution_trace_observer=execution_trace_observer,
             acc_events=acc_events,
+            custom_trace_id_callback=custom_trace_id_callback,
         )
 
         if schedule:
@@ -782,6 +827,20 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
+    def set_custom_trace_id_callback(self, callback):
+        """
+        Sets a callback to be called when a new trace ID is generated.
+        """
+        self.custom_trace_id_callback = callback
+
+    def get_trace_id(self):
+        """
+        Returns the current trace ID.
+        """
+        if self.profiler is None:
+            return None
+        return self.profiler.trace_id
+
     def _trace_ready(self):
         if self.on_trace_ready:
             self.on_trace_ready(self)
@@ -847,7 +906,7 @@ class ExecutionTraceObserver(_ITraceObserver):
 
             kernel_files = [
                 v.__file__
-                for v in PyCodeCache.cache.values()
+                for v in PyCodeCache.modules
                 if getattr(v, "__file__", None) is not None
             ]
             work_dir, file_name = os.path.split(self._output_file_path)
@@ -860,7 +919,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             for kernel_file in kernel_files:
                 if kernel_file is None:
                     continue
-                path, name = os.path.split(kernel_file)
+                name = os.path.basename(kernel_file)
                 dst = os.path.join(resource_dir, name)
                 shutil.copyfile(kernel_file, dst)
 
@@ -931,5 +990,6 @@ class ExecutionTraceObserver(_ITraceObserver):
         ):
             pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
             torch.autograd._record_function_with_args_enter(
-                "## process_group:init ##", json.dumps(pg_config_info)
+                "## process_group:init ##",
+                json.dumps(pg_config_info, cls=_NumpyEncoder),
             )

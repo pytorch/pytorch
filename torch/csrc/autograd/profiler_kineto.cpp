@@ -261,7 +261,22 @@ struct AddGenericMetadata : public MetadataBase {
 
     // Add metadata for kwinputs if exist
     for (const auto& [key, val] : op_event.kwinputs_) {
-      addMetadata(key, ivalueToStr(val));
+      if (key == "stream" && !val.isInt()) {
+        LOG(WARNING) << "Inputted stream is not an int for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+
+      // Until needed, lets limit the kwargs to only ints, doubles, strings and
+      // bools
+      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool()) {
+        LOG(WARNING) << "Inputted kwarg: " << key
+                     << " is not an int, double, string, or bool for op: "
+                     << op_event.name_ << " skipping";
+        continue;
+      }
+      bool isString = val.isString();
+      addMetadata(key, ivalueToStr(val, isString));
     }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
@@ -487,6 +502,15 @@ void onFunctionExit(
   }
   kineto_ctx_ptr->event_->basic_fields_.end_tid_ =
       at::RecordFunction::currentThreadId();
+  if (fn.isNcclMeta()) {
+    auto& extra_meta = *(kineto_ctx_ptr->event_->extra_nccl_meta_);
+    // Record only the outputs in this exit callback of the record function
+    torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
+        true, false, false, true};
+    auto additonal_nccl_meta =
+        torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig);
+    extra_meta.insert(additonal_nccl_meta.begin(), additonal_nccl_meta.end());
+  }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
       auto fallback = kineto_ctx_ptr->fallback_;
@@ -588,7 +612,8 @@ void prepareProfiler(
           at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
           c10::get_privateuse1_backend() != "privateuseone"),
       activities,
-      config.experimental_config);
+      config.experimental_config,
+      config.trace_id);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
@@ -669,6 +694,11 @@ void toggleCollectionDynamic(
       activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
     LOG(WARNING)
         << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+  } else if (
+      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
+    LOG(WARNING)
+        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
   }
   for (auto act : activities) {
     if (act == torch::autograd::profiler::ActivityType::CUDA) {

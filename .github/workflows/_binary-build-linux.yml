@@ -271,7 +271,9 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
-            docker exec -t "${container_name}" bash -c "bash /builder/aarch64_linux/aarch64_ci_build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
+          elif [[ ${{ inputs.PACKAGE_TYPE }} == "manywheel" || ${{ inputs.PACKAGE_TYPE }} == "libtorch" ]]; then
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           else
             docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
           fi
@@ -283,7 +285,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4.4.0
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}
