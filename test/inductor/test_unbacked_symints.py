@@ -300,5 +300,5 @@ instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu(0)):
+    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu()):
         run_tests()
