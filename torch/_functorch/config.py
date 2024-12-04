@@ -215,6 +215,9 @@ generate_fake_kernels_from_real_mismatches = False
 # Used for tests
 strict_autograd_cache = False
 
+# See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+disable_guess_zero_tangent_for_mutated_input_subclass = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

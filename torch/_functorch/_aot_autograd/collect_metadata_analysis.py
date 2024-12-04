@@ -668,11 +668,12 @@ from a multi-output view call"
                 )
 
         f_input_tangents = [
+            # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
             # Generally when creating tangents to trace with, we assume that tangents will have
             # the same subclass-ness as their forward outs
             # however: for tangents that correspond to input mutations, in practice it is more likely
             # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
-            # to assume that the these tangents should always be plaint tensors.
+            # to assume that these tangents should always be plaint tensors.
             # Example:
             #  def f(x):
             #      x.mul_(2)
@@ -681,9 +682,24 @@ from a multi-output view call"
             #  out.sum().backward()
             # In the above code, we will have a tangent "x_updated_tangent",
             # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
-            _plain_fake_tensor_like_subclass(inp)
-            if is_traceable_wrapper_subclass(inp)
-            else inp
+            #
+            # However, there are exceptions to this logic. If a view is created from mutated input and is used in backward,
+            # The tangent for this subclass input will be a subclass tensor.
+            # Example:
+            #  def f(a, b):
+            #      a.mul_(2)
+            #      b.mul_(3)
+            #      return b.view(b.shape), a + b
+            # a_out, b_out = f(..., Subclass)
+            # (a * b).sum().backward()
+            #
+            # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
+            (
+                _plain_fake_tensor_like_subclass(inp)
+                if is_traceable_wrapper_subclass(inp)
+                and not torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
+                else inp
+            )
             for inp, info in zip(flat_f_args, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
