@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -86,7 +87,7 @@ class ComposabilityTest(MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
-    @parametrize("dp_type", ["DDP", "FSDP"])
+    @parametrize("dp_type", ["DDP"] if TEST_WITH_ROCM else ["DDP", "FSDP"])
     @parametrize(
         "ScheduleClass",
         [
