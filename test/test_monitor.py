@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timedelta
 
 from torch.monitor import (
+    _WaitCounter,
     Aggregation,
     Event,
     log_event,
@@ -13,9 +14,9 @@ from torch.monitor import (
     Stat,
     TensorboardEventHandler,
     unregister_event_handler,
-    _WaitCounter,
 )
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
 
 class TestMonitor(TestCase):
     def test_interval_stat(self) -> None:
@@ -110,10 +111,10 @@ class TestMonitorTensorboard(TestCase):
     def setUp(self):
         global SummaryWriter, event_multiplexer
         try:
-            from torch.utils.tensorboard import SummaryWriter
             from tensorboard.backend.event_processing import (
                 plugin_event_multiplexer as event_multiplexer,
             )
+            from torch.utils.tensorboard import SummaryWriter
         except ImportError:
             return self.skipTest("Skip the test since TensorBoard is not installed")
         self.temp_dirs = []
@@ -154,13 +155,17 @@ class TestMonitorTensorboard(TestCase):
             for tag in run_dict
         }
         scalars = {
-            tag: [e.tensor_proto.float_val[0] for e in events] for tag, events in raw_result.items()
+            tag: [e.tensor_proto.float_val[0] for e in events]
+            for tag, events in raw_result.items()
         }
-        self.assertEqual(scalars, {
-            "asdf.sum": [10],
-            "asdf.count": [5],
-        })
+        self.assertEqual(
+            scalars,
+            {
+                "asdf.sum": [10],
+                "asdf.count": [5],
+            },
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
