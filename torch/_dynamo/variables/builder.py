@@ -2436,7 +2436,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
-    elif istype(example_value, int) and (
+    elif isinstance(example_value, int) and (
         proxy.node.target
         in [
             torch.sym_int,
@@ -2477,8 +2477,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         ]
         + list(supported_const_comparison_op_values.keys())
     ):
-        if proxy.node.target is operator.eq:
-            breakpoint()
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
