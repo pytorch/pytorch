@@ -665,7 +665,7 @@ def _get_output_act_obs_or_fq(
     named_modules: Dict[str, torch.nn.Module],
     obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> ObserverOrFakeQuantize:
+) -> Optional[ObserverOrFakeQuantize]:
     """Get the constructor for observer or fake quant object for
     the argument in the original graph as the output of previous node,
     skipping inserted observers
