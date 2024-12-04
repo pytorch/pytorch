@@ -926,8 +926,7 @@ ScalingType get_scaling_type(
   // Check for RowWise scaling
   if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
       scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
-#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
-    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+#if !defined(_MSC_VER)
     TORCH_CHECK(
         scale_a.is_contiguous() && scale_b.is_contiguous(),
         "Both scale_a and scale_b must be contiguous for RowWise scaling.");
@@ -1049,6 +1048,19 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+
+  // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
+  // do not support this case).
+  if (mat1_sizes[0] == 0 || mat1_sizes[1] == 0 || mat2_sizes[1] == 0) {
+    // `out` was created with `at::empty`. In the case where we are multiplying
+    // MxK by KxN and K is the zero dim, we need to initialize here to properly
+    // return a tensor of zeros.
+    if (mat1_sizes[1] == 0) {
+      out.zero_();
+    }
+
+    return out;
+  }
 
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {

@@ -44,7 +44,6 @@ from torch._C._dynamo.guards import (
     check_type_id,
     dict_version,
     DictGuardManager,
-    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
     profile_guard_manager,
@@ -83,7 +82,6 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
-    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -129,6 +127,7 @@ from .utils import (
     istype,
     key_is_id,
     key_to_id,
+    normalize_range_iter,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -421,6 +420,7 @@ def _get_closure_vars():
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: a in b,
             "___tuple_iterator_len": tuple_iterator_len,
+            "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
@@ -968,14 +968,6 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, AutoDerefLocalSource):
-            # Guard checks run on f_locals, in which the python level
-            # auto-dereferenced cell objects are also dereferenced (e.g., rather
-            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
-            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
-            # base guard manager.
-            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
-            out = base_guard_manager
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1710,6 +1702,24 @@ class GuardBuilder(GuardBuilderBase):
             tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
         )
 
+    def RANGE_ITERATOR_MATCH(self, guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        t = type(value)
+
+        code = []
+        normalized_range_iter = normalize_range_iter(value)
+        code.append(f"___normalize_range_iter({ref}) == {normalized_range_iter}")
+        self._set_guard_export_info(guard, code)
+
+        t = type(value)
+        obj_id = self.id_ref(t, f"type({guard.name})")
+
+        start, stop, step = normalized_range_iter
+        self.get_guard_manager(guard).add_range_iterator_match_guard(
+            start, stop, step, obj_id, get_verbose_code_parts(code, guard)
+        )
+
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
         ref_a = self.arg_ref(guard)
@@ -2080,10 +2090,11 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        supports_weakref = (
+            getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
+        )
         # See D64140537 for why we are checking for tuple.
-        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, (enum.Enum, tuple)
-        ):
+        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
