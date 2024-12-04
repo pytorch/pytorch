@@ -388,7 +388,7 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
                 # allow the SampleInput to tell us how to canonicalize the dim kwargs
                 ndim = nt_inp._ndim if hasattr(nt_inp, "_ndim") else nt_inp.dim()
                 kwargs[argname] = _outer_to_inner_dim(
-                    ndim, kwargs[argname], canonicalize=True
+                    ndim, kwargs[argname], nt_inp._ragged_idx, canonicalize=True
                 )
 
         out_ref_component = op.op(inp, *args, **kwargs)
@@ -463,7 +463,7 @@ def reduction_reference(op, sample):
         ref_kwargs = dict(sample.kwargs)
         assert dimlist_argname is not None
         ref_kwargs[dimlist_argname] = _outer_to_inner_dim(
-            sample.input.dim(), dim, canonicalize=True
+            sample.input.dim(), dim, sample.input._ragged_idx, canonicalize=True
         )
         out = op.op(sample.input.values(), *sample.args, **ref_kwargs)
         if keepdim:
@@ -828,8 +828,10 @@ def batchwise_reference_chunk(op, sample):
 
 
 def batchwise_reference_narrow(op, sample):
-    # TODO: write this!
-    raise NotImplementedError
+    start, length = sample.kwargs["start"], sample.kwargs["length"]
+    components = list(sample.input.unbind())
+    narrowed = components[start : start + length]
+    return torch.nested.nested_tensor(narrowed, layout=torch.jagged)
 
 
 def batchwise_reference_select(op, sample):

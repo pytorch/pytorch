@@ -172,7 +172,10 @@ def insert_deferred_runtime_asserts(
             node.args,
         )
         try:
-            node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
+            target = node.target
+            if isinstance(node.target, str):
+                target = getattr(torch.Tensor, node.target)
+            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
             # e.g. with NestedTensors + sym_size.int via match_symbol().

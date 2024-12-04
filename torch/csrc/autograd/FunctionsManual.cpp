@@ -2164,6 +2164,30 @@ Tensor split_backward(
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
+Tensor _nested_narrow_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    int64_t dim,
+    const c10::SymInt& start,
+    const c10::SymInt& length) {
+  Tensor grad_input = at::zeros_like(self);
+  Tensor narrowed_grad = grad_input.narrow_symint(dim, start, length);
+  Tensor grad_values = at::_nested_get_values(grad);
+  Tensor narrowed_grad_values = at::_nested_get_values(narrowed_grad);
+  TORCH_INTERNAL_ASSERT(
+      grad_values.dim() == narrowed_grad_values.dim(),
+      "Bug encountered in _nested_narrow_backward(); please open an issue");
+  for (int i = 0; i < grad_values.dim(); ++i) {
+    auto narrowed_grad_size = narrowed_grad_values.sym_size(i);
+    auto grad_size = grad_values.sym_size(i);
+    TORCH_SYM_CHECK(
+        narrowed_grad_size.sym_eq(grad_size),
+        "Bug encountered in _nested_narrow_backward(); please open an issue");
+  }
+  narrowed_grad_values.copy_(grad_values);
+  return grad_input;
+}
+
 Tensor max_pool_double_backward(
     const Tensor& grad,
     const Tensor& indices,

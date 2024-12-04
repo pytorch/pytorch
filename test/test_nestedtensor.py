@@ -6021,6 +6021,51 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    @torch._dynamo.utils.disable_cache_limit()
+    @dtypes(torch.float32)
+    @parametrize("env", ["eager", "compile", "compile_dynamic"])
+    def test_narrow_on_batch_dim(self, device, dtype, env):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5, device=device, dtype=dtype),
+                torch.randn(3, 5, device=device, dtype=dtype),
+                torch.randn(4, 5, device=device, dtype=dtype),
+                torch.randn(6, 5, device=device, dtype=dtype),
+                torch.randn(7, 5, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        def f(nt, start, length):
+            return nt.narrow(0, start, length)
+
+        if "compile" in env:
+            torch._dynamo.config.capture_scalar_outputs = True
+            f = torch.compile(f, dynamic=(env == "compile_dynamic"), fullgraph=True)
+
+        # first few batch items
+        out1 = f(nt, 0, 2)
+        self.assertEqual(out1.shape[0], 2)
+        for out1_comp, nt_comp in zip(out1.unbind(), nt.unbind()[0:2]):
+            self.assertEqual(out1_comp, nt_comp)
+
+        # some middle batch items
+        out2 = f(nt, 1, 3)
+        self.assertEqual(out2.shape[0], 3)
+        for out2_comp, nt_comp in zip(out2.unbind(), nt.unbind()[1:4]):
+            self.assertEqual(out2_comp, nt_comp)
+
+        # last few batch items
+        out3 = f(nt, 2, 3)
+        self.assertEqual(out3.shape[0], 3)
+        for out3_comp, nt_comp in zip(out3.unbind(), nt.unbind()[2:5]):
+            self.assertEqual(out3_comp, nt_comp)
+
+        # length past the end
+        with self.assertRaisesRegex(RuntimeError, "exceeds dimension size"):
+            out4 = f(nt, 3, 3)
+
     def test_njt_cat(self, device):
         offsets = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
         values_1 = torch.randn(
@@ -8034,7 +8079,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             in {
                 "chunk",
                 "masked_select",
-                "narrow",
                 "split",
                 "split_with_sizes",
                 "squeeze",
@@ -8061,6 +8105,17 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
         name="ragged_dim_unsupported",
     ),
+    # narrow(): not supported with non-contig on dims other than the batch dim
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not yet supported for non-contiguous nested tensors on dim != 0",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs["dim"] != 0
+            and (sample.input._lengths is not None or sample.input._ragged_idx != 1)
+        ),
+        name="narrow_missing_noncontig_support_on_batch_dim",
+    ),
     XFailRule(
         error_type=RuntimeError,
         # error comes from usage of view() in the decomp
@@ -8076,7 +8131,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name
             in {
-                "narrow",
                 "split",
                 "split_with_sizes",
                 "unsqueeze",

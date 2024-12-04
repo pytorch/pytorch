@@ -17,20 +17,22 @@ __all__: List[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
-# Simplifying assumption: we assume that the batch dim is always the left-most
-# dim, and the ragged dim is always the second dim.
-def _outer_to_inner_dim(ndim, dim, canonicalize=False):
+def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
 
     if isinstance(dim, (tuple, list)):
-        output = type(dim)(_outer_to_inner_dim(ndim, d) for d in dim)
+        output = type(dim)(_outer_to_inner_dim(ndim, d, ragged_dim) for d in dim)
         # ensure no duplicates, which can result from both batch and ragged mapping to 0
         return type(output)(dict.fromkeys(output))
 
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
+
     assert dim >= 0 and dim < ndim
-    return 0 if dim < 2 else dim - 1
+
+    # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
+    # For other dims, subtract 1 to convert to inner space.
+    return ragged_dim - 1 if dim == 0 else dim - 1
 
 
 def _wrap_jagged_dim(
@@ -49,7 +51,11 @@ def _wrap_jagged_dim(
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on ragged dim")
     elif wrapped == 0 and not allow_batch_dim:
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
-    ret = _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
+    ret = (
+        _outer_to_inner_dim(ndim, wrapped, ragged_dim)
+        if convert_to_inner_dim
+        else wrapped
+    )
     if allow_batch_dim:
         # Need to disambiguate whether we're operating on the batch dim or not.
         # Operating on dim=1 -> dim=0 after the inner dim conversion.
@@ -80,7 +86,7 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
 
     # ensure no duplicates, which can result from both batch and ragged mapping to 0
     outer_to_inner_dim = tuple(
-        dict.fromkeys(_outer_to_inner_dim(ndim, d) for d in wrapped_dims)
+        dict.fromkeys(_outer_to_inner_dim(ndim, d, ragged_idx) for d in wrapped_dims)
     )
 
     return outer_to_inner_dim, operate_on_batch, operate_on_ragged, operate_on_non_batch
@@ -874,7 +880,7 @@ def split_with_sizes_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.narrow.default, "self: jt, dim: any, start: any, length: any"
+    torch.ops.aten.narrow.default, "self: jt_all, dim: any, start: any, length: any"
 )
 def narrow(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -882,7 +888,51 @@ def narrow(func, *args, **kwargs):
     )
     inp = new_kwargs.pop("input")
 
-    dim = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], inp._ragged_idx, "narrow")
+    dim, operating_on_batch = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], inp._ragged_idx, "narrow", allow_batch_dim=True
+    )
+    if operating_on_batch:
+        # batch dim narrowing requires custom logic involving offsets
+        out_kwargs = extract_kwargs(inp)
+        start, length = new_kwargs["start"], new_kwargs["length"]
+        end = start + length - 1
+        batch = inp._offsets.shape[0] - 1
+        if end >= batch:
+            raise RuntimeError(
+                f"narrow(): start ({start}) + length ({length}) exceeds dimension size ({batch})"
+            )
+
+        # +1 to include last offset. Also normalize offsets to start at 0.
+        out_kwargs["offsets"] = (
+            inp._offsets[start : start + length + 1] - inp._offsets[start]
+        )
+        # metadata cache may no longer be accurate since offsets have changed
+        if "_metadata_cache" in out_kwargs:
+            del out_kwargs["_metadata_cache"]
+
+        if inp._lengths is not None:
+            out_kwargs["lengths"] = inp._lengths[start : start + length]
+
+        start_offset = inp._offsets[start].item()
+        torch._check_is_size(start_offset)
+        torch._check(start_offset <= inp._values.size(inp._ragged_idx - 1))
+
+        length = (inp._offsets[start + length] - inp._offsets[start]).item()
+        torch._check_is_size(length)
+        torch._check(length <= inp._values.size(inp._ragged_idx - 1))
+
+        new_values = inp._values.narrow(
+            dim=(inp._ragged_idx - 1),
+            start=start_offset,
+            length=length,
+        )
+
+        return NestedTensor(new_values, **out_kwargs)
+
+    if inp._lengths is not None or inp._ragged_idx != 1:
+        raise RuntimeError(
+            "narrow(): not yet supported for non-contiguous nested tensors on dim != 0"
+        )
     values = func(
         inp._values,
         dim=dim,
@@ -1419,8 +1469,8 @@ def transpose_int(func, *args, **kwargs):
         inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
-                _outer_to_inner_dim(len(inp._size), dim0),
-                _outer_to_inner_dim(len(inp._size), dim1),
+                _outer_to_inner_dim(len(inp._size), dim0, inp._ragged_idx),
+                _outer_to_inner_dim(len(inp._size), dim1, inp._ragged_idx),
             ),
             **inp_kwargs,
         )
@@ -1468,7 +1518,10 @@ def permute_default(func, *args, **kwargs):
             "Permute is not supported on the batch dimension for jagged NT"
         )
     inp_kwargs["_ragged_idx"] = canonicalized_dims.index(inp._ragged_idx)
-    inner_dims = [_outer_to_inner_dim(inp_dim, dim) for dim in canonicalized_dims[1:]]
+    inner_dims = [
+        _outer_to_inner_dim(inp_dim, dim, inp._ragged_idx)
+        for dim in canonicalized_dims[1:]
+    ]
     new_kwargs["dims"] = inner_dims
     return NestedTensor(func(inp._values, **new_kwargs), **inp_kwargs)
 
