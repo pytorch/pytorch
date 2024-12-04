@@ -25,6 +25,7 @@ from torch.distributed.pipelining.schedules import (
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
+    _validate_schedule,
     B,
     F,
     get_schedule_class,
@@ -34,7 +35,6 @@ from torch.distributed.pipelining.schedules import (
     RESHARD,
     SEND_B,
     UNSHARD,
-    validate_schedule,
     W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
@@ -873,7 +873,7 @@ class TestValidateSchedule(TestCase):
         pp_group_size = 2
         num_stages = 2
         num_microbatches = 1
-        validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+        _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
     def test_invalid_schedule_missing_rank(self):
         actions = {
@@ -883,7 +883,7 @@ class TestValidateSchedule(TestCase):
         num_stages = 2
         num_microbatches = 1
         with self.assertRaises(AssertionError):
-            validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
     def test_invalid_schedule_missing_action(self):
         actions = {
@@ -894,14 +894,7 @@ class TestValidateSchedule(TestCase):
         num_stages = 2
         num_microbatches = 1
         with self.assertRaises(AssertionError):
-            validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
-
-    def test_format(self):
-        actions = {
-            0: [_Action(0, F, 0), _Action(0, B, 0)],
-            1: [_Action(1, F, 0), _Action(1, B, 0)],
-        }
-        print(_format_pipeline_order(actions, error_step_number=0))
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)

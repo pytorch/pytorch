@@ -1000,8 +1000,8 @@ def _add_send_recv(
     return comm_actions
 
 
-def validate_schedule(
-    actions: Dict[int, List[_Action | None]],
+def _validate_schedule(
+    actions: Dict[int, List[Optional[_Action]]],
     pp_group_size: int,
     num_stages: int,
     num_microbatches: int,
@@ -1157,7 +1157,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             reader = csv.reader(csvfile)
             for rank, row in enumerate(reader):
                 self.pipeline_order[rank] = [_Action.from_str(s) for s in row]
-        validate_schedule(
+        _validate_schedule(
             self.pipeline_order,
             self.pp_group_size,
             self._num_stages,
