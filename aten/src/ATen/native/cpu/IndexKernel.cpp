@@ -200,54 +200,56 @@ void index_fill_kernel(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
-    auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
-      auto* self_data_bytes = data[0];
-      auto* index_data_bytes = data[1];
-      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
-        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
-        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+    AT_DISPATCH_INDEX_TYPES(iter.dtype(1), "index_fill_cpu", [&] {
+      auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+        auto* self_data_bytes = data[0];
+        auto* index_data_bytes = data[1];
+        for ([[maybe_unused]] const auto elem : c10::irange(n)) {
+          auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+          auto idx = *reinterpret_cast<index_t*>(index_data_bytes);
+          TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
+                            "index ", idx, " is out of bounds for dimension ",
+                            dim, " with size ", self_dim_size);
+          if (idx < 0) {
+            idx += self_dim_size;
+          }
+
+          self_data[idx * self_dim_stride] = fill_val;
+
+          self_data_bytes += strides[0];
+          index_data_bytes += strides[1];
+        }
+      };
+      auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+        auto* self_data_bytes = data[0];
+        auto* index_data_bytes = data[1];
+        auto idx = *reinterpret_cast<index_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
                           "index ", idx, " is out of bounds for dimension ",
                           dim, " with size ", self_dim_size);
         if (idx < 0) {
           idx += self_dim_size;
         }
+        for ([[maybe_unused]] const auto elem : c10::irange(n)) {
+          auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
-        self_data[idx * self_dim_stride] = fill_val;
+          self_data[idx * self_dim_stride] = fill_val;
 
-        self_data_bytes += strides[0];
-        index_data_bytes += strides[1];
-      }
-    };
-    auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
-      auto* self_data_bytes = data[0];
-      auto* index_data_bytes = data[1];
-      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-      TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
-                        "index ", idx, " is out of bounds for dimension ",
-                        dim, " with size ", self_dim_size);
-      if (idx < 0) {
-        idx += self_dim_size;
-      }
-      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
-        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+          self_data_bytes += strides[0];
+        }
+      };
 
-        self_data[idx * self_dim_stride] = fill_val;
-
-        self_data_bytes += strides[0];
-      }
-    };
-
-    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      auto idx_stride = strides[1];
-      if (idx_stride) {
-        handle_nonzero_idx_stride(data, strides, n);
-      }
-      else {
-        handle_zero_idx_stride(data, strides, n);
-      }
-    };
-    iter.for_each(loop);
+      auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+        auto idx_stride = strides[1];
+        if (idx_stride) {
+          handle_nonzero_idx_stride(data, strides, n);
+        }
+        else {
+          handle_zero_idx_stride(data, strides, n);
+        }
+      };
+      iter.for_each(loop);
+    });
   });
 }
 
@@ -258,59 +260,61 @@ void index_copy_kernel(
   int64_t self_dim_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cpu", [&] {
-    auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
-      auto* self_data_bytes = data[0];
-      auto* index_data_bytes = data[1];
-      auto* source_data_bytes = data[2];
-      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
-        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
-        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-        auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
+    AT_DISPATCH_INDEX_TYPES(iter.dtype(1), "index_copy_cpu", [&] {
+      auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+        auto* self_data_bytes = data[0];
+        auto* index_data_bytes = data[1];
+        auto* source_data_bytes = data[2];
+        for ([[maybe_unused]] const auto elem : c10::irange(n)) {
+          auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+          auto idx = *reinterpret_cast<index_t*>(index_data_bytes);
+          auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
+          TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
+                "index_copy_(): index ", idx, " is out of bounds for dimension ",
+                dim, " with size ", self_dim_size);
+
+          self_data[idx * self_dim_stride] = c10::load(source_data);
+
+          self_data_bytes += strides[0];
+          index_data_bytes += strides[1];
+          source_data_bytes += strides[2];
+        }
+      };
+      auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+        auto* self_data_bytes = data[0];
+        auto* index_data_bytes = data[1];
+        auto* source_data_bytes = data[2];
+        auto idx = *reinterpret_cast<index_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
               "index_copy_(): index ", idx, " is out of bounds for dimension ",
               dim, " with size ", self_dim_size);
+        for ([[maybe_unused]] const auto elem : c10::irange(n)) {
+          auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+          auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
-        self_data[idx * self_dim_stride] = c10::load(source_data);
+          self_data[idx * self_dim_stride] = c10::load(source_data);
 
-        self_data_bytes += strides[0];
-        index_data_bytes += strides[1];
-        source_data_bytes += strides[2];
+          self_data_bytes += strides[0];
+          source_data_bytes += strides[2];
+        }
+      };
+
+      auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+        auto idx_stride = strides[1];
+        if (idx_stride) {
+          handle_nonzero_idx_stride(data, strides, n);
+        }
+        else {
+          handle_zero_idx_stride(data, strides, n);
+        }
+      };
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      if (is_deterministic) {
+        iter.serial_for_each(loop, {0, iter.numel()});
+      } else {
+        iter.for_each(loop);
       }
-    };
-    auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
-      auto* self_data_bytes = data[0];
-      auto* index_data_bytes = data[1];
-      auto* source_data_bytes = data[2];
-      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-      TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
-            "index_copy_(): index ", idx, " is out of bounds for dimension ",
-            dim, " with size ", self_dim_size);
-      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
-        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
-        auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
-
-        self_data[idx * self_dim_stride] = c10::load(source_data);
-
-        self_data_bytes += strides[0];
-        source_data_bytes += strides[2];
-      }
-    };
-
-    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      auto idx_stride = strides[1];
-      if (idx_stride) {
-        handle_nonzero_idx_stride(data, strides, n);
-      }
-      else {
-        handle_zero_idx_stride(data, strides, n);
-      }
-    };
-    bool is_deterministic = at::globalContext().deterministicAlgorithms();
-    if (is_deterministic) {
-      iter.serial_for_each(loop, {0, iter.numel()});
-    } else {
-      iter.for_each(loop);
-    }
+    });
   });
 }
 
