@@ -19,6 +19,7 @@ from typing import (
     Tuple,
     Type,
     TYPE_CHECKING,
+    Union,
 )
 
 import torch
@@ -502,7 +503,10 @@ def get_lifted_tensor_constant(
     return None
 
 
-def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
+def sequential_split(
+    gm: torch.fx.GraphModule,
+    node_call_back: Callable[[torch.fx.Node], Union[torch.fx.Node, bool]],
+) -> torch.fx.GraphModule:
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
     based on the node_call_back. It doesn't mutate the input graph module. The node_call_back should return
@@ -535,7 +539,7 @@ def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.No
     return [node for node in nodes if node_call_back(node)]
 
 
-def apply_runtime_assertion_pass(gm, graph_signature):
+def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
     from torch._export.passes._node_metadata_hook import (
         _node_metadata_hook,
         _set_node_metadata_hook,
@@ -610,13 +614,14 @@ def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) 
         gm.meta.update({"custom": mod.meta["custom"]})
 
 
-def node_inline_(call_mod_node: torch.fx.Node) -> None:
+def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]:
     """
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
     """
     assert call_mod_node.op == "call_module"
     gm = call_mod_node.graph.owning_module
+    assert gm is not None
 
     assert isinstance(call_mod_node.target, str)
     sub_gm = getattr(gm, call_mod_node.target)
@@ -635,7 +640,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
-                setattr(gm, node.target, getattr(sub_gm, node.target))
+                new_target_name = new_node.target
+                if hasattr(gm, new_target_name):
+                    # Loop through and find the "submod_{i}" that have no name collision
+                    i = 1
+                    new_target_name = f"submod_{i}"
+                    while hasattr(gm, new_target_name):
+                        i += 1
+                        new_target_name = f"submod_{i}"
+                new_node.target = new_target_name
+                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
@@ -679,14 +693,14 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
     return gm
 
 
-def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
+def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Signature:
     """
     Get source code and parse argument names using AST. The function returns
     a signature of the forward() function.
 
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
-    ast_mod = ast.parse(mod.code)
+    ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
     ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
@@ -1027,10 +1041,10 @@ def _special_op_to_preserve_cia(*args, **kwargs):
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.
-# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
 def _check_valid_to_preserve(op_overload: "OperatorBase"):
-    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+    from torch._decomp import _should_decompose_because_unsafe_op
+
+    if _should_decompose_because_unsafe_op(op_overload):
         return False
     if op_overload in FunctionalTensor.metadata_fns:
         return False

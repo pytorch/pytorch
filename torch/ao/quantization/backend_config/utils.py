@@ -36,18 +36,20 @@ def get_pattern_to_dtype_configs(
 
 
 def get_qat_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
-    qat_module_classes = []
-    for config in backend_config.configs:
-        if config.qat_module is not None:
-            qat_module_classes.append(config.qat_module)
+    qat_module_classes = [
+        config.qat_module
+        for config in backend_config.configs
+        if config.qat_module is not None
+    ]
     return tuple(set(qat_module_classes))
 
 
 def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
-    fused_module_classes = []
-    for config in backend_config.configs:
-        if config.fused_module is not None:
-            fused_module_classes.append(config.fused_module)
+    fused_module_classes = [
+        config.fused_module
+        for config in backend_config.configs
+        if config.fused_module is not None
+    ]
     return tuple(set(fused_module_classes))
 
 
