@@ -1594,11 +1594,16 @@ static PyObject* _dims(PyObject *self,
     decoder.next();
 
     if (relevant_op(decoder.opcode())) {
+        std::cout << "RELEVANT OP" << std::endl;
         found_ndims = 1;
     } else if (decoder.opcode() == UNPACK_SEQUENCE) {
+        std::cout << "UNPACK SEQUENCE" << std::endl;
         found_ndims = decoder.oparg();
         decoder.next();
+    } else {
+        std::cout << "NEITHER" << std::endl;
     }
+    std::cout <<"FOUND NDIMS: " << found_ndims << std::endl;
 
     if (specified_ndims == -1) {
         if (found_ndims == 0) {
