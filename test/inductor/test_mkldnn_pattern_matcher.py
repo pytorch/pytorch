@@ -698,14 +698,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
         test_memory_format = [torch.contiguous_format, cl_format]
         if dim == 4:
             input_shapes = [
-                (2, 3, 56, 56),
+                [2, 3, 56, 56],
             ]
-            other_shapes = [(2, 16, 1, 1), (1, 16, 1, 1), (1, 1, 1, 1)]
+            other_shapes = [[2, 16, 1, 1], [1, 16, 1, 1], [1, 1, 1, 1]]
         else:
             input_shapes = [
-                (2, 3, 20, 56, 56),
+                [2, 3, 20, 56, 56],
             ]
-            other_shapes = [(2, 16, 1, 1, 1), (1, 16, 1, 1, 1), (1, 1, 1, 1, 1)]
+            other_shapes = [[2, 16, 1, 1, 1], [1, 16, 1, 1, 1], [1, 1, 1, 1, 1]]
         options = itertools.product(
             binary_list,
             input_shapes,
