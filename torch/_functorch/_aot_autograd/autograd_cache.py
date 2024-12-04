@@ -815,7 +815,10 @@ class AOTAutogradCache:
                         # cache hit, because we never save it to the cache
                         # If we need to do that, we should do it here
                         return pickle.loads(content)
-                except Exception:
+                except Exception as e:
+                    log_cache_bypass(
+                        "bypass_aot_autograd", "Unable to deserialize: " + str(e)
+                    )
                     log.warning(
                         "remote autograd cache unable to load compiled graph",
                         exc_info=True,
@@ -831,6 +834,10 @@ class AOTAutogradCache:
             content = pickle.dumps(entry)
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
             if config.strict_autograd_cache:
                 raise e
             return None
