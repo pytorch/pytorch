@@ -165,11 +165,15 @@ class Benchmarker:
     @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
-    
+
     @maybe_time
     @count
-    def benchmark_many_gpu(self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any) -> List[float]:
-        return [self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables]
+    def benchmark_many_gpu(
+        self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any
+    ) -> List[float]:
+        return [
+            self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
+        ]
 
 
 class TritonBenchmarker(Benchmarker):
@@ -255,7 +259,7 @@ def maybe_fallback(
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
-        fn_class = inspect._findclass(fn)
+        fn_class = inspect._findclass(fn)  # type: ignore
         feature_name = fn_class.feature_name
         if not is_feature_enabled(feature_name):
             fallback_fn = getattr(super(fn_class, self), fn.__name__)
@@ -401,7 +405,8 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         return [self.get_event_pairs(num_callables) for _ in range(iters)]
 
     def get_interleaved_event_pairs_min_timing(
-        self: Self, interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]]
+        self: Self,
+        interleaved_event_pairs: List[List[Tuple[torch.cuda.Event, torch.cuda.Event]]],
     ) -> List[float]:
         """Get the interleaved minimum timings, in milliseconds, for an interleaved
         grouping of CUDA event pairs.
@@ -455,7 +460,9 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
         buffer.zero_()
 
         # estimate the runtime of `_callable`
-        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
@@ -463,7 +470,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
                 _callable()
                 end_event.record()
         torch.cuda.synchronize()
-        estimated_timings = self.get_interleaved_min_timings_ms(
+        estimated_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
         )
 
@@ -479,7 +486,9 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
             buffer.zero_()
 
         # benchmark `_callable`
-        interleaved_event_pairs = self.get_interleaved_event_pairs(len(callables), estimation_iters)
+        interleaved_event_pairs = self.get_interleaved_event_pairs(
+            len(callables), estimation_iters
+        )
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
                 buffer.zero_()
@@ -487,7 +496,7 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
                 _callable()
                 end_event.record()
         torch.cuda.synchronize()
-        benchmarked_timings = self.get_interleaved_min_timings_ms(
+        benchmarked_timings = self.get_interleaved_event_pairs_min_timing(
             interleaved_event_pairs
         )
 
@@ -497,7 +506,12 @@ class InductorGroupedBenchmarker(InductorBenchmarker):
 
         # return the minimum of estimated_timing and benchmarked_timing, since
         # we just want the minimum timing overall we might check both
-        return [min(estimated_timing, benchmarked_timing) for estimated_timing, benchmarked_timing in zip(estimated_timings, benchmarked_timings)]
+        return [
+            min(estimated_timing, benchmarked_timing)
+            for estimated_timing, benchmarked_timing in zip(
+                estimated_timings, benchmarked_timings
+            )
+        ]
 
 
 benchmarker = InductorGroupedBenchmarker()

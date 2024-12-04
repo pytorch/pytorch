@@ -94,15 +94,13 @@ class TestBenchmarker(TestCase):
             self.assertEqual(
                 self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1
             )
-    
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker,
     )
-    @parametrize(
-        "benchmarker_cls", ALL_BENCHMARKER_CLASSES
-    )
+    @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
     def test_benchmark_many_gpu_smoke(self, benchmarker_cls, device=GPU_TYPE):
         benchmarker = benchmarker_cls()
         callables = [self.make_params(device)[1] for _ in range(10)]
@@ -110,11 +108,17 @@ class TestBenchmarker(TestCase):
         for timing in timings:
             self.assertGreater(timing, 0)
         if benchmarker_cls is InductorGroupedBenchmarker:
-            self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_many_gpu", 1))
+            self.assertEqual(
+                self.get_counter_value(benchmarker_cls, "benchmark_many_gpu", 1)
+            )
         else:
-            self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 10)
+            self.assertEqual(
+                self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 10
+            )
         if benchmarker_cls is TritonBenchmarker:
-            self.assertEqual(self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1)
+            self.assertEqual(
+                self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1
+            )
 
     @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
     @unittest.expectedFailure
@@ -139,7 +143,9 @@ class TestBenchmarker(TestCase):
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
 
     @unittest.skipIf(config.is_fbcode(), "test does not run in fbcode")
-    @parametrize("feature_name", ("inductor_benchmarker", "inductor_grouped_benchmarker"))
+    @parametrize(
+        "feature_name", ("inductor_benchmarker", "inductor_grouped_benchmarker")
+    )
     @parametrize(
         "config_name,config_val,expected",
         [
