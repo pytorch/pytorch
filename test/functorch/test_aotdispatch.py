@@ -5068,6 +5068,9 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfTorchDynamo(
+        "torch.compile a test that checks isinstance raw symints is meaningless."
+    )
     def test_min_cut_partitioner_save_shape(self):
         def f(x):
             s = x.sum(dim=1)
@@ -5106,7 +5109,9 @@ class TestPartitioning(AOTTestCase):
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all(is_sym_node(n) for n in outs[1:]))
 
-    @skipIfTorchDynamo("Testing isinstance raw symints is not meaningful in user code.")
+    @skipIfTorchDynamo(
+        "torch.compile a test that checks isinstance raw symints is meaningless."
+    )
     def test_default_partitioner_output_tensor_shape_tensor(self):
         inp = [
             torch.randn(10, requires_grad=True),
@@ -5172,6 +5177,9 @@ class TestPartitioning(AOTTestCase):
         # TODO(whc) we should learn to return torch.Sizes
         self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
+    @skipIfTorchDynamo(
+        "torch.compile tests that test isinstance raw symints is meaningless."
+    )
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
         inp = [
@@ -6009,6 +6017,9 @@ class TestAOTModuleSimplified(AOTTestCase):
             keep_inference_input_mutations=True,
         )
 
+    @skipIfTorchDynamo(
+        "torch.compile a test that calls aot_module_simplified is meaningless."
+    )
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         real_x = torch.randn(4, requires_grad=True)
