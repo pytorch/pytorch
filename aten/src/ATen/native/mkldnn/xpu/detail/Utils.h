@@ -82,7 +82,7 @@ dnnl::memory::dims compatible_dilation(Vec&& dilation) {
     *it -= 1;
   }
   return ret;
-};
+}
 
 template <typename T>
 dnnl::memory dnnl_memory_from_host_scalar(
@@ -96,6 +96,6 @@ dnnl::memory dnnl_memory_from_host_scalar(
   dnnl::memory::desc md = get_onednn_md(holder);
   dnnl::memory mem = make_onednn_memory(md, engine, holder.data_ptr());
   return mem;
-};
+}
 
 } // namespace at::native::onednn
