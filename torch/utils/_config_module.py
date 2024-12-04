@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import hashlib
+import importlib
 import inspect
 import io
 import os
@@ -56,6 +57,7 @@ class Config:
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
     value_type: Optional[type] = None
+    alias: Optional[str] = None
 
     def __init__(
         self,
@@ -64,6 +66,7 @@ class Config:
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
         value_type: Optional[type] = None,
+        alias: Optional[str] = None,
     ):
         # python 3.9 does not support kw_only on the dataclass :(.
         self.default = default
@@ -71,6 +74,7 @@ class Config:
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
         self.value_type = value_type
+        self.alias = alias
         if self.justknob is not None:
             assert isinstance(
                 self.default, bool
@@ -229,6 +233,7 @@ class _ConfigEntry:
     # call so the final state is correct. It's just very unintuitive.
     # upstream bug - python/cpython#126886
     hide: bool = False
+    alias: Optional[str] = None
 
     def __init__(self, config: Config):
         self.default = config.default
@@ -236,6 +241,7 @@ class _ConfigEntry:
             config.value_type if config.value_type is not None else type(self.default)
         )
         self.justknob = config.justknob
+        self.alias = config.alias
         if config.env_name_default is not None:
             if (env_value := _read_env_variable(config.env_name_default)) is not None:
                 self.env_value_default = env_value
@@ -270,6 +276,11 @@ class ConfigModule(ModuleType):
             self._config[name].user_override = value
             self._is_dirty = True
             self._config[name].hide = False
+            alias_val = self._get_alias_val(name)
+            if alias_val is not None:
+                raise AttributeError(
+                    f"{self.__name__}.{name} is already set via alias {self._config[name].alias}"
+                )
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -277,6 +288,10 @@ class ConfigModule(ModuleType):
 
             if config.hide:
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
+
+            alias_val = self._get_alias_val(name)
+            if alias_val is not None:
+                return alias_val
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
@@ -309,6 +324,15 @@ class ConfigModule(ModuleType):
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
         self._config[name].hide = True
+
+    def _get_alias_val(self, name: str) -> Optional[Any]:
+        alias = self._config[name].alias
+        if alias is None:
+            return None
+        module_name, constant_name = alias.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+        constant_value = getattr(module, constant_name)
+        return constant_value
 
     def _is_default(self, name: str) -> bool:
         return self._config[name].user_override is _UNSET_SENTINEL

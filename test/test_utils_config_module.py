@@ -9,7 +9,10 @@ os.environ["ENV_FALSE"] = "0"
 
 from typing import Optional
 
-from torch.testing._internal import fake_config_module as config
+from torch.testing._internal import (
+    fake_config_module as config,
+    fake_config_module2 as config2,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._config_module import _UNSET_SENTINEL, Config
 
@@ -318,6 +321,21 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
             msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
         ):
             Config(default="bad", justknob="fake_knob")
+
+    def test_alias(self):
+        self.assertFalse(config2.e_aliasing_bool)
+        self.assertTrue(config._config["e_aliased_bool"].default)
+        self.assertFalse(config.e_aliased_bool)
+        with config2.patch(e_aliasing_bool=True):
+            self.assertTrue(config2.e_aliasing_bool)
+            self.assertTrue(config.e_aliased_bool)
+        with self.assertRaises(
+            AttributeError,
+            msg="torch.testing._internal.fake_config_module.e_aliased_bool is already set via"
+            " alias torch.testing._internal.fake_config_module2.e_aliasing_bool",
+        ):
+            with config.patch(e_aliased_bool=True):
+                pass
 
 
 if __name__ == "__main__":
