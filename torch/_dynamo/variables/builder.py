@@ -36,7 +36,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import clone_input
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -100,12 +99,15 @@ from ..trace_rules import (
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
+    clone_input,
     common_constant_types,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
     is_function_or_wrapper,
+    is_invoke_subgraph,
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
@@ -138,6 +140,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
@@ -589,7 +592,7 @@ class VariableBuilder:
             # key order.
             self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
+                TypingVariable(k): UserDefinedObjectVariable(
                     v,
                     source=GetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
@@ -677,13 +680,23 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+        elif istype(value, frozenset) and all(
+            (
+                # For DBR quantization, we could get a frozenset of torch funcs.
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                or
+                # Another commonly used frozenset of types.
+                x in torch.utils._pytree.BUILTIN_TYPES
+            )
+            for x in value
         ):
-            # For frozenset, we can guard by object ID instead of value
-            # equality, this allows us to handle non-literal values
+            # For the limited cases of frozenset here, we know the items won't
+            # change across runs, so we can safely create sourceless VTs for
+            # them and only guard on the frozenset id.
+            # TODO support source for sets and remove the special logics here.
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable.create(value=value, source=self.source)
+            return FrozensetVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
@@ -697,6 +710,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_invoke_subgraph(value):
+            return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -841,6 +856,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
+            if value is torch._higher_order_ops.invoke_subgraph:
+                unimplemented(
+                    "Directly using invoke_subgraph is not supported. Use mark_compile_region"
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
@@ -870,9 +889,6 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, torch._C._SDPBackend):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -1888,12 +1904,28 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
+
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
         if (
             torch._dynamo.config.specialize_float
             or is_constant_source(self.get_source())
             or math.isnan(value)
+            or math.isinf(value)
+            # We don't support cudagraphs for now. Without this cudagraphs
+            # break because they expect all cuda inputs but our tensorified
+            # float will be a f64[] cpu tensor. Fixes the following test
+            # when specialize_float=False
+            # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
+            or torch._inductor.config.triton.cudagraphs
+            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -1905,6 +1937,14 @@ class VariableBuilder:
         # time.
 
         wrapped_value = torch.tensor(value, dtype=torch.float64)
+
+        # We don't support specializing floats for grad checking tensors
+        # See https://github.com/pytorch/pytorch/pull/140828 for more
+        # context.
+        if torch._C._functorch.is_gradtrackingtensor(wrapped_value):
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
@@ -2453,10 +2493,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, str) and (proxy.node.target in ["hex"]):
-        set_example_value(proxy.node, example_value)
-        return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, float):
+    elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
@@ -2655,7 +2692,7 @@ def _automatic_dynamic(
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
             mark_size[i] = auto_dynamic
-            frame_state_entry |= FrameStateSizeEntry(size=mark_size)
+            frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
         automatic_dynamic_size = (
@@ -2969,3 +3006,26 @@ class SourcelessBuilder:
 
 
 SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
+
+
+class SourcelessUserDefinedObjectBuilder:
+    """
+    SourceLessBuilder does not return a UserDefinedObjectVariable, but in some
+    cases it might be ok to return UserDefinedObjects. In such case, use this
+    builder.
+    """
+
+    def __init__(self) -> None:
+        raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+        value_type = type(value)
+        if issubclass(value_type, MutableMapping):
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        else:
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())

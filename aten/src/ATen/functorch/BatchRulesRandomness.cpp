@@ -213,6 +213,11 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   return std::make_tuple(output, mask);
 }
 
+static Tensor native_dropout_backward_batch_rule(const Tensor& grad_out, const Tensor& mask, double scale){
+  Tensor result = grad_out * mask * scale;
+  return result;
+}
+
 static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, std::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -462,6 +467,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
+  m.impl("native_dropout_backward", native_dropout_backward_batch_rule);
 
   UNARY_POINTWISE_RANDOM(_standard_gamma);
   UNARY_POINTWISE_RANDOM(_sample_dirichlet);
