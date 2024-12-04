@@ -8290,7 +8290,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_reduce_two
+    CPU, CUDA, MPS: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
