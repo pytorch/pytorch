@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch._inductor
+from torch._higher_order_ops import foreach_map
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -31,11 +32,41 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+
+def foreach_map_wrapper(op):
+    def wrapper(*args, **kwargs):
+        return foreach_map(op, (args), **kwargs)
+
+    wrapper.__name__ = "foreach_map_" + op.__name__
+
+    return wrapper
+
+
+def add_op(x, y):
+    return torch.add(x, y)
+
+
+def addrecip_op(x, y):
+    return torch.reciprocal(torch.add(x, y))
+
+
+def addcmul_op(x, y, z):
+    return torch.mul(torch.add(x, y), z)
+
+
+def recipaddmul_op(x, y, z):
+    return torch.mul(torch.add(torch.reciprocal(x), y), z)
+
+
 inplace_bin_ops_under_test = [
     torch._foreach_add_,
     torch._foreach_mul_,
     torch._foreach_sub_,
     torch._foreach_div_,
+]
+ternary_ops_under_test = [
+    foreach_map_wrapper(addcmul_op),
+    foreach_map_wrapper(recipaddmul_op),
 ]
 
 bin_ops_under_test = [
@@ -43,11 +74,22 @@ bin_ops_under_test = [
     torch._foreach_mul,
     torch._foreach_sub,
     torch._foreach_div,
+    foreach_map_wrapper(torch.add),
+    foreach_map_wrapper(torch.mul),
+    foreach_map_wrapper(torch.sub),
+    foreach_map_wrapper(torch.div),
+    foreach_map_wrapper(addrecip_op),
+    foreach_map_wrapper(add_op),
     torch._foreach_maximum,
     torch._foreach_minimum,
     torch._foreach_clamp_max,
     torch._foreach_clamp_min,
     aten._foreach_copy,
+    foreach_map_wrapper(torch.maximum),
+    foreach_map_wrapper(torch.minimum),
+    foreach_map_wrapper(torch.clamp_max),
+    foreach_map_wrapper(torch.clamp_min),
+    foreach_map_wrapper(aten.copy),
 ]
 
 un_ops_under_test = [
@@ -57,18 +99,26 @@ un_ops_under_test = [
     torch._foreach_abs,
     torch._foreach_sqrt,
     torch._foreach_rsqrt,
+    foreach_map_wrapper(torch.reciprocal),
+    foreach_map_wrapper(torch.neg),
+    foreach_map_wrapper(torch.sign),
+    foreach_map_wrapper(torch.abs),
 ]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
-    "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
+    "op",
+    ternary_ops_under_test + bin_ops_under_test + un_ops_under_test,
+    name_fn=lambda f: f.__name__,
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 inplace_bin_ops = parametrize(
     "op", inplace_bin_ops_under_test, name_fn=lambda f: f.__name__
 )
-scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
+scalar_bin_ops = parametrize(
+    "op", bin_ops_under_test[:10], name_fn=lambda f: f.__name__
+)
 scalar_tensor_bin_ops = parametrize(
-    "op", bin_ops_under_test[:2], name_fn=lambda f: f.__name__
+    "op", bin_ops_under_test[:10], name_fn=lambda f: f.__name__
 )
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
@@ -79,8 +129,17 @@ def gen_args(op):
             torch.rand(10, 10, device="cuda:0"),
             torch.rand(20, 20, device="cuda:0"),
         )
+    elif op in bin_ops_under_test:
+        return (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
     else:
         return (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
             torch.rand(10, 10, device="cuda:0"),
             torch.rand(20, 20, device="cuda:0"),
             torch.rand(10, 10, device="cuda:0"),
@@ -108,10 +167,15 @@ class ForeachTests(TestCase):
             def fn(a0, a1):
                 return op([a0, a1])
 
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, a1, b0, b1):
                 return op([a0, a1], [b0, b1])
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                return op([a0, a1], [b0, b1], [c0, c1])
 
         self.check_model_cuda(
             fn,
@@ -174,10 +238,16 @@ class ForeachTests(TestCase):
                 c = op([a0, a1])
                 return torch._foreach_sqrt(c)
 
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, a1, b0, b1):
                 c = op([a0, a1], [b0, b1])
+                return c, torch._foreach_add([a0, a1], c)
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                c = op([a0, a1], [b0, b1], [c0, c1])
                 return c, torch._foreach_add([a0, a1], c)
 
         self.check_model_cuda(
@@ -232,12 +302,23 @@ class ForeachTests(TestCase):
                 return op([a0])
 
             args = (torch.rand(10, 10, device="cuda:0"),)
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, b0):
                 return op([a0], [b0])
 
             args = (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            )
+
+        else:
+
+            def fn(a0, b0, c0):
+                return op([a0], [b0], [c0])
+
+            args = (
+                torch.rand(10, 10, device="cuda:0"),
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(10, 10, device="cuda:0"),
             )
@@ -342,10 +423,16 @@ class ForeachTests(TestCase):
                 c = op([a0, a1])
                 return torch.mul(c[0], a0)
 
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, a1, b0, b1):
                 c = op([a0, a1], [b0, b1])
+                return torch.mul(c[0], a0)
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                c = op([a0, a1], [b0, b1], [c0, c1])
                 return torch.mul(c[0], a0)
 
         self.check_model_cuda(
@@ -382,12 +469,19 @@ class ForeachTests(TestCase):
                 c1 = torch.add(a1, a1)
                 return op([c0, c1])
 
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, a1, b0, b1):
                 c0 = torch.add(a0, b0)
                 c1 = torch.add(a1, b1)
                 return op([a0, a1], [c0, c1])
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                c0 = torch.add(a0, b0)
+                c1 = torch.add(a1, b1)
+                return op([a0, a1], [b0, b1], [c0, c1])
 
         self.check_model_cuda(
             fn, gen_args(op), reference_in_float=False, check_lowp=False
@@ -428,12 +522,22 @@ class ForeachTests(TestCase):
                 e1 = torch.mul(d[1], a1)
                 return [e0, e1]
 
-        else:
+        elif op in bin_ops_under_test:
 
             def fn(a0, a1, b0, b1):
                 c0 = torch.add(a0, b0)
                 c1 = torch.add(a1, b1)
                 d = op([a0, a1], [c0, c1])
+                e0 = torch.mul(d[0], a0)
+                e1 = torch.mul(d[1], a1)
+                return [e0, e1]
+
+        else:
+
+            def fn(a0, a1, b0, b1, c0, c1):
+                c0 = torch.add(a0, b0)
+                c1 = torch.add(a1, b1)
+                d = op([a0, a1], [b0, b1], [c0, c1])
                 e0 = torch.mul(d[0], a0)
                 e1 = torch.mul(d[1], a1)
                 return [e0, e1]
