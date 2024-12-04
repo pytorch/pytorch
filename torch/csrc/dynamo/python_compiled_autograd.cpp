@@ -140,6 +140,25 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
     return torch::dynamo::autograd::call_function(
         py_compiler, name, fn, inputs, saved_state, num_outputs, debug);
   }
+  variable_list call_copy_slices_prologue(
+      PyObject* py_compiler,
+      const variable_list& inputs,
+      const at::TensorGeometry& base,
+      const at::TensorGeometry& view) override {
+    py::handle handle(py_compiler);
+    py::object stuff = handle.attr("call_copy_slices_prologue")(inputs, base, view);
+    return py::cast<std::vector<at::Tensor>>(stuff);
+  }
+  virtual variable_list call_copy_slices_epilogue(
+      PyObject* py_compiler,
+      const std::vector<bool>& needs_input_grad,
+      const at::Tensor& result,
+      const variable_list& res,
+      const at::Tensor& grad_slice) override {
+    py::handle handle(py_compiler);
+    py::object stuff = handle.attr("call_copy_slices_epilogue")(needs_input_grad, result, res, grad_slice);
+    return py::cast<std::vector<at::Tensor>>(stuff);
+  }
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {

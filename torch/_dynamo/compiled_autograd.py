@@ -61,6 +61,30 @@ def maybe_clone(x):
 counter = 0
 
 
+def copy_slices_prologue(inputs, base_sizes, base_strides, base_storage_offset, view_sizes, view_strides, view_storage_offset):
+    grad = inputs[0]
+    result = grad.new_empty_strided(base_sizes, base_strides)
+    assert grad is not None
+    result.copy_(grad)
+    offset = view_storage_offset - base_storage_offset
+    grad_slice = result.as_strided(view_sizes, view_strides, offset)
+    return [result, grad_slice, grad_slice.clone(memory_format=torch.contiguous_format)]
+
+
+def copy_slices_epilogue(needs_input_grad, result, res, grad_slice):
+    grad_inputs = [None] * len(needs_input_grad)
+    for i in range(len(needs_input_grad)):
+        if needs_input_grad[i]:
+            if res[i] is None:
+                continue
+            if i == 0:
+                grad_slice.copy_(res[i])
+                grad_inputs[i] = result
+            else:
+                grad_inputs[i] = res[i]
+    return grad_inputs
+
+
 class OpNamespace:
     def __init__(self):
         self.next_id = {}
@@ -328,6 +352,17 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
+    def call_copy_slices_prologue(self, inputs, base, view):
+        args = (inputs, base.sizes(), base.strides(), base.storage_offset(), view.sizes(), view.strides(), view.storage_offset())
+        if self.old_inline_behavior:
+            return copy_slices_prologue(*args)
+        return self.proxy_call(copy_slices_prologue, args, 3)
+
+    def call_copy_slices_epilogue(self, needs_input_grad, result, res, grad_slice):
+        if self.old_inline_behavior:
+            return copy_slices_epilogue(needs_input_grad, result, res, grad_slice)
+        return self.proxy_call(copy_slices_epilogue, (needs_input_grad, result, res, grad_slice), len(needs_input_grad))
+
     def allocate_dummy(self, *examples):
         with disable_proxy_modes_tracing():
             return torch.zeros(0)
@@ -348,6 +383,14 @@ class AutogradCompilerInstance:
             "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
         )
         result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
+        self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
+        return result
+
+    def proxy_call(self, fn, args, num_outputs):
+        flat_args, _ = pytree.tree_flatten(args)
+        proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
+        proxy_out = self.fx_tracer.create_proxy("call_function", fn, args=proxy_args, kwargs={})
+        result = [self.allocate_dummy(*flat_args) for _ in range(num_outputs)]
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
 

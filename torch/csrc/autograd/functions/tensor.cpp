@@ -252,6 +252,44 @@ variable_list CopySlices::apply_with_saved(
     SwapSavedVariables& saved) {
   saved.before(base);
   saved.before(view);
+
+  auto results = variable_list(num_outputs());
+
+  if (grads[0].defined()) {
+    std::vector<bool> needs_input_grad;
+    for (const auto i : c10::irange(num_outputs())) {
+      needs_input_grad.emplace_back(task_should_compute_output(i));
+    }
+
+    TORCH_INTERNAL_ASSERT(!view_fn);
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    variable_list stuff = interface->call_copy_slices_prologue(
+        saved.get_py_compiler(),
+        grads,
+        base,
+        view);
+    TORCH_INTERNAL_ASSERT(stuff.size() == 3);
+    auto result = stuff[0];
+    auto grad_slice = stuff[1];
+    auto grad_slice_clone = stuff[2];
+    auto res = fn->apply_with_saved({grad_slice_clone}, saved);
+    results = interface->call_copy_slices_epilogue(
+        saved.get_py_compiler(),
+        needs_input_grad,
+        result,
+        res,
+        grad_slice);
+  }
+
+  saved.after(base);
+  saved.after(view);
+  return results;
+
+  // apply_with_saved
+  //
+
+
+  /*
   int call_count = 0;
   variable_list result = apply_impl(
       variable_list(grads),
@@ -263,6 +301,7 @@ variable_list CopySlices::apply_with_saved(
   saved.after(base);
   saved.after(view);
   return result;
+  */
 }
 
 ivalue_list CopySlices::retrieve_saved(SwapSavedVariables& saved) {
