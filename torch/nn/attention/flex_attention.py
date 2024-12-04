@@ -115,7 +115,7 @@ def _vmap_for_bhqkv(
     ]
 
     for dims in dimensions:
-        fn = torch.vmap(fn, in_dims=prefix + dims + suffix, out_dims=out_dims)
+        fn = torch.vmap(fn, in_dims=prefix + dims + suffix, out_dims=out_dims)  # type: ignore[arg-type]
     return fn
 
 
