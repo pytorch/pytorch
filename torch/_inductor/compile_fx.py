@@ -9,6 +9,7 @@ import logging
 import sys
 import time
 import warnings
+from abc import ABC, abstractmethod
 from itertools import count
 from typing import (
     Any,
@@ -24,7 +25,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
+from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -135,7 +136,6 @@ if TYPE_CHECKING:
         GraphInputName,
         GraphSignature,
     )
-
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -382,7 +382,7 @@ def split_const_gm(
             gm,
             node,
             (
-                const_result[const_outputs[node.name]]
+                const_result[const_outputs[node.name]]  # type:ignore[index]
                 if lifted_constant_names is None
                 else None
             ),
@@ -770,6 +770,345 @@ def _compile_fx_inner(
     return compiled_graph
 
 
+class FxCompile(ABC):
+    # TODO: We should probably eventually add some kind of async version of this
+    # so we can kick off a compile and then go do other things - but we'll need
+    # to know what kind of API we want for that first.
+    @abstractmethod
+    def codegen_and_compile(
+        self,
+        gm: GraphModule,
+        example_inputs: Sequence[InputType],
+        inputs_to_check: Sequence[int],
+        graph_kwargs: _CompileFxKwargs,
+    ) -> OutputCode:
+        ...
+
+
+class _InProcessFxCompile(FxCompile):
+    @override
+    def codegen_and_compile(
+        self,
+        gm: GraphModule,
+        example_inputs: Sequence[InputType],
+        inputs_to_check: Sequence[int],
+        graph_kwargs: _CompileFxKwargs,
+    ) -> OutputCode:
+        # Sorry about the mess, we need graph_kwargs to continue to be able
+        # to propagate it further on
+        # TODO: _CompileFxKwargs actually has stronger types than in the
+        # signature, need to tighten it up
+        assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
+        cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
+        static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
+        is_backward: bool = graph_kwargs.get("is_backward", False)
+        graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
+        cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
+        aot_mode: bool = graph_kwargs.get("aot_mode", False)
+        is_inference: bool = graph_kwargs.get("is_inference", False)
+        layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
+        extern_node_serializer: Optional[
+            Callable[[List[ExternKernelNode]], Any]
+        ] = graph_kwargs.get("extern_node_serializer", None)
+        boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
+            "boxed_forward_device_index", None
+        )
+
+        with _WaitCounter(
+            "pytorch.wait_counter.actual_codegen_and_compile"
+        ).guard(), dynamo_utils.preserve_rng_state():
+            if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
+                import time
+
+                log.warning(
+                    "Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec
+                )
+                time.sleep(sleep_sec)
+
+            if is_tf32_warning_applicable(gm):
+                _warn_tf32_disabled()
+
+            inductor_counters = counters["inductor"].copy()
+
+            # lift the maximum depth of the Python interpreter stack
+            # to adapt large/deep models
+            sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
+
+            _step_logger()(
+                logging.INFO,
+                "torchinductor compiling "
+                f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+                f"graph {graph_id}",
+            )
+
+            def log_graph_runnable() -> str:
+                fd = io.StringIO()
+                torch._dynamo.repro.after_aot.save_graph_repro(
+                    fd, gm, example_inputs, "inductor", save_dir=None
+                )
+                return fd.getvalue()
+
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "fx_graph_runnable",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: log_graph_runnable(),
+            )
+
+            V.debug.fx_graph(gm, example_inputs)
+            # TODO: Should we actually dump this?  It should be redundant with the aot
+            # structured logs...
+            # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
+
+            shape_env = shape_env_from_inputs(example_inputs)
+
+            # Convert view to reshape in the graph. This is necessary primarily for
+            # layout optimization. Do it unconditionally for uniformity.
+            #
+            # It's needed because when we do layout optimization, an contiguous tensor
+            # in eager mode may becomes a channels last tensor. A view op previously
+            # can be applied to the contiguous tensor may not be able to be applied
+            # on the channels tensor any more. An error like
+            #   RuntimeError: view size is not compatible with input tensor's size and stride
+            #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+            # will be printed.
+            #
+            # Replace view op to reshape op in this case.
+            # As an example, timm_resnest/botnet26t_256/convnext_base etc. will fail if we don't do this.
+            #
+            # Also this has to be done before FakeTensorProp below to avoid the failed
+            # .view() call.
+            view_to_reshape(gm)
+
+            # It is safe to run FakeTensorProp under no_grad because by the time
+            # we're in inductor, we assume that AOTAutograd has already "taken care"
+            # of autograd, so there should be no more autograd-related API's in the
+            # graph.
+            with torch.no_grad():
+                fake_mode = fake_tensor_prop(gm, example_inputs)
+
+            record_original_output_strides(gm)
+
+            # pattern matcher passes might not preserve striding information
+            # on node.meta["val"]. if in the future we rely on these being
+            # correct we will need to fix.
+
+            with V.set_fake_mode(fake_mode):
+                # has some issues with memory in training
+                cuda_context = get_cuda_device_context(gm)
+                with cuda_context:
+                    _recursive_post_grad_passes(gm, is_inference=is_inference)
+                V.debug.fx_graph_transformed(gm, example_inputs)
+                post_grad_graphs_log.debug(
+                    "%s",
+                    lazy_format_graph_code(
+                        "AFTER POST GRAD",
+                        gm,
+                        include_stride=True,
+                        include_device=True,
+                        colored=True,
+                    ),
+                )
+                trace_structured(
+                    "inductor_post_grad_graph",
+                    payload_fn=lambda: gm.print_readable(
+                        print_output=False, include_stride=True, include_device=True
+                    ),
+                )
+                if config.is_fbcode():
+                    log_optimus_to_scuba(
+                        extra_logging={"pt2_configs": str(get_patched_config_dict())}
+                    )
+
+            with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
+                example_inputs
+            ):
+                const_output_index = None
+                const_graph = None
+                const_code = None
+
+                if aot_mode and config.aot_inductor.use_runtime_constant_folding:
+                    const_gm, const_output_index = split_const_gm(gm)
+
+                    const_graph = GraphLowering(
+                        const_gm,
+                        example_inputs=[],
+                        shape_env=shape_env,
+                        graph_id=graph_id,
+                        cpp_wrapper=cpp_wrapper,
+                        aot_mode=aot_mode,
+                        extern_node_serializer=extern_node_serializer,
+                        is_inference=is_inference,
+                        is_backward=is_backward,
+                        is_const_graph=True,
+                    )
+                    with V.set_graph_handler(const_graph):
+                        assert cpp_wrapper, "AOT mode only supports C++ wrapper"
+                        const_graph.run()
+
+                        const_code, _ = const_graph.codegen_with_cpp_wrapper()
+
+                graph = GraphLowering(
+                    gm,
+                    # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
+                    # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
+                    # we currently use fake tensors and defake them later.
+                    example_inputs=example_inputs,
+                    shape_env=shape_env,
+                    graph_id=graph_id,
+                    cpp_wrapper=cpp_wrapper,
+                    aot_mode=aot_mode,
+                    extern_node_serializer=extern_node_serializer,
+                    is_inference=is_inference,
+                    is_backward=is_backward,
+                    const_output_index=const_output_index,
+                    const_code=const_code,
+                    const_module=const_graph,
+                )
+                metrics_helper = metrics.CachedMetricsHelper()
+                with V.set_graph_handler(graph):
+                    graph.run(*example_inputs)
+                    output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
+                    if graph.graph_outputs is not None:
+                        # We'll put the output strides in the compiled graph so we
+                        # can later return them to the caller via TracingContext
+                        p = SymExprPrinter()
+                        for out in graph.graph_outputs:
+                            if (
+                                isinstance(out, IRNode)
+                                and out.has_tensor_output()
+                                and len(free_unbacked_symbols(out.get_stride())) == 0
+                            ):
+                                # Convert to string for eval on the load path
+                                output_strides.append(
+                                    tuple(p.doprint(s) for s in out.get_layout().stride)
+                                )
+                            else:
+                                output_strides.append(None)
+
+                    _check_triton_bf16_support(graph)
+
+                    # TODO: The switching between AOT mode and not here is a bit
+                    # messy, but it's localized to the block of code below so I'm
+                    # not going to touch it for now
+
+                    compiled_fn: Any
+
+                    with dynamo_timed(
+                        "GraphLowering.compile_to_fn", log_pt2_compile_event=True
+                    ):
+                        if graph.aot_mode:
+                            from .codecache import AotCodeCompiler
+
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
+                            code, linemap = graph.codegen_with_cpp_wrapper()
+                            output_code_log.debug("Output code: \n%s", code)
+
+                            serialized_extern_kernel_nodes = None
+                            if graph.extern_kernel_nodes:
+                                serialized_extern_kernel_nodes = (
+                                    graph.extern_node_serializer(
+                                        graph.extern_kernel_nodes
+                                    )
+                                )
+                                output_code_log.debug(
+                                    "Serialized Extern Kernel Nodes: \n%s",
+                                    serialized_extern_kernel_nodes,
+                                )
+
+                            additional_files = graph.wrapper_code.additional_files
+
+                            with dynamo_timed(
+                                "AotCodeCompiler.compile", log_pt2_compile_event=True
+                            ):
+                                # Directly return the file path with the compiled code
+                                compiled_fn = AotCodeCompiler.compile(
+                                    graph,
+                                    code,
+                                    serialized_extern_kernel_nodes,
+                                    device_type=graph.device_type,
+                                    additional_files=additional_files,
+                                )
+                        else:
+                            compiled_fn = graph.compile_to_module().call
+
+                    num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+                    metrics.num_bytes_accessed += num_bytes
+                    metrics.node_runtimes += node_runtimes
+                    metrics.nodes_num_elem += nodes_num_elem
+
+                    if (
+                        cudagraphs
+                        and config.triton.cudagraph_skip_dynamic_graphs
+                        and not V.graph.disable_cudagraphs_reason
+                        and torch._inductor.utils.any_is_symbolic(*example_inputs)
+                    ):
+                        stack_trace = None
+                        for node in gm.graph.nodes:
+                            meta_val = node.meta.get("val", None)
+                            if (
+                                node.op == "placeholder"
+                                or not isinstance(meta_val, torch.Tensor)
+                                or not torch._inductor.utils.any_is_symbolic(meta_val)
+                            ):
+                                continue
+
+                            if stack_trace := node.meta.get("stack_trace", None):
+                                break
+                        disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
+                        if stack_trace:
+                            disable = f"{disable} Found from {stack_trace}\n"
+                        else:
+                            disable = f"{disable}\n"
+                        V.graph.disable_cudagraphs_reason = disable
+
+                    if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                        maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
+                        if maybe_incompat_node:
+                            disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
+                            if stack_trace := maybe_incompat_node.meta.get(
+                                "stack_trace", None
+                            ):
+                                disable = f"{disable} Found from {stack_trace}\n"
+                            V.graph.disable_cudagraphs_reason = disable
+
+                    if V.aot_compilation is True:
+                        assert isinstance(compiled_fn, (str, list))
+                        return CompiledAOTI(compiled_fn)
+
+                    # TODO: Hoist this above V.aot_compilation
+                    if cudagraphs and not V.graph.disable_cudagraphs_reason:
+                        from torch._inductor.cudagraph_utils import (
+                            check_lowering_disable_cudagraph,
+                        )
+
+                        V.graph.disable_cudagraphs_reason = (
+                            check_lowering_disable_cudagraph(
+                                V.graph.device_node_mapping
+                            )
+                        )
+
+                    return CompiledFxGraph(
+                        compiled_fn,
+                        graph,
+                        gm,
+                        output_strides,
+                        V.graph.disable_cudagraphs_reason,
+                        metrics_helper.get_deltas(),
+                        counters["inductor"] - inductor_counters,
+                        cudagraphs,
+                        example_inputs,
+                        static_input_idxs,
+                        graph_kwargs,
+                        inputs_to_check,
+                        boxed_forward_device_index,
+                    )
+
+
 def fx_codegen_and_compile(
     gm: GraphModule,
     example_inputs: Sequence[InputType],
@@ -778,313 +1117,9 @@ def fx_codegen_and_compile(
     inputs_to_check: Sequence[int],
     **graph_kwargs: Unpack[_CompileFxKwargs],
 ) -> OutputCode:
-    # Sorry about the mess, we need graph_kwargs to continue to be able
-    # to propagate it further on
-    # TODO: _CompileFxKwargs actually has stronger types than in the
-    # signature, need to tighten it up
-    assert "cudagraphs" in graph_kwargs and graph_kwargs["cudagraphs"] is not None
-    cudagraphs: BoxedBool = graph_kwargs["cudagraphs"]
-    static_input_idxs: Sequence[int] = graph_kwargs.get("static_input_idxs", ())
-    is_backward: bool = graph_kwargs.get("is_backward", False)
-    graph_id: Optional[int] = graph_kwargs.get("graph_id", None)
-    cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
-    aot_mode: bool = graph_kwargs.get("aot_mode", False)
-    is_inference: bool = graph_kwargs.get("is_inference", False)
-    layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
-    extern_node_serializer: Optional[
-        Callable[[List[ExternKernelNode]], Any]
-    ] = graph_kwargs.get("extern_node_serializer", None)
-    boxed_forward_device_index: Optional[BoxedDeviceIndex] = graph_kwargs.get(
-        "boxed_forward_device_index", None
-    )
+    scheme: FxCompile = _InProcessFxCompile()
 
-    with _WaitCounter(
-        "pytorch.wait_counter.actual_codegen_and_compile"
-    ).guard(), dynamo_utils.preserve_rng_state():
-        if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
-            import time
-
-            log.warning(
-                "Sleeping for %s since sleep_sec_TESTING_ONLY is set", sleep_sec
-            )
-            time.sleep(sleep_sec)
-
-        if is_tf32_warning_applicable(gm):
-            _warn_tf32_disabled()
-
-        inductor_counters = counters["inductor"].copy()
-
-        # lift the maximum depth of the Python interpreter stack
-        # to adapt large/deep models
-        sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
-
-        _step_logger()(
-            logging.INFO,
-            "torchinductor compiling "
-            f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
-            f"graph {graph_id}",
-        )
-
-        def log_graph_runnable() -> str:
-            fd = io.StringIO()
-            torch._dynamo.repro.after_aot.save_graph_repro(
-                fd, gm, example_inputs, "inductor", save_dir=None
-            )
-            return fd.getvalue()
-
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_runnable",
-                "encoding": "string",
-            },
-            payload_fn=lambda: log_graph_runnable(),
-        )
-
-        V.debug.fx_graph(gm, example_inputs)
-        # TODO: Should we actually dump this?  It should be redundant with the aot
-        # structured logs...
-        # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
-
-        shape_env = shape_env_from_inputs(example_inputs)
-
-        # Convert view to reshape in the graph. This is necessary primarily for
-        # layout optimization. Do it unconditionally for uniformity.
-        #
-        # It's needed because when we do layout optimization, an contiguous tensor
-        # in eager mode may becomes a channels last tensor. A view op previously
-        # can be applied to the contiguous tensor may not be able to be applied
-        # on the channels tensor any more. An error like
-        #   RuntimeError: view size is not compatible with input tensor's size and stride
-        #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-        # will be printed.
-        #
-        # Replace view op to reshape op in this case.
-        # As an example, timm_resnest/botnet26t_256/convnext_base etc. will fail if we don't do this.
-        #
-        # Also this has to be done before FakeTensorProp below to avoid the failed
-        # .view() call.
-        view_to_reshape(gm)
-
-        # It is safe to run FakeTensorProp under no_grad because by the time
-        # we're in inductor, we assume that AOTAutograd has already "taken care"
-        # of autograd, so there should be no more autograd-related API's in the
-        # graph.
-        with torch.no_grad():
-            fake_mode = fake_tensor_prop(gm, example_inputs)
-
-        record_original_output_strides(gm)
-
-        # pattern matcher passes might not preserve striding information
-        # on node.meta["val"]. if in the future we rely on these being
-        # correct we will need to fix.
-
-        with V.set_fake_mode(fake_mode):
-            # has some issues with memory in training
-            cuda_context = get_cuda_device_context(gm)
-            with cuda_context:
-                _recursive_post_grad_passes(gm, is_inference=is_inference)
-            V.debug.fx_graph_transformed(gm, example_inputs)
-            post_grad_graphs_log.debug(
-                "%s",
-                lazy_format_graph_code(
-                    "AFTER POST GRAD",
-                    gm,
-                    include_stride=True,
-                    include_device=True,
-                    colored=True,
-                ),
-            )
-            trace_structured(
-                "inductor_post_grad_graph",
-                payload_fn=lambda: gm.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                ),
-            )
-            if config.is_fbcode():
-                log_optimus_to_scuba(
-                    extra_logging={"pt2_configs": str(get_patched_config_dict())}
-                )
-
-        with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
-            example_inputs
-        ):
-            const_output_index = None
-            const_graph = None
-            const_code = None
-
-            if aot_mode and config.aot_inductor.use_runtime_constant_folding:
-                const_gm, const_output_index = split_const_gm(gm)
-
-                const_graph = GraphLowering(
-                    const_gm,
-                    example_inputs=[],
-                    shape_env=shape_env,
-                    graph_id=graph_id,
-                    cpp_wrapper=cpp_wrapper,
-                    aot_mode=aot_mode,
-                    extern_node_serializer=extern_node_serializer,
-                    is_inference=is_inference,
-                    is_backward=is_backward,
-                    is_const_graph=True,
-                )
-                with V.set_graph_handler(const_graph):
-                    assert cpp_wrapper, "AOT mode only supports C++ wrapper"
-                    const_graph.run()
-
-                    const_code, _ = const_graph.codegen_with_cpp_wrapper()
-
-            graph = GraphLowering(
-                gm,
-                # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
-                # For the forward pass, we have the real inputs to be used as example_inputs. For the backward pass,
-                # we currently use fake tensors and defake them later.
-                example_inputs=example_inputs,
-                shape_env=shape_env,
-                graph_id=graph_id,
-                cpp_wrapper=cpp_wrapper,
-                aot_mode=aot_mode,
-                extern_node_serializer=extern_node_serializer,
-                is_inference=is_inference,
-                is_backward=is_backward,
-                const_output_index=const_output_index,
-                const_code=const_code,
-                const_module=const_graph,
-            )
-            metrics_helper = metrics.CachedMetricsHelper()
-            with V.set_graph_handler(graph):
-                graph.run(*example_inputs)
-                output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
-                if graph.graph_outputs is not None:
-                    # We'll put the output strides in the compiled graph so we
-                    # can later return them to the caller via TracingContext
-                    p = SymExprPrinter()
-                    for out in graph.graph_outputs:
-                        if (
-                            isinstance(out, IRNode)
-                            and out.has_tensor_output()
-                            and len(free_unbacked_symbols(out.get_stride())) == 0
-                        ):
-                            # Convert to string for eval on the load path
-                            output_strides.append(
-                                tuple(p.doprint(s) for s in out.get_layout().stride)
-                            )
-                        else:
-                            output_strides.append(None)
-
-                _check_triton_bf16_support(graph)
-
-                # TODO: The switching between AOT mode and not here is a bit
-                # messy, but it's localized to the block of code below so I'm
-                # not going to touch it for now
-
-                compiled_fn: Any
-
-                with dynamo_timed(
-                    "GraphLowering.compile_to_fn", log_pt2_compile_event=True
-                ):
-                    if graph.aot_mode:
-                        from .codecache import AotCodeCompiler
-
-                        assert graph.cpp_wrapper, "AOT mode only supports C++ wrapper"
-                        code, linemap = graph.codegen_with_cpp_wrapper()
-                        output_code_log.debug("Output code: \n%s", code)
-
-                        serialized_extern_kernel_nodes = None
-                        if graph.extern_kernel_nodes:
-                            serialized_extern_kernel_nodes = (
-                                graph.extern_node_serializer(graph.extern_kernel_nodes)
-                            )
-                            output_code_log.debug(
-                                "Serialized Extern Kernel Nodes: \n%s",
-                                serialized_extern_kernel_nodes,
-                            )
-
-                        additional_files = graph.wrapper_code.additional_files
-
-                        with dynamo_timed(
-                            "AotCodeCompiler.compile", log_pt2_compile_event=True
-                        ):
-                            # Directly return the file path with the compiled code
-                            compiled_fn = AotCodeCompiler.compile(
-                                graph,
-                                code,
-                                serialized_extern_kernel_nodes,
-                                device_type=graph.device_type,
-                                additional_files=additional_files,
-                            )
-                    else:
-                        compiled_fn = graph.compile_to_module().call
-
-                num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-                metrics.num_bytes_accessed += num_bytes
-                metrics.node_runtimes += node_runtimes
-                metrics.nodes_num_elem += nodes_num_elem
-
-                if (
-                    cudagraphs
-                    and config.triton.cudagraph_skip_dynamic_graphs
-                    and not V.graph.disable_cudagraphs_reason
-                    and torch._inductor.utils.any_is_symbolic(*example_inputs)
-                ):
-                    stack_trace = None
-                    for node in gm.graph.nodes:
-                        meta_val = node.meta.get("val", None)
-                        if (
-                            node.op == "placeholder"
-                            or not isinstance(meta_val, torch.Tensor)
-                            or not torch._inductor.utils.any_is_symbolic(meta_val)
-                        ):
-                            continue
-
-                        if stack_trace := node.meta.get("stack_trace", None):
-                            break
-                    disable = "graph with symbolic shapes inputs and config.triton.cudagraph_skip_dynamic_graphs=True."
-                    if stack_trace:
-                        disable = f"{disable} Found from {stack_trace}\n"
-                    else:
-                        disable = f"{disable}\n"
-                    V.graph.disable_cudagraphs_reason = disable
-
-                if cudagraphs and not V.graph.disable_cudagraphs_reason:
-                    maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
-                    if maybe_incompat_node:
-                        disable = f"disabling cudagraphs due to incompatible op {maybe_incompat_node.target}"
-                        if stack_trace := maybe_incompat_node.meta.get(
-                            "stack_trace", None
-                        ):
-                            disable = f"{disable} Found from {stack_trace}\n"
-                        V.graph.disable_cudagraphs_reason = disable
-
-                if V.aot_compilation is True:
-                    assert isinstance(compiled_fn, (str, list))
-                    return CompiledAOTI(compiled_fn)
-
-                # TODO: Hoist this above V.aot_compilation
-                if cudagraphs and not V.graph.disable_cudagraphs_reason:
-                    from torch._inductor.cudagraph_utils import (
-                        check_lowering_disable_cudagraph,
-                    )
-
-                    V.graph.disable_cudagraphs_reason = (
-                        check_lowering_disable_cudagraph(V.graph.device_node_mapping)
-                    )
-
-                return CompiledFxGraph(
-                    compiled_fn,
-                    graph,
-                    gm,
-                    output_strides,
-                    V.graph.disable_cudagraphs_reason,
-                    metrics_helper.get_deltas(),
-                    counters["inductor"] - inductor_counters,
-                    cudagraphs,
-                    example_inputs,
-                    static_input_idxs,
-                    graph_kwargs,
-                    inputs_to_check,
-                    boxed_forward_device_index,
-                )
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
 
 def get_input_idxs_to_check(
@@ -1285,6 +1320,8 @@ def compile_fx_aot(
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
+    assert isinstance(model_, GraphModule), model_
+
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
