@@ -149,10 +149,6 @@ static inline hash_t Hash(const std::string& value) {
   return DataHash(value.data(), value.size());
 }
 
-static inline hash_t Hash(const c10::string_view& value) {
-  return DataHash(value.data(), value.size());
-}
-
 static inline hash_t Hash(const std::string_view& value) {
   return DataHash(value.data(), value.size());
 }
