@@ -3464,7 +3464,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable) or (
+        if isinstance(tos, (ListIteratorVariable, GeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
