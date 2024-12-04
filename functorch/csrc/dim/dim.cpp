@@ -1586,7 +1586,9 @@ static PyObject* _dims(PyObject *self,
     #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
+    std::cout << "PRECALL CHECK" << std::endl;
     if (decoder.opcode() == PRECALL) {
+        std::cout <<  "PRECALL FOUND" << std::endl;
         decoder.next();
     }
     // note that this opcode was removed in 3.12
