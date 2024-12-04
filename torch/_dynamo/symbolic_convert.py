@@ -921,7 +921,7 @@ class InstructionTranslatorBase(
         """
         # TODO: figure it out why dynamo produces the wrong result when fn is
         # a UserMethodVariable
-        if is_generator(fn.get_code()):
+        if config.enable_yield_on_generator and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -3074,6 +3074,17 @@ class InstructionTranslator(InstructionTranslatorBase):
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst):
+        tos = self.stack[-1]
+        if isinstance(tos, GeneratorObjectVariable):
+            # If we are inside, this means the user is trying to return a generator
+            # from a compiled function. Before GeneratorObjectVariable, dynamo
+            # would create an iterator for the remaining of the variables not consumed
+            # from the List. We still try to do the same thing here, exhaust the
+            # generator and pass it to a ListIteratorVariable
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
+            )
         self._return(inst)
 
     def RETURN_CONST(self, inst):
@@ -3148,7 +3159,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
                 GeneratorFunctionVariable,
-                # I'm not so sure if Dynamo can inline an object.
                 GeneratorObjectVariable,
             ),
         )
@@ -3268,18 +3278,29 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         log.debug("DONE INLINING %s", code)
 
-        if (
-            is_generator(code)
-            and isinstance(self, InliningGeneratorInstructionTranslator)
-            and self.generator_exhausted
-        ):
-            assert isinstance(self, InliningGeneratorInstructionTranslator)
-            # When the generator returns None, we raise StopIteration
-            r = self.symbolic_result
-            assert r.as_python_constant() is None
-            exc.raise_observed_exception(StopIteration, self)
+        if config.enable_yield_on_generator:
+            if (
+                is_generator(code)
+                and isinstance(self, InliningGeneratorInstructionTranslator)
+                and self.generator_exhausted
+            ):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                # When the generator returns None, we raise StopIteration
+                r = self.symbolic_result
+                assert r.as_python_constant() is None
+                exc.raise_observed_exception(StopIteration, self)
+            else:
+                return self.symbolic_result
         else:
-            return self.symbolic_result
+            if is_generator(code):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                assert self.symbolic_result.as_python_constant() is None
+                return ListIteratorVariable(
+                    self.generated_items,
+                    mutation_type=ValueMutationNew(),
+                )
+            else:
+                return self.symbolic_result
 
     def __init__(
         self,
@@ -3408,9 +3429,10 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
-        self.symbolic_result = top
-        # Stop tracing
-        raise YieldValueOp
+        if config.enable_yield_on_generator:
+            self.symbolic_result = top
+            # Stop tracing
+            raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]

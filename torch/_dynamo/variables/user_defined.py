@@ -835,7 +835,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     (self.value is args[0].value) is (method is object.__eq__)
                 )
 
-            if isinstance(self.value, types.GeneratorType):
+            if torch._dynamo.config.enable_yield_on_generator and isinstance(
+                self.value, types.GeneratorType
+            ):
                 return variables.GeneratorObjectVariable(
                     self.value, None, source=self.source
                 ).call_method(tx, name, args, kwargs)

@@ -395,7 +395,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
 class GeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
-        # vt: VariableTracker,
         value: types.GeneratorType,
         inline_tracer: Optional["InstructionTranslator"],
         **kwargs,
@@ -418,7 +417,6 @@ class GeneratorObjectVariable(VariableTracker):
         return self.value
 
     def has_self(self):
-        # This is an object, it should have a self! But we cannot inline objects(?)
         return False
 
     def __name__(self):
@@ -430,9 +428,8 @@ class GeneratorObjectVariable(VariableTracker):
     def get_globals(self):
         return self.value.gi_frame.f_globals
 
-    def can_reconstruct(self, tx):
-        # TODO: reconstruct generator object
-        return False
+    def python_type(self):
+        return types.GeneratorType
 
     def _get_inline_tracer(self, tx):
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator

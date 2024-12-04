@@ -382,6 +382,9 @@ enable_cpp_guard_manager = True
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Changes dynamo behavior on generator functions
+enable_yield_on_generator = True
+
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
