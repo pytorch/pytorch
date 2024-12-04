@@ -49,8 +49,8 @@ def replace_node_with_constant(gm, node, constant, name=None):
 class ConstantFolder(torch.fx.Interpreter):
     def __init__(
         self,
-        gm: torch.fx.GraphModule,
-        skip_constructors: bool = False,
+        gm,
+        skip_constructors=False,
     ):
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
@@ -62,7 +62,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
-    def is_impure(self, node: torch.fx.Node) -> bool:
+    def is_impure(self, node: torch.fx.node.Node):
         if (
             node.target == torch.ops.prims.convert_element_type.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
@@ -202,10 +202,7 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run(initial_env=env)
 
 
-def constant_fold(
-    gm: torch.fx.GraphModule,
-    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
-):
+def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()
@@ -245,7 +242,7 @@ def constant_fold(
         gm.recompile()
 
 
-def constant_graph_tag(gm: torch.fx.GraphModule) -> None:
+def constant_graph_tag(gm: torch.fx.GraphModule):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()
