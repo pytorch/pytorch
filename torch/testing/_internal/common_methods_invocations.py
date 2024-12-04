@@ -16249,6 +16249,8 @@ op_db: List[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          dtypes=(torch.float8_e4m3fn,)),
+            # aten::_scaled_mm hit the vmap fallback which is currently disabled
++           DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule", device_type='cpu'),
         )
     ),
     OpInfo(
