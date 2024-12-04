@@ -171,6 +171,13 @@ bool CUDAPluggableAllocator::initialized() {
   return initialized_;
 }
 
+double CUDAPluggableAllocator::getMemoryFraction(c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support getMemoryFraction. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 void CUDAPluggableAllocator::setMemoryFraction(
     double fraction,
     c10::DeviceIndex device) {

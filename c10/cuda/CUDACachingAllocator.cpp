@@ -1579,6 +1579,19 @@ class DeviceCachingAllocator {
     }
   }
 
+  /** get memory fraction limiting maximum allocated memory **/
+  double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_total);
+  }
+
   /** set memory fraction to limit maximum allocated memory **/
   void setMemoryFraction(double fraction) {
     size_t device_free = 0;
@@ -3387,6 +3400,16 @@ class NativeCachingAllocator : public CUDAAllocator {
           c10::kCUDA, reinterpret_cast<uintptr_t>(block->ptr));
     }
     device_allocator[block->device]->free(block);
+  }
+
+  double getMemoryFraction(c10::DeviceIndex device) override {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
+    return device_allocator[device]->getMemoryFraction();
   }
 
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
