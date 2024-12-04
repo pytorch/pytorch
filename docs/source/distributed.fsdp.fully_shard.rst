@@ -29,6 +29,8 @@ FSDP-specific methods on the module.
 .. autoclass:: UnshardHandle
     :members:
 
+.. autofunction:: register_fsdp_forward_method
+
 .. autoclass:: MixedPrecisionPolicy
     :members:
 
