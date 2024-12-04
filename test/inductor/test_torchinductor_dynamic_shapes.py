@@ -1020,6 +1020,7 @@ class TestInductorDynamic(TestCase):
         # Automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 2)
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_softshrink(self):
         # This test is particularly interesting since it exercises
         # both standard operator replacements ie. torch.ops.aten.mul.Tensor
