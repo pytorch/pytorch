@@ -40,7 +40,6 @@ import torch._export.serde.schema as export_schema
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
@@ -79,7 +78,7 @@ from .dependencies import (
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
     argsort,
     argsort_sym,
@@ -1058,19 +1057,11 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        dtype = get_device_type(device)
-        assert dtype is not None
-        device_interface = get_interface_for_device(dtype)
-        device_properties = device_interface.Worker.get_device_properties(device)
-        if get_device_type(device) == "xpu":
-            num_sm = device_properties.gpu_subslice_count
-        else:
-            # default is cuda behavior
-            num_sm = device_properties.multi_processor_count
-
+        props = DeviceProperties.create(device)
+        num_sm = props.multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
-        threads_per_sm = 2048
+        threads_per_sm = props.max_threads_per_multi_processor or 2048
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 

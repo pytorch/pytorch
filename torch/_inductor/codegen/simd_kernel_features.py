@@ -404,7 +404,9 @@ class StatsForDim:
 
     @property
     def contiguous_score(self) -> float:
-        return 1.0 - self.count_per_thread_non_contiguous / self.count_per_thread
+        return 1.0 - self.count_per_thread_non_contiguous / max(
+            self.count_per_thread, 1
+        )
 
     def __add__(self, other: typing.Self) -> StatsForDim:
         return StatsForDim(
