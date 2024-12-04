@@ -643,8 +643,6 @@ class PythonWrapperCodegen(CodeGen):
         self.ending = ""
         self.comment = "#"
         self.none_str = "None"
-        self.size = "size()"
-        self.stride = "stride()"
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
@@ -1237,62 +1235,47 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
-    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
+    def codegen_input_symbol_assignment(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        value: ir.TensorBox,
+        bound_vars: Set[sympy.Symbol],
+    ):
+        @functools.lru_cache(None)
+        def sizeof(name):
+            code.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
 
-    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(
-            f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
-        )
+        @functools.lru_cache(None)
+        def strideof(name):
+            code.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
+        if isinstance(value, sympy.Expr):
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+                return
+            code.writeline(f"{value} = {name}")
+            bound_vars.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim, size in enumerate(value.get_size()):
+                if isinstance(size, sympy.Symbol) and size not in bound_vars:
+                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
+                    bound_vars.add(size)
+            for dim, stride in enumerate(value.get_stride()):
+                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
+                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
+                    bound_vars.add(stride)
+        else:
+            raise AssertionError(f"Unknown value type: {type(value)}")
 
     def codegen_inputs(
         self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
     ):
         """Assign all symbolic shapes to locals"""
-
-        @functools.lru_cache(None)
-        def sizeof(name):
-            self.codegen_input_size_var_decl(code, name)
-            return f"{name}_size"
-
-        @functools.lru_cache(None)
-        def strideof(name):
-            self.codegen_input_stride_var_decl(code, name)
-            return f"{name}_stride"
-
-        # Assign all symbolic shapes needed to local variables
         bound_vars: Set[sympy.Symbol] = set()
-
-        def is_expr(x):
-            return isinstance(x[1], sympy.Expr)
-
-        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
-        graph_inputs_tensors = list(
-            filter(lambda x: not is_expr(x), graph_inputs.items())
-        )
-
-        for name, shape in graph_inputs_expr:
-            if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
-                bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
+        for name, value in graph_inputs.items():
+            self.codegen_input_symbol_assignment(code, name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):

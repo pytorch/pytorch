@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import sympy
 from sympy import Expr
@@ -45,8 +45,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.ending = ";"
         self.comment = "//"
         self.none_str = "nullptr"
-        self.size = "sizes()"
-        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -255,6 +253,46 @@ class CppWrapperCpu(PythonWrapperCodegen):
         name: str,
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
+
+    def codegen_input_symbol_assignment(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        value: ir.TensorBox,
+        bound_vars: Set[sympy.Symbol],
+    ):
+        @functools.lru_cache(None)
+        def sizeof(name):
+            self.codegen_input_size_var_decl(code, name)
+            return f"{name}_size"
+
+        @functools.lru_cache(None)
+        def strideof(name):
+            self.codegen_input_stride_var_decl(code, name)
+            return f"{name}_stride"
+
+        if isinstance(value, sympy.Expr):
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+                return
+            if value.is_integer:
+                decl = "int64_t"
+            elif value.is_float:
+                decl = "double"
+            else:
+                raise AssertionError("Unexpected symbol type")
+            code.writeline(f"{decl} {value} = {name};")
+            bound_vars.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim, size in enumerate(value.get_size()):
+                if isinstance(size, sympy.Symbol) and size not in bound_vars:
+                    code.writeline(f"int64_t {size} = {sizeof(name)}[{dim}];")
+                    bound_vars.add(size)
+            for dim, stride in enumerate(value.get_stride()):
+                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
+                    code.writeline(f"int64_t {stride} = {strideof(name)}[{dim}];")
+                    bound_vars.add(stride)
+        else:
+            raise AssertionError(f"Unknown value type: {type(value)}")
 
     def generate_input_output_runtime_checks(self):
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
