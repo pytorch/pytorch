@@ -85,6 +85,13 @@ table.gsc-search-box td {
     margin-bottom: 0 !important;
     padding-bottom: 0 !important;
 }
+
+@media (max-width: 768px) {
+  table.gsc-search-box td {
+    height: 34px;
+  }
+}
+
 .gsc-search-button-v2 {
     display: none;
 }
@@ -114,3 +121,4 @@ form.gsc-search-box {
   padding-bottom: 0;
   margin-bottom: 0;
 }
+
