@@ -518,10 +518,7 @@ def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
 
 @dataclasses.dataclass
 class MockFXGraphCacheOutput(OutputCode):
-    gm: Any
-    _fx_graph_cache_key: Optional[str]
-    # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: Optional[int]
+    gm: Any = None
 
     def __post_init__(self) -> None:
         self._boxed_call = True
