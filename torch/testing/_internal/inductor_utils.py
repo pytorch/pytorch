@@ -11,7 +11,6 @@ import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
-from torch._inductor.utils import GPU_TYPES, get_gpu_type
 from torch.utils._triton import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
@@ -21,6 +20,15 @@ from torch.testing._internal.common_utils import (
     TestCase,
     IS_CI,
     IS_WINDOWS,
+)
+
+from torch.testing._internal.common_utils import (
+    GPU_TYPES,
+    GPU_TYPE,
+    HAS_CUDA,
+    HAS_XPU,
+    HAS_GPU,
+    HAS_MULTIGPU,
 )
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -41,18 +49,11 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+HAS_CUDA = HAS_CUDA and HAS_TRITON
 
-HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU = HAS_XPU and HAS_TRITON
 
 HAS_GPU = HAS_CUDA or HAS_XPU
-
-GPU_TYPE = get_gpu_type()
-
-HAS_MULTIGPU = any(
-    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPU_TYPES
-)
 
 def _check_has_dynamic_shape(
     self: TestCase,
