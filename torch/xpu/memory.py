@@ -187,7 +187,7 @@ def mem_get_info(device: _device_t = None) -> Tuple[int, int]:
             if :attr:`device` is ``None`` (default).
 
     Returns:
-        int: the memory avialble on the device in units of bytes.
+        int: the memory available on the device in units of bytes.
         int: the total memory on the device in units of bytes
     """
     device = _get_device_index(device, optional=True)
