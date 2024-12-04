@@ -565,7 +565,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(tma_descriptor, str)
             assert self.template_mask is None
-            indices = list(map(TritonPrinter.paren, indices))
+            indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
