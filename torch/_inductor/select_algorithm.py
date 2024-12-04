@@ -221,7 +221,6 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         assert (
             self.mask is not None
         ), "Mask is required for inner stores in modifications"
-        print(type(mode))
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
