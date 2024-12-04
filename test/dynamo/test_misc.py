@@ -11949,6 +11949,24 @@ fn
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
 
+    def test_user_defined_when_value_type_is_set(self):
+        old_device_constructors_ = torch.utils._device._device_constructors()
+
+        def origin_device_constructors():
+            return old_device_constructors_
+
+        with unittest.mock.patch(
+            "torch.utils._device._device_constructors", origin_device_constructors
+        ):
+
+            @torch.compile(fullgraph=True)
+            def split(x):
+                return x.split(4, 0)
+
+            x = torch.zeros(12)
+            with torch.device("cpu"):
+                cpu_res = split(x)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
