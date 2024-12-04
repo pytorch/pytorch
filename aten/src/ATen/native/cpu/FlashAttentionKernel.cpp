@@ -317,7 +317,7 @@ void cpu_flash_attention(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -815,7 +815,7 @@ void cpu_flash_attention_backward(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
