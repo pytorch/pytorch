@@ -115,7 +115,7 @@ static void min_kernel_impl(
         scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
