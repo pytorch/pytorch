@@ -715,6 +715,17 @@ class WhileLoopModels:
                 cond_fn, body_fn, (it, pytree_input)
             )
 
+    class DataDependentOutput(torch.nn.Module):
+        def forward(self, c, a, b):
+            def cond_fn(c, x, y):
+                return c > 0
+
+            def body_fn(c, x, y):
+                _ = torch.masked_select(x, y)
+                return c - 1, x.sin(), y.clone()
+
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -862,6 +873,21 @@ class WhileLoopTests(TestCase):
                     [torch.randn(10, 20)],
                     {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
                 ),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_data_dependent_ops(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.DataDependentOutput(),
+            inputs=(
+                torch.tensor([1, 2, 3, 4, 5]),
+                torch.tensor([True, True, True, True, True]),
+                torch.randn(10, 20),
             ),
             device=device,
             dynamic=dynamic,

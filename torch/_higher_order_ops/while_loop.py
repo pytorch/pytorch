@@ -235,7 +235,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
         # body_fn return output with the same pytree and tensor meta data as carried_inputs
         # so we could just return the output after one iteration.
-        out = body_fn(*carried_inputs, *additional_inputs)
+        out = while_loop_op(cond_graph, body_graph, carried_inputs, additional_inputs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
@@ -250,7 +250,8 @@ def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
 ):
     with mode:
-        return body_fn(*carried_inputs, *additional_inputs)
+        with mode.shape_env.ignore_fresh_unbacked_symbols():
+            return body_fn(*carried_inputs, *additional_inputs)
 
 
 @while_loop_op.py_functionalize_impl
