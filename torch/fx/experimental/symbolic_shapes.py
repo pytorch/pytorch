@@ -12,6 +12,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import dis
 import functools
 import inspect
 import itertools
@@ -4293,6 +4294,7 @@ class ShapeEnv:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
                 )
+            breakpoint()
             self.source_to_var[source_name] = sympy_expr
             # We always associate vars to vals
             if isinstance(val, int):
@@ -4413,6 +4415,7 @@ class ShapeEnv:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.val_to_var[val]
+            breakpoint()
             self.source_to_var[source_name] = r
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
@@ -5680,6 +5683,7 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+        self._log_frame(_find_user_code_frame())
         return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(
@@ -6163,6 +6167,64 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
+    def _log_frame(self, frame):
+        self.log.info(f"{frame.f_code.co_filename}({frame.f_lineno}){frame.f_code.co_name}()")
+        lines, n = inspect.getsourcelines(frame.f_code)
+        instr_start = None
+        instr_end = None
+        cur_line = None
+        instructions = list(dis.Bytecode(frame.f_code))
+        for idx, instr in enumerate(instructions):
+            if instr.starts_line is not None:
+                cur_line = instr.starts_line
+            if cur_line == frame.f_lineno:
+                if instr_start is None:
+                    instr_start = idx
+                else:
+                    instr_end = idx
+
+        localvars = set()
+        rel_instructions = instructions[instr_start : instr_end + 1]
+        for instr in rel_instructions:
+            localvars.add(instr.argval)
+        last_lineno = max(
+            instr.starts_line
+            for instr in rel_instructions 
+            if instr.starts_line is not None
+        )
+        self.log.info("".join(lines[frame.f_lineno - n : last_lineno + 1 - n]))
+        _vars = {}
+        for var in localvars:
+            if var in frame.f_locals:
+                _vars[var] = frame.f_locals[var]
+            elif var in frame.f_globals:
+                _vars[var] = frame.f_globals[var]
+        free_symbols = set()
+        def _track_symbols(x):
+            if isinstance(x, (SymBool, SymInt, SymFloat)):
+                free_symbols.update(x.node.expr.free_symbols)
+            elif isinstance(x, (torch.Size, tuple)):
+                for y in x:
+                    _track_symbols(y)
+            return x
+
+        def _print_shape_or_attr(x):
+            if isinstance(x, torch.Tensor):
+                return f"Tensor(shape: {_track_symbols(x.size())}, stride: {_track_symbols(x.stride())}, storage_offset: {_track_symbols(x.storage_offset())})"
+            elif isinstance(x, (bool, int, float, SymBool, SymInt, SymFloat)):
+                return _track_symbols(x)
+
+        self.log.info("Values during FakeTensor propagation:")
+        for k, v in _vars.items():
+            _repr = pytree.tree_map(_print_shape_or_attr, v)
+            if not pytree.tree_all(lambda x: x is None, _repr):
+                self.log.info(f"{k}: {_repr}")
+        self.log.info("\nSymbols:")
+        for symbol in free_symbols:
+            if symbol in self.var_to_sources:
+                self.log.info(f"{symbol}: {self.var_to_sources[symbol][0].name()}")
+        self.log.info("")
+
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
         dtrace_structured(
             "guard_added",
@@ -6210,6 +6272,21 @@ class ShapeEnv:
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
+
+            user_frame = _find_user_code_frame()
+            # sloc_frame = inspect.currentframe()
+            # while sloc_frame is not None:
+            #     if (
+            #         sloc_frame.f_code.co_filename == sloc.framework_loc.filename
+            #         and sloc_frame.f_lineno == sloc.framework_loc.lineno
+            #     ):
+            #         break
+            #     sloc_frame = sloc_frame.f_back
+
+            self._log_frame(user_frame)
+            breakpoint()
+            # if sloc_frame != user_frame and sloc_frame is not None:
+            #     _log_frame(sloc_frame)
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
@@ -6416,16 +6493,6 @@ class ShapeEnv:
                 return concrete_val
 
             if not self._suppress_guards_tls():
-                if isinstance(g, sympy.Rel):
-                    # TODO: If we successfully eliminate a symbol via equality, it
-                    # is not actually necessary to save a guard for the equality,
-                    # as we will implicitly generate a guard when we match that
-                    # input against the symbol.  Probably the easiest way to
-                    # implement this is to have maybe_guard_rel return a bool
-                    # saying if it "subsumed" the guard (and therefore the guard
-                    # is no longer necessary)
-                    self._maybe_guard_rel(g)
-
                 if not self.allow_complex_guards_as_runtime_asserts:
                     # at this point, we've evaluated the concrete expr value, and have
                     # flipped/negated the guard if necessary. Now we know what to guard
@@ -6433,19 +6500,7 @@ class ShapeEnv:
                     guard = ShapeGuard(g, self._get_sloc())
                     self.guards.append(guard)
                     self.axioms.update(dict(self.get_implications(self.simplify(g))))
-                else:
-                    # it's fine to defer simple guards here without checking,
-                    # the _maybe_guard_rel() call above will set replacements if possible,
-                    # and so the result here will be statically known
-                    self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
 
-        except Exception:
-            if fresh:
-                self._remove_fx_node(node)
-            raise
-        else:
-            if not self._suppress_guards_tls():
-                if guard is not None:  # we might have deferred this to runtime assert
                     self._log_guard("eval", g, forcing_spec=forcing_spec)
 
                     for s in g.free_symbols:
@@ -6464,8 +6519,29 @@ class ShapeEnv:
                                 s,
                             )
                             self.evaluate_expr(s, forcing_spec=True)
+                else:
+                    # it's fine to defer simple guards here without checking,
+                    # the _maybe_guard_rel() call above will set replacements if possible,
+                    # and so the result here will be statically known
+                    self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
+
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
+
+                if isinstance(g, sympy.Rel):
+                    # TODO: If we successfully eliminate a symbol via equality, it
+                    # is not actually necessary to save a guard for the equality,
+                    # as we will implicitly generate a guard when we match that
+                    # input against the symbol.  Probably the easiest way to
+                    # implement this is to have maybe_guard_rel return a bool
+                    # saying if it "subsumed" the guard (and therefore the guard
+                    # is no longer necessary)
+                    self._maybe_guard_rel(g)
+
+        except Exception:
+            if fresh:
+                self._remove_fx_node(node)
+            raise
 
         return concrete_val
 
@@ -6531,6 +6607,7 @@ class ShapeEnv:
                 self._add_fx_node_metadata(node)
 
         if not self._suppress_guards_tls():
+            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
@@ -6557,7 +6634,6 @@ class ShapeEnv:
             self.axioms.update(dict(self.get_implications(self.simplify(expr))))
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
-            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
         else:
             self._log_guard(
                 "runtime_assert [guard suppressed]", orig_expr, forcing_spec=False
@@ -6675,8 +6751,11 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
 def _find_user_code_frame() -> Optional[types.FrameType]:
     frame = inspect.currentframe()
     while frame is not None:
-        if not frame.f_code.co_filename.startswith(
-            os.path.dirname(inspect.getfile(torch)) + os.path.sep
+        if (
+            not frame.f_code.co_filename.startswith(
+                os.path.dirname(inspect.getfile(torch)) + os.path.sep
+            )
+            and frame.f_code.co_filename != "<string>"
         ):
             break
         frame = frame.f_back
