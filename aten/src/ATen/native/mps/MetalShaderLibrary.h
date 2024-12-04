@@ -102,7 +102,7 @@ class MetalShaderLibrary {
         nparams(nparams_),
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
-  virtual ~MetalShaderLibrary() = default;
+  virtual ~MetalShaderLibrary();
   std::vector<std::string> getFunctionNames();
   std::shared_ptr<MetalKernelFunction> getKernelFunction(
       const std::string& name);
