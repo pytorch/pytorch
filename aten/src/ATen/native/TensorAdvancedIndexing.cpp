@@ -289,7 +289,8 @@ TORCH_PRECOMPUTE_META_FUNC(index_copy)
                    source.dim(), "), destination dimensionality (", self.dim(), ")");
   }
 
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type());
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+          "index_copy_(): Expected a dtype int64 or int32 for index, but got ", index.scalar_type());
   TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
   TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
       "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
@@ -1480,9 +1481,8 @@ Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
   at::NoNamesGuard guard;
 
-  TORCH_CHECK_INDEX(
-    index.scalar_type() == ScalarType::Long,
-    "index_fill_(): Expected dtype int64 for index.");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+          "index_fill_(): Expected a dtype int64 or int32 for index, but got ", index.scalar_type());
 
   at::assert_no_overlap(self, index);
   if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {

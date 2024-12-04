@@ -106,7 +106,7 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
 // size to avoid redundant kernels for different types of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>>
 void index_fill_kernel_impl(
   TensorIterator& iter,
   const int64_t dim,
@@ -133,7 +133,7 @@ void index_fill_kernel_impl(
     const auto offsets = offset_calc.get(i);
 
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
-    auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    auto idx = *reinterpret_cast<index_t*>(idx_ptr + offsets[1]);
     CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
     if (idx < 0) {
       idx += self_dim_size;
@@ -144,7 +144,7 @@ void index_fill_kernel_impl(
   launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename index_t>>
 void index_copy_kernel_impl(
   TensorIterator& iter,
   const int64_t dim,
@@ -171,7 +171,7 @@ void index_copy_kernel_impl(
     const auto offsets = offset_calc.get(i);
 
     auto* const __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
-    auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    auto idx = *reinterpret_cast<index_t*>(idx_ptr + offsets[1]);
     const auto* const __restrict__ source_data = reinterpret_cast<scalar_t*>(source_ptr + offsets[2]);
     CUDA_KERNEL_ASSERT(idx >= 0 && idx < self_dim_size && "index_copy_(): index out of bounds");
 
@@ -213,7 +213,9 @@ static void index_fill_kernel(
     using dtype = OpaqueType<sizeof(scalar_t)>;
     const auto fill_val = source.to<scalar_t>();
     const auto fill_val_opaque = *reinterpret_cast<const dtype*>(&fill_val);
-    index_fill_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque);
+    AT_DISPATCH_INDEX_TYPES(iter.dtype(1), "index_fill_cuda", [&] {
+      index_fill_kernel_impl<dtype, index_t>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque);
+    });
   });
 }
 
@@ -229,7 +231,9 @@ static void index_copy_kernel(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
     iter.dtype(), "index_copy_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
-    index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
+    AT_DISPATCH_INDEX_TYPES(iter.dtype(1), "index_copy_cuda", [&] {
+      index_copy_kernel_impl<dtype, index_t>(iter, dim, self_dim_size, self_dim_stride);
+    });
   });
 }
 
