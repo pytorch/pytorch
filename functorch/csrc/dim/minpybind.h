@@ -600,16 +600,16 @@ struct vector_args {
             _PyArg_Parser* _parser = new _PyArg_Parser{format_str, &names_buf[0], fname_cstr, 0};
             PyObject *dummy = NULL;
             _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
-#else
-#if IS_PYTHON_3_12_PLUS
+#elif IS_PYTHON_3_12_PLUS
             _PyArg_Parser* _parser = new _PyArg_Parser{
                     .format = NULL,
                     .keywords = &names_buf[0],
                     .fname = fname_cstr,
                     .kwtuple = 0};
+            std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
+            _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #else
             _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
-#endif
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
             _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
