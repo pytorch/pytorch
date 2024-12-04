@@ -1880,6 +1880,11 @@ if (custom_op_wrapper.get() == NULL) {
                     raise NotImplementedError(
                         f"arg type {arg_type} with raw_arg {raw_arg}, {type(raw_arg)} is not yet supported by custom_op_wrapper"
                     )
+            elif isinstance(raw_arg, torch.device):
+                # device
+                self.include_extra_header("torch/csrc/Device.h")
+                device_str, device_index = self.codegen_device(raw_arg).split(", ")
+                return f"THPDevice_New(c10::Device(static_cast<c10::DeviceType>({device_str}), {device_index}))"
             elif isinstance(raw_arg, torch.dtype):
                 # dtype
                 add_py_newref()
