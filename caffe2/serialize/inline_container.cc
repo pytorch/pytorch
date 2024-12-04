@@ -1,13 +1,13 @@
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <algorithm>
-#include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
+#include <cerrno>
 #include <istream>
 #include <ostream>
+#include <fstream>
+#include <algorithm>
 #include <sstream>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <thread>
 
 #include <c10/core/Allocator.h>
@@ -48,27 +48,25 @@ ChunkRecordIterator::~ChunkRecordIterator() {
   mz_zip_reader_extract_iter_free(iter_->impl);
 }
 
-size_t ChunkRecordIterator::next(void* buf) {
+size_t ChunkRecordIterator::next(void* buf){
   size_t want_size = std::min(chunkSize_, recordSize_ - offset_);
   if (want_size == 0) {
     return 0;
   }
-  size_t read_size =
-      mz_zip_reader_extract_iter_read(iter_->impl, buf, want_size);
+  size_t read_size = mz_zip_reader_extract_iter_read(iter_->impl, buf, want_size);
   TORCH_CHECK(read_size > 0, "Read bytes should be larger than 0");
   offset_ += read_size;
   return read_size;
 }
 
-size_t
-istream_read_func(void* pOpaque, mz_uint64 file_ofs, void* pBuf, size_t n) {
+size_t istream_read_func(void* pOpaque, mz_uint64 file_ofs, void* pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamReader*>(pOpaque);
   return self->read(file_ofs, static_cast<char*>(pBuf), n);
 }
 
 static std::string basename(const std::string& name) {
   size_t start = 0;
-  for (size_t i = 0; i < name.size(); ++i) {
+  for(size_t i = 0; i < name.size(); ++i) {
     if (name[i] == '\\' || name[i] == '/') {
       start = i + 1;
     }
@@ -79,7 +77,7 @@ static std::string basename(const std::string& name) {
   }
 
   size_t end = name.size();
-  for (size_t i = end; i > start; --i) {
+  for(size_t i = end; i > start; --i) {
     if (name[i - 1] == '.') {
       end = i - 1;
       break;
@@ -94,13 +92,13 @@ static std::string parentdir(const std::string& name) {
     end = name.find_last_of('\\');
   }
 
-#ifdef WIN32
+  #ifdef WIN32
   if (end != std::string::npos && end > 1 && name[end - 1] == ':') {
     // This is a Windows root directory, so include the slash in
     // the parent directory
     end++;
   }
-#endif
+  #endif
 
   if (end == std::string::npos) {
     return "";
@@ -159,8 +157,8 @@ void PyTorchStreamReader::init() {
   mz_zip_reader_init(ar_.get(), size, 0);
   valid("reading zip archive");
 
-  // figure out the archive_name (i.e. the zip folder all the other files are
-  // in) all lookups to getRecord will be prefixed by this folder
+  // figure out the archive_name (i.e. the zip folder all the other files are in)
+  // all lookups to getRecord will be prefixed by this folder
   mz_uint n = mz_zip_reader_get_num_files(ar_.get());
   if (n == 0) {
     CAFFE_THROW("archive does not contain any files");
@@ -203,15 +201,15 @@ void PyTorchStreamReader::init() {
     TORCH_CHECK(hasRecord("version"))
     std::tie(version_ptr, version_size) = getRecord("version");
   }
-  std::string version(
-      static_cast<const char*>(version_ptr.get()), version_size);
+  std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   try {
     version_ = std::stoull(version);
   } catch (const std::invalid_argument& e) {
-    CAFFE_THROW("Couldn't parse the version ", version, " as Long Long.");
+    CAFFE_THROW("Couldn't parse the version ",
+                 version,
+                 " as Long Long.");
   }
-  if (version_ <
-      static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
+  if (version_ < static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
         std::to_string(version_),
@@ -221,8 +219,7 @@ void PyTorchStreamReader::init() {
         " with latest version of PyTorch to mitigate this issue.");
   }
 
-  if (version_ >
-      static_cast<decltype(version_)>(kMaxSupportedFileFormatVersion)) {
+  if (version_ > static_cast<decltype(version_)>(kMaxSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
         version_,
@@ -280,13 +277,12 @@ size_t getPadding(
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
-} // namespace detail
+}
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
 
-  if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
     return false;
   }
   std::string ss = archive_name_plus_slash_ + name;
@@ -311,8 +307,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
-    mz_zip_reader_get_filename(
-        ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
+    mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
     if (strncmp(
             buf,
             archive_name_plus_slash_.data(),
@@ -324,9 +319,7 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
           buf);
     }
     if ((load_debug_symbol_) ||
-        (!c10::ends_with(
-            std::string_view(buf + archive_name_plus_slash_.size()),
-            kDebugPklSuffix))) {
+        (!c10::ends_with(std::string_view(buf + archive_name_plus_slash_.size()),kDebugPklSuffix))) {
       // NOLINTNEXTLINE(modernize-use-emplace)
       out.push_back(buf + archive_name_plus_slash_.size());
     }
@@ -347,8 +340,7 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 }
 
 // return dataptr, size
-std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
-    const std::string& name) {
+std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::ends_with(name, kDebugPklSuffix)) {
     at::DataPtr retval;
@@ -359,57 +351,45 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
   at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(
-      ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
+  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
 
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
 }
 
-size_t PyTorchStreamReader::getRecordMultiReaders(
-    const std::string& name,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
-    void* dst,
-    size_t n) {
-  size_t nthread = additionalReaders.size() + 1;
+size_t
+PyTorchStreamReader::getRecordMultiReaders(const std::string& name,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+  void *dst, size_t n){
+
+  size_t nthread = additionalReaders.size()+1;
   size_t recordOff = getRecordOffset(name);
   std::vector<std::thread> loaderThreads;
-  size_t perThreadSize = (n + nthread - 1) / nthread;
+  size_t perThreadSize = (n+nthread-1)/nthread;
   std::vector<size_t> readSizes(nthread, 0);
   std::lock_guard<std::mutex> guard(reader_lock_);
-  for (size_t i = 0; i < nthread; i++) {
-    loaderThreads.emplace_back([this,
-                                name,
-                                i,
-                                n,
-                                recordOff,
-                                perThreadSize,
-                                dst,
-                                &additionalReaders,
-                                &readSizes] {
-      size_t startPos = i * perThreadSize;
-      size_t endPos = std::min((i + 1) * perThreadSize, n);
-      if (startPos < endPos) {
+  for(size_t i = 0; i < nthread ; i++){
+    loaderThreads.emplace_back([this, name, i, n, recordOff, perThreadSize, dst, &additionalReaders, &readSizes]{
+      size_t startPos = i*perThreadSize;
+      size_t endPos = std::min((i+1)*perThreadSize,n);
+      if (startPos < endPos){
         size_t threadReadSize = endPos - startPos;
         size_t size = 0;
-        if (i == 0) {
-          size =
-              read(recordOff + startPos, (char*)dst + startPos, threadReadSize);
-        } else {
-          auto reader = additionalReaders[i - 1];
-          size = reader->read(
-              recordOff + startPos, (char*)dst + startPos, threadReadSize);
+        if (i==0){
+          size = read(recordOff+startPos, (char *)dst+startPos, threadReadSize);
+        }else{
+          auto reader = additionalReaders[i-1];
+          size = reader->read(recordOff+startPos, (char *)dst+startPos, threadReadSize);
         }
         readSizes[i] = size;
-        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
-                  << "] "
-                  << "from " << name << " of size " << n;
+        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos << "] "
+            << "from " << name << " of size " << n;
         TORCH_CHECK(
-            threadReadSize == size,
-            "record size ",
-            threadReadSize,
-            " mismatch with read size ",
-            size);
+              threadReadSize == size,
+              "record size ",
+              threadReadSize,
+              " mismatch with read size ",
+              size);
       }
     });
   }
@@ -420,7 +400,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
   loaderThreads.clear();
 
   size_t total_read_n = 0;
-  for (auto& r : readSizes) {
+  for (auto& r : readSizes){
     total_read_n += r;
   }
 
@@ -435,10 +415,10 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
 }
 
 // read record with multi clients
-std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
-    const std::string& name,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
-  if (additionalReaders.empty()) {
+std::tuple<at::DataPtr, size_t>
+PyTorchStreamReader::getRecord(const std::string& name,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+  if(additionalReaders.empty()){
     // No additional readers or record too small, use single threaded version
     return getRecord(name);
   }
@@ -452,7 +432,7 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   auto n = stat.m_uncomp_size;
   valid("retrieving file meta-data for ", name.c_str());
-  if (n < additional_reader_size_threshold_) {
+  if(n < additional_reader_size_threshold_){
     // Reader size too small, use single threaded version
     return getRecord(name);
   }
@@ -486,20 +466,17 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   return stat.m_uncomp_size;
 }
 
-// inplace memory writing, in-tensor multi-threads, can be used for large
-// tensor.
-size_t PyTorchStreamReader::getRecord(
-    const std::string& name,
-    void* dst,
-    size_t n,
-    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
-  if (additionalReaders.empty()) {
+
+// inplace memory writing, in-tensor multi-threads, can be used for large tensor.
+size_t
+PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+  if(additionalReaders.empty()){
     // No additional readers, use single threaded version
     return getRecord(name, dst, n);
   }
 
-  if ((!load_debug_symbol_) &&
-      c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
+  if ((!load_debug_symbol_) && c10::ends_with(std::string_view(name), kDebugPklSuffix)) {
     return 0;
   }
   size_t key = getRecordID(name);
@@ -513,7 +490,7 @@ size_t PyTorchStreamReader::getRecord(
       n);
   valid("retrieving file meta-data for ", name.c_str());
 
-  if (n < additional_reader_size_threshold_) {
+  if(n < additional_reader_size_threshold_){
     // Reader size too small, use single threaded version
     return getRecord(name, dst, n);
   }
@@ -600,8 +577,7 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
       "reading file header");
   size_t filename_len = read_le_16(local_header + MZ_ZIP_LDH_FILENAME_LEN_OFS);
   size_t extra_len = read_le_16(local_header + MZ_ZIP_LDH_EXTRA_LEN_OFS);
-  return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len +
-      extra_len;
+  return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
 }
 
 size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
@@ -644,16 +620,14 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::string& file_name,
-    bool compute_crc32)
-    : archive_name_(basename(file_name)), compute_crc32_(compute_crc32) {
+PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name, bool compute_crc32)
+    : archive_name_(basename(file_name)),
+      compute_crc32_(compute_crc32) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func,
-    bool compute_crc32)
+    const std::function<size_t(const void*, size_t)> writer_func, bool compute_crc32)
     : archive_name_("archive"),
       writer_func_(writer_func),
       compute_crc32_(compute_crc32) {
@@ -675,12 +649,10 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     valid("opening archive ", file_name.c_str());
 
     const std::string dir_name = parentdir(file_name);
-    if (!dir_name.empty()) {
+    if(!dir_name.empty()) {
       struct stat st;
-      bool dir_exists =
-          (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
-      TORCH_CHECK(
-          dir_exists, "Parent directory ", dir_name, " does not exist.");
+      bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+      TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
@@ -756,20 +728,17 @@ void PyTorchStreamWriter::writeEndOfFile() {
   // destructor would would result in `std::terminate()`
   // See https://github.com/pytorch/pytorch/issues/87997/
   struct Finalizer {
-    Finalizer(bool& var) : var_(var) {}
+    Finalizer(bool& var): var_(var) {}
     ~Finalizer() {
       var_ = true;
     }
-
    private:
     bool& var_;
   } f(finalized_);
 
   auto allRecords = getAllWrittenRecords();
-  // If no ".data/version" or "version" record in the output model, rewrites
-  // version info
-  if (allRecords.find(".data/version") == allRecords.end() &&
-      allRecords.find("version") == allRecords.end()) {
+  // If no ".data/version" or "version" record in the output model, rewrites version info
+  if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
     std::string version = std::to_string(version_);
     version.push_back('\n');
     if (version_ >= 0x6L) {
@@ -780,7 +749,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   }
 
   // If no "byteorder" record in the output model, rewrites byteorder info
-  if (allRecords.find("byteorder") == allRecords.end()) {
+  if(allRecords.find("byteorder") == allRecords.end()) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     std::string byteorder = "little";
 #elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -839,8 +808,9 @@ void PyTorchStreamWriter::writeSerializationId() {
     }
     std::ostringstream serialization_id_oss;
     serialization_id_oss << std::setfill('0') << std::setw(20)
-                         << combined_record_name_hash << std::setfill('0')
-                         << std::setw(20) << combined_uncomp_crc32_;
+                         << combined_record_name_hash
+                         << std::setfill('0') << std::setw(20)
+                         << combined_uncomp_crc32_;
     serialization_id_ = serialization_id_oss.str();
     writeRecord(
         kSerializationIdRecordName,
