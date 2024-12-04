@@ -2,8 +2,6 @@ import dataclasses
 import importlib
 import io
 import pickle
-import typing
-from torch.utils._mode_utils import no_dispatch
 from abc import abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 from typing_extensions import override
@@ -23,6 +21,7 @@ from torch._subclasses.meta_utils import (
 )
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._mode_utils import no_dispatch
 
 
 class _ShapeEnvPickleData:
