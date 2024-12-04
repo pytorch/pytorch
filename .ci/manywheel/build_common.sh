@@ -425,6 +425,7 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
 
     # tag the wheel with approproiate tags
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" ]]; then
+        LD_LIBRARY_PATH="/usr/local/nvidia/lib64/:${LD_LIBRARY_PATH}"
         auditwheel repair --plat ${PLATFORM} $(basename $pkg)
         # replace original wheel with audited
         mv //wheelhouse/*.whl /$WHEELHOUSE_DIR/
