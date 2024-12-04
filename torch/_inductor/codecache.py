@@ -36,20 +36,17 @@ from typing import (
     Any,
     Callable,
     cast,
-    Counter,
     Dict,
     Generator,
     List,
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -67,12 +64,13 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler, TritonKernelArtifacts
+from .triton_bundler import TritonBundler
 
 
 T = TypeVar("T")
@@ -81,7 +79,8 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
-    from .compile_fx import _CompileFxKwargs
+    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .output_code import OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -101,11 +100,7 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    CudagraphCachedInfo,
-    log_cudagraph_skip_and_bump_counter,
-)
+from torch._inductor.cudagraph_utils import log_cudagraph_skip_and_bump_counter
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -806,8 +801,12 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = v
 
         from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
             triton_kernel_wrapper_functional,
             triton_kernel_wrapper_mutation,
+        )
+        from torch._inductor.codegen.wrapper import (
+            user_defined_triton_kernel_transitive_closure_source_code,
         )
 
         # Node meta will not be part of gm's reduce function, so lets remember
@@ -825,14 +824,23 @@ class FxGraphHashDetails:
                         op="call_function", target=triton_kernel_wrapper_mutation
                     ),
                 ):
-                    data = node.meta.get(
-                        "user_defined_triton_kernel_source_and_constant_args", None
-                    )
-                    if data is None:
-                        raise AssertionError(
-                            "TritonKernelWrapper does not contain source code meta"
+                    from triton.runtime.autotuner import Autotuner
+
+                    kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                    if isinstance(kernel, Autotuner):
+                        kernel = kernel.fn
+
+                    kernel_source = (
+                        user_defined_triton_kernel_transitive_closure_source_code(
+                            kernel
                         )
-                    self.user_defined_triton_source.append(data)
+                    )
+                    constant_args = kernel_side_table.get_constant_args(
+                        node.kwargs["constant_args_idx"]
+                    )
+                    self.user_defined_triton_source.append(
+                        (kernel_source, constant_args)
+                    )
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
@@ -855,7 +863,6 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
-
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
@@ -871,10 +878,6 @@ class FxGraphHashDetails:
             return None
         assert isinstance(custom_pass, CustomGraphPass)
         return custom_pass.uuid()
-
-
-def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return getattr(gm, "_has_frozen_params", False)
 
 
 def compiled_fx_graph_hash(
@@ -1183,25 +1186,6 @@ class FxGraphCache:
         if graph is None:
             return None, cache_info
 
-        # See _save_graph(); we don't store the callable in the cache entry so
-        # recreate it here from the PyCodeCache disk cache.
-        artifact_path = get_path(graph.cache_key, "py")[2]
-        code = graph.source_code
-        if not os.path.exists(artifact_path):
-            counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            cpp_pp = cpp_prefix_path()
-            if os.path.basename(cpp_pp) in code:
-                if cpp_pp in code:
-                    # Great the name is correct
-                    pass
-                else:
-                    # Old dir name is included, replace it
-                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
-                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
-
-            write_atomic(artifact_path, code, make_dirs=True)
-
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
@@ -1215,26 +1199,16 @@ class FxGraphCache:
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
-        inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
-
         try:
-            with dynamo_timed(
-                "PyCodeCache.load_by_key_path",
-                log_pt2_compile_event=True,
-                fwd_only=False,
-            ):
-                graph.current_callable = PyCodeCache.load_by_key_path(
-                    graph.cache_key,
-                    artifact_path,
-                    graph.cache_linemap,
-                    graph.get_constants(gm),
-                ).call
+            artifact_path = graph.after_deserialization(gm)
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", artifact_path)
             return None, cache_info
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        code = graph.source_code
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1252,9 +1226,6 @@ class FxGraphCache:
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
-        from .graph import GraphLowering
-
-        GraphLowering.save_output_code(code)
         output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
@@ -1316,7 +1287,7 @@ class FxGraphCache:
     @staticmethod
     def _save_graph(
         key: str,
-        compiled_graph: CompiledFxGraph,
+        compiled_graph: OutputCode,
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
@@ -1324,12 +1295,13 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
+        from .compile_fx import CompiledFxGraph
+
+        assert isinstance(
+            compiled_graph, CompiledFxGraph
+        ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
-        # We can't really serialize callables that may be C++/Triton/etc.,
-        # so we serialize their PyCodeCache disk cache location instead.
-        # TODO: This could be better if we're ever able to serialize compiled
-        # models to disk.
-        disk_compiled_graph.current_callable = None
+        disk_compiled_graph.prepare_for_serialization()
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -1507,6 +1479,12 @@ class FxGraphCache:
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
+            if remote_cache:
+                # Count remote cache hit stats
+                get_metrics_context().increment("inductor_fx_remote_cache_hit_count", 1)
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_hit_keys", key
+                )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
@@ -1520,129 +1498,19 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
+            if remote_cache:
+                # Count remote cache miss stats
+                get_metrics_context().increment(
+                    "inductor_fx_remote_cache_miss_count", 1
+                )
+                get_metrics_context().add_to_set(
+                    "inductor_fx_remote_cache_miss_keys", key
+                )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
         return compiled_graph, cache_info
-
-    @staticmethod
-    def load(  # type: ignore[no-untyped-def]
-        compile_fx_fn: Callable[..., Any],
-        gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-        fx_kwargs: _CompileFxKwargs,
-        inputs_to_check: Sequence[int],
-        local: bool,
-        remote: bool,
-    ):
-        """
-        Load a compiled graph from the cache. If a cached entry does not exist,
-        compile the graph and save it to the cache.
-        """
-        assert local or remote, "at least one of them needs to be enabled"
-        compiled_graph = None
-        remote_cache = None
-        (key_info, cache_info) = FxGraphCache.prepare_key(
-            gm, example_inputs, fx_kwargs, inputs_to_check, remote
-        )
-        if key_info is not None:
-            key, debug_lines = key_info
-            if remote:
-                remote_cache = FxGraphCache.get_remote_cache()
-            compiled_graph, cache_info = FxGraphCache.load_with_key(
-                key,
-                debug_lines,
-                example_inputs,
-                local,
-                remote_cache,
-                is_backward=fx_kwargs.get("is_backward", False),
-                gm=gm,
-            )
-
-        # CACHE BYPASS: Compile the graph, don't save it to the cache
-        if cache_info["cache_state"] == "bypass":
-            assert compiled_graph is None
-            compiled_graph = compile_fx_fn(
-                gm, example_inputs, inputs_to_check, fx_kwargs
-            )
-
-        # CACHE MISS: Compile the graph and save to cache
-        elif cache_info["cache_state"] == "miss":
-            assert compiled_graph is None
-            assert key_info is not None
-            start_time = cache_info["cache_event_time"]
-            TritonBundler.begin_compile()
-            try:
-                compiled_graph = compile_fx_fn(
-                    gm, example_inputs, inputs_to_check, fx_kwargs
-                )
-                compiled_graph._time_taken_ns = time_ns() - start_time
-                cache_key = key_info[0]
-                compiled_graph._fx_graph_cache_key = cache_key
-                (
-                    compiled_graph._triton_bundle,
-                    triton_bundler_meta,
-                ) = TritonBundler.collect()
-            finally:
-                TritonBundler.end_compile()
-            if triton_bundler_meta is not None:
-                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
-            cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
-            FxGraphCache._save_graph(
-                cache_key,
-                compiled_graph,
-                example_inputs,
-                local,
-                remote_cache,
-            )
-        # CACHE HIT: not much to really do, just make sure the cache key
-        # is recorded on the graph
-        else:
-            assert cache_info["cache_state"] == "hit"
-            assert compiled_graph is not None
-            assert key_info is not None
-            cache_key = key_info[0]
-            compiled_graph._fx_graph_cache_key = cache_key
-
-        assert compiled_graph is not None
-
-        # Logging and observability: we log a single chromium event
-        # and a tlparse log for every cache action.
-        # In the event of a bypass, we also logged to the remote table earlier
-        # with log_cache_bypass.
-        chromium_log = get_chromium_event_logger()
-        cache_state = cache_info["cache_state"]
-        chromium_log.log_instant_event(
-            f"fx_graph_cache_{cache_state}",
-            cache_info["cache_event_time"],
-            metadata=cache_info,
-        )
-        # Add event data about cache hits/miss
-        # TODO: add remote cache get/put timings here too
-        chromium_log.add_event_data(
-            "inductor_compile",
-            cache_state=cache_state,
-            cache_event_time=cache_info["cache_event_time"],
-            key=cache_info.get("key"),
-            components=cache_info.get("components"),
-            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-            remote_cache_enabled=remote,
-            local_cache_enabled=local,
-        )
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": f"fx_graph_cache_{cache_state}",
-                "encoding": "json",
-            },
-            payload_fn=lambda: json.dumps(cache_info),
-        )
-        # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
-        FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
-        )
-        return compiled_graph
 
     @staticmethod
     def clear() -> None:
@@ -1655,127 +1523,13 @@ class FxGraphCache:
             pass
 
 
-_StrideExprStr: TypeAlias = str
-
-
-@dataclasses.dataclass
-class CompiledFxGraph:
-    """
-    Class holding a compiled FX graph. This is the object serialized on disk
-    to support FxGraph caching.
-    """
-
-    current_callable: Optional[Callable[..., Any]]
-    cache_key: str
-    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
-    cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
-    # We populate exactly one of the next two fields. In the common case, we store the
-    # constant attirbutes in the cache entry and re-attach them to the module created in
-    # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
-    # however, we save the mapping from attribute names in the GraphLowering to the
-    # original name of the attribute in the GraphModule. When we create the module from
-    # the cache entry, we then look up the constants from the current GraphModule. This
-    # scheme allows us to support caching with freezing.
-    allocated_constant_name: Optional[Dict[str, str]]
-    constants: Optional[Dict[str, torch.Tensor]]
-    torchbind_constants: Dict[str, torch._C.ScriptObject]
-    output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
-    disabled_cudagraphs_reason: Optional[str]
-    metrics_deltas: metrics.CachedMetricsDeltas
-    counter_deltas: Counter[str]
-    # This is a string representation of an expression we serialize
-    # with the object so the guards can be evaluated in a different
-    # context in order to verify the validity of serving a cached
-    # fx graph. The expression must be generated by:
-    # ShapeEnv.produce_guards_expression()
-    guards_expr: Optional[str]
-
-    cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: _CompileFxKwargs
-    inputs_to_check: Sequence[int]
-    boxed_forward_device_index: Optional[BoxedDeviceIndex]
-
-    _time_taken_ns: Optional[int] = None
-    _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
-    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
-
-    def __init__(
-        self,
-        current_callable: Optional[Callable[..., Any]],
-        graph: GraphLowering,
-        gm: torch.fx.GraphModule,
-        output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
-        disabled_cudagraphs_reason: Optional[str],
-        metrics_deltas: metrics.CachedMetricsDeltas,
-        counter_deltas: Counter[str],
-    ) -> None:
-        self.current_callable = current_callable
-        self.cache_key = graph.cache_key
-        if graph.cache_path:
-            with open(graph.cache_path) as f:
-                self.source_code = f.read()
-        self.cache_linemap = graph.cache_linemap
-        # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
-        if has_frozen_params(gm):
-            self.allocated_constant_name = graph.allocated_constant_name
-            self.constants = None
-        else:
-            self.allocated_constant_name = None
-            self.constants = graph.constants
-        self.torchbind_constants = graph.torchbind_constants
-        self.output_strides = output_strides
-        self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
-        self.metrics_deltas = metrics_deltas
-        self.counter_deltas = counter_deltas
-        self.guards_expr = None
-        self.cudagraph_info = None
-        self.fx_kwargs = {}
-        self.inputs_to_check = ()
-        self.boxed_forward_device_index = None
-
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        assert self.current_callable is not None
-        try:
-            return self.current_callable(inputs)
-        finally:
-            AutotuneCacheBundler.end_compile()
-
-    def get_constants(
-        self, gm: Optional[torch.fx.GraphModule]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Get the constant attributes.
-        """
-        # Normal case: The constants are stored in the entry.
-        if self.constants is not None:
-            return self.constants
-
-        # Freezing case: Look up the constants from attributes on the GraphModule using
-        # the allocated_constant_name map.
-        assert gm is not None
-        assert self.allocated_constant_name is not None
-        constants = {
-            name: getattr(gm, orig_name)
-            for name, orig_name in self.allocated_constant_name.items()
-        }
-        return constants
-
-
 def run_command_and_check(cmd_: str) -> None:
-    cmd = shlex.split(cmd_)
-    try:
-        subprocess.check_call(cmd)
-    except subprocess.CalledProcessError as e:
-        raise exc.CppCompileError(cmd, e.output) from e
+    with dynamo_timed("run_command_and_check", log_pt2_compile_event=True):
+        cmd = shlex.split(cmd_)
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            raise exc.CppCompileError(cmd, e.output) from e
 
 
 @functools.lru_cache(None)
@@ -2103,13 +1857,14 @@ class AotCodeCompiler:
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
 
             consts_o = _compile_consts(aot_constants, sys.platform)
-            kernels_o = []
             gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
                 ROCmCodeCache() if torch.version.hip else CUDACodeCache()
             )
-            for entry in gpu_codecache.cache.values():
-                if entry.output_path.endswith(".o"):
-                    kernels_o.append(entry.output_path)
+            kernels_o = [
+                entry.output_path
+                for entry in gpu_codecache.cache.values()
+                if entry.output_path.endswith(".o")
+            ]
             kernels_o = " ".join(kernels_o)
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)

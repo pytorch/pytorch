@@ -32,7 +32,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.test_case
 import torch.onnx.operators
-import torch.utils._pytree as pytree
+import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
@@ -89,9 +89,11 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = importlib.util.find_spec("optree")
+HAS_OPTREE = python_pytree._cxx_pytree_exists
 if HAS_OPTREE:
-    import optree
+    import torch.utils._cxx_pytree as cxx_pytree
+else:
+    cxx_pytree = None
 
 MyTuple = collections.namedtuple("MyTuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -293,9 +295,9 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_OPTREE, "missing optree package")
     def test_optree_graph_break_message(self):
-        @torch.compile(
-            backend="eager",
-        )
+        import optree
+
+        @torch.compile(backend="eager")
         def fn(x):
             d = {"a": 1}
             optree.tree_flatten(d)
@@ -1372,6 +1374,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_config_obj(self):
         class Cfg:
             def __init__(self) -> None:
@@ -1396,7 +1399,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         cfg2.val = 2.0
         v = opt_fn(v, cfg2)  # 7
         self.assertEqual(v[0], 7)
-        self.assertEqual(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 9)
 
     def test_config_getattr_default(self):
         class Cfg:
@@ -1777,6 +1780,39 @@ utils_device.CURRENT_DEVICE == None""".split(
             nargs=1,
             expected_ops=9,
         )
+
+    def test_range_iter_guards(self):
+        @torch.compile()
+        def func():
+            @torch._dynamo.disable(recursive=False)
+            def run(n):
+                # For python <= 3.11, list comprehension is implemented by
+                # desugaring to:
+                # 1. creation of an iterator object
+                # 2. calling a new `listcomp` function with (1)
+                #
+                # In this test we force Dynamo to trace through (2) as the root
+                # frame, thereby ensuring we have the right guards for range
+                # iterators.
+                xs = [torch.ones(1) for i in range(n)]
+                return torch.concat(xs)
+
+            return run(2), run(3)
+
+        res2, res3 = func()
+        self.assertTrue(same(res2, torch.ones(2)))
+        self.assertTrue(same(res3, torch.ones(3)))
+
+    def test_range_iter_side_effects(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, it):
+            n = next(it)
+            return x + n
+
+        it = iter(range(1, 3))
+        res = run(torch.zeros(1), it)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(next(it), 2)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
@@ -2420,6 +2456,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         with warnings.catch_warnings():
             warnings.simplefilter("error")
+            warnings.simplefilter("ignore", category=DeprecationWarning)  # from asyncio
             y = fn(x)
         self.assertTrue(y.flags.writeable)  # XXX: differs from numpy
 
@@ -2831,6 +2868,38 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_copy_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, d0):
+            d1 = d0.copy()
+            d1[0] = 1
+            return x + 1, d1
+
+        d0 = {}
+        res, d1 = run(torch.zeros(1), d0)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(d0, {})
+        self.assertEqual(d1, {0: 1})
+
+    def test_dict_subclass_get_method(self):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        config = dotdict({"a": 1, "b": 2})
+
+        def fn(x):
+            x2 = x * 2
+            x3 = x * config.get("a", 3)
+            return x3
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_dict_order_keys(self):
         def fn(d):
@@ -3678,6 +3747,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(out[0], out[1]))
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_closure_out_of_scope_cell(self):
         cell1 = torch.rand(1).item()
         cell2 = torch.rand(3, 3)
@@ -3699,6 +3769,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_closure_out_of_scope_cell_with_mutation(self):
         cell1 = torch.rand(1).item()
         orig1 = cell1
@@ -3725,8 +3796,18 @@ utils_device.CURRENT_DEVICE == None""".split(
             result1, result2, _ = opt_fn()
             self.assertAlmostEqual(orig1 + 1 * i, result1)
             self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
-            self.assertEqual(cnts.frame_count, 1)
-            self.assertEqual(cnts.op_count, 3)
+            if i == 1:
+                # No automatic dynamic
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 3)
+            elif i == 2:
+                # Automatic dynamic float arguments kicked in
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(cnts.op_count, 6)
+            else:
+                # No more recompiles
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(cnts.op_count, 0)
             cnts.clear()
 
     def test_closure_with_mutation_and_graph_break(self):
@@ -3891,10 +3972,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_writes_to_cells_across_frames2(self):
         # This regression test was added when Dynamo didn't fully account for
-        # already established `NewCellVariable` instance for pre-existing cell,
+        # already established `CellVariable` instance for pre-existing cell,
         # while encountering the same cell again (we should reuse the instance
         # rather than creating a new one). This caused buffered writes to escape
-        # the newly created `NewCellVariable`.
+        # the newly created `CellVariable`.
         x = 0
 
         def inc_x_and_get_x(obj):
@@ -4833,6 +4914,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         x = torch.randn(3)
         self.assertEqual(opt_fn(x), x)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_set_update(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, int_set, int_list):
+            int_set.update(map(int, int_list))
+            return x + 1
+
+        int_set = set()
+        int_list = [1, 2, 1]
+        res = run(torch.ones(1), int_set, int_list)
+        self.assertTrue(same(res, torch.ones(1) + 1))
+        self.assertEqual(int_set, set([1, 2]))
+        self.assertEqual(int_list, [1, 2, 1])
 
     def test_frozenset_torch_func_contains(self):
         funcs = frozenset([torch.add])
@@ -8633,9 +8727,9 @@ def ___make_guard_fn():
 
     def test_tracing_py_tree(self):
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
 
@@ -8645,12 +8739,10 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 3)
 
     def test_tracing_nested_py_tree(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = [xs, xs, xs, xs]
@@ -8663,12 +8755,10 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_tuples(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = (xs, xs, xs, xs)
@@ -8681,12 +8771,10 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 12)
 
     def test_tracing_nested_py_tree_dicts(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = {
@@ -8719,12 +8807,10 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_nested_py_tree_mixed_all(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return pytree.tree_unflatten(res, spec)
+            return python_pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsa = (xs, xs)
@@ -8769,13 +8855,12 @@ def ___make_guard_fn():
         self.assertEqual(cnt.frame_count, 2)
 
     def test_tracing_py_tree_tensor_subclass(self):
-        import torch.utils._pytree as pytree
         from torch.testing._internal.two_tensor import TwoTensor
         from torch.utils.checkpoint import checkpoint
 
         def fn(xs):
             nested_xs = [[xs]]
-            flat_xs, spec = pytree.tree_flatten(xs)
+            flat_xs, spec = python_pytree.tree_flatten(xs)
             return flat_xs[0].clone()
 
         # use checkpoint to trigger a "sourceless" tensor subclass
@@ -8790,13 +8875,11 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 2)
 
     def test_tracing_tree_map_only(self):
-        import torch.utils._pytree as pytree
-
         def fn(xs):
             def mapper(x):
                 return x.clone()
 
-            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
             return y
 
         xs = [torch.tensor(i) for i in range(3)] + ["hi"]
@@ -9111,6 +9194,11 @@ def ___make_guard_fn():
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
         self.assertEqual(res, img1 + torch.sin(img1))
 
+    # Compiling autograd.Function traces fwd function twice, but the same unbacked symints were not identified
+    # as the same across the two tracings. This is an unlikely situation in real use cases, so we add another
+    # `test_validate_outputs_unbacked_by_custom_op` to mitigate it and keep this one as expected failure
+    # until we have a proper fix.
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_validate_outputs_unbacked(self):
         class SillyCat(torch.autograd.Function):
@@ -9133,6 +9221,29 @@ def ___make_guard_fn():
             return SillyCat.apply(x0, x1, i)
 
         f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_validate_outputs_unbacked_by_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor a, Tensor b) -> (Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::foo")
+            def foo_impl(x, y):
+                return torch.cat([x, y])
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def f(x, i):
+                i0, i1 = i.tolist()
+                x0, x1 = x.split([i0, i1])
+                return torch.ops.mylib.foo(x0, x1)
+
+            f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -9316,11 +9427,8 @@ def ___make_guard_fn():
     def test_deque_input(self):
         a = torch.randn([2, 3])
         b = torch.randn([2, 3])
-        d1 = collections.deque([a, b])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([a, b])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", a, b])
+        d2 = d1.copy()
 
         def fn(q):
             a = q.pop()
@@ -9329,16 +9437,14 @@ def ___make_guard_fn():
 
         eager = fn(d1)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
 
     def test_deque_append_left(self):
-        d1 = collections.deque([10, 10])
-        d1.insert(0, "foo")
-
-        d2 = collections.deque([10, 10])
-        d2.insert(0, "foo")
+        d1 = collections.deque(["foo", 10, 10])
+        d2 = d1.copy()
 
         def fn(q, a, b):
             q.appendleft(a)
@@ -9349,7 +9455,8 @@ def ___make_guard_fn():
         b = torch.randn([3, 3])
         eager = fn(d1, a, b)
         counter = CompileCounter()
-        compiled = torch.compile(fn, backend=counter)(d2, a, b)
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)(d2, a, b)
+        self.assertEqual(d1, d2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
         self.assertTrue(isinstance(compiled, torch.Tensor))
@@ -10122,7 +10229,9 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10154,7 +10263,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("python", python_pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10203,7 +10312,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", pytree)]
+        implemtations = [("python", python_pytree)]
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10396,7 +10505,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  >  Left: {(Mod(s0, 3)) < 0: False, (Mod(s0, 3)) <= 0: True, 0 < (Mod(s0, 3)): False, 0 <= (Mod(s0, 3)): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
   > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
@@ -10515,7 +10624,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> axioms: values don't match.
-  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  >  Left: {(PythonMod(u0, 3)) < 0: False, (PythonMod(u0, 3)) <= 0: True, 0 < (PythonMod(u0, 3)): False, 0 <= (PythonMod(u0, 3)): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False}
   > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
@@ -11125,6 +11234,8 @@ fn
 
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
+        DeletedGuardManagerWrapper = torch._dynamo.guards.DeletedGuardManagerWrapper
+
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super(Mod, self).__init__()
@@ -11160,19 +11271,21 @@ fn
         # delete center of cache
         del m3
         c3 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c3), 2)
-        self.assertIs(c3[0], c2[0])
-        self.assertIs(c3[1], c2[2])
+        self.assertEqual(len(c3), 3)
+        self.assertTrue(isinstance(c3[2].guard_manager, DeletedGuardManagerWrapper))
 
         # delete end of cache
         del m1
         c4 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c4), 1)
-        self.assertIs(c4[0], c3[0])
+        self.assertEqual(len(c4), 3)
+        self.assertTrue(isinstance(c4[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c4[2].guard_manager, DeletedGuardManagerWrapper))
 
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
-        self.assertEqual(len(c5), 0)
+        self.assertTrue(isinstance(c5[0].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[1].guard_manager, DeletedGuardManagerWrapper))
+        self.assertTrue(isinstance(c5[2].guard_manager, DeletedGuardManagerWrapper))
 
     def test_inspect_signature_bind(self):
         import inspect
@@ -11966,6 +12079,43 @@ fn
             x = torch.zeros(12)
             with torch.device("cpu"):
                 cpu_res = split(x)
+
+    def test_dataclass(self):
+        @dataclasses.dataclass(frozen=True)
+        class Foo:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, foo0):
+            if dataclasses.is_dataclass(foo0):
+                foo1 = dataclasses.replace(foo0, **{"x": 1})
+                return x + 1, foo1
+            return x + 2, foo0
+
+        res, foo = run(torch.zeros(1), Foo(0))
+        self.assertTrue(res, torch.ones(1))
+        self.assertEqual(foo.x, 1)
+
+    def test_frozenset_of_non_literals(self):
+        class Foo:
+            pass
+
+        foo = Foo()
+        foo.x = 0
+        s = frozenset([foo])
+
+        @torch.compile(backend="eager")
+        def run(x, s, foo0):
+            # Dynamo must have the same representation for `foo0` and `foo1`,
+            # otherwise the update to `foo0.x` won't be reflected in the read of
+            # `foo1.x`.
+            foo1 = list(s)[0]
+            foo0.x += 1
+            return x + 1, foo1.x
+
+        res = run(torch.ones(1), s, foo)
+        self.assertTrue(same(res[0], torch.ones(1) + 1))
+        self.assertEqual(res[1], 1)
 
 
 class TestTracer(JitTestCase):

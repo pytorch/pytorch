@@ -283,11 +283,15 @@ class ExportGraphSignature:
         return tuple(user_inputs)
 
     # Graph node names of pytree-flattened outputs of original program
+    # For joint-graph purposes, will include the loss output.
     @property
     def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
         user_outputs: List[Union[int, float, bool, None, str]] = []
         for s in self.output_specs:
-            if s.kind != OutputKind.USER_OUTPUT:
+            if s.kind not in [
+                OutputKind.USER_OUTPUT,
+                OutputKind.LOSS_OUTPUT,
+            ]:
                 continue
 
             if isinstance(s.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
@@ -453,9 +457,11 @@ class ExportGraphSignature:
                 if i.arg.name == old:
                     i.arg.name = new
 
-    def get_replace_hook(self):
+    def get_replace_hook(self, replace_inputs=False):
         def _(old, new, user):
-            if user.op in ("output", "input"):
+            if user.op == "output":
+                self.replace_all_uses(old.name, new)
+            if replace_inputs and old.op == "placeholder":
                 self.replace_all_uses(old.name, new)
 
         return _
