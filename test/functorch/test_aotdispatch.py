@@ -5489,6 +5489,11 @@ metadata incorrectly.
         self.assertEqual(b_ref.grad.a, b_test.grad.a)
         self.assertEqual(b_ref.grad.b, b_test.grad.b)
 
+    @torch._functorch.config.patch(
+        {
+            "disable_guess_zero_tangent_for_mutated_input_subclass": True,
+        }
+    )
     def test_aot_dispatch_input_mutation(self):
         def f(a, b):
             a.mul_(2)

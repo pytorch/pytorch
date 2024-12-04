@@ -8565,7 +8565,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             return torch.nested.nested_tensor_from_jagged(
                 v,
                 offsets=torch.tensor([0, 2, 3]),
-                # lengths=torch.tensor([2, 1]),
             ), torch.ones(2, 32)
 
         ref_x, ref_x0 = _inp()

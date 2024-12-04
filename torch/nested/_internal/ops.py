@@ -959,6 +959,15 @@ def unbind_int(func, *args, **kwargs):
     ragged_idx = inp._ragged_idx
 
     def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
+        # This torch._check and torch._check_is_size are needed for torch.compile
+        # symbolic shapes processing.
+        # offsets and lengths are symbolic variables during compilation,
+        # we guarantee the correct offsets/lengths correspondence:
+        # sum of lengths <= total ragged_dim_size
+        # every length and offset are size-like variable (allows sym shapes to reason it as [2, inf))
+        # offset[i] + length[i] <= ragged_dim_size, for unbind and split dim correctness
+        # offsets[i] <= ragged_dim_size
+
         lengths_sum = 0
         ragged_dim_size = values.shape[ragged_idx - 1]
         for i in range(len(_lengths)):
