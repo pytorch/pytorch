@@ -485,8 +485,264 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "attn_mask: Optional[Tensor] = None",
                             "dropout_p: float = 0.0",
                             "is_causal: bool = False",
+                            "*",
                             "scale: Optional[float] = None",
                             "enable_gqa: bool = False",
+                        ]
+                    )
+                )
+            ],
+            "cross_entropy_loss": [
+                "def cross_entropy_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "weight: Optional[Tensor] = None",
+                            "reduction: int = 1",
+                            "ignore_index: int = -100",
+                            "label_smoothing: float = 0.0",
+                        ]
+                    )
+                )
+            ],
+            "binary_cross_entropy" : [
+                "def binary_cross_entropy({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "weight: Optional[Tensor] = None",
+                            "reduction: int = 1",
+                            "*",
+                            "out: Optional[Tensor] = None"
+                        ]
+                    )
+                )
+            ],
+            "l1_loss" : [
+                "def l1_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                        ]
+                    )
+                )
+            ],
+            "smooth_l1_loss" : [
+                "def smooth_l1_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                            "beta: float = 1.0",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "max_pool2d_with_indices" : [
+                "def max_pool2d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "kernel_size: Union[_int, _size]",
+                            "stride: Optional[Union[_int, _size]] = None",
+                            "padding: Union[_int, _size] = 0",
+                            "dilation: Union[_int, _size] = 1",
+                            "ceil_mode: bool = False",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "max_pool3d_with_indices" : [
+                "def max_pool3d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "kernel_size: Union[_int, _size]",
+                            "stride: Optional[Union[_int, _size]] = None",
+                            "padding: Union[_int, _size] = 0",
+                            "dilation: Union[_int, _size] = 1",
+                            "ceil_mode: bool = False",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "huber_loss" : [
+                "def huber_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                            "delta: float = 1.0",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "mse_loss" : [
+                "def mse_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "multilabel_margin_loss" : [
+                "def multilabel_margin_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "soft_margin_loss" : [
+                "def soft_margin_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "reduction: int = 1",
+                            "*",
+                            "out: Optional[Tuple[Tensor, Tensor]] = None",
+                        ]
+                    )
+                )
+            ],
+            "multi_margin_loss" : [
+                "def multi_margin_loss({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "p: Union[_int, _float] = 1",
+                            "margin: Union[_int, _float] = 1",
+                            "weight: Optional[Tensor] = None",
+                            "reduction: int = 1",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "upsample_nearest1d" : [
+                "def upsample_nearest1d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "upsample_nearest2d" : [
+                "def upsample_nearest2d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales_h: Optional[float] = None",
+                            "scales_w: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "upsample_nearest3d" : [
+                "def upsample_nearest3d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales_d: Optional[float] = None",
+                            "scales_h: Optional[float] = None",
+                            "scales_w: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "_upsample_nearest_exact1d" : [
+                "def _upsample_nearest_exact1d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "_upsample_nearest_exact2d" : [
+                "def _upsample_nearest_exact2d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales_h: Optional[float] = None",
+                            "scales_w: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "_upsample_nearest_exact3d" : [
+                "def _upsample_nearest_exact3d({}) -> Tensor: ...".
+                format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "output_size: Union[_int, _size] = None",
+                            "scales_d: Optional[float] = None",
+                            "scales_h: Optional[float] = None",
+                            "scales_w: Optional[float] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
                         ]
                     )
                 )
@@ -542,7 +798,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "linear",
         "pad",
         "one_hot",
-        "scaled_dot_product_attention",
+        "scaled_dot_product_attention"
     ]
     imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed

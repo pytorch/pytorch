@@ -1,10 +1,11 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
+from numbers import Number
 from typing import List, Literal, Optional, overload, Sequence, Tuple, Union
 
 from torch import memory_format, Tensor
-from torch.types import _bool, _device, _dtype, _int, _size
+from torch.types import _bool, _device, _dtype, _int, _float, _size
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp
 
