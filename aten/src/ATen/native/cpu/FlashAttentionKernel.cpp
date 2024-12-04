@@ -307,7 +307,7 @@ static inline void transpose_pad_2x32_block(
   __m512i d0, d1;
   // load
   if (nrem < 32) {
-    __mmask32 mask_krem_v = (((long long)1) << nrem) - 1;
+    __mmask32 mask_krem_v = (1LL << nrem) - 1;
     r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
     // if krem is not 2, pad with zeros
     if (krem == 2) {
@@ -333,13 +333,12 @@ static inline void transpose_pad_2x32_block(
 
   // store
   if (nrem < 16) {
-    __mmask32 mask_rem_v = (((long long)1) << (nrem * 2)) - 1;
+    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
     _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
   } else if (nrem == 16) {
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
   } else if (nrem < 32) {
-    __mmask32 mask_rem_v = (((long long)1) << (nrem * 2 - 32)) - 1;
-    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
+    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
     _mm512_mask_storeu_epi16(
         reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
