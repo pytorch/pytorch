@@ -26,13 +26,18 @@ if TEST_WITH_TORCHDYNAMO:
         atleast_1d,
         atleast_2d,
         atleast_3d,
-        AxisError,
         concatenate,
         hstack,
         newaxis,
         stack,
         vstack,
     )
+
+    if int(numpy.__version__[0]) >= 2:
+        from numpy.exceptions import AxisError
+    else:
+        from numpy import AxisError
+
     from numpy.testing import assert_, assert_array_equal, assert_equal
 else:
     import torch._numpy as np
