@@ -3646,6 +3646,18 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(it2, enumerate)
         self.assertEqual(list(it1), list(it2))
 
+    def test_returning_recursive_func(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            def f():
+                return f
+
+            return x + 1, f
+
+        res, f = run(torch.zeros(1))
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertTrue(f is f())
+
 
 def udf_mul(x, y):
     return x * y

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,6 +21,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.static_runtime import config
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 logger: logging.Logger = logging.getLogger()
