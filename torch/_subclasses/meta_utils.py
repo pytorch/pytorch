@@ -26,7 +26,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import override, TypeGuard, TypeIs
+from typing_extensions import override, TypedDict, TypeGuard, TypeIs, Unpack
 
 import torch
 from torch._C._autograd import CreationMeta
@@ -547,9 +547,16 @@ class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
+class _MetaTensorCallbackKwargs(TypedDict, total=False):
+    device: Union[torch.device, str]
+
+
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+        self,
+        arg: Callable[[], torch.Tensor],
+        /,
+        **kwargs: Unpack[_MetaTensorCallbackKwargs],
     ) -> _TensorT_cov:
         ...
 
@@ -806,7 +813,9 @@ class MetaConverter(Generic[_TensorT]):
 
     @classmethod
     def _identity_callable(
-        cls, t: Callable[[], torch.Tensor], device: Union[torch.device, str]
+        cls,
+        t: Callable[[], torch.Tensor],
+        device: Optional[Union[torch.device, str]] = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 
@@ -1468,7 +1477,7 @@ class MetaConverter(Generic[_TensorT]):
                                     dtype=t.dtype,
                                     device="meta",
                                 ),
-                                device="meta",
+                                # device="meta",
                             )
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
