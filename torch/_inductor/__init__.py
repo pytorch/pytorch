@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import io
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
@@ -54,7 +55,7 @@ def aoti_compile_and_package(
     _deprecated_unused_args=None,
     _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
@@ -102,9 +103,11 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert package_path is None or package_path.endswith(
-        ".pt2"
-    ), f"Expect package path to end with .pt2, got {package_path}"
+    assert (
+        package_path is None
+        or isinstance(package_path, io.BytesIO)
+        or (isinstance(package_path, str) and package_path.endswith(".pt2"))
+    ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
 
     inductor_configs = inductor_configs or {}
 
@@ -132,7 +135,7 @@ def _aoti_compile_and_package_inner(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -177,7 +180,7 @@ def aoti_compile_and_package_debug_wrapper(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ):
     m = exported_program.module()
@@ -211,7 +214,7 @@ def aoti_compile_and_package_debug_wrapper(
         raise e
 
 
-def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
