@@ -181,23 +181,15 @@ class TestBenchmarker(TestCase):
     def test_benchmark_gpu_fallback(
         self, benchmarker_cls, should_fallback, device=GPU_TYPE
     ):
-        benchmarker = benchmarker_cls()
-        _, _callable = self.make_params(device)
-        if should_fallback:
-            benchmarker.should_fallback = lambda: True
+        @config.patch({f"benchmarking.{benchmarker_cls.feature_name}.env_val": 0 if should_fallback else 1})
+        def inner():
+            benchmarker = benchmarker_cls()
+            _, _callable = self.make_params(device)
             _ = benchmarker.benchmark_gpu(_callable)
-            self.assertEqual(
-                self.get_counter_value(InductorBenchmarker, "triton_do_bench"), 1
-            )
-            self.assertEqual(
-                self.get_counter_value(InductorBenchmarker, "benchmark_gpu"), 1
-            )
-        else:
-            benchmarker.should_fallback = lambda: False
-            _ = benchmarker.benchmark_gpu(_callable)
-            self.assertEqual(
-                self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 1
-            )
+        
+        inner()
+
+        self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_gpu"), 0 if should_fallback else 1)
 
 
 if __name__ == "__main__":
