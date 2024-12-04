@@ -80,7 +80,7 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
 
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
-    from .output_code import OutputCode
+    from .output_code import CompiledFxGraphConstants, OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -1000,7 +1000,7 @@ class FxGraphCache:
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-        gm: Optional[torch.fx.GraphModule],
+        constants: CompiledFxGraphConstants,
     ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1085,7 +1085,7 @@ class FxGraphCache:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
         try:
-            artifact_path = graph.after_deserialization(gm)
+            artifact_path = graph.after_deserialization(constants)
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
@@ -1296,7 +1296,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
-        gm: Optional[torch.fx.GraphModule] = None,
+        constants: CompiledFxGraphConstants,
     ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -1304,7 +1304,7 @@ class FxGraphCache:
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, gm
+            key, example_inputs, local, remote_cache, constants
         )
         cache_info = {
             **cache_info,
