@@ -356,7 +356,7 @@ class MetaTensorDescriber:
 
         from torch.nested._internal.nested_tensor import _tensor_symint_registry
 
-        view_func = _ViewFunc.from_tensor(t)
+        view_func = ViewFunc.from_tensor(t)
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -490,7 +490,7 @@ class MetaStorageDesc:
 
 
 @dataclass(frozen=True)
-class _ViewFunc(Generic[_TensorT]):
+class ViewFunc(Generic[_TensorT]):
     @abstractmethod
     def apply(
         self,
@@ -502,7 +502,7 @@ class _ViewFunc(Generic[_TensorT]):
         ...
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> _ViewFunc:
+    def from_tensor(t: torch.Tensor) -> ViewFunc:
         if _is_fake_tensor(t):
             return _FakeTensorViewFunc()
         else:
@@ -510,7 +510,7 @@ class _ViewFunc(Generic[_TensorT]):
 
 
 @dataclass(frozen=True)
-class _FakeTensorViewFunc(_ViewFunc["FakeTensor"]):
+class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
     @override
     def apply(
         self,
@@ -525,7 +525,7 @@ class _FakeTensorViewFunc(_ViewFunc["FakeTensor"]):
 
 
 @dataclass(frozen=True)
-class _CustomViewFunc(_ViewFunc[_TensorT], Generic[_TensorT]):
+class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
             torch.Tensor,
@@ -661,7 +661,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
     fake_mode: Optional[FakeTensorMode] = None
-    view_func: Optional[_ViewFunc] = None
+    view_func: Optional[ViewFunc] = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped

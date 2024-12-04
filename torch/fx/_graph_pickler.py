@@ -3,17 +3,13 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
-from typing_extensions import override
+from typing import Any, Callable, Dict, NewType, Optional, Tuple, Type, TypeVar, Union
+from typing_extensions import override, Self
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
-from torch._subclasses.fake_tensor import (  # extract_tensor_metadata,
-    FakeTensor,
-    FakeTensorMode,
-    Tensor,
-)
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
     MetaTensorDesc,
@@ -24,8 +20,133 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 
+_SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
+
+
+class GraphPickler(pickle.Pickler):
+    """
+    GraphPickler is a Pickler which helps pickling fx graph - in particular
+    GraphModule.
+    """
+
+    def __init__(self, file: io.BytesIO) -> None:
+        super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
+
+        # This abomination is so we can pass external decoding state to the
+        # unpickler functions. We serialize _unpickle_state as a persistent
+        # external item and when we deserialize it we return the common state
+        # object.
+        self._unpickle_state = _UnpickleStateToken(object())
+
+        # This is used to describe tensors. It needs to be common across the
+        # pickle so that duplicates and views are properly handled.
+        self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
+
+    @override
+    def reducer_override(
+        self, obj: object
+    ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
+        # This function is supposed to return either NotImplemented (meaning to
+        # do the default pickle behavior) or a pair of (unpickle callable, data
+        # to pass to unpickle).
+
+        # We could instead teach individual classes how to pickle themselves but
+        # that has a few problems:
+        #
+        #   1. If we have some special needs (maybe for this use-case we don't
+        #      want to fully serialize every field) then we're adding private
+        #      details to a public interface.
+        #
+        #   2. If we need to have some common shared data (such as a
+        #      FakeTensorMode) which is passed to each value it's harder to
+        #      support.
+
+        # These are the types that need special handling. See the individual
+        # *PickleData classes for details on pickling that particular type.
+        if isinstance(obj, FakeTensor):
+            return _TensorPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch.fx.GraphModule):
+            return _GraphModulePickleData.reduce_helper(self, obj)
+        elif isinstance(obj, (torch._ops.OperatorBase, torch._ops.OpOverloadPacket)):
+            return _OpPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, ShapeEnv):
+            return _ShapeEnvPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch.SymInt):
+            return _SymNodePickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch._guards.TracingContext):
+            return _TracingContextPickleData.reduce_helper(self, obj)
+        else:
+            # We should never get a raw Node!
+            assert not isinstance(obj, torch.fx.Node)
+            if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
+                return reduce
+
+            # returning `NotImplemented` causes pickle to revert to the default
+            # behavior for this object.
+            return NotImplemented
+
+    @override
+    def persistent_id(self, obj: object) -> Optional[str]:
+        if obj is self._unpickle_state:
+            return "unpickle_state"
+        else:
+            return None
+
+    @classmethod
+    def dumps(cls, obj: object) -> bytes:
+        """
+        Pickle an object.
+        """
+        with io.BytesIO() as stream:
+            pickler = cls(stream)
+            pickler.dump(obj)
+            return stream.getvalue()
+
+    @staticmethod
+    def loads(data: bytes, fake_mode: FakeTensorMode) -> object:
+        """
+        Unpickle an object.
+        """
+        state = _UnpickleState(fake_mode)
+        with io.BytesIO(data) as stream:
+            unpickler = _GraphUnpickler(stream, state)
+            return unpickler.load()
+
+
+class _UnpickleState:
+    def __init__(self, fake_mode: FakeTensorMode) -> None:
+        self.fake_mode = fake_mode
+        self.meta_converter: MetaConverter[FakeTensor] = MetaConverter()
+
+
+# This token is passed when pickling to indicate that we want to use the
+# unpickler's _UnpickleState as a parameter in that position.
+_UnpickleStateToken = NewType("_UnpickleStateToken", object)
+
+
+class _GraphUnpickler(pickle.Unpickler):
+    def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
+        super().__init__(stream)
+        self._unpickle_state = unpickle_state
+
+    @override
+    def persistent_load(self, pid: object) -> object:
+        if pid == "unpickle_state":
+            return self._unpickle_state
+        else:
+            raise pickle.UnpicklingError("Invalid persistent ID")
+
+
 class _ShapeEnvPickleData:
     data: Dict[str, object]
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: ShapeEnv
+    ) -> Tuple[
+        Callable[[Self, _UnpickleState], ShapeEnv], Tuple[Self, _UnpickleStateToken]
+    ]:
+        return cls.unpickle, (cls(obj), pickler._unpickle_state)
 
     def __init__(self, env: ShapeEnv) -> None:
         # In theory pickle should recognize that a given ShapeEnv was already
@@ -36,7 +157,7 @@ class _ShapeEnvPickleData:
         del self.data["tracked_fakes"]
         del self.data["fake_tensor_cache"]
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> ShapeEnv:
+    def unpickle(self, unpickle_state: _UnpickleState) -> ShapeEnv:
         # Fill in the existing ShapeEnv rather than creating a new one
         assert unpickle_state.fake_mode
         assert unpickle_state.fake_mode.shape_env
@@ -48,6 +169,20 @@ class _ShapeEnvPickleData:
 
 
 class _SymNodePickleData:
+    @classmethod
+    def reduce_helper(
+        cls,
+        pickler: GraphPickler,
+        obj: _SymNodeT,
+    ) -> Tuple[
+        Callable[[Self, _UnpickleState], _SymNodeT], Tuple[Self, _UnpickleStateToken]
+    ]:
+        args = (cls(obj.node), pickler._unpickle_state)
+        if isinstance(obj, torch.SymInt):
+            return _SymNodePickleData.unpickle_sym_int, args
+        else:
+            raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
+
     def __init__(self, node: SymNode) -> None:
         self.expr = node._expr
         self.shape_env = node.shape_env
@@ -60,12 +195,23 @@ class _SymNodePickleData:
         assert self.shape_env is not None
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
-    def unpickle_sym_int(self, unpickle_state: "_UnpickleState") -> torch.SymInt:
+    def unpickle_sym_int(self, unpickle_state: _UnpickleState) -> torch.SymInt:
         return torch.SymInt(self._to_sym_node())
 
 
 class _TensorPickleData:
     metadata: MetaTensorDesc[FakeTensor]
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: FakeTensor
+    ) -> Tuple[
+        Callable[[Self, _UnpickleState], FakeTensor], Tuple[Self, _UnpickleStateToken]
+    ]:
+        return cls.unpickle, (
+            cls(pickler._meta_tensor_describer, obj),
+            pickler._unpickle_state,
+        )
 
     def __init__(self, describer: MetaTensorDescriber, t: Tensor) -> None:
         # THINGS TO WORRY ABOUT:
@@ -89,7 +235,7 @@ class _TensorPickleData:
                 getattr(self.metadata, k) is None
             ), f"not None: {k}: {getattr(self.metadata, k)}"
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> Tensor:
+    def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
         metadata = dataclasses.replace(
             self.metadata,
@@ -116,16 +262,29 @@ class _TensorPickleData:
 
 
 class _TorchNumpyPickleData:
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: object
+    ) -> Optional[
+        Tuple[
+            Callable[[Self, _UnpickleState], object], Tuple[Self, _UnpickleStateToken]
+        ]
+    ]:
+        if data := cls.from_object(obj):
+            return (cls.unpickle, (data, pickler._unpickle_state))
+        else:
+            return None
+
     def __init__(self, mod: str, name: str) -> None:
         self.mod = mod
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> Callable[..., object]:
+    def unpickle(self, unpickle_state: _UnpickleState) -> Callable[..., object]:
         np = getattr(importlib.import_module(self.mod), self.name)
         return torch._dynamo.variables.misc.get_np_to_tnp_map()[np]
 
-    @staticmethod
-    def from_object(tnp: object) -> Optional["_TorchNumpyPickleData"]:
+    @classmethod
+    def from_object(cls, tnp: object) -> Optional[Self]:
         if not callable(tnp):
             return None
 
@@ -143,10 +302,22 @@ class _TorchNumpyPickleData:
             return None
 
         assert np == getattr(importlib.import_module(mod), name)
-        return _TorchNumpyPickleData(mod, name)
+        return cls(mod, name)
 
 
 class _GraphModulePickleData:
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch.fx.GraphModule
+    ) -> Tuple[
+        Callable[[Self, _UnpickleState], torch.fx.GraphModule],
+        Tuple[Self, _UnpickleStateToken],
+    ]:
+        return cls.unpickle, (
+            cls(obj),
+            pickler._unpickle_state,
+        )
+
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         if isinstance(gm, torch.fx._lazy_graph_module._LazyGraphModule):
             python_code = gm._real_recompile()
@@ -156,7 +327,7 @@ class _GraphModulePickleData:
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph)
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> torch.fx.GraphModule:
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch.fx.GraphModule:
         gm = torch.fx.GraphModule.__new__(torch.fx.GraphModule)
         gm.__dict__ = self.gm_dict
         gm._graph = self.graph.unpickle(gm, unpickle_state)
@@ -187,7 +358,7 @@ class _NodePickleData:
         self,
         graph: torch.fx.Graph,
         mapping: Dict["_NodePickleData", torch.fx.Node],
-        unpickle_state: "_UnpickleState",
+        unpickle_state: _UnpickleState,
     ) -> torch.fx.Node:
         args = pytree.tree_map_only(_NodePickleData, lambda n: mapping[n], self.args)
         kwargs = pytree.tree_map_only(
@@ -203,8 +374,8 @@ class _NodePickleData:
 class _OpPickleData:
     @classmethod
     def reduce_helper(
-        cls, pickler: "_GraphPickler", op: object
-    ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
+        cls, pickler: GraphPickler, op: object
+    ) -> Tuple[Callable[[_UnpickleState], object], Tuple[_UnpickleStateToken]]:
         result = cls.pickle(op)
         return (result.unpickle, (pickler._unpickle_state,))
 
@@ -242,7 +413,7 @@ class _OpPickleData:
         return datacls(name)
 
     @abstractmethod
-    def unpickle(self, unpickle_state: "_UnpickleState") -> object:
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
         pass
 
     @staticmethod
@@ -259,7 +430,7 @@ class _OpStrPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> str:
+    def unpickle(self, unpickle_state: _UnpickleState) -> str:
         return self.name
 
 
@@ -267,7 +438,7 @@ class _OpOverloadPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> torch._ops.OpOverload:
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverload:
         obj = self._lookup_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverload)
         return obj
@@ -277,7 +448,7 @@ class _OpOverloadPacketPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> torch._ops.OpOverloadPacket:
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.OpOverloadPacket:
         obj = self._lookup_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
@@ -288,7 +459,7 @@ class _OpBuiltinPickleData(_OpPickleData):
         self.root = root
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> object:
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
         if self.root == "builtins":
             return __builtins__.get(self.name)  # type: ignore[attr-defined]
         elif self.root == "math":
@@ -305,7 +476,7 @@ class _OpOperatorPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> object:
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
         import operator
 
         return getattr(operator, self.name)
@@ -331,7 +502,7 @@ class _GraphPickleData:
         # -- self._find_nodes_lookup_table = _FindNodesLookupTable()
 
     def unpickle(
-        self, gm: torch.fx.GraphModule, unpickle_state: "_UnpickleState"
+        self, gm: torch.fx.GraphModule, unpickle_state: _UnpickleState
     ) -> torch.fx.Graph:
         graph = torch.fx.Graph(gm, self.tracer_cls, self.tracer_extras)
 
@@ -343,6 +514,21 @@ class _GraphPickleData:
 
 
 class _TracingContextPickleData:
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch._guards.TracingContext
+    ) -> Tuple[
+        Callable[[Self, _UnpickleState], torch._guards.TracingContext],
+        Tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
     def __init__(self, context: TracingContext) -> None:
         # TODO: Do we really need all of this?
         self.module_context = context.module_context
@@ -365,7 +551,7 @@ class _TracingContextPickleData:
         #   self.hop_dispatch_set_cache = None
         #   self.tensor_to_context = context.tensor_to_context
 
-    def unpickle(self, unpickle_state: "_UnpickleState") -> TracingContext:
+    def unpickle(self, unpickle_state: _UnpickleState) -> TracingContext:
         context = TracingContext(unpickle_state.fake_mode)
         context.module_context = self.module_context
         context.frame_summary_stack = self.frame_summary_stack
@@ -379,103 +565,3 @@ class _TracingContextPickleData:
             self.force_unspec_int_unbacked_size_like
         )
         return context
-
-
-class _GraphPickler(pickle.Pickler):
-    def __init__(self, file: io.BytesIO) -> None:
-        super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # This abomination is so we can pass external decoding state to the
-        # unpickler functions. We serialize _unpickle_state as a persistent
-        # external item and when we deserialize it we return the "known" state
-        # object.
-        self._unpickle_state = object()
-        self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
-
-    @override
-    def reducer_override(
-        self, obj: object
-    ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
-        if isinstance(obj, FakeTensor):
-            return (
-                _TensorPickleData.unpickle,
-                (
-                    _TensorPickleData(self._meta_tensor_describer, obj),
-                    self._unpickle_state,
-                ),
-            )
-        elif isinstance(obj, torch.fx.GraphModule):
-            return (
-                _GraphModulePickleData.unpickle,
-                (_GraphModulePickleData(obj), self._unpickle_state),
-            )
-        elif isinstance(obj, (torch._ops.OperatorBase, torch._ops.OpOverloadPacket)):
-            return _OpPickleData.reduce_helper(self, obj)
-        elif isinstance(obj, ShapeEnv):
-            return (
-                _ShapeEnvPickleData.unpickle,
-                (_ShapeEnvPickleData(obj), self._unpickle_state),
-            )
-        elif isinstance(obj, torch.SymInt):
-            return (
-                _SymNodePickleData.unpickle_sym_int,
-                (_SymNodePickleData(obj.node), self._unpickle_state),
-            )
-        elif isinstance(obj, torch._guards.TracingContext):
-            return (
-                _TracingContextPickleData.unpickle,
-                (_TracingContextPickleData(obj), self._unpickle_state),
-            )
-        else:
-            # We should never get a raw Node!
-            assert not isinstance(obj, torch.fx.Node)
-
-            if data := _TorchNumpyPickleData.from_object(obj):
-                assert data.unpickle(self._unpickle_state) == obj  # type: ignore[arg-type]
-                return (_TorchNumpyPickleData.unpickle, (data, self._unpickle_state))
-
-            # returning `NotImplemented` causes pickle to revert to the default
-            # behavior for this object.
-            return NotImplemented
-
-    @override
-    def persistent_id(self, obj: object) -> Optional[str]:
-        if obj is self._unpickle_state:
-            return "unpickle_state"
-        else:
-            return None
-
-    @classmethod
-    def dumps(cls, obj: object) -> bytes:
-        """
-        Pickle an object.
-        """
-        with io.BytesIO() as stream:
-            pickler = cls(stream)
-            pickler.dump(obj)
-            return stream.getvalue()
-
-
-class _UnpickleState:
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
-        self.fake_mode = fake_mode
-        self.meta_converter: MetaConverter[FakeTensor] = MetaConverter()
-
-
-class _GraphUnpickler(pickle.Unpickler):
-    def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
-        super().__init__(stream)
-        self._unpickle_state = unpickle_state
-
-    @classmethod
-    def loads(cls, data: bytes, unpickle_state: _UnpickleState) -> object:
-        with io.BytesIO(data) as stream:
-            unpickler = cls(stream, unpickle_state)
-            return unpickler.load()
-
-    @override
-    def persistent_load(self, pid: object) -> object:
-        if pid == "unpickle_state":
-            return self._unpickle_state
-        else:
-            raise pickle.UnpicklingError("Invalid persistent ID")

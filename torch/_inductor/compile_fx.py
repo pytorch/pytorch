@@ -1148,9 +1148,9 @@ class _WireProtocolInput:
         Turns this object into a _WireProtocolPickledInput which can be
         directly transferred across a stream.
         """
-        from torch.fx._graph_pickler import _GraphPickler
+        from torch.fx._graph_pickler import GraphPickler
 
-        return _WireProtocolPickledInput(_GraphPickler.dumps(self))
+        return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
 @dataclass
@@ -1161,11 +1161,10 @@ class _WireProtocolPickledInput:
         """
         Turn this streamable object back into a _WireProtocolInput.
         """
-        from torch.fx._graph_pickler import _GraphUnpickler, _UnpickleState
+        from torch.fx._graph_pickler import GraphPickler
 
         fake_mode = _current_fake_mode()
-        state = _UnpickleState(fake_mode)
-        result = _GraphUnpickler.loads(self.value, state)
+        result = GraphPickler.loads(self.value, fake_mode)
         assert isinstance(result, _WireProtocolInput)
         return result
 
@@ -1184,11 +1183,11 @@ class _WireProtocolOutput:
         Turns this object into a _WireProtocolPickledOutput which can be
         directly transferred across a stream.
         """
-        from torch.fx._graph_pickler import _GraphPickler
+        from torch.fx._graph_pickler import GraphPickler
 
         if isinstance(self.graph, CompiledFxGraph):
             self.graph.prepare_for_serialization()
-        return _WireProtocolPickledOutput(_GraphPickler.dumps(self))
+        return _WireProtocolPickledOutput(GraphPickler.dumps(self))
 
 
 @dataclass
@@ -1199,11 +1198,10 @@ class _WireProtocolPickledOutput:
         """
         Turn this streamable object back into a _WireProtocolOutput.
         """
-        from torch.fx._graph_pickler import _GraphUnpickler, _UnpickleState
+        from torch.fx._graph_pickler import GraphPickler
 
         fake_mode = _current_fake_mode()
-        state = _UnpickleState(fake_mode)
-        result = _GraphUnpickler.loads(self.value, state)
+        result = GraphPickler.loads(self.value, fake_mode)
         assert isinstance(result, _WireProtocolOutput)
         if isinstance(result.graph, CompiledFxGraph):
             result.graph.after_deserialization(gm)
