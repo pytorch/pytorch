@@ -6743,7 +6743,9 @@ class MockFXGraphCache:
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
-            gm = MockFXGraphCacheOutput(gm, key, 0)
+            gm = MockFXGraphCacheOutput(gm)
+            gm._fx_graph_cache_key = key
+            gm._time_taken_ns = 0
         return gm, {}
 
 
