@@ -717,14 +717,14 @@ class WhileLoopModels:
 
     class DataDependentOutput(torch.nn.Module):
         def forward(self, c, a, b):
-            def cond_fn(c, x, y):
+            def cond_fn(c):
                 return c > 0
 
-            def body_fn(c, x, y):
-                _ = torch.masked_select(x, y)
-                return c - 1, x.sin(), y.clone()
+            def body_fn(c):
+                _ = torch.masked_select(a, b)
+                return c - 1
 
-            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
+            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c])
 
 
 class WhileLoopTests(TestCase):
@@ -880,18 +880,24 @@ class WhileLoopTests(TestCase):
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
-    @parametrize("dynamic", [False])
+    @parametrize("dynamic", [True, False])
     def test_while_loop_with_data_dependent_ops(self, device, dynamic):
-        self._run_test(
-            model=WhileLoopModels.DataDependentOutput(),
-            inputs=(
-                torch.tensor([1, 2, 3, 4, 5]),
-                torch.tensor([True, True, True, True, True]),
-                torch.randn(10, 20),
-            ),
-            device=device,
-            dynamic=dynamic,
-        )
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentOutput(),
+                inputs=(
+                    torch.tensor([1, 2, 3, 4, 5]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+            )
 
 
 class AssociativeScanTests(TestCase):
