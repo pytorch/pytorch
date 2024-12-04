@@ -2134,6 +2134,20 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
 
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
+    constexpr auto getHermitianLimit() {
+        // Not the most universal way, but it will work
+        // properly because x is always of a floating
+        // point type.
+        if constexpr (sizeof(T) <= sizeof(float)) {
+            return 128;
+        } else if constexpr (sizeof(T) <= sizeof(double)) {
+            return 512;
+        } else {
+            return 1024;
+        }
+    }
+
+    template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
@@ -2147,11 +2161,7 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
             return x + x;
         }
 
-        if (sizeof(T) <= 4 && n > 128) {
-            return NAN;
-        } else if (sizeof(T) <= 8 && n > 512) {
-            return NAN;
-        } else if (n > 1024) {
+        if (n > getHermitianLimit<T>()) {
             return NAN;
         }
 
@@ -2176,6 +2186,20 @@ const auto hermite_polynomial_h_string = jiterator_stringify(
 
 const auto hermite_polynomial_he_string = jiterator_stringify(
     template<typename T>
+    constexpr auto getHermitianLimit() {
+        // Not the most universal way, but it will work
+        // properly because x is always of a floating
+        // point type.
+        if constexpr (sizeof(T) <= sizeof(float)) {
+            return 128;
+        } else if constexpr (sizeof(T) <= sizeof(double)) {
+            return 512;
+        } else {
+            return 1024;
+        }
+    }
+
+    template<typename T>
     T hermite_polynomial_he_forward(T x, int64_t n) {
         if (n < 0) {
             return T(0.0);
@@ -2189,11 +2213,7 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
             return x;
         }
 
-        if (sizeof(T) <= 4 && n > 128) {
-            return NAN;
-        } else if (sizeof(T) <= 8 && n > 512) {
-            return NAN;
-        } else if (n > 1024) {
+        if (n > getHermitianLimit<T>()) {
             return NAN;
         }
 

@@ -3041,6 +3041,17 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
 } // chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
+constexpr auto getHermitianLimit() {
+    if constexpr (std::is_same_v<T, float>) {
+        return 128;
+    } else if constexpr (std::is_same_v<T, double>) {
+        return 512;
+    } else {
+        return 1024;
+    }
+}
+
+template<typename T>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
@@ -3054,11 +3065,7 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
         return x + x;
     }
 
-    if (std::is_same_v<T, float> && n > 128) {
-        return std::numeric_limits<T>::quiet_NaN();
-    } else if (std::is_same_v<T, double> && n > 512) {
-        return std::numeric_limits<T>::quiet_NaN();
-    } else if (n > 1024) {
+    if (n > getHermitianLimit<T>()) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
@@ -3099,11 +3106,7 @@ inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
         return x;
     }
 
-    if (std::is_same_v<T, float> && n > 128) {
-        return std::numeric_limits<T>::quiet_NaN();
-    } else if (std::is_same_v<T, double> && n > 512) {
-        return std::numeric_limits<T>::quiet_NaN();
-    } else if (n > 1024) {
+    if (n > getHermitianLimit<T>()) {
         return std::numeric_limits<T>::quiet_NaN();
     }
 
