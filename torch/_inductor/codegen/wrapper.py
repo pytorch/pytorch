@@ -1783,12 +1783,12 @@ class PythonWrapperCodegen(CodeGen):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid: List[Any],
+        grid_args: List[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwags,
     ):
-        return grid
+        return grid_args
 
     def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
