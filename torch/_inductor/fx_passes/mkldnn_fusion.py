@@ -388,24 +388,18 @@ if torch._C._has_mkldnn:
             assert computation_node.target == computation_op
             computation_node_size = get_meta_value(computation_node).size()
             if computation_op is mkldnn._linear_pointwise.default:
-                broadcast_sizes = [
-                    torch.Size([1, computation_node_size[1]]),
-                    torch.Size([1, 1]),
-                ]
-                if get_meta_value(n.args[0]).dim() == 2:
-                    return (
-                        get_meta_value(match.kwargs["other"]).size()
-                        in [
-                            computation_node_size,
-                        ]
-                        + broadcast_sizes
-                    )
+                if len(computation_node_size) >= 2:
+                    broadcast_sizes = [
+                        torch.Size(
+                            [1 for _ in range(len(computation_node_size) - 1)]
+                            + [computation_node_size[-1]]
+                        ),
+                        torch.Size([1 for _ in range(len(computation_node_size))]),
+                    ]
                 else:
-                    # TODO: support broadcast binary fusion for all linear cases.
-                    return (
-                        get_meta_value(n.args[0]).size()
-                        == get_meta_value(n.args[1]).size()
-                    )
+                    broadcast_sizes = [
+                        torch.Size([1 for _ in range(len(computation_node_size))]),
+                    ]
             else:
                 broadcast_sizes = [
                     torch.Size(
@@ -418,13 +412,13 @@ if torch._C._has_mkldnn:
                     ),
                     torch.Size([1 for _ in range(len(computation_node_size))]),
                 ]
-                return (
-                    get_meta_value(match.kwargs["other"]).size()
-                    in [
-                        computation_node_size,
-                    ]
-                    + broadcast_sizes
-                )
+            return (
+                get_meta_value(match.kwargs["other"]).size()
+                in [
+                    computation_node_size,
+                ]
+                + broadcast_sizes
+            )
 
         if any(
             not _check_input_sizes(n, computation_op)

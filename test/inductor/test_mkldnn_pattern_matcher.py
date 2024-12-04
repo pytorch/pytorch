@@ -843,16 +843,18 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         options = itertools.product(
             binary_list,
-            [
-                [2, 10],
-            ],
-            [[1, 30], [1, 1]],
-            [True, False],
+            (
+                ([2, 3, 10], [1, 1, 30]),
+                ([2, 3, 10], [1, 1, 1]),
+                ([2, 10], [1, 30]),
+                ([2, 10], [1, 1]),
+            ),
+            (True, False),
             dtypes,
         )
         out_feature = 30
 
-        for binary_fn, input_shape, other_shape, bias, dtype in options:
+        for binary_fn, (input_shape, other_shape), bias, dtype in options:
             metrics.reset()
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
