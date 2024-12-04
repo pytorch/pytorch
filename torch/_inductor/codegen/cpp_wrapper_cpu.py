@@ -274,7 +274,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if isinstance(value, sympy.Expr):
             if not isinstance(value, sympy.Symbol) or value in bound_vars:
                 return
-            code.writeline(f"int64_t {value} = {name};")
+            if value.is_integer:
+                decl = "int64_t"
+            elif value.is_float:
+                decl = "double"
+            else:
+                raise AssertionError("Unexpected symbol type")
+            code.writeline(f"{decl} {value} = {name};")
             bound_vars.add(value)
         elif isinstance(value, ir.TensorBox):
             for dim, size in enumerate(value.get_size()):
