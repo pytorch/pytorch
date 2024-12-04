@@ -2762,6 +2762,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
   assertDense(invalidArgument, {outputTensor});
   assertDense(invalidArgument, {inputTensor});
 
+  if (!inputTensor.is_contiguous(inputTensor.suggest_memory_format())) {
+    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+  }
+
   const auto& device = outputTensor.device();
   c10::intrusive_ptr<AsyncAlltoallWork> work;
   auto tag = nextTag();
