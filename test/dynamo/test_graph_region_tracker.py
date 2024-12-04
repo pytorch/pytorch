@@ -17,7 +17,7 @@ def extract_graph_and_tracker(fn, *args, **kwargs):
         region_tracker = InstructionTranslator.current_tx().output.region_tracker
         return _gm
 
-    torch.compile(backend=extract_graph_backend)(fn)(*args, **kwargs)
+    torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
     return gm.graph, region_tracker
 
 
@@ -182,6 +182,38 @@ class GraphRegionTrackerTests(TestCase):
 ['y1_2', 'sum_3', 'x1_2', 'o4'], ['y1_3', 'sum_4', 'x1_3', 'o5']]]""",
         )
 
+    def test_nested_args(self):
+        def inner_fn(xs, ys):
+            out = torch._foreach_add(xs, ys)
+            return out[0] + out[1].sum()
+
+        def fn(x, y, z):
+            x0 = torch.sin(x)
+            y0 = torch.cos(y)
+            z0 = torch.sin(z)
+            o0 = inner_fn([x0, z0], [x0, y0])
+            o2 = inner_fn([x0, z0], [x0, y0])
+            o4 = inner_fn([x0, z0], [x0, y0])
+            o5 = inner_fn([x0, z0], [x0, y0])
+            o1 = inner_fn(
+                [x0.to(torch.bfloat16), z0.to(torch.bfloat16)],
+                [x0.to(torch.bfloat16), y0.to(torch.bfloat16)],
+            )
+            o3 = o1 + o2
+            return o3 * o0 + o4 + o5
+
+        self.assertExpectedInline(
+            self.get_result(
+                fn,
+                torch.rand(10, 10),
+                torch.rand(10, 20),
+                torch.ones(10, 20),
+            ),
+            """[[['getitem_1', '_foreach_add', 'sum_1', 'getitem', 'o0'], ['getitem_3', \
+'_foreach_add_1', 'sum_2', 'getitem_2', 'o2'], ['getitem_5', '_foreach_add_2', 'sum_3', \
+'getitem_4', 'o4'], ['getitem_7', '_foreach_add_3', 'sum_4', 'getitem_6', 'o5']]]""",
+        )
+
     def test_mismatched_global_state(self):
         def inner_fn(x, y):
             x1 = x * 1
@@ -226,6 +258,9 @@ class GraphRegionTrackerTests(TestCase):
         for ctx in [
             lambda: torch.set_grad_enabled(False),
             torch.autograd.grad_mode.inference_mode,
+            lambda: torch.autograd.graph.disable_saved_tensors_hooks(
+                "This is not supported"
+            ),
             # lambda: torch.set_num_threads(2), : Unsupported
             (set_default_dtype_bfloat16, reset_default_dtype),
             (
