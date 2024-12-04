@@ -1114,8 +1114,18 @@ class DelayReplaceLine(DeferredLineBase):
 
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
+    prop = torch.cuda.get_device_properties(index)
+
+    # SM logic is not relevant to ROCm gpus
+    # Arbitrarily skipping the older models
+    if torch.version.hip:
+        if prop.major < 9 or prop.major == 10:
+            log.warning("GPU arch does not support max_autotune_gemm mode usage")
+            return False
+        return True
+
     min_sms = 68  # 3080
-    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
             "Not enough SMs to use max_autotune_gemm mode",
@@ -2173,6 +2183,34 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
+
+
+_triton_type_re = re.compile(r"^.*[.]")
+
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_type_to_torch(dtype: str) -> torch.dtype:
+    adjusted_type = _torch_triton_mapping.get(dtype, dtype)
+    type_name = adjusted_type.replace("tl.", "")
+    out_dtype = getattr(torch, type_name)
+    assert isinstance(out_dtype, torch.dtype)
+    return out_dtype
 
 
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor):

@@ -411,6 +411,7 @@ coverage_ignore_functions = [
     "change_current_allocator",
     "empty_cache",
     "get_allocator_backend",
+    "get_per_process_memory_fraction",
     "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_cached",

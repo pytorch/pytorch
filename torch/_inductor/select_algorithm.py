@@ -35,7 +35,13 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, OpOverrides, WorkspaceArg
+from .codegen.common import (
+    CSEVariable,
+    IndentedBuffer,
+    KernelTemplate,
+    OpOverrides,
+    WorkspaceArg,
+)
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
@@ -46,6 +52,7 @@ from .codegen.triton import (
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
+from .ops_handler import StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .utils import (
@@ -56,6 +63,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    triton_type_to_torch,
     unique,
 )
 from .virtualized import V
@@ -204,19 +212,23 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
-    def store(self, name, index, value, mode):
-        """Store value and track the store's mask and output value on the kernel.
-
-        The template_mask and template_out are used by the indexing() method to properly
-        mask store operations in the generated Triton code. The mask ensures stores only
-        affect elements matching the mask condition. This is currently only used for scatter node's store
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> str:
+        """Currently only supports stores for atomic adds coming from scatter nodes
+        This is used by flex_attention's backwards grad for captured buffers, see
+        zeros_and_scatter lowering
         """
         assert (
             self.mask is not None
         ), "Mask is required for inner stores in modifications"
-        self.kernel.template_out = value
-        self.kernel.template_mask = self.mask
-        return self._inner.store(name, index, value, mode)
+        assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
+
+        buf_name = self._add_kernel_input(name)
+        index_str = self._process_indexing(index)
+        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
+        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
+        return store
 
     def _add_kernel_input(self, name: str):
         """Add name as input to kernel and return input ref."""
@@ -488,7 +500,7 @@ class TritonTemplateKernel(TritonKernel):
                 x_i * stride for x_i, stride in zip(x, scatter_graph.get_stride())
             )
 
-        scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
+        return scatter_graph.data.store_output(scatter_graph.name, contiguous_strides, [])  # type: ignore[attr-defined]
 
     def modification(
         self,
@@ -508,6 +520,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         num = 0
         out = None
+        scatters = []
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
@@ -522,7 +535,7 @@ class TritonTemplateKernel(TritonKernel):
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
-                        self._handle_scatter_graph(scatter_graph)
+                        scatters.append(self._handle_scatter_graph(scatter_graph))
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
                 else:
@@ -533,6 +546,10 @@ class TritonTemplateKernel(TritonKernel):
                 assert isinstance(output_name, str)
                 assert out is not None
                 self.body.writeline(f"{output_name} = {out.value}")
+            else:
+                assert out is None
+                for scatter in scatters:
+                    self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
             self.cse.invalidate(set())  # type: ignore[arg-type]
@@ -589,7 +606,12 @@ class TritonTemplateKernel(TritonKernel):
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex", integer=True)
 
-            epilogue_args = [val]
+            acc_dtype = (
+                triton_type_to_torch(self.meta["ACC_TYPE"])
+                if "ACC_TYPE" in self.meta
+                else torch.float32
+            )
+            epilogue_args = [V.kernel.cse.namedvar(val, dtype=acc_dtype)]
             for input_node in itertools.chain(
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
@@ -1728,9 +1750,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+        if config.autotune_num_choices_displayed == 0:
+            return
+        elif config.autotune_num_choices_displayed is None:
+            n = -1
+        else:
+            n = config.autotune_num_choices_displayed
 
-        n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
+
         best = top_k[0]
 
         def get_choice_info(choice):
