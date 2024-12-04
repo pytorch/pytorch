@@ -43,10 +43,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
-        self.open_bracket = "{"
-        self.closed_bracket = "}"
         self.comment = "//"
-        self.namespace = "at::"
         self.none_str = "nullptr"
         self.size = "sizes()"
         self.stride = "strides()"
@@ -856,7 +853,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cst_names = V.graph.constants.keys()
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
-            if output == self.none_str:
+            if output == "nullptr":
                 continue
 
             is_constant_buffer = output in cst_names
@@ -1516,7 +1513,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # in case the outer_output carried a value
             # before (e.g., in the while_loop codegen)
             self.writeline(f"{outer_output}.reset();")
-            self.writeline(f"{outer_output} = {src}{self.ending}")
+            self.writeline(f"{outer_output} = {src};")
 
     def codegen_invoke_subgraph(self, invoke_subgraph):
         raise NotImplementedError(
@@ -1566,7 +1563,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # support lifting of subgraphs as functions for cpp wrapper as well.
         try:
             self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            self.writeline(f"// subgraph: {subgraph.name}")
             self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
             parent_graph = V.graph
             with V.set_graph_handler(subgraph.graph):
