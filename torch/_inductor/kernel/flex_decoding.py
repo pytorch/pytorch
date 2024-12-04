@@ -332,6 +332,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,  # full_kv_num_blocks,
