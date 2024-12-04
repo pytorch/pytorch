@@ -12,7 +12,7 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
-from .cpp_utils import cexpr, DTYPE_TO_CPP
+from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
@@ -73,7 +73,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation

@@ -363,9 +363,9 @@ class CppWrapperGpu(CppWrapperCpu):
                         )
                     )
             elif arg_type in (sympy.Integer, int):
-                self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
+                self.writeline(f"int {var_name} = {cexpr(arg)};")
             elif arg_type in (sympy.Float, float):
-                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
+                self.writeline(f"float {var_name} = {cexpr(arg)};")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
@@ -375,10 +375,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 and arg_signature in signature2dtype.keys()
             ):
                 self.writeline(
-                    f"{signature2dtype[arg_signature]} {var_name} = {self.expr_printer(arg)};"
+                    f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
             else:
-                self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
+                self.writeline(f"auto {var_name} = {cexpr(arg)};")
             new_args.append(f"&{var_name}")
 
         for arg, arg_type, arg_signature in zip_longest(
