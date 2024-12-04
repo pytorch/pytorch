@@ -31,14 +31,17 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_param_group import (
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import (
+    CPUOffload,
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+)
+from torch.distributed.fsdp._common_utils import TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
-from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
@@ -1484,7 +1487,7 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+        torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
@@ -1497,7 +1500,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
+            original_fully_shard = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")

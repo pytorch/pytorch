@@ -6,10 +6,6 @@ from typing import TYPE_CHECKING
 import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed._composable.fsdp.fully_shard import (
-    fully_shard,
-    MixedPrecisionPolicy,
-)
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint import FileSystemReader
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
@@ -17,6 +13,7 @@ from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_di
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,

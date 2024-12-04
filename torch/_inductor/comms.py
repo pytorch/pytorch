@@ -536,7 +536,7 @@ Graph: {graph}
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
-        import torch.distributed._composable.fsdp._fsdp_collectives
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         assert torch.distributed.is_available()
         # Assert existence of these ops
