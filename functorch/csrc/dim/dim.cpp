@@ -1583,6 +1583,7 @@ static PyObject* _dims(PyObject *self,
     auto c = mpy::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
+    std::cout << "MY VERSION IS: " << std::hex << PY_VERSION_HEX << std::endl;
     #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
