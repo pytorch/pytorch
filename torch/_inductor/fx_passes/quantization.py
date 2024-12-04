@@ -2626,13 +2626,11 @@ def _register_smooth_quant_int_mm_pattern():
         if len(match.nodes) not in [4, 5, 6, 7, 10]:
             return False
         # Make sure weight is a constant
-        for node in match.nodes:
-            if node.target == aten._int_mm.default:
-                if not isinstance(node.args[1], torch.fx.node.Node):
-                    return False
-                if node.args[1].op != "get_attr":
-                    return False
-                break
+        aten_int_mm_node = filter_nodes(match.nodes, aten._int_mm.default)[0]
+        if not isinstance(aten_int_mm_node.args[1], torch.fx.node.Node):
+            return False
+        if aten_int_mm_node.args[1].op != "get_attr":
+            return False
 
         if len(match.nodes) == 10:
             # Check the two tailing reshape nodes can be fused
