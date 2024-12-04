@@ -1384,12 +1384,16 @@ elements, have ``nan`` values.
 {reduction_args}
 
 {reduction_example}"""
+    dtype_source = "Optional"
     if dtype is None:
         dtype = input.dtype
-    if dtype is torch.bool:
-        # upcast dtype when computing mean of boolean tensors otherwise
-        # sum(..., dtype=torch.bool) is clamped to 1
-        dtype = torch.int32
+        dtype_source = "Input"
+
+    if not (dtype.is_floating_point() or dtype.is_complex()):
+        raise ValueError(
+            f"mean(): Could not infer output dtype. {dtype_source} dtype must be either "
+            f"a floating point or complex dtype. Got: {dtype}"
+        )
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
