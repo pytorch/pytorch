@@ -315,7 +315,7 @@ class AsyncCompile:
             "async_compile.wait",
             log_pt2_compile_event=True,
             dynamo_compile_column_us="triton_compile_time_us",
-            log_waitcounter=True
+            log_waitcounter=True,
         ):
             num_kernels = len(
                 [
