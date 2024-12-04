@@ -2131,9 +2131,13 @@ class SubgraphTracer(fx.Tracer):
             msgs = traceback.StackSummary.from_list(frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
-        self.output_graph.region_tracker.track_node(
-            self.output_graph.current_tx, rv.node
-        )
+        if (
+            torch._dynamo.config.use_graph_deduplication
+            or torch._dynamo.config.track_nodes_for_deduplication
+        ):
+            self.output_graph.region_tracker.track_node(
+                self.output_graph.current_tx, rv.node
+            )
         return rv
 
     def create_node(
