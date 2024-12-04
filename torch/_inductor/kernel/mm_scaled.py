@@ -128,18 +128,9 @@ device_tma = r"""
         global_size=[N, K],
         element_ty=B.dtype.element_ty,
     )
-    # TODO need to have a descriptor store
-    # experimental_device_tensormap_create2d(
-    #     desc_ptr=c_desc_ptr,
-    #     global_address=c_ptr,
-    #     load_size=[BLOCK_M, BLOCK_N],
-    #     global_size=[M, N],
-    #     element_ty=c_ptr.dtype.element_ty,
-    # )
 
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
-    # tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(c_desc_ptr)
 
     tiles_per_SM = num_tiles // NUM_SMS
     if start_pid < num_tiles % NUM_SMS:
@@ -200,8 +191,7 @@ device_tma = r"""
                 stride_a_scale_m,
                 stride_b_scale_n,
             )
-            # TODO need to have a descriptor store
-            # tl._experimental_descriptor_store(c_desc_ptr, c, [offs_am, offs_bn])
+
             idx_m = offs_cm[:, None]
             idx_n = offs_cn[None, :]
             mask = (idx_m < M) & (idx_n < N)
