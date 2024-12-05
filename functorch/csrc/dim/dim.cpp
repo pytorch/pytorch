@@ -7,7 +7,18 @@
 #include <torch/csrc/utils/python_compat.h>
 
 
-// Many APIs have changed/don't exist anymore
+// Many APIs have changed/don't exist anymore/untested on 3.13
+#if IS_PYTHON_3_13_PLUS
+
+#include "dim.h"
+
+// Re-enable this some day
+PyObject* Dim_init() {
+    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.13");
+    return nullptr;
+}
+
+#else
 
 #include "minpybind.h"
 #include <frameobject.h>
@@ -1583,20 +1594,10 @@ static PyObject* _dims(PyObject *self,
     auto c = mpy::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
-    std::cout << "MY VERSION IS: " << std::hex << PY_VERSION_HEX << std::endl;
-    std::cout << "311+ MACRO: " << ((int) IS_PYTHON_3_11_PLUS) << " 312+ MACRO: " << ((int) IS_PYTHON_3_12_PLUS) << std::endl;
-    std::cout << "NEGATION : " << ((int) (!IS_PYTHON_3_12_PLUS)) << std::endl;
-    #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
-    std::cout << " OK " << std::endl;
-    #else
-    std::cout << " scuzama" << std::endl;
-    #endif
-    #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
+    #if IS_PYTHON_3_11_PLUS && !(IS_PYTHON_3_12_PLUS)
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
-    std::cout << "PRECALL CHECK" << std::endl;
     if (decoder.opcode() == PRECALL) {
-        std::cout <<  "PRECALL FOUND" << std::endl;
         decoder.next();
     }
     // note that this opcode was removed in 3.12
@@ -1604,16 +1605,11 @@ static PyObject* _dims(PyObject *self,
     decoder.next();
 
     if (relevant_op(decoder.opcode())) {
-        std::cout << "RELEVANT OP" << std::endl;
         found_ndims = 1;
     } else if (decoder.opcode() == UNPACK_SEQUENCE) {
-        std::cout << "UNPACK SEQUENCE" << std::endl;
         found_ndims = decoder.oparg();
         decoder.next();
-    } else {
-        std::cout << "NEITHER" << std::endl;
     }
-    std::cout <<"FOUND NDIMS: " << found_ndims << std::endl;
 
     if (specified_ndims == -1) {
         if (found_ndims == 0) {
@@ -3268,3 +3264,4 @@ PyObject* Dim_init() {
     }
 }
 
+#endif
