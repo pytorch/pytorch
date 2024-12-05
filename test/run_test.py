@@ -433,7 +433,6 @@ S390X_TESTLIST = [
     "test_mkldnn_verbose",
     "test_mkl_verbose",
     "test_mobile_optimizer",
-    "test_model_dump",
     "test_model_exports_to_core_aten",
     "test_module_tracker",
     "test_monitor",

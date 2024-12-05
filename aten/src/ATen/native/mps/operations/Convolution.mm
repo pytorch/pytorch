@@ -127,13 +127,13 @@ static Tensor _mps_convolution_impl(const Tensor& input_t_,
   const bool is_macOS_13_2_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
   const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
   Tensor input_t = input_t_;
-  if (!is_macOS_15_0_or_newer) {
+  bool is3DConv = input_t.dim() == 5;
+  if (!is_macOS_15_0_or_newer || is3DConv) {
     input_t = input_t.contiguous();
   }
 
   TORCH_CHECK(((input_t.dim() < 5) || is_macOS_13_2_or_newer),
               "Conv3D is only supported on MPS for MacOS_13_2 or newer");
-  bool is3DConv = input_t.dim() == 5;
 
   TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
