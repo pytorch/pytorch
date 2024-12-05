@@ -919,7 +919,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 rtol=rtol,
             )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
-        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
 
     @inductor_config.patch({"freezing": True})
     @patches

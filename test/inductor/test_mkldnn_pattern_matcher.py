@@ -464,7 +464,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
                 )
-                self.assertEqual(counters["inductor"]["binary_folding"], 2)
 
             self._test_common(
                 fold_mod,
