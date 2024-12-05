@@ -274,26 +274,6 @@ PyObject* THXPModule_resetAccumulatedMemoryStats(
   Py_RETURN_NONE;
 }
 
-PyObject* THXPModule_getMemoryInfo(PyObject* self, PyObject* arg) {
-  HANDLE_TH_ERRORS
-#if SYCL_COMPILER_VERSION >= 20250000
-  TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to mem_get_info");
-  const auto device_index = THPUtils_unpackDeviceIndex(arg);
-  auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
-  auto free = c10::xpu::get_raw_device(device_index)
-                  .get_info<sycl::ext::intel::info::device::free_memory>();
-  auto ret = THPObjectPtr{PyTuple_New(2)};
-  PyTuple_SET_ITEM(ret.get(), 0, THPUtils_packUInt64(free));
-  PyTuple_SET_ITEM(ret.get(), 1, THPUtils_packUInt64(total));
-  return ret.release();
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
-  END_HANDLE_TH_ERRORS
-}
-
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -396,6 +376,22 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
+static void initPybindMethods(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+#if SYCL_COMPILER_VERSION >= 20250000
+    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
+    auto free = c10::xpu::get_raw_device(device_index)
+                    .get_info<sycl::ext::intel::info::device::free_memory>();
+    return std::make_tuple(free, total);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+  });
+}
+
 // Callback for python part. Used for additional initialization of python
 // classes
 static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
@@ -468,7 +464,6 @@ static struct PyMethodDef _THXPModule_methods[] = {
      THXPModule_resetPeakMemoryStats,
      METH_O,
      nullptr},
-    {"_xpu_getMemoryInfo", THXPModule_getMemoryInfo, METH_O, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
@@ -479,6 +474,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
+  initPybindMethods(module);
 }
 
 } // namespace torch::xpu
