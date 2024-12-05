@@ -599,6 +599,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -760,12 +761,6 @@ def jacrev(
         if has_aux:
             return output_input, aux
         return output_input
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
@@ -1287,6 +1282,7 @@ def jacfwd(
 
     """
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1340,12 +1336,6 @@ def jacfwd(
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
