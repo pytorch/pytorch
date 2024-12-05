@@ -135,6 +135,7 @@ _SKIP_PYTHON_BINDINGS = [
     "_to_copy_out",
     "_reshape_copy",
     "_reshape_copy_out",
+    "_lazy_clone_alias",
     "_lazy_clone_alias_copy",
     "_lazy_clone_copy",
     "_lazy_clone_future",

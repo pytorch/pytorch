@@ -144,7 +144,11 @@ Tensor _lazy_clone_future(Tensor const& self) {
   return _lazy_clone_impl(self, /*future=*/true);
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+Tensor _lazy_clone(Tensor const& self, bool _force_alias) {
+  if (_force_alias) {
+    return self._lazy_clone_alias();
+  }
+
   if (c10::impl::cow::get_future_lazy_clone()) {
     return self._lazy_clone_future();
   } else {

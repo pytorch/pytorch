@@ -459,7 +459,7 @@
   self: grad
   result: auto_linear
 
-- name: _lazy_clone_copy(Tensor self) -> Tensor
+- name: _lazy_clone_copy(Tensor self, bool _force_alias=False) -> Tensor
   self: grad
   result: auto_linear
 

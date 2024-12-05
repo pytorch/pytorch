@@ -1262,7 +1262,7 @@
 # the input to COW tensors.
 #
 # From Python, this function should only be called for testing COW behavior.
-- func: _lazy_clone(Tensor(a) self) -> Tensor(a)
+- func: _lazy_clone(Tensor(a) self, bool _force_alias=False) -> Tensor(a)
   variants: function, method
 
 - func: _lazy_clone_future(Tensor self) -> Tensor
@@ -1275,7 +1275,7 @@
   dispatch:
     CompositeExplicitAutograd: _lazy_clone_alias
 
-- func: _lazy_clone_copy(Tensor self) -> Tensor
+- func: _lazy_clone_copy(Tensor self, bool _force_alias=False) -> Tensor
   variants: function
   tags: view_copy
   dispatch:

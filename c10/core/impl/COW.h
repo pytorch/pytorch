@@ -48,7 +48,6 @@ C10_API void check_cowsim_read(const StorageImpl& storage);
 C10_API void set_future_lazy_clone(bool mode);
 C10_API bool get_future_lazy_clone();
 
-// TODO: Do I still need this?
 class C10_API FutureLazyCloneGuard {
  public:
   FutureLazyCloneGuard(bool mode) : mode_restore(cow::get_future_lazy_clone()) {
@@ -57,6 +56,10 @@ class C10_API FutureLazyCloneGuard {
   ~FutureLazyCloneGuard() {
     cow::set_future_lazy_clone(mode_restore);
   }
+  FutureLazyCloneGuard(FutureLazyCloneGuard const&) = delete;
+  FutureLazyCloneGuard& operator=(FutureLazyCloneGuard const&) = delete;
+  FutureLazyCloneGuard(FutureLazyCloneGuard&&) = delete;
+  FutureLazyCloneGuard& operator=(FutureLazyCloneGuard&&) = delete;
 
  private:
   bool mode_restore;

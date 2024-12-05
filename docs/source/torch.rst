@@ -738,6 +738,7 @@ Symbolic Numbers
     :nosignatures:
 
     sym_float
+    sym_fresh_size
     sym_int
     sym_max
     sym_min
