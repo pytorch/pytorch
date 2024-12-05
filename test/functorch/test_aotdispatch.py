@@ -6290,6 +6290,16 @@ metadata incorrectly.
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
     def test_subclass_parameters(self):
+        class _M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + self.p
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -6297,9 +6307,10 @@ metadata incorrectly.
                 self.p2 = torch.nn.Parameter(
                     TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
+                self._m = _M()
 
             def forward(self, x):
-                return x + 2 * self.p1 + self.p2
+                return self._m(x) + x + 2 * self.p1 + self.p2
 
         m = M()
         ref_x = torch.randn(3, 4)
