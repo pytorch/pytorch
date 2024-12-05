@@ -1585,6 +1585,12 @@ static PyObject* _dims(PyObject *self,
     auto decoder = PyInstDecoder(c.ptr(), lasti);
     std::cout << "MY VERSION IS: " << std::hex << PY_VERSION_HEX << std::endl;
     std::cout << "311+ MACRO: " << ((int) IS_PYTHON_3_11_PLUS) << " 312+ MACRO: " << ((int) IS_PYTHON_3_12_PLUS) << std::endl;
+    std::cout << "NEGATION : " << ((int) (!IS_PYTHON_3_12_PLUS)) << std::endl;
+    #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
+    std::cout << " OK " << std::endl;
+    #else
+    std::cout << " scuzama" << std::endl;
+    #endif
     #if IS_PYTHON_3_11_PLUS && !IS_PYTHON_3_12_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
