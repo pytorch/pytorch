@@ -1618,7 +1618,7 @@ class Tensor(torch._C.TensorBase):
                     event = torch.cuda.Event()
                     event.record(sync_stream)
                     stream.wait_event(event)
-        if self.device.type == 'xla':
+        if self.device.type == "xla":
             import torch_xla
             import torch_xla.utils.dlpack as xla_dlpack
 
@@ -1626,7 +1626,9 @@ class Tensor(torch._C.TensorBase):
                 len(torch_xla.real_devices()) <= 0
                 or "cuda" not in torch_xla.real_devices()[0].lower()
             ):
-                raise RuntimeError("Can't export to dlpack an XLA tensor that is not on CUDA.")
+                raise RuntimeError(
+                    "Can't export to dlpack an XLA tensor that is not on CUDA."
+                )
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
@@ -1651,7 +1653,7 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLOneAPI
         elif self.device.type == "privateuse1":
             device_type = DLDeviceType.kDLExtDev
-        elif torch_device_type == 'xla':
+        elif torch_device_type == "xla":
             import torch_xla
 
             if (
