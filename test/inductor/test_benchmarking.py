@@ -176,9 +176,10 @@ class TestBenchmarker(TestCase):
                 getattr(config.benchmarking, feature_name).oss_default,
             )
 
+    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @parametrize("fn_name", ("benchmark", "benchmark_cpu", "benchmark_gpu", "benchmark_many_gpu",))
     @parametrize("enabled", (True, False,))
-    @parametrize("device", (GPU_TYPE, "cpu,"))
+    @parametrize("device", (GPU_TYPE, "cpu",))
     def test_inductor_benchmarker_fallback(self, fn_name, enabled, device):
         @config.patch({
             f"benchmarking.{InductorBenchmarker.feature_name}.env_val": 1 if enabled else 0
@@ -201,10 +202,11 @@ class TestBenchmarker(TestCase):
             # all other benchmark functions should still pass, since they are inherited
             self.assertEqual(self.get_counter_value(InductorBenchmarker, fn_name), 1)
     
+    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @parametrize("fn_name", ("benchmark", "benchmark_cpu", "benchmark_gpu", "benchmark_many_gpu",))
     @parametrize("enabled", (True, False,))
     @parametrize("inductor_benchmarker_enabled", (True, False,))
-    @parametrize("device", (GPU_TYPE, "cpu,"))
+    @parametrize("device", (GPU_TYPE, "cpu",))
     def test_inductor_grouped_benchmarker_fallback(self, fn_name, enabled, inductor_benchmarker_enabled, device):
         @config.patch({
             f"benchmarking.{InductorGroupedBenchmarker.feature_name}.env_val": 1 if enabled else 0,
