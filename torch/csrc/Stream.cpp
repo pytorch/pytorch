@@ -264,13 +264,6 @@ static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(dst_device_type))) {
     Py_RETURN_NONE;
   }
-  const auto device_type = at::accelerator::getAccelerator(true).value();
-  TORCH_CHECK(
-      dst_device_type == device_type,
-      "stream's device type ",
-      c10::DeviceTypeName(dst_device_type),
-      " doesn't match the current accelerator ",
-      c10::DeviceTypeName(device_type));
   c10::DeviceIndex src_device_idx = at::accelerator::getDeviceIndex();
   c10::DeviceIndex dst_device_idx =
       static_cast<c10::DeviceIndex>(self->device_index);
