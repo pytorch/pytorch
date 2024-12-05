@@ -253,11 +253,19 @@ class TestFxGraphCache(TestCase):
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
-        self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
+            self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
+
+            with torch.compiler.config.patch(
+                {"remote_cache_key_prefix": "test"}
+            ), fresh_inductor_cache():
+                compiled_fn = torch.compile(fn, dynamic=dynamic)
+                self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+            self.assertEqual(global_stats.fx_graph, Stats(2, 3, 2))
 
         # Check that the cache entries seem reasonable
         for k in global_stats.fx_graph.cache.keys():
-            self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
+            self.assertRegex(k, r"pt2:(test)?fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
