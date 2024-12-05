@@ -9,8 +9,10 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
@@ -489,6 +491,45 @@ def get_dummy_aot_autograd_config():
 # Slices off the first element of a given dimension
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
+
+
+def diff_meta_pairs(lhs_list: List[ torch.Tensor | torch.SymInt | int], rhs_list: List[ torch.Tensor | torch.SymInt | int]) -> List[str]:
+    assert len(lhs_list) == len(rhs_list)
+    all_diffs = []
+    for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
+        if diff := diff_meta(lhs, rhs):
+            all_diffs.append(
+                f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
+            )
+    return all_diffs
+
+def diff_meta(lhs: torch.Tensor | torch.SymInt | int, rhs: torch.Tensor | torch.SymInt | int) -> str:
+    if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
+        return ", ".join(diff_tensor_meta(_extract_tensor_metadata(lhs), _extract_tensor_metadata(rhs)))
+    elif type(lhs) != type(rhs):
+        return f"dtype: {lhs} vs {rhs}"
+    else:
+        return ""
+
+# Reports the difference between meta of two tensors in a string
+def diff_tensor_meta(
+    meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
+) -> List[str]:
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+    pair_diffs = []
+    for meta_name in TensorMetadata._fields:
+        if not check_grad and meta_name == "requires_grad":
+            continue
+        val1 = getattr(meta1, meta_name)
+        val2 = getattr(meta2, meta_name)
+        try:
+            if val1 != val2:
+                pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+        except GuardOnDataDependentSymNode as _:
+            pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+            continue
+    return pair_diffs
 
 
 # Note [lifted arg types in hop]

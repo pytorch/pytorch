@@ -751,16 +751,16 @@ class WhileLoopModels:
 
     class DataDependentInOutMismatch(torch.nn.Module):
         def forward(self, c, a, b):
-            def cond_fn(c, a):
+            def cond_fn(c, a, b):
                 return c > 0
 
-            def body_fn(c, a):
-                return c - 1, a.nonzero()
+            def body_fn(c, a, b):
+                return c - 1, a.nonzero(), b.nonzero()
 
             return torch._higher_order_ops.while_loop(
                 cond_fn,
                 body_fn,
-                [c, a],
+                [c, a, b],
             )
 
     class IntCarryWithCompute(torch.nn.Module):
