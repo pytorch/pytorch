@@ -2682,7 +2682,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"], 0 if TEST_ACL else 4
             )
             self.assertEqual(
-                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1 if TEST_ACL else 2
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
             )
 
         with torch.no_grad():
