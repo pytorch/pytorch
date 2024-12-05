@@ -212,11 +212,11 @@ class InterpreterModuleDispatcher(torch.nn.Module):
     to the next InterpreterModule, and wraps back around after the last.
     """
 
-    def __init__(self, consts_accessors: Set[str], call_modules: List[InterpreterModule]):
+    def __init__(self, attrs: Set[str], call_modules: List[InterpreterModule]):
         super().__init__()
         assert call_modules
         self._modules = call_modules[0]._modules
-        for accessor in consts_accessors:
+        for accessor in attrs:
             setattr(self, accessor, getattr(call_modules[0], accessor))
         self._call_modules = call_modules
         self._num_calls = 0
@@ -299,20 +299,7 @@ class UnflattenedModule(torch.nn.Module):
         # for each read intermediate value x, find the module that created it,
         # and generate instructions to update the corresponding attribute;
         # finally, initialize all these attributes
-        partitions = list(seen_modules.values())
-        partitions.append(
-            [
-                _SubmoduleEntry(
-                    parent_fqn=None,
-                    parent_module=None,
-                    parent_call_module=None,
-                    fqn="",
-                    call_idx=0,
-                    module=self,
-                ),
-            ]
-        )
-        self.ivals.create(partitions)
+        self.ivals.create(seen_modules.values(), self)
         # move attributes that correspond to graph arguments for HOPs
         # from exported program to unflattened submodules
         _copy_graph_attrs(export_module._graph_module, self, seen_attrs)
@@ -624,17 +611,17 @@ class UnflattenedModule(torch.nn.Module):
                 base, idx = fqn.split("@") if "@" in fqn else [fqn, "0"]
                 called_modules[base].append((int(idx), mod))
 
-        consts = defaultdict(set)
+        attrs_map = defaultdict(set)
         for target in consts_targets:
             if "." in target:
                 orig_fqn, name = target.rsplit(".", 1)
-                consts[orig_fqn].add(name)
+                attrs_map[orig_fqn].add(name)
             else:
-                consts[""].add(target)
+                attrs_map[""].add(target)
 
         # replace multiple call modules with a single dispatcher module
         for orig_fqn, call_modules in called_modules.items():
-            call_modules = list(map(lambda p: p[1], sorted(call_modules)))
+            call_modules = [mod for _, mod in sorted(call_modules)]
             if len(call_modules) > 1:
                 for i, call_module in enumerate(call_modules):
                     fqn = _call_name(orig_fqn, i + 1)
@@ -643,7 +630,7 @@ class UnflattenedModule(torch.nn.Module):
                         _get_attr_via_attr_list(self, prefix)._modules.pop(name)
                 self.set_submodule(
                     orig_fqn,
-                    InterpreterModuleDispatcher(consts[orig_fqn], call_modules),
+                    InterpreterModuleDispatcher(attrs_map[orig_fqn], call_modules),
                 )
 
         # elide call indices in call modules because they are
@@ -964,7 +951,8 @@ class _ModuleFrame:
             _add_submodule(parent.module, accessor, self.module, create_module)
             self.parent_call_module = parent.graph.call_module(accessor)
             if self.seen_modules[self.module_id]:
-                self.module._modules = self.seen_modules[self.module_id][-1].module._modules
+                base_module_frame = self.seen_modules[self.module_id][0]
+                self.module._modules = base_module_frame.module._modules
             self.seen_modules[self.module_id].append(
                 _SubmoduleEntry(
                     parent_fqn=self.parent.fqn,
@@ -1453,17 +1441,17 @@ class _IVals:
             )
             new_ival_node.meta = copy.copy(node.meta)
 
-    def create(self, partitions):
+    def create(self, partitions, root_module):
         """
         Update attributes corresponding to intermediate values that were read.
         Finally, initialize attributes in all modules that read or update
         corresponding intermediate values.
         """
 
-        entries = []
+        entries = [("", root_module)]
         for shared_submodules in partitions:
             for entry in shared_submodules:
-                entries.append(entry)
+                entries.append((entry.fqn, entry.module))
                 graph = entry.module.graph
                 for node in graph.nodes:
                     if node.name in self.storage:
@@ -1475,16 +1463,12 @@ class _IVals:
             for fqn in fqns:
                 ivals[fqn].append(name)
 
-        for entry in entries:
-            for name in ivals[entry.fqn]:
+        for fqn, mod in entries:
+            for name in ivals[fqn]:
                 ival_name = f"__ival__{name}"
                 # for a ival named x created in module call m,
                 # create attribute m.__ival__x, initially empty
-                setattr(
-                    entry.module,
-                    ival_name,
-                    self.storage[name],
-                )
+                setattr(mod, ival_name, self.storage[name])
 
 
 def _copy_graph_attrs(

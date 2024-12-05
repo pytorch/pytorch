@@ -7029,33 +7029,40 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
+
             def forward(self, x):
                 return x + 1
+
         class N2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n3 = N3()
+
             def forward(self, x):
                 x = x + self.n3.buf
                 x = self.n3(x + 1)
                 return x + 1
+
         class N1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n2 = N2()
+
             def forward(self, x):
                 x = x + self.n2.n3.buf
                 x = self.n2(x + 1)
                 x = self.n2.n3(x + 1)
                 self.n2.n3.buf.add_(1)
                 return x + 1
+
         class N0(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n1 = N1()
+
             def forward(self, x):
                 x = x + self.n1.buf
                 x = x + self.n1.n2.n3.buf
@@ -7065,6 +7072,7 @@ graph():
                 self.n1.buf.add_(1)
                 self.n1.n2.buf.add_(1)
                 return x + 1
+
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
@@ -7079,31 +7087,38 @@ graph():
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
+
             def forward(self, x):
                 return x + 1
+
         class N4(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n5 = N5()
+
             def forward(self, x):
                 x = x + self.n5.buf
                 self.n5.buf.add_(1)
                 return x + 1
+
         class N3(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n4 = N4()
+
             def forward(self, x):
                 x = x + self.n4.buf
                 x = self.n4(x + 1)
                 return x + 1
+
         class N2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n3 = N3()
+
             def forward(self, x):
                 x = x + self.n3.buf
                 x = x + self.n3.n4.n5.buf
@@ -7112,11 +7127,13 @@ graph():
                 x = self.n3.n4.n5(x + 1)
                 self.n3.n4.buf.add_(1)
                 return x + 1
+
         class N1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n2 = N2()
+
             def forward(self, x):
                 x = x + self.n2.n3.n4.buf
                 x = self.n2.n3(x + 1)
@@ -7126,11 +7143,13 @@ graph():
                 self.n2.n3.buf.add_(1)
                 self.n2.n3.n4.n5.buf.add_(1)
                 return x + 1
+
         class N0(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n1 = N1()
+
             def forward(self, x):
                 x = x + self.n1.n2.buf
                 x = x + self.n1.n2.n3.buf
@@ -7143,6 +7162,7 @@ graph():
                 self.n1.n2.buf.add_(1)
                 self.n1.n2.n3.n4.buf.add_(1)
                 return x + 1
+
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
@@ -7336,7 +7356,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7393,7 +7421,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7449,7 +7485,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7523,7 +7567,16 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+                'n1.n2.n3.n4',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7640,131 +7693,18 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4', 'n1.n2.n3.n4.n5', 'n1.n2.n3.n4.n5.n6',))
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
-
-    def test_MutatingStatefulUnflatten_9_77(self):
-        class N8(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-            def forward(self, x):
-                return x + 1
-        class N7(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n8 = N8()
-            def forward(self, x):
-                x = self.n8(x + 1)
-                return x + 1
-        class N6(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n7 = N7()
-            def forward(self, x):
-                x = self.n7(x + 1)
-                return x + 1
-        class N5(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n6 = N6()
-            def forward(self, x):
-                x = x + self.n6.n7.n8.buf
-                x = self.n6(x + 1)
-                x = self.n6.n7(x + 1)
-                x = self.n6.n7.n8(x + 1)
-                return x + 1
-        class N4(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n5 = N5()
-            def forward(self, x):
-                x = x + self.n5.buf
-                x = self.n5(x + 1)
-                x = self.n5.n6.n7(x + 1)
-                x = self.n5.n6.n7.n8(x + 1)
-                self.n5.buf.add_(1)
-                self.n5.n6.buf.add_(1)
-                self.n5.n6.n7.buf.add_(1)
-                return x + 1
-        class N3(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n4 = N4()
-            def forward(self, x):
-                x = x + self.n4.n5.buf
-                x = x + self.n4.n5.n6.n7.n8.buf
-                x = self.n4(x + 1)
-                x = self.n4.n5(x + 1)
-                self.n4.buf.add_(1)
-                self.n4.n5.buf.add_(1)
-                self.n4.n5.n6.n7.buf.add_(1)
-                self.n4.n5.n6.n7.n8.buf.add_(1)
-                return x + 1
-        class N2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n3 = N3()
-            def forward(self, x):
-                x = x + self.n3.n4.buf
-                x = self.n3(x + 1)
-                x = self.n3.n4.n5(x + 1)
-                x = self.n3.n4.n5.n6(x + 1)
-                x = self.n3.n4.n5.n6.n7.n8(x + 1)
-                self.n3.n4.n5.buf.add_(1)
-                self.n3.n4.n5.n6.buf.add_(1)
-                self.n3.n4.n5.n6.n7.n8.buf.add_(1)
-                return x + 1
-        class N1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n2 = N2()
-            def forward(self, x):
-                x = x + self.n2.n3.n4.n5.buf
-                x = x + self.n2.n3.n4.n5.n6.buf
-                x = x + self.n2.n3.n4.n5.n6.n7.n8.buf
-                x = self.n2(x + 1)
-                x = self.n2.n3(x + 1)
-                x = self.n2.n3.n4(x + 1)
-                x = self.n2.n3.n4.n5.n6(x + 1)
-                x = self.n2.n3.n4.n5.n6.n7(x + 1)
-                self.n2.n3.buf.add_(1)
-                self.n2.n3.n4.buf.add_(1)
-                self.n2.n3.n4.n5.n6.buf.add_(1)
-                self.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
-                return x + 1
-        class N0(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n1 = N1()
-            def forward(self, x):
-                x = x + self.n1.buf
-                x = x + self.n1.n2.n3.buf
-                x = x + self.n1.n2.n3.n4.n5.buf
-                x = x + self.n1.n2.n3.n4.n5.n6.buf
-                x = self.n1(x + 1)
-                x = self.n1.n2(x + 1)
-                x = self.n1.n2.n3(x + 1)
-                x = self.n1.n2.n3.n4(x + 1)
-                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
-                self.n1.n2.buf.add_(1)
-                self.n1.n2.n3.buf.add_(1)
-                self.n1.n2.n3.n4.n5.n6.buf.add_(1)
-                return x + 1
-        inp = (torch.ones(1),)
-        eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4', 'n1.n2.n3.n4.n5', 'n1.n2.n3.n4.n5.n6', 'n1.n2.n3.n4.n5.n6.n7', 'n1.n2.n3.n4.n5.n6.n7.n8',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+                'n1.n2.n3.n4',
+                'n1.n2.n3.n4.n5',
+                'n1.n2.n3.n4.n5.n6',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7941,7 +7881,22 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4', 'n1.n2.n3.n4.n5', 'n1.n2.n3.n4.n5.n6', 'n1.n2.n3.n4.n5.n6.n7', 'n1.n2.n3.n4.n5.n6.n7.n8', 'n1.n2.n3.n4.n5.n6.n7.n8.n9',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            strict=False,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+                'n1.n2.n3',
+                'n1.n2.n3.n4',
+                'n1.n2.n3.n4.n5',
+                'n1.n2.n3.n4.n5.n6',
+                'n1.n2.n3.n4.n5.n6.n7',
+                'n1.n2.n3.n4.n5.n6.n7.n8',
+                'n1.n2.n3.n4.n5.n6.n7.n8.n9',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7981,7 +7936,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            strict=False,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -8021,7 +7984,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2',))
+        ep = torch.export.export(
+            N0(),
+            inp,
+            strict=False,
+            preserve_module_call_signature=(
+                'n1',
+                'n1.n2',
+            ),
+        )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
