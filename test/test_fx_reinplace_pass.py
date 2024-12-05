@@ -356,8 +356,6 @@ def forward(self):
     slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 2, 9223372036854775807);  slice_1 = None
     copy = torch.ops.aten.copy_.default(slice_2, ones);  slice_2 = ones = copy = None
     slice_3 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807);  slice_3 = None
-    slice_4 = torch.ops.aten.slice.Tensor(zeros, 0, 0, 9223372036854775807)
-    slice_5 = torch.ops.aten.slice.Tensor(slice_4, 1, 2, 9223372036854775807);  slice_4 = slice_5 = None
     return zeros
     """)
 

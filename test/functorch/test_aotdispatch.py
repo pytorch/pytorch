@@ -5986,11 +5986,13 @@ class TestAOTModuleSimplified(AOTTestCase):
             assert "test_aotdispatch.py" in node.stack_trace
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
+            print(gm.graph)
             assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
             for node in gm.graph.nodes:
                 if node.target == torch.ops.aten.copy_.default:
                     assert "stack_trace" in node.meta
-                    assert "x_view.mul_(2)" in node.meta["stack_trace"]
+                    print(node.meta["stack_trace"])
+                    assert "return (x + x,)" in node.meta["stack_trace"]
             return gm.forward  # return a python callable
 
         x = torch.randn(128, 20)

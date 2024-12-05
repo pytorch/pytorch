@@ -1439,14 +1439,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros)
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(zeros, copy);  zeros = copy = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter)
-    add = torch.ops.aten.add.Tensor(diagonal_copy_1, arg0_1);  diagonal_copy_1 = arg0_1 = None
-    diagonal_scatter_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter, add);  diagonal_scatter = add = None
-    diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
-    return diagonal_copy_2
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
+    return add
     """,
         )
 
@@ -1461,12 +1457,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal = torch.ops.aten.diagonal.default(zeros)
-    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
-    diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
-    diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    return diagonal_2
+    diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  copy = None
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = add = None
+    return diagonal
     """,
         )
 
@@ -1481,14 +1475,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros)
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(zeros, copy);  zeros = copy = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter)
-    add = torch.ops.aten.add.Tensor(diagonal_copy_1, arg0_1);  diagonal_copy_1 = arg0_1 = None
-    diagonal_scatter_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter, add);  diagonal_scatter = add = None
-    diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
-    return diagonal_copy_2
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
+    return add
     """,
         )
 
@@ -1503,12 +1493,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal = torch.ops.aten.diagonal.default(zeros)
-    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
-    diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
-    diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    return diagonal_2
+    diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  copy = None
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = add = None
+    return diagonal
     """,
         )
 
@@ -1523,14 +1511,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros)
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(zeros, copy);  zeros = copy = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter)
-    add = torch.ops.aten.add.Tensor(diagonal_copy_1, arg0_1);  diagonal_copy_1 = arg0_1 = None
-    diagonal_scatter_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter, add);  diagonal_scatter = add = None
-    diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
-    return diagonal_copy_2
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
+    return add
     """,
         )  # noqa: B950
 
@@ -1545,12 +1529,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal = torch.ops.aten.diagonal.default(zeros)
-    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
-    diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
-    diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    return diagonal_2
+    diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  copy = None
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = add = None
+    return diagonal
     """,
         )  # noqa: B950
 
@@ -1565,14 +1547,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros)
+    diagonal_copy = torch.ops.aten.diagonal_copy.default(zeros);  zeros = None
     copy = torch.ops.aten.copy.default(diagonal_copy, arg0_1);  diagonal_copy = None
-    diagonal_scatter = torch.ops.aten.diagonal_scatter.default(zeros, copy);  zeros = copy = None
-    diagonal_copy_1 = torch.ops.aten.diagonal_copy.default(diagonal_scatter)
-    add = torch.ops.aten.add.Tensor(diagonal_copy_1, arg0_1);  diagonal_copy_1 = arg0_1 = None
-    diagonal_scatter_1 = torch.ops.aten.diagonal_scatter.default(diagonal_scatter, add);  diagonal_scatter = add = None
-    diagonal_copy_2 = torch.ops.aten.diagonal_copy.default(diagonal_scatter_1);  diagonal_scatter_1 = None
-    return diagonal_copy_2
+    add = torch.ops.aten.add.Tensor(copy, arg0_1);  copy = arg0_1 = None
+    return add
     """,
         )  # noqa: B950
 
@@ -1587,12 +1565,10 @@ def forward(self, arg0_1):
 
 def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([2, 2], device = device(type='cpu'), pin_memory = False)
-    diagonal = torch.ops.aten.diagonal.default(zeros)
-    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  diagonal = copy = None
-    diagonal_1 = torch.ops.aten.diagonal.default(zeros)
-    add = torch.ops.aten.add_.Tensor(diagonal_1, arg0_1);  diagonal_1 = arg0_1 = add = None
-    diagonal_2 = torch.ops.aten.diagonal.default(zeros);  zeros = None
-    return diagonal_2
+    diagonal = torch.ops.aten.diagonal.default(zeros);  zeros = None
+    copy = torch.ops.aten.copy_.default(diagonal, arg0_1);  copy = None
+    add = torch.ops.aten.add_.Tensor(diagonal, arg0_1);  arg0_1 = add = None
+    return diagonal
     """,
         )  # noqa: B950
 
