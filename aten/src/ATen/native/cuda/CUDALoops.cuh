@@ -149,12 +149,9 @@ static inline void launch_vectorized_kernel(
   constexpr auto io_size = calc_io_size<func_t>();
   int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
-  const uint16_t max_vec_size = memory::can_vectorize_elementwise_up_to<func_t>(data);
   using cpp_type = typename function_traits<func_t>::result_type;
+  const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data, sizeof(cpp_type) == 2);
   uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
-  if(vec_size == 16) {
-    vec_size = 4;
-  }
   vec_size = std::min(vec_size, max_vec_size);
 
   switch (vec_size) {
