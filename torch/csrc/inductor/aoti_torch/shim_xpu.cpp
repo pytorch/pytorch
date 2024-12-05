@@ -35,9 +35,7 @@ AOTITorchError aoti_torch_create_xpu_stream_guard(
     int32_t device_index,
     XPUStreamGuardHandle* ret_guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    if (stream == nullptr) {
-      stream = &(at::xpu::getCurrentXPUStream(device_index).queue());
-    }
+    assert(stream);
     at::StreamGuard* guard =
         new at::StreamGuard(at::xpu::getStreamFromExternal(
                                 static_cast<sycl::queue*>(stream), device_index)
