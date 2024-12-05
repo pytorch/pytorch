@@ -130,7 +130,7 @@ void Context::setAllowTF32OneDNN(bool b){
 #ifdef USE_XPU
   allow_tf32_onednn = b;
 #else
-  TORCH_WARN("oneDNN TF32 computation is only valid at GPU currently, please make sure the PyTorch is built with USE_XPU=ON.")
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
 #endif
 }
 
