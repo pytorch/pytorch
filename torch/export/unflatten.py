@@ -275,8 +275,6 @@ class UnflattenedModule(torch.nn.Module):
         flat_args_adapter: Optional[FlatArgsAdapter] = None,
     ):
         super().__init__()
-        import time
-        start = time.time()
         if export_module.graph_signature.backward_signature is not None:
             raise ValueError("Unflattening on JointExportModule NYI")
 
@@ -298,9 +296,6 @@ class UnflattenedModule(torch.nn.Module):
         # record any intermediate value x that is used, with the modules that used it,
         # and generate instructions to read the corresponding attribute
         seen_modules, seen_attrs = _outline_submodules(export_graph, self)
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_outline_submodules", elapsed)
         # for each read intermediate value x, find the module that created it,
         # and generate instructions to update the corresponding attribute;
         # finally, initialize all these attributes
@@ -489,25 +484,13 @@ class UnflattenedModule(torch.nn.Module):
             for n, _ in node_target:
                 inputs_to_state[n] = targets
 
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_assign_attr [all]", elapsed)
         _sink_params(self, inputs_to_state, [])
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_sink_params", elapsed)
 
         redirected_call_indices = _deduplicate_modules(seen_modules.values())
         fqn_list = [fqn for fqn in fqn_list if fqn not in redirected_call_indices]
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_deduplicate_modules", elapsed)
 
         self._dispatch_modules(redirected_call_indices, consts_targets)
         fqn_list = [fqn for fqn in fqn_list if "@" not in fqn]
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_dispatch_modules", elapsed)
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -523,9 +506,6 @@ class UnflattenedModule(torch.nn.Module):
             if name not in fqn_order:
                 fqn_order[name] = len(fqn_order)
         _reorder_submodules(self, fqn_order)
-        elapsed = time.time() - start
-        start += elapsed
-        print("===", "_reorder_submodules", elapsed)
         self.graph.lint()
 
     def _print_graph(self):

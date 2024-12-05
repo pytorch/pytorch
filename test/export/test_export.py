@@ -6793,7 +6793,7 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
-    def test_unflatten_random_dag_5_modules(self):
+    def test_unflatten_random_dag_5(self):
         # dag: {0: [1, 2, 3], 1: [2, 4], 2: [4], 3: [], 4: []}
 
         class N4(torch.nn.Module):
@@ -6850,7 +6850,7 @@ graph():
         self.assertTrue(torch.allclose(epm(*inp), eager))
         self.assertTrue(torch.allclose(ufm(*inp), eager))
 
-    def test_unflatten_random_dag_6_modules(self):
+    def test_unflatten_random_dag_6(self):
         # dag: {0: [1, 2, 4, 5], 1: [3, 5], 2: [4, 5], 3: [], 4: [5], 5: []}
 
         class N5(torch.nn.Module):
@@ -6918,7 +6918,7 @@ graph():
         self.assertTrue(torch.allclose(epm(*inp), eager))
         self.assertTrue(torch.allclose(ufm(*inp), eager))
 
-    def test_unflatten_random_dag_8_modules_state(self):
+    def test_unflatten_random_dag_buf_8(self):
         class N7(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -7024,7 +7024,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_4_modules_mutating_state(self):
+    def test_unflatten_random_dag_mutating_buf_4(self):
         class N3(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -7074,7 +7074,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_6_modules_mutating_state(self):
+    def test_unflatten_random_dag_mutating_buf_6(self):
         class N5(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -7152,7 +7152,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_9_modules_mutating_state(self):
+    def test_unflatten_random_dag_mutating_buf_9(self):
         class N8(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -7297,7 +7297,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_4_modules_preserving_call_signatures(self):
+    def test_unflatten_random_dag_preserving_4(self):
         # {0: [1, 2, 3], 1: [2], 2: [], 3: []}
         class N3(torch.nn.Module):
             def __init__(self):
@@ -7342,7 +7342,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_4_modules_mutating_state_preserving_call_signatures(self):
+    def test_unflatten_random_dag_mutating_buf_preserving_4(self):
         # {0: [2, 3], 1: [2], 2: [3], 3: []}
         # {0: [], 1: [3], 2: [3], 3: []}
         # {0: [2, 3], 1: [2], 2: [3], 3: []}
@@ -7399,7 +7399,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_4_modules_mutating_state_preserving_call_signatures_1(self):
+    def test_unflatten_random_dag_mutating_buf_preserving_4_1(self):
         # {0: [2], 1: [3], 2: [3], 3: []}
         # {0: [2, 3], 1: [3], 2: [3], 3: []}
         # {0: [1], 1: [3], 2: [], 3: []}
@@ -7455,7 +7455,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_5_modules_mutating_state_preserving_call_signatures(self):
+    def test_unflatten_random_dag_mutating_buf_preserving_5(self):
         # {0: [1, 2, 3], 1: [3, 4], 2: [3, 4], 3: [4], 4: []}
         # {0: [3], 1: [4], 2: [3, 4], 3: [4], 4: []}
         # {0: [1, 2], 1: [2, 3], 2: [3, 4], 3: [], 4: []}
@@ -7529,7 +7529,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_7_modules_mutating_state_preserving_call_signatures(self):
+    def test_unflatten_random_dag_mutating_buf_preserving_7(self):
         # {0: [3, 4, 5, 6], 1: [2, 3, 4, 5, 6], 2: [3, 4, 5], 3: [5, 6], 4: [6], 5: [6], 6: []}
         # {0: [2, 4, 5, 6], 1: [3, 4, 6], 2: [6], 3: [5], 4: [], 5: [], 6: []}
         # {0: [1, 2, 3, 4, 5, 6], 1: [2, 3, 4], 2: [4, 5, 6], 3: [4, 5, 6], 4: [5, 6], 5: [6], 6: []}
@@ -7763,32 +7763,14 @@ graph():
                 self.n1.n2.n3.n4.n5.n6.buf.add_(1)
                 return x + 1
         inp = (torch.ones(1),)
-        import time
-        start = time.time()
         eager = N0()(*inp)
-        elapsed = time.time() - start
-        start += elapsed
-        print("eager result", elapsed)
         ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4', 'n1.n2.n3.n4.n5', 'n1.n2.n3.n4.n5.n6', 'n1.n2.n3.n4.n5.n6.n7', 'n1.n2.n3.n4.n5.n6.n7.n8',))
         epm = ep.module()
-        elapsed = time.time() - start
-        start += elapsed
-        print("export", elapsed)
         ufm = torch.export.unflatten(ep)
-        elapsed = time.time() - start
-        start += elapsed
-        print("unflatten", elapsed)
         assert torch.allclose(epm(*inp), eager)
-        elapsed = time.time() - start
-        start += elapsed
-        print("export result", elapsed)
         assert torch.allclose(ufm(*inp), eager)
-        elapsed = time.time() - start
-        start += elapsed
-        print("unflatten result", elapsed)
-        assert False
 
-    def test_unflatten_random_dag_10_modules_mutating_state_preserving_call_signatures(self):
+    def test_unflatten_random_dag_mutating_buf_preserving_10(self):
         class N9(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -7958,32 +7940,14 @@ graph():
                 return x + 1
 
         inp = (torch.ones(1),)
-        import time
-        start = time.time()
         eager = N0()(*inp)
-        elapsed = time.time() - start
-        start += elapsed
-        print("eager result", elapsed)
         ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=('n1', 'n1.n2', 'n1.n2.n3', 'n1.n2.n3.n4', 'n1.n2.n3.n4.n5', 'n1.n2.n3.n4.n5.n6', 'n1.n2.n3.n4.n5.n6.n7', 'n1.n2.n3.n4.n5.n6.n7.n8', 'n1.n2.n3.n4.n5.n6.n7.n8.n9',))
         epm = ep.module()
-        elapsed = time.time() - start
-        start += elapsed
-        print("export", elapsed)
         ufm = torch.export.unflatten(ep)
-        elapsed = time.time() - start
-        start += elapsed
-        print("unflatten", elapsed)
         assert torch.allclose(epm(*inp), eager)
-        elapsed = time.time() - start
-        start += elapsed
-        print("export result", elapsed)
         assert torch.allclose(ufm(*inp), eager)
-        elapsed = time.time() - start
-        start += elapsed
-        print("unflatten result", elapsed)
-        assert False
 
-    def test_unflatten_random_dag_3_modules_consts_preserving_call_signatures(self):
+    def test_unflatten_random_dag_const_preserving_3(self):
         class N2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -8023,7 +7987,7 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
-    def test_unflatten_random_dag_3_modules_consts_preserving_call_signatures_1(self):
+    def test_unflatten_random_dag_const_preserving_3_1(self):
         class N2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
