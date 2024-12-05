@@ -5,6 +5,8 @@ on:
     inputs:
       always-rebuild:
         description: If set to any value, always build a fresh docker image
+        type: string
+        default: ''
         required: false
       docker-build-matrix:
         required: true
@@ -12,6 +14,8 @@ on:
         description: JSON description of what docker images to build
       push-to-ghcr:
         description: If set to any value, push the image to ghcr.io
+        type: string
+        default: ''
         required: false
 
 env:
