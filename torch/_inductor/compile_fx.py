@@ -1954,7 +1954,7 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         warn_and_skip(node.get_device())
 
 
-def _flatten_inputs(
+def _aoti_flatten_inputs(
     gm: torch.fx.GraphModule,
     args: Union[List[Any], Tuple[Any, ...]],
     kwargs: Optional[Dict[str, Any]] = None,

@@ -175,7 +175,7 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 
@@ -217,9 +217,11 @@ def aot_compile(
         AOTI if aot_inductor.package=True.
         TODO: make it return a list by default
     """
-    from .compile_fx import _flatten_inputs, compile_fx_aot
+    from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
 
-    flat_example_inputs, options = _flatten_inputs(gm, args, kwargs, options=options)
+    flat_example_inputs, options = _aoti_flatten_inputs(
+        gm, args, kwargs, options=options
+    )
 
     return compile_fx_aot(
         gm,

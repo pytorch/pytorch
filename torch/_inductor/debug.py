@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import io
 import itertools
 import logging
 import os
@@ -717,7 +718,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: Dict[str, Any],
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
 ) -> str:
     from torch._inductor import config
 

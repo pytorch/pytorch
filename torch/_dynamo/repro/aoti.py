@@ -328,12 +328,12 @@ def export_for_aoti_minifier(
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
-    from torch._inductor.compile_fx import _flatten_inputs
+    from torch._inductor.compile_fx import _aoti_flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
 
     # update serialized_in_spec and serialized_out_spec
-    flat_example_inputs, inductor_configs = _flatten_inputs(
+    flat_example_inputs, inductor_configs = _aoti_flatten_inputs(
         mod, args, kwargs, options=config_patches
     )
     compiler_name = "aot_inductor"
