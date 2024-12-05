@@ -136,19 +136,22 @@ class DeviceProperties(typing.NamedTuple):
 
         device_interface = get_interface_for_device(device)
         props = device_interface.get_device_properties(device)
+        try:
+            multi_processor_count = props.multi_processor_count
+        except AttributeError:
+            if device_type == "xpu":
+                multi_processor_count = props.gpu_subslice_count
+            else:
+                raise
         return cls(
             type=device_type,
             index=device.index,
+            multi_processor_count=multi_processor_count,
             cc=device_interface.get_compute_capability(device),
             major=getattr(props, "major", None),
             regs_per_multiprocessor=getattr(props, "regs_per_multiprocessor", None),
             max_threads_per_multi_processor=getattr(
                 props, "max_threads_per_multi_processor", None
-            ),
-            multi_processor_count=getattr(
-                props,
-                "multi_processor_count",
-                props.gpu_subslice_count if device_type == "xpu" else None,
             ),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
