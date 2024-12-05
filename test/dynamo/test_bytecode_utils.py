@@ -527,6 +527,23 @@ def fn():
                     self.assertIs(insts[insts_i].target, insts[-1])
             insts_i += 1
 
+    def test_bytecode_analysis_jump_backward_no_interrupt(self):
+        # bytecode_analysis fails if JUMP_BACKWARD_NO_INTERRUPT is not terminal in 3.13+
+        @torch.compile(backend="eager")
+        def fn(x):
+            # graph break causes bytecode_analysis to analyze the rest of this function
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                try:
+                    x = x + 1
+                except NotImplementedError:
+                    x = x + 1
+                except Exception as e:
+                    x = x + 1
+            return x
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):
     def test_bytecode_hook(self):
