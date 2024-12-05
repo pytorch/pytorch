@@ -6,9 +6,6 @@ import os
 import sys
 import tempfile
 
-import torch
-import torch.distributed as dist
-
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
 from schedule_registry import (
     ScheduleUnbalanced,
@@ -16,6 +13,9 @@ from schedule_registry import (
     ScheduleWithReorderedB,
     ScheduleWithW,
 )
+
+import torch
+import torch.distributed as dist
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
