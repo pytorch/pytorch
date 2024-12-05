@@ -277,11 +277,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm_str = gm.print_readable(
         print_output=False, include_stride=True, include_device=True
     )
-
     torch._logging.trace_structured(
         "artifact",
         metadata_fn=lambda: {
-            "name": "inductor_post_grad_before_bucket_fsdp_all_gather",
+            "name": "inductor_post_grad_before_bucket_fsdp_AG_and_RS",
             "encoding": "string",
         },
         payload_fn=lambda: gm_str,
@@ -306,7 +305,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     torch._logging.trace_structured(
         "artifact",
         metadata_fn=lambda: {
-            "name": "inductor_post_grad_after_bucket_fsdp_all_gather",
+            "name": "inductor_post_grad_after_bucket_fsdp_AG_and_RS",
             "encoding": "string",
         },
         payload_fn=lambda: gm_str,

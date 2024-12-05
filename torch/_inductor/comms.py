@@ -435,7 +435,7 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_nodes, group_size, group_name, wait_nodes)
 
     ag_wait_nodes = list(ag_node_to_wait_node.values())
-    all_ag_related_nodes = set(ag_nodes + ag_wait_nodes + [next(iter(n.users.keys())) for n in ag_wait_nodes])
+    ag_and_wait_nodes = set(ag_nodes + ag_wait_nodes)
     new_graph: torch.fx.Graph = torch.fx.Graph()
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -471,8 +471,8 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         return new_node
 
     for node in node_list:
-        if node not in all_ag_related_nodes:
-            # not related to all_gather - schedule it normally
+        if node not in ag_and_wait_nodes:
+            # not all_gather or its wait_tensor - schedule it normally
             node_copy(node, lambda x: env_lookup(x, node))
         elif node in ag_node_to_wait_node:
             assert node in ag_node_to_bucket_id
@@ -577,8 +577,6 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
                 assert len(orig_wait_nodes) > 0
                 for orig_wait_node, out in zip(orig_wait_nodes, outs):
                     env[orig_wait_node] = out
-                    orig_wait_node_user = next(iter(orig_wait_node.users.keys()))
-                    node_copy(orig_wait_node_user, lambda x: env_lookup(x, orig_wait_node_user))
                 bucket_id_is_scheduled[bucket_id] = True
         else:
             continue
@@ -598,7 +596,22 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
             and node.target == torch.ops._c10d_functional.wait_tensor.default
         )
 
-    node_list = gm.graph.nodes
+    def find_recursive_users_of_fx_node(
+        node, collected_node_set, criteria_cb=None
+    ):
+        if criteria_cb and criteria_cb(node):
+            return
+        for user_node in node.users:
+            if user_node in collected_node_set:
+                continue
+            collected_node_set.add(user_node)
+            find_recursive_users_of_fx_node(
+                user_node,
+                collected_node_set,
+                criteria_cb=criteria_cb,
+            )
+
+    node_list = list(gm.graph.nodes)
 
     # Prerequisite: Check if there is any reduce_scatter node
     found_reduce_scatter = False
@@ -660,22 +673,28 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
     #     log.warning(f"RS Bucket {bucket_id}: size: {bucket_id_to_actual_bucket_size[bucket_id]}, # RS nodes: {len(rs_bucket)}, RS nodes: {rs_bucket}")
 
     # Step 3: Create new (bucketed) reduce_scatter nodes
+    order = {x: i for i, x in enumerate(node_list)}
+    rs_wait_nodes = list(rs_node_to_wait_node.values())
+    for n in rs_wait_nodes:
+        assert len(n.users) == 1, f"Expect only one user for {n}, but got {n.users}"
+    rs_and_its_recursive_users = set(rs_nodes + rs_wait_nodes)
+    
     bucket_id_to_bucketed_op_info = {}
     bucket_id_is_scheduled = {}
     for bucket_id, rs_bucket in enumerate(rs_buckets):
         _, reduce_op, group_size, group_name = list(rs_node_to_wait_node.keys())[0].args
         rs_input_nodes = []
         wait_nodes = []
+        wait_node_recursive_users = set()
         for rs_node in rs_bucket:
             assert rs_node in rs_node_to_wait_node and rs_node.args[1] == reduce_op and rs_node.args[2] == group_size and rs_node.args[3] == group_name
             rs_input_nodes.append(rs_node.args[0])
-            wait_nodes.append(rs_node_to_wait_node[rs_node])
-        bucket_id_to_bucketed_op_info[bucket_id] = (rs_input_nodes, reduce_op, group_size, group_name, wait_nodes)
+            wait_node = rs_node_to_wait_node[rs_node]
+            wait_nodes.append(wait_node)
+            find_recursive_users_of_fx_node(wait_node, wait_node_recursive_users)
+            rs_and_its_recursive_users |= wait_node_recursive_users
+        bucket_id_to_bucketed_op_info[bucket_id] = (rs_input_nodes, reduce_op, group_size, group_name, wait_nodes, wait_node_recursive_users)
 
-    rs_wait_nodes = rs_node_to_wait_node.values()
-    for n in rs_wait_nodes:
-        assert len(n.users) == 1, f"Expect only one user for {n}, but got {n.users}"
-    all_rs_related_nodes = set(rs_nodes + list(rs_wait_nodes) + [next(iter(n.users.keys())) for n in rs_wait_nodes])
     new_graph: torch.fx.Graph = torch.fx.Graph()
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -708,15 +727,15 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
         return new_node
 
     for node in node_list:
-        if node not in all_rs_related_nodes:
-            # not related to reduce_scatter - schedule it normally
+        if node not in rs_and_its_recursive_users:
+            # not reduce_scatter or its (recursive) users - schedule it normally
             node_copy(node, lambda x: env_lookup(x, node))
         elif node in rs_node_to_wait_node:
             assert node in rs_node_to_bucket_id
             bucket_id = rs_node_to_bucket_id[node]
             if bucket_id not in bucket_id_is_scheduled and rs_buckets[bucket_id][-1] == node:
                 # If we are at the last node in the bucket, we can start to schedule the bucketed reduce_scatter node
-                rs_input_nodes, reduce_op, group_size, group_name, orig_wait_nodes = bucket_id_to_bucketed_op_info[bucket_id]
+                rs_input_nodes, reduce_op, group_size, group_name, orig_wait_nodes, orig_wait_node_recursive_users = bucket_id_to_bucketed_op_info[bucket_id]
                 unsharded_grads = [
                     node_copy(rs_input_node, lambda x: env_lookup(x, rs_input_node))
                     for rs_input_node in rs_input_nodes
@@ -811,11 +830,15 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
                 assert len(orig_wait_nodes) > 0
                 for orig_wait_node, new_sharded_grad in zip(orig_wait_nodes, new_sharded_grads):
                     env[orig_wait_node] = new_sharded_grad
-                    orig_wait_node_user = next(iter(orig_wait_node.users.keys()))
-                    node_copy(orig_wait_node_user, lambda x: env_lookup(x, orig_wait_node_user))
+                for user in sorted(orig_wait_node_recursive_users, key=lambda x: order[x]):
+                    if user.op != "output":
+                        node_copy(user, lambda x: env_lookup(x, user))
                 bucket_id_is_scheduled[bucket_id] = True
         else:
             continue
+    assert node_list[-1].op == "output"
+    output_node = node_list[-1]
+    node_copy(output_node, lambda x: env_lookup(x, output_node))
     gm.graph = new_graph
 
 
