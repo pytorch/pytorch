@@ -83,31 +83,17 @@ def discard_graph_changes(tx):
 
 
 def diff_meta(tensor_vars1, tensor_vars2) -> str:
-    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+    from torch._higher_order_ops.utils import diff_tensor_meta
 
     from . import TensorVariable
 
     assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
     all_diffs = []
     for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-        # We check the meta data associated with meta["example_value"]
-        meta1 = _extract_tensor_metadata(
-            var1.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        meta2 = _extract_tensor_metadata(
-            var2.proxy.node.meta["example_value"], include_contiguity=False
-        )
+        meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
+        meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
         # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
-        pair_diffs = []
-        for meta_name in ("dtype", "shape", "stride", "memory_format"):
-            val1 = getattr(meta1, meta_name)
-            val2 = getattr(meta2, meta_name)
-            try:
-                if val1 != val2:
-                    pair_diffs.append(f"'{meta_name}'")
-            except GuardOnDataDependentSymNode as _:
-                pair_diffs.append(f"'{meta_name}'")
-                continue
+        pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
 
         if len(pair_diffs) > 0:
             fmt_str = ", ".join(pair_diffs)
