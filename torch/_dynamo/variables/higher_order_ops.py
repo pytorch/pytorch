@@ -82,41 +82,24 @@ def discard_graph_changes(tx):
         ctx.__exit__(None, None, None)
 
 
-def diff_meta(tensor_vars1, tensor_vars2) -> str:
-    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+def diff_var_meta(vars1, vars2) -> str:
+    from torch._higher_order_ops.utils import diff_meta_pairs 
 
     from . import TensorVariable
+    def _unwrap_var(var):
+        if isinstance(var, TensorVariable):
+            return var.proxy.node.meta["example_value"]
+        elif isinstance(var, SymNodeVariable):
+            return var.sym_num
+        elif isinstance(var, ConstantVariable):
+            return var.as_python_constant()
+        else:
+            unimplemented(f"Cannot unwrap var {var}")
+    
+    unwrapped1 = [_unwrap_var(var) for var in vars1]
+    unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    all_diffs = []
-    for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-        assert var1.python_type() == var2.python_type()
-        if isinstance(var1, TensorVariable):
-            assert isinstance(var2, TensorVariable)
-            # We check the meta data associated with meta["example_value"]
-            meta1 = _extract_tensor_metadata(
-                var1.proxy.node.meta["example_value"], include_contiguity=False
-            )
-            meta2 = _extract_tensor_metadata(
-                var2.proxy.node.meta["example_value"], include_contiguity=False
-            )
-            # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
-            pair_diffs = []
-            for meta_name in ("dtype", "shape", "stride", "memory_format"):
-                val1 = getattr(meta1, meta_name)
-                val2 = getattr(meta2, meta_name)
-                try:
-                    if val1 != val2:
-                        pair_diffs.append(f"'{meta_name}'")
-                except GuardOnDataDependentSymNode as _:
-                    pair_diffs.append(f"'{meta_name}'")
-                    continue
-
-            if len(pair_diffs) > 0:
-                fmt_str = ", ".join(pair_diffs)
-                all_diffs.append(
-                    f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
-                )
-    return "\n".join(all_diffs)
+    return "\n".join(diff_meta_pairs(unwrapped1, unwrapped2))
 
 
 @contextlib.contextmanager
@@ -938,7 +921,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        if diffs := diff_meta(
+        if diffs := diff_var_meta(
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
@@ -1186,7 +1169,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
-        if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
+        if diffs := diff_var_meta(operands_seq, body_r.unpack_var_sequence(tx)):
             unimplemented(
                 f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
             )

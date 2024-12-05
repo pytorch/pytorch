@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    diff_meta_pairs,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -267,6 +268,16 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
+def check_outputs_carry_consistency(
+    outs: List[torch.Tensor | torch.SymInt | int], crys: List[torch.Tensor | torch.SymInt | int]
+) -> None:
+    if all_diffs :=  diff_meta_pairs(outs, crys):
+        diff_str = "\n".join(all_diffs)
+        raise RuntimeError(
+            f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diff_str}"
+        )
+
+
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
@@ -312,8 +323,9 @@ def while_loop_fake_tensor_mode(
         with mode.shape_env.ignore_fresh_unbacked_symbols():
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
-            body_output = body_fn(*carried_inputs, *additional_inputs)
-        return unspecialize_ints_with_unbacked_symints(mode, body_output)
+            body_outs = body_fn(*carried_inputs, *additional_inputs)
+            check_outputs_carry_consistency(body_outs, carried_inputs)
+            return unspecialize_ints_with_unbacked_symints(mode, body_outs)
 
 
 @while_loop_op.py_functionalize_impl
