@@ -31,7 +31,7 @@ from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shar
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
-__all__ = ["context_parallel"]
+__all__ = ["context_parallel", "set_rotate_method"]
 
 
 class _CausalBehavior(Enum):
@@ -1291,3 +1291,24 @@ def context_parallel_unshard(
         else _SequentialSharder
     )
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+
+
+def set_rotate_method(rotate_method: str) -> None:
+    """
+    Context Parallel SDPA requires the rotation of kv shards. Users can call this
+    API to specify which rotation method to use. "alltoall" shuffles the kv shards
+    using all-to-all collective while "allgather" gathers the kv shards using
+    all-gather collective. If this API has not been called, the default rotate
+    method is "allgather".
+    """
+    if rotate_method == "allgather":
+        print("all-gather rotate")
+        _cp_options.rotate_method = _RotateMethod.ALL_GATHER
+    elif rotate_method == "alltoall":
+        print("all-to-all rotate")
+        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
+    else:
+        raise NotImplementedError(
+            "Context Parallel does not support "
+            f"using {rotate_method} for kv shards rotation"
+        )
