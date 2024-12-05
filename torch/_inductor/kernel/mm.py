@@ -227,8 +227,6 @@ mm_template_persistent_tma = TritonTemplate(
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
 
     # based on triton.ops.matmul
     start_pid = tl.program_id(0)

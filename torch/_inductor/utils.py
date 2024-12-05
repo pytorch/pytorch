@@ -1175,8 +1175,9 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
 
 
 def use_triton_tma_template(*matrices):
-    from .virtualized import V
     from torch.utils._triton import has_triton_tma_device
+
+    from .virtualized import V
 
     def _is_compatible(x):
         if len(x.get_size()) != 2:
