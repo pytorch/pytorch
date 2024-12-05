@@ -18,11 +18,11 @@ void initModule(PyObject* module) {
   });
 
   m.def("_accelerator_setDeviceIndex", [](c10::DeviceIndex device_index) {
-    const auto device_type = at::accelerator::getAccelerator(true).value();
     // If device index is negative, no-op
     if (device_index < 0) {
       return;
     }
+    const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);
     at::accelerator::setDeviceIndex(device_index);
   });
