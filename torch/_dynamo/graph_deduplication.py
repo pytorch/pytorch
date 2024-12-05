@@ -1,14 +1,43 @@
+import logging
 import operator
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, Iterable, List, Set, Tuple
 
 import torch.fx
+from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
+from .exc import unimplemented, Unsupported
 from .graph_region_tracker import Node, Region
 
 
+log = logging.getLogger(__name__)
+
+
 def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-def]
+    """
+    This is the main entry point for applying the graph deduplication pass. \
+Deduplication occurs in two phases:
+    1. Subgraph creation:
+        Subgraph creation works by taking one representative region from each region \
+group and creating a subgraph from it, which will then be used to replace all regions \
+in the group. This is implemented by first copying all nodes of the region to the new \
+subgraph and then finding all inputs which are not within the region and creating placeholders \
+for them. For the outputs, all regions in a region group need to be scanned to ensure the \
+largest set of outputs is found, and then an output node is created which returns \
+a tuple of all outputs.
+
+    2. Graph replacement:
+        To replace each region with the extracted subgraph, the node index in the region \
+and argument index within the node's flattened args and kwargs are recorded once during \
+subgraph creation. This allows us to determine which (external to the region) nodes and \
+in which order these nodes are passed as inputs. For the outputs, getitem nodes are created \
+for each output, and all nodes in the region with external outputs are replaced by the proper \
+getitem node. Finally, all original nodes are erased (there should be no uses of these \
+left in the graph).
+
+The deduplication mutates the output_graph argument in place.
+    """
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
@@ -27,15 +56,21 @@ def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-
                 "get_attr", subgraph_name, (), {}
             )
         for region in region_group:
-            _replace_region_with_subgraph(
-                output_graph.graph,
-                region,
-                get_subgraph_node,
-                node_ind_arg_inds.keys(),
-                inds_with_external_users,
-                subgraph,
-                subgraph_name,
-            )
+            try:
+                _replace_region_with_subgraph(
+                    output_graph.graph,
+                    region,
+                    get_subgraph_node,
+                    node_ind_arg_inds.keys(),
+                    inds_with_external_users,
+                    sub_gm,
+                    subgraph_name,
+                )
+            except Unsupported:
+                log.debug(
+                    "Failed to substitute region %s due to input alias or mutation",
+                    region,
+                )
 
 
 def _replace_region_with_subgraph(
@@ -44,7 +79,7 @@ def _replace_region_with_subgraph(
     get_subgraph_node: Node,
     node_ind_arg_ind: Iterable[Tuple[int, int]],
     inds_with_external_users: List[int],
-    subgraph: torch.fx.Graph,
+    sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
 ) -> None:
     sub_args = []
@@ -54,6 +89,10 @@ def _replace_region_with_subgraph(
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
+    fake_inputs = [node.meta["example_value"] for node in sub_args]
+
+    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+        unimplemented("NYI: replacing subgraph with input alias or mutation")
 
     earliest_region_node = region[0]
     with graph.inserting_before(earliest_region_node):
