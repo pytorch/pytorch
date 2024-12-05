@@ -53,7 +53,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
-          always-rebuild: ${{ inputs.always-rebuild }}
+          always-rebuild: ${{ inputs.always-rebuild && 'true' || '' }}
           push: true
 
       - name: Pull docker image

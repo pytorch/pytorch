@@ -49,10 +49,28 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  build-docker-images:
+    name: build-docker-images
+    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
+    uses: ./.github/workflows/_docker-builds.yml
+    needs:
+      - get-label-type
+    with:
+      docker-build-matrix: |
+        { include: [
+          { "docker-image-name": "pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9" },
+          { "docker-image-name": "pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9" },
+          { "docker-image-name": "pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9" },
+          { "docker-image-name": "pytorch-linux-focal-rocm-n-py3" },
+        ]}
+    secrets: inherit
+
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
@@ -65,6 +83,7 @@ jobs:
           { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
+
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
@@ -79,7 +98,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-build:
     name: linux-focal-cuda12.4-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
@@ -113,7 +134,9 @@ jobs:
   linux-focal-cuda11_8-py3_9-gcc9-build:
     name: linux-focal-cuda11.8-py3.9-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
@@ -137,7 +160,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-debug-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
@@ -166,7 +191,9 @@ jobs:
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm6.2-py3.10
@@ -195,7 +222,9 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -226,7 +255,9 @@ jobs:
   linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -254,7 +285,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     if: false # See https://github.com/pytorch/pytorch/issues/138750
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -284,7 +317,9 @@ jobs:
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
