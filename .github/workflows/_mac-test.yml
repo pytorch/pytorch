@@ -144,7 +144,7 @@ jobs:
         run: |
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
-  
+
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
