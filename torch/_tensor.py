@@ -1626,7 +1626,7 @@ class Tensor(torch._C.TensorBase):
                 len(torch_xla.real_devices()) <= 0
                 or "cuda" not in torch_xla.real_devices()[0].lower()
             ):
-                raise RuntimeError("Can't export XLA tensors not on CUDA.")
+                raise RuntimeError("Can't export to dlpack an XLA tensor that is not on CUDA.")
             return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
@@ -1659,6 +1659,7 @@ class Tensor(torch._C.TensorBase):
                 or "cuda" not in torch_xla.real_devices()[0].lower()
             ):
                 raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
+
             device_type = DLDeviceType.kDLGPU
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
