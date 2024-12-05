@@ -700,6 +700,8 @@ from a multi-output view call"
             # (a * b).sum().backward()
             #
             # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
+            # NJT gurantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
             (
                 _plain_fake_tensor_like_subclass(inp)
                 if is_traceable_wrapper_subclass(inp)
