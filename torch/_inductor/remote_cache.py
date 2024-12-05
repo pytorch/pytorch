@@ -47,6 +47,7 @@ remote_fx_cache_get_timed = functools.partial(
     phase_name="remote_fx_graph_cache_get",
     log_pt2_compile_event=False,
     dynamo_compile_column_us="remote_fx_graph_cache_get_time_us",
+    log_waitcounter=True,
 )
 remote_fx_cache_put_timed = functools.partial(
     dynamo_timed,
@@ -54,6 +55,7 @@ remote_fx_cache_put_timed = functools.partial(
     phase_name="remote_fx_graph_cache_put",
     log_pt2_compile_event=False,
     dynamo_compile_column_us="remote_fx_graph_cache_put_time_us",
+    log_waitcounter=True,
 )
 
 

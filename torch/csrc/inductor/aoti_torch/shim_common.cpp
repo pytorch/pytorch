@@ -151,13 +151,20 @@ AOTI_TORCH_DTYPE_IMPL(complex64, ComplexFloat)
 AOTI_TORCH_DTYPE_IMPL(complex128, ComplexDouble)
 #undef AOTI_TORCH_DTYPE_IMPL
 
-int32_t aoti_torch_layout_strided() {
-  return (int32_t)at::kStrided;
-}
+#define AOTI_TORCH_LAYOUT_IMPL(name, enum) \
+  int32_t aoti_torch_layout_##name() {     \
+    return (int32_t)at::Layout::enum;      \
+  }
 
-int32_t aoti_torch_layout__mkldnn() {
-  return (int32_t)at::kMkldnn;
-}
+AOTI_TORCH_LAYOUT_IMPL(strided, Strided)
+AOTI_TORCH_LAYOUT_IMPL(sparse_coo, Sparse)
+AOTI_TORCH_LAYOUT_IMPL(sparse_csr, SparseCsr)
+AOTI_TORCH_LAYOUT_IMPL(sparse_csc, SparseCsc)
+AOTI_TORCH_LAYOUT_IMPL(sparse_bsr, SparseBsr)
+AOTI_TORCH_LAYOUT_IMPL(sparse_bsc, SparseBsc)
+AOTI_TORCH_LAYOUT_IMPL(_mkldnn, Mkldnn)
+AOTI_TORCH_LAYOUT_IMPL(jagged, Jagged)
+#undef AOTI_TORCH_LAYOUT_IMPL
 
 #define AOTI_TORCH_MEMORY_FORMAT_IMPL(name, enum) \
   int32_t aoti_torch_memory_format_##name() {     \
