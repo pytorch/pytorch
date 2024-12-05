@@ -107,14 +107,6 @@ jobs:
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Start monitoring script
-        id: monitor-script
-        if: ${{ !inputs.disable-monitor }}
-        continue-on-error: true
-        run: |
-          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -145,6 +137,14 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      - name: Start monitoring script
+        id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        continue-on-error: true
+        run: |
+          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+  
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
