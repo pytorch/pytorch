@@ -1101,9 +1101,6 @@ class TestFlexAttention(InductorTestCase):
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
-    @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
-    )
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
