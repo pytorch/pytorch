@@ -830,11 +830,6 @@ def lower_cpu(
         raise NotImplementedError(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
         )
-    if query.layout.dtype not in [torch.float, torch.bfloat16]:
-        raise NotImplementedError(
-            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
-            f"Found input tensors are `{query.layout.dtype}`."
-        )
 
     fake_buffers: List[Buffer] = []  # noqa: F821
     placeholder_inps = [
@@ -912,7 +907,11 @@ def lower_cpu(
         raise NotImplementedError(
             "Unsupported for now if query, key, value are the same buffer."
         )
-
+    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+        raise NotImplementedError(
+            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            f"Found input tensors are `{query.get_dtype()}`."
+        )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
