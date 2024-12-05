@@ -20,7 +20,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         out_channels: int,
         kernel_size: Tuple[int, ...],
         stride: Tuple[int, ...],
-        padding: Tuple[int, ...],
+        padding: Union[str, Tuple[int, ...]],
         dilation: Tuple[int, ...],
         transposed: bool,
         output_padding: Tuple[int, ...],
