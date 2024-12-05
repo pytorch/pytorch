@@ -1269,7 +1269,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def bitwise_and(a, b):
-        a, b = unify_mask_base_type(V.kernel.compute, (a, b))
+        if a.dtype == torch.bool:
+            assert b.dtype == torch.bool
+            a, b = unify_mask_base_type(V.kernel.compute, (a, b))
         return f"{a} & {b}"
 
     @staticmethod
