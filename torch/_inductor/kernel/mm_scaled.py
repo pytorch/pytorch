@@ -9,6 +9,7 @@ from torch.utils._triton import has_triton_tma_device
 
 from .. import config as inductor_config
 from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
+from ..config import triton as triton_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
@@ -521,7 +522,7 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        if has_triton_tma_device():
+        if has_triton_tma_device() and triton_config.enable_persistent_matmul:
             for config in persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
