@@ -766,21 +766,6 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
-# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
-# should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = False
-
-# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
-# to maximize performance for use cases that it can accommodate at the expense of
-# generality. In brief:
-# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
-#   tensor must be contiguous)
-# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
-#
-# When the DSO is generated in this mode, the usual interface will also be supported,
-# but performance for that interface may be degraded.
-use_minimal_arrayref_interface: bool = False
-
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
@@ -1117,6 +1102,21 @@ class aot_inductor:
 
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
+
+    # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+    # should be run with this flag both on and off to make sure we have coverage.
+    allow_stack_allocation: bool = False
+
+    # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+    # to maximize performance for use cases that it can accommodate at the expense of
+    # generality. In brief:
+    # - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+    #   tensor must be contiguous)
+    # - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+    #
+    # When the DSO is generated in this mode, the usual interface will also be supported,
+    # but performance for that interface may be degraded.
+    use_minimal_arrayref_interface: bool = False
 
 
 class cuda:

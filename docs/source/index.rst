@@ -52,7 +52,7 @@ Features described in this documentation are classified by release status:
 
 .. toctree::
    :glob:
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Python API
 
    torch
