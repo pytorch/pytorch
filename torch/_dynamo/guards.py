@@ -740,7 +740,11 @@ class GuardBuilder(GuardBuilderBase):
         # reported in https://github.com/python/cpython/issues/125608,
         # fixed by https://github.com/python/cpython/pull/125611), we cannot take
         # advantage of __dict__ versions to speed up guard checks.
-        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+        if (
+            config.issue_3_13_0_warning
+            and sys.version_info >= (3, 13)
+            and sys.version_info < (3, 13, 1)
+        ):
             warnings.warn(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
