@@ -376,7 +376,7 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
-static void initPybindMethods(PyObject* module) {
+static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
 #if SYCL_COMPILER_VERSION >= 20250000
@@ -474,7 +474,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
-  initPybindMethods(module);
+  initXpuMethodBindings(module);
 }
 
 } // namespace torch::xpu
