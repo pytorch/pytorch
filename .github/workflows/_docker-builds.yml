@@ -1,0 +1,87 @@
+name: _docker-builds
+
+on:
+  workflow_call:
+    always-rebuild:
+      description: If set to any value, always build a fresh docker image
+      required: false
+    docker-build-matrix:
+      required: true
+      type: string
+      description: JSON description of what docker images to build
+    push-to-ghcr:
+      description: If set to any value, push the image to ghcr.io
+      required: false
+
+env:
+  ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
+  AWS_DEFAULT_REGION: us-east-1
+
+permissions: read-all
+
+jobs:
+  docker-build:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    strategy:
+      matrix: ${{ fromJSON(inputs.docker-build-matrix) }}
+      fail-fast: false
+    timeout-minutes: ${{ matrix.timeout-minutes != '' && matrix.timeout-minutes || 240 }}
+    runs-on: ${{ matrix.runner != '' && matrix.runner || 'linux.12xlarge' }}
+    env:
+      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Build docker image
+        id: build-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ matrix.docker-image-name }}
+          always-rebuild: ${{ inputs.always-rebuild }}
+          push: true
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+
+      - uses: nick-fields/retry@v3.0.0
+        name: Push to https://https://ghcr.io/
+        if: ${{ inputs.push-to-ghcr }}
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          IMAGE_NAME: ${{ matrix.docker-image-name }}
+        with:
+          shell: bash
+          timeout_minutes: 30
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            ghcr_image="ghcr.io/pytorch/ci-image"
+            tag=${ECR_DOCKER_IMAGE##*:}
+            # Push docker image to the ghcr.io
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

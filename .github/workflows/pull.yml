@@ -45,10 +45,36 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
+  build-docker-images:
+    if: github.repository_owner == 'pytorch'
+    name: build-docker-images
+    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
+    uses: ./.github/workflows/_docker-builds.yml
+    with:
+      docker-build-matrix: |
+        { include: [
+          { docker-image-name: "pytorch-linux-jammy-py3.9-gcc11" },
+          { docker-image-name: "pytorch-linux-jammy-py3-clang15-asan" },
+          { docker-image-name: "pytorch-linux-focal-py3-clang10-onnx" },
+          { docker-image-name: "pytorch-linux-focal-py3.9-clang10" },
+          { docker-image-name: "pytorch-linux-focal-py3.11-clang10" },
+          { docker-image-name: "pytorch-linux-focal-py3.12-clang10" },
+          { docker-image-name: "pytorch-linux-focal-py3.13-clang10" },
+          { docker-image-name: "pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9" },
+          { docker-image-name: "pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9" },
+          { docker-image-name: "pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12" },
+          { docker-image-name: "pytorch-linux-focal-rocm-n-py3" },
+          { docker-image-name: "pytorch-linux-jammy-py3-clang12-executorch" },
+          { docker-image-name: "pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks" },
+        ]}
+    secrets: inherit
+
   linux-jammy-py3_9-gcc11-build:
     name: linux-jammy-py3.9-gcc11
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11
@@ -93,7 +119,9 @@ jobs:
   linux-jammy-py3_9-gcc11-no-ops:
     name: linux-jammy-py3.9-gcc11-no-ops
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-no-ops
@@ -107,7 +135,9 @@ jobs:
   linux-jammy-py3_9-gcc11-pch:
     name: linux-jammy-py3.9-gcc11-pch
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc11-pch
@@ -121,7 +151,9 @@ jobs:
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang15-asan
@@ -137,7 +169,6 @@ jobs:
         ]}
       sync-tag: asan-build
     secrets: inherit
-
 
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
@@ -155,7 +186,9 @@ jobs:
   linux-focal-py3_9-clang10-onnx-build:
     name: linux-focal-py3.9-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10-onnx
@@ -182,7 +215,9 @@ jobs:
   linux-focal-py3_9-clang10-build:
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-focal-py3.9-clang10
@@ -215,7 +250,9 @@ jobs:
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.11-clang10
@@ -250,7 +287,9 @@ jobs:
   linux-focal-py3_12-clang10-build:
     name: linux-focal-py3.12-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.12-clang10
@@ -282,7 +321,9 @@ jobs:
   linux-focal-py3_13-clang10-build:
     name: linux-focal-py3.13-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.13-clang10
@@ -314,7 +355,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
@@ -344,7 +387,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-build:
     name: linux-focal-cuda12.4-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
@@ -375,7 +420,9 @@ jobs:
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-mobile-build
@@ -390,7 +437,9 @@ jobs:
   linux-jammy-cuda-11_8-cudnn9-py3_9-clang12-build:
     name: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda11.8-cudnn9-py3.9-clang12
@@ -447,7 +496,9 @@ jobs:
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
@@ -462,7 +513,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
@@ -477,7 +530,9 @@ jobs:
   linux-jammy-py3_9-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.9-gcc111-mobile-lightweight-dispatch-build
@@ -494,7 +549,9 @@ jobs:
     if: github.event_name == 'pull_request'
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm6.2-py3.10
@@ -511,7 +568,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-sm89-build:
     name: linux-focal-cuda12.4-py3.10-gcc9-sm89
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm89
@@ -542,7 +601,9 @@ jobs:
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3-clang12-executorch
@@ -567,7 +628,9 @@ jobs:
     if: false # See https://github.com/pytorch/pytorch/issues/138750
     name: linux-focal-py3.12-clang10-experimental-split-build
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       use_split_build: True
@@ -598,7 +661,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build:
     name: cuda12.4-py3.10-gcc9-sm75
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm75
