@@ -50,16 +50,21 @@ from torch._inductor.cudagraph_utils import (
     get_placeholder_info,
     log_cudagraph_skip_and_bump_counter,
 )
+from torch._inductor.utils import (
+    align_inputs_from_check_idxs,
+    BoxedBool,
+    InputType,
+    output_node,
+    set_tracing_context_output_strides,
+)
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .utils import BoxedBool, InputType, output_node
 
 
 if TYPE_CHECKING:
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
-    from torch.fx import GraphModule
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
@@ -84,7 +89,7 @@ class OutputCode:
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         raise NotImplementedError(type(self))
 
@@ -136,6 +141,163 @@ def complex_memory_overlap(t: torch.Tensor) -> bool:
             if strides[indices[i]] < prev_stride * prev_size:
                 return True
     return False
+
+
+def cudagraph_post_compile(
+    example_inputs: Sequence[InputType],
+    compiled_graph: CompiledFxGraph,
+    cudagraphs: BoxedBool,
+    constants: Dict[str, torch.Tensor],
+) -> None:
+    """
+    Checks for any reasons not to run cudagraphs and then
+    runs it on compiled_graph.
+    Mutates the `compiled_graph.current_callable` and `cudagraphs`
+    """
+    assert compiled_graph.current_callable is not None
+    assert compiled_graph.cudagraph_info is not None
+    cached_info = compiled_graph.cudagraph_info
+    cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
+    inputs_to_check = compiled_graph.inputs_to_check
+    boxed_forward_device_index = compiled_graph.boxed_forward_device_index
+    is_inference = compiled_graph.fx_kwargs["is_inference"]
+    is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    if not cudagraph_fail_reasons:
+        fx_kwargs = compiled_graph.fx_kwargs
+        static_input_idxs = fx_kwargs["static_input_idxs"]
+
+        placeholders = cached_info.placeholders
+        stack_traces = cached_info.stack_traces
+        if not config.triton.cudagraph_trees:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
+        if (
+            boxed_forward_device_index is not None
+            and not is_inference
+            and not is_backward
+        ):
+            boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+        from .compile_fx import cudagraphify
+
+        current_callable = compiled_graph.current_callable
+        assert current_callable is not None
+        compiled_graph.current_callable = cudagraphify(
+            current_callable,
+            static_input_idxs=static_input_idxs or (),
+            device_index=next(iter(compiled_graph.device_idxs)),
+            stack_traces=stack_traces,
+            is_backward=is_backward,
+            is_inference=is_inference,
+            constants=tuple(constants.values()),
+            placeholders=placeholders,
+            mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
+        )
+
+    else:
+        BoxedBool.disable(cudagraphs)
+
+        # See [Backward Generation Handling]
+        # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+        # know we are we running the backward even if we will not run it in cudagraphs
+        if is_backward and config.triton.cudagraph_trees:
+            assert boxed_forward_device_index is not None
+            assert boxed_forward_device_index.value is not None
+            compiled_graph_callable = compiled_graph.current_callable
+
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_forward_device_index.value, create_if_none_exists=False
+            )
+            # should already exist from forward
+            assert manager is not None
+
+            def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
+                manager.set_to_running_backward()  # type: ignore[union-attr]
+                return compiled_graph_callable(new_inputs)
+
+            compiled_graph.current_callable = compiled_artifact
+
+        if "cuda" in compiled_graph.device_types:
+            # prefer better disable_cudagraphs_reason bc stack trace
+            # TODO: migrate all disable reasons to stack trace, refactor
+            if compiled_graph.disabled_cudagraphs_reason:
+                log_cudagraph_skip_and_bump_counter(
+                    compiled_graph.disabled_cudagraphs_reason
+                )
+            else:
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraphs due to {cudagraph_fail_reasons}"
+                )
+
+
+def maybe_realign_inputs(
+    ran_cudagraphs: BoxedBool,
+    compiled_graph: CompiledFxGraph,
+    inputs_to_check: Sequence[int],
+) -> None:
+    """
+    Realigns input strides from inputs_to_check if
+    we didn't end up running cudagraphs. Mutates
+    `compiled_graph.current_callable` if cudagraphs
+    was run. Otherwise, does nothing.
+    """
+    if not ran_cudagraphs:
+        assert compiled_graph.current_callable is not None
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
+        )
+        if new_callable is not compiled_graph.current_callable:
+            compiled_graph.current_callable = new_callable
+
+
+class CompiledFxGraphConstants:
+    """Wrapper class that unwraps constants from a compiled fx graph. This
+    version of the class only supports directly grabbing the saved constants off of
+    a CompiledFxGraph.
+
+    With freezing, FxGraphCache doesn't store the constants of the input
+    GraphModule it gets from AOTAutograd. Instead, it saves just the **names**
+    of those constants, and grabs the constant values directly from the graph module
+    passed in at runtime.
+
+    Thing is, we don't always *have* the graph module available at runtime, hence
+    the existence of this class and its CompiledFxGraphConstantsWithGm counterpart.
+
+    To support freezing, FXGraphCache gets passed a CompiledFxGraphConstantsWithGm during
+    post compile. Otherwise, CompiledFxGraphConstants supports the basic case of loading
+    the value of constants directly off of the original saved object.
+    """
+
+    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+        assert g.constants is not None
+        return g.constants
+
+
+class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
+    """
+    This version of CompiledFxGraphConstants, instead of grabbing constants
+    directly saved on CompiledFxGraphs, will just grab their names. Then, it takes
+    a second GraphModule to grab the corresponding constant values out of.
+
+    This is necessary for supporting freezing in FxGraphCache.
+    """
+
+    def __init__(self, gm: torch.fx.GraphModule) -> None:
+        self.gm = gm
+
+    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+        if g.allocated_constant_name is not None:
+            return {
+                name: getattr(self.gm, name)
+                for name in g.allocated_constant_name.values()
+            }
+        else:
+            assert g.constants is not None
+            return g.constants
 
 
 @dataclasses.dataclass
@@ -295,6 +457,9 @@ class CompiledFxGraph(OutputCode):
         # TODO: should this be part of fx_kwargs
         self.boxed_forward_device_index = boxed_forward_device_index
 
+        # aot autograd needs to know to pass in inputs as a list
+        self._boxed_call = True
+
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
         try:
@@ -306,39 +471,49 @@ class CompiledFxGraph(OutputCode):
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
-        # TODO: maybe move this here?  Not sure.
-        from torch._inductor.codecache import FxGraphCache
+        """
+        Run a set of post processing steps after loading from the cache. These involve:
+         - Setting the tracing context output strides
+         - Running cudagraphs if enabled
+         - Realigning inputs
 
-        FxGraphCache.post_compile(self, example_inputs, cudagraphs, gm)
+        This runs whether or not we have a cache hit, and always runs directly after we get a CompiledFxGraph.
+        The results of this function are *not* saved in the cache itself.
+        """
+        set_tracing_context_output_strides(example_inputs, self)
 
-        # aot autograd needs to know to pass in inputs as a list
-        # TODO: Not sure why this isn't just set by default on CompiledFxGraph
-        self._boxed_call = True
+        if cudagraphs:
+            # It's possible that cudagraphs is enabled, but was disabled
+            # during a previous compilation we're loading from the cache.
+            # If so, we need to disable it on this new process too.
+            if self.disabled_cudagraphs_reason:
+                if "cuda" in self.device_types:
+                    log_cudagraph_skip_and_bump_counter(
+                        f"skipping cudagraphs due to {self.disabled_cudagraphs_reason}"
+                    )
+                else:
+                    counters["inductor"]["cudagraph_skips"] += 1
+                BoxedBool.disable(cudagraphs)
+            else:
+                cudagraph_post_compile(
+                    example_inputs,
+                    self,
+                    cudagraphs,
+                    constants.unwrap(self),
+                )
+        inputs_to_check = self.inputs_to_check
+        # cudagraphs could have been disabled from the earlier conditions
+        # so we still need to realign inputs if that happens
+        maybe_realign_inputs(
+            cudagraphs,
+            self,
+            inputs_to_check,
+        )
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
-
-    def get_constants(
-        self, gm: Optional[torch.fx.GraphModule]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Get the constant attributes.
-        """
-        # Normal case: The constants are stored in the entry.
-        if self.constants is not None:
-            return self.constants
-
-        # Freezing case: Look up the constants from attributes on the GraphModule using
-        # the allocated_constant_name map.
-        assert gm is not None
-        assert self.allocated_constant_name is not None
-        constants = {
-            name: getattr(gm, orig_name)
-            for name, orig_name in self.allocated_constant_name.items()
-        }
-        return constants
 
     def prepare_for_serialization(self) -> None:
         # We can't really serialize callables that may be C++/Triton/etc.,
@@ -347,7 +522,7 @@ class CompiledFxGraph(OutputCode):
         # models to disk.
         self.current_callable = None
 
-    def after_deserialization(self, gm: Optional[torch.fx.GraphModule]) -> str:
+    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
         from torch._dynamo.utils import counters, dynamo_timed
         from torch._inductor.codecache import (
             cpp_prefix_path,
@@ -390,7 +565,7 @@ class CompiledFxGraph(OutputCode):
                     self.cache_key,
                     artifact_path,
                     self.cache_linemap,
-                    self.get_constants(gm),
+                    constants.unwrap(self),
                 ).call
         except OSError:
             log.error("Failed to load artifact: %s", artifact_path)
@@ -418,7 +593,7 @@ class CompiledAOTI(OutputCode):
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         pass
 
@@ -428,3 +603,25 @@ class CompiledAOTI(OutputCode):
 
 def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
     return h
+
+
+@dataclasses.dataclass
+class MockFXGraphCacheOutput(OutputCode):
+    gm: Any = None
+
+    def __post_init__(self) -> None:
+        self._boxed_call = True
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        cudagraphs: BoxedBool,
+        constants: CompiledFxGraphConstants,
+    ) -> None:
+        pass
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        return self.gm(inputs)
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        pass
