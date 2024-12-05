@@ -252,41 +252,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    gm_str = gm.print_readable(
-        print_output=False, include_stride=True, include_device=True
-    )
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "inductor_post_grad_before_bucket_fsdp_all_gather",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm_str,
-    )
-
     # from torch.distributed._composable.fsdp import _use_SimpleFSDP
     _use_SimpleFSDP = True
     if _use_SimpleFSDP:
         reorder_allgather_fsdp_param_to_right_before_first_usage(gm)
         remove_unused_allgather(gm)
         gm.graph.eliminate_dead_code()
-        # 100MiB -> 25 buckets
-        # 500MiB -> 11 buckets
-        # 1000MiB -> 6 bucket
-        comms.bucket_fsdp_all_gather(gm, all_gather_bucket_cap_mb=100)
-        comms.bucket_fsdp_reduce_scatter(gm, reduce_scatter_bucket_cap_mb=100)
-
-    gm_str = gm.print_readable(
-        print_output=False, include_stride=True, include_device=True
-    )
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "inductor_post_grad_after_bucket_fsdp_all_gather",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm_str,
-    )
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
@@ -301,6 +272,44 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
+    )
+
+    gm_str = gm.print_readable(
+        print_output=False, include_stride=True, include_device=True
+    )
+
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_post_grad_before_bucket_fsdp_all_gather",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm_str,
+    )
+
+    # from torch.distributed._composable.fsdp import _use_SimpleFSDP
+    _use_SimpleFSDP = True
+    if _use_SimpleFSDP:
+        # 100MiB -> 25 buckets
+        # 500MiB -> 11 buckets
+        # 1000MiB -> 6 bucket
+        # TODO(yf225): these two passes cannot be passed in via post_grad_custom_post_pass config
+        # becuase they introduce mutation. Ideally we should use `torch.ops.higher_order.auto_functionalized_v2`
+        # to wrap those mutation ops, but we need to figure out how to auto-generate the metadata needed for auto_functionalized_v2
+        # (See tlparse of `pytest -rA test/distributed/_composable/fsdp/test_fully_shard_compile.py::TestFullyShardCompile::test_transformer_backend_inductor_fullgraph_True` for how it should look like)
+        comms.bucket_fsdp_all_gather_concat(gm, all_gather_bucket_cap_mb=100)
+        comms.bucket_fsdp_reduce_scatter_concat(gm, reduce_scatter_bucket_cap_mb=100)
+
+    gm_str = gm.print_readable(
+        print_output=False, include_stride=True, include_device=True
+    )
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_post_grad_after_bucket_fsdp_all_gather",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm_str,
     )
 
     gm.recompile()
