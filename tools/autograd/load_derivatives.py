@@ -635,7 +635,7 @@ def create_differentiability_info(
             raise RuntimeError(
                 f"Not supported: for {specification},"
                 f"output_differentiability must either be "
-                f"List[bool] or a list[str] where each str is a "
+                f"list[bool] or a list[str] where each str is a "
                 f"condition. In the case where it is a condition, "
                 f"we only support single-output functions. "
                 f"Please file us an issue. "
