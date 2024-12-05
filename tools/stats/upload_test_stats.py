@@ -33,7 +33,10 @@ def parse_xml_report(
 
     test_cases: list[dict[str, Any]] = []
 
-    root = ET.parse(report)
+    try:
+        root = ET.parse(report)
+    except ET.ParseError as e:
+        raise RuntimeError(f"Failed to parse {report}: {e}") from e
     for test_case in root.iter(tag):
         case = process_xml_element(test_case)
         case["workflow_id"] = workflow_id

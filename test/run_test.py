@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
@@ -58,6 +57,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.make_manual_xml import make_manual_xml
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
     gen_additional_test_failures_file,
@@ -868,6 +868,8 @@ def run_test(
         output = None
         if options.pipe_logs:
             output = stack.enter_context(open(log_path, "w"))
+        else:
+            log_path = None
 
         if should_retry:
             ret_code, was_rerun = run_test_retries(
@@ -877,10 +879,12 @@ def run_test(
                 timeout,
                 stepcurrent_key,
                 output,
+                log_path,
                 options.continue_through_error,
+                test_file,
             )
         else:
-            command.extend([f"--sc={stepcurrent_key}", "--print-items"])
+            command.extend(["--print-items"])
             ret_code, was_rerun = retry_shell(
                 command,
                 test_directory,
@@ -920,7 +924,9 @@ def run_test_retries(
     timeout,
     stepcurrent_key,
     output,
+    output_file,
     continue_through_error,
+    invoking_file,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -937,13 +943,63 @@ def run_test_retries(
     def print_to_file(s):
         print(s, file=output, flush=True)
 
-    num_failures = defaultdict(int)
+    def get_rerun(s: str, failed: bool = False) -> str:
+        # cont = run test and run next test
+        # s, r2, r1 = run test on its own, counting number of retries
+        # failed = test failed consistently, continue with the rest
+        statuses = ["cont", "s", "r2", "r1", "failed"]
+        i = statuses.index(s)
+        new_status = statuses[i + 1]
+        if failed and new_status == "s":
+            return statuses[i + 2]
+        return new_status
+
+    def get_last_lines():
+        if not output_file:
+            return "Unable to retrieve last lines of log, please run with --pipe-logs to get output"
+        with open(output_file) as f:
+            return "".join(f.readlines()[-40:])
+
+    def get_test_report_path():
+        source = env.get("TEST_REPORT_SOURCE_OVERRIDE", "python-pytest")
+        sanitized_invoking_file = sanitize_file_name(invoking_file)
+        path = (
+            REPO_ROOT
+            / "test"
+            / "test-reports"
+            / source
+            / sanitized_invoking_file
+            / f"{sanitized_invoking_file}-{os.urandom(8).hex()}.xml"
+        )
+        os.makedirs(path.parent, exist_ok=True)
+        return path
 
     print_items = ["--print-items"]
+    # See conftest.py for comments on --sc behavior
     sc_command = f"--sc={stepcurrent_key}"
+    step_current_file = (
+        REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
+    )
+
+    def save_cache(cache):
+        def _save_keys(keys, file):
+            with open(f"{step_current_file}/{file}", "w") as f:
+                json.dump({k: v for k, v in cache.items() if k in keys}, f, indent=2)
+
+        _save_keys(["to_run", "prev_run", "already_ran"], "init")
+        _save_keys(["ended_at", "pytest_previous_status"], "active")
+
+    def load_cache():
+        with open(f"{step_current_file}/init") as f:
+            cache = json.load(f)
+        with open(f"{step_current_file}/active") as f:
+            return {**cache, **json.load(f)}
+
     while True:
+        start = time.time()
+        test_report_path = get_test_report_path()
         ret_code, _ = retry_shell(
-            command + [sc_command] + print_items,
+            command + [sc_command] + print_items + [f"--save-xml={test_report_path}"],
             test_directory,
             stdout=output,
             stderr=output,
@@ -951,62 +1007,126 @@ def run_test_retries(
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
+        duration = time.time() - start
         ret_code = 0 if ret_code == 5 else ret_code
-        if ret_code == 0 and not sc_command.startswith("--rs="):
-            break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
-
-        # Read what just failed/ran
+        # Read what was previously run
         try:
-            with open(
-                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-            ) as f:
-                current_failure = f.read()
+            cache = load_cache()
         except FileNotFoundError:
             print_to_file(
-                "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
+                "No stepcurrent file found. Either pytest didn't run"
                 + " or file got deleted (contact dev infra)"
             )
-            break
+            return ret_code, False
+        if ret_code != 0 and "ended_at" not in cache:
+            print_to_file("Failed despite no tests running")
+            return 1, False
 
         env = try_set_cpp_stack_traces(env, command, set=False)
-        if ret_code != 0:
-            num_failures[current_failure] += 1
 
-        if ret_code == 0:
-            # Rerunning the previously failing test succeeded, so now we can
-            # skip it and move on
-            sc_command = f"--scs={stepcurrent_key}"
-            print_to_file(
-                "Test succeeeded in new process, continuing with the rest of the tests"
+        # Remove prev_run from to_run
+        cache["to_run"] = [
+            [x, y]
+            for x, y in cache["to_run"]
+            if x not in [y for y, _ in cache["prev_run"]]
+        ]
+
+        if ret_code != 0 and cache["pytest_previous_status"] == 0:
+            # Failed after exiting
+            # Remove old xml since it is incorrect
+            os.remove(test_report_path)
+            if len(cache["prev_run"]) == 1:
+                make_manual_xml(
+                    invoking_file,
+                    cache["ended_at"],
+                    duration,
+                    get_last_lines() + "\nFailed at exit?",
+                )
+
+            # Rerun all tests on their own to figure out which one
+            # caused the process to fail at exit
+            cache["to_run"] = [[x, get_rerun(y)] for x, y in cache["prev_run"]] + cache[
+                "to_run"
+            ]
+
+        elif cache["pytest_previous_status"] == "no xml":
+            # Segfault or something similar
+            # Manually create xml entry
+            make_manual_xml(
+                invoking_file, cache["ended_at"], duration, get_last_lines()
             )
-        elif num_failures[current_failure] >= 3:
+
+            # Rerun everything prior to the segfaulting test to generate xml
+            i, t = next(
+                (i, t)
+                for i, t in enumerate(cache["prev_run"])
+                if t[0] == cache["ended_at"]
+            )
+            cache["to_run"] = (
+                cache["prev_run"][:i]
+                + [[cache["ended_at"], get_rerun(t[1], failed=True)]]
+                + cache["prev_run"][i + 1 :]
+                + cache["to_run"]
+            )
+
+        elif cache["pytest_previous_status"] != 0:
+            # Failed last run, so we need to rerun the last test
+            i, t = next(
+                (i, t)
+                for i, t in enumerate(cache["prev_run"])
+                if t[0] == cache["ended_at"]
+            )
+            cache["already_ran"] = cache["already_ran"] + cache["prev_run"][:i]
+            cache["to_run"] = (
+                [[cache["ended_at"], get_rerun(t[1], failed=True)]]
+                + cache["prev_run"][i + 1 :]
+                + cache["to_run"]
+            )
+
+        elif cache["pytest_previous_status"] == 0:
+            # Success
+            cache["already_ran"].extend(cache["prev_run"])
+
+        if len(cache["to_run"]) > 0 and cache["to_run"][0][1] == "failed":
+            # Test failed consistently
+            cache["already_ran"].append(cache["to_run"][0])
+            cache["to_run"] = cache["to_run"][1:]
             if not continue_through_error:
+                save_cache(cache)
                 print_to_file("Stopping at first consistent failure")
                 break
-            sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
                 "Test failed consistently, "
                 "continuing with the rest of the tests due to continue-through-error being set"
             )
-        else:
+        save_cache(cache)
+        if len(cache["to_run"]) == 0:
+            break
+        if cache["to_run"][0][1] != "cont":
             env = try_set_cpp_stack_traces(env, command, set=True)
-            sc_command = f"--rs={stepcurrent_key}"
-            print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    cache = load_cache()
+    consistent_failures = [x[0] for x in cache["already_ran"] if x[1] == "failed"]
+    flaky_failures = [
+        x[0] for x in cache["already_ran"] if x[1] not in ("failed", "cont", "s")
+    ]
+    ret = 0, False
+
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
             + f"{flaky_failures}",
         )
+        ret = 0, True
+
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
-        return 1, True
-    return ret_code, any(x > 0 for x in num_failures.values())
+        ret = 1, True
+
+    return ret
 
 
 def run_test_with_subprocess(test_module, test_directory, options):
