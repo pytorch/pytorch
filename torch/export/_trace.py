@@ -725,12 +725,6 @@ def _export_to_aten_ir(
             yield
         finally:
             torch.compiler._is_compiling_flag = old_value
-    
-    from torch._functorch._aot_autograd.subclass_parametrization import (
-        unwrap_tensor_subclass_parameters,
-    )
-
-    unwrap_tensor_subclass_parameters(mod)
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
@@ -1521,7 +1515,7 @@ def _export_to_aten_ir_make_fx(
                 if node.op == "call_function" and node.target in (
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
-                    torch.ops.profiler._record_function_exit._RecordFunction,
+                    torch.ops.profiler._record_function_exit.default,
                 ):
                     return False
                 return True
@@ -1875,7 +1869,7 @@ def _export_for_training(
 
     _update_gm_meta_if_possible(gm, mod)
 
-    from torch._export.verifier import TrainingIRVerifier
+    from torch._export.verifier import TrainingIRVerifier    
 
     exported_program = ExportedProgram(
         root=gm,

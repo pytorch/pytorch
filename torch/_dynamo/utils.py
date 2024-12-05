@@ -996,24 +996,6 @@ def record_compilation_metrics(
         return ",".join(safe_str(item) for item in metric)
 
     structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
-
-    if torch._inductor.utils.should_use_remote_fx_graph_cache():
-        try:
-            from torch._inductor.fb.remote_cache import (
-                FbRemoteFxGraphCache,
-                REMOTE_CACHE_VERSION,
-            )
-        except ModuleNotFoundError:
-            REMOTE_CACHE_VERSION = None
-            inductor_fx_remote_cache_backend_type = None
-
-        remote_cache_version = REMOTE_CACHE_VERSION
-        backend = FbRemoteFxGraphCache.get_remote_backend()
-        inductor_fx_remote_cache_backend_type = type(backend).__name__
-    else:
-        inductor_fx_remote_cache_backend_type = None
-        remote_cache_version = None
-
     common_metrics = {
         "compile_id": str(torch._guards.CompileContext.current_compile_id()),
         "start_time_us": start_time_ns // 1000,
@@ -1031,8 +1013,6 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
             "inductor_fx_remote_cache_miss_keys"
         ),
-        "remote_cache_version": remote_cache_version,
-        "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
 
     # TODO: The following are legacy fields, populated from the fields that replace

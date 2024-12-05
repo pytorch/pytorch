@@ -599,38 +599,34 @@ class SideEffects:
 
             elif isinstance(var, variables.ConstDictVariable):
                 # Reconstruct works as follow:
-                # (1) Skip codegen if there are no new items
-                # (2) codegen(...) each pair of key/value
-                # (3) create a new dictionary with the pairs of key/values above
-                # (4) clear the original dictionary
+                # (1) codegen(...) each pair of key/value
+                # (2) create a new dictionary with the pairs of key/values above
+                # (3) clear the original dictionary
                 #   + only if a key was removed from the input dict
-                # (5) update the original dictionary with the dict created in (2)
+                # (4) update the original dictionary with the dict created in (2)
 
-                if var.has_new_items():
+                cg(var.source)  # type: ignore[attr-defined]
+                cg.load_method("update")
+                cg(var, allow_cache=False)  # Don't codegen via source
+
+                if var.should_reconstruct_all:
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("update")
-                    cg(var, allow_cache=False)  # Don't codegen via source
+                    cg.load_method("clear")
 
-                    if var.should_reconstruct_all:
-                        cg(var.source)  # type: ignore[attr-defined]
-                        cg.load_method("clear")
+                suffixes.append(
+                    [
+                        *create_call_method(1),  # update
+                        create_instruction("POP_TOP"),
+                    ]
+                )
 
+                if var.should_reconstruct_all:
                     suffixes.append(
                         [
-                            *create_call_method(1),  # update
+                            *create_call_method(0),  # clear
                             create_instruction("POP_TOP"),
                         ]
                     )
-
-                    if var.should_reconstruct_all:
-                        # clear will appear before "update" as the suffixes are
-                        # applied in reverse order.
-                        suffixes.append(
-                            [
-                                *create_call_method(0),  # clear
-                                create_instruction("POP_TOP"),
-                            ]
-                        )
 
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable

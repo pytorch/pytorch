@@ -197,7 +197,7 @@ def lift_constants_pass(
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 # Remove the parameterness of constant_val
-                if isinstance(constant_val, torch.nn.Parameter):
+                if isinstance(constant_val, torch.nn.Parameter):                   
                     warnings.warn(
                         f"{node.target} created when tracing {node.meta['stack_trace']} is a parameter. But"
                         f"it's not registered with register_parameter(). export will treat it as a constant tensor"

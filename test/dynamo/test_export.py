@@ -4618,7 +4618,7 @@ def forward(self, x, b, y):
                 )
 
             def forward(self, x):
-                return x + 2 * self.p1 + self.p2
+                return (x + 2 * self.p1 + self.p2).a
 
         m = M()
         ref_x = torch.randn(3, 4)
@@ -4635,7 +4635,9 @@ def forward(self, x, b, y):
 
         x = ref_x.detach().clone()
         graph, _ = torch._dynamo.export(m)(x)
+        print("GRAPH", graph.graph)
         out = graph(x)
+        self.assertTrue(False)
         self.assertEqual(ref_out, out)
 
 
