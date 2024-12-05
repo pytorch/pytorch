@@ -117,6 +117,10 @@ if TEST_ON_CUDA:
     test_dtypes_fast = [torch.float16]
 else:
     test_device = "cpu"
+    from torch._inductor.cpp_builder import is_clang
+
+    # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
+    LONG_COMPILATION_ON_CPU = is_clang()
     test_dtypes = (
         [torch.float32, torch.bfloat16]
         if torch.ops.mkldnn._is_mkldnn_bf16_supported()
@@ -304,6 +308,8 @@ class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
+        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
 
     def _check_equal(
         self,
@@ -1095,6 +1101,9 @@ class TestFlexAttention(InductorTestCase):
         self._check_equal(golden_out3, ref_out3, compiled_out3, fudge_factor)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
+    @unittest.skipIf(
+        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+    )
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable):
@@ -4048,6 +4057,8 @@ class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
+        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
+            self.skipTest("skip UT for CPU due to long compilation time found in CI")
 
     def _check_equal(
         self,
