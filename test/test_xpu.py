@@ -308,9 +308,8 @@ print(torch.xpu.device_count())
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
 
     def test_stream_context_manager(self):
-        stream = torch.xpu.Stream()
         prev_stream = torch.xpu.current_stream()
-        with stream:
+        with torch.xpu.Stream() as stream:
             self.assertEqual(stream, torch.xpu.current_stream())
         self.assertEqual(prev_stream, torch.xpu.current_stream())
 
@@ -319,10 +318,9 @@ print(torch.xpu.device_count())
         src_device = 0
         dst_device = 1
         torch.xpu.set_device(src_device)
-        dst_stream = torch.xpu.Stream(dst_device)
         src_prev_stream = torch.xpu.current_stream(src_device)
         dst_prev_stream = torch.xpu.current_stream(dst_device)
-        with dst_stream:
+        with torch.xpu.Stream(dst_device) as dst_stream:
             self.assertEqual(dst_device, torch.xpu.current_device())
             self.assertEqual(dst_stream, torch.xpu.current_stream())
             self.assertEqual(src_prev_stream, torch.xpu.current_stream(src_device))

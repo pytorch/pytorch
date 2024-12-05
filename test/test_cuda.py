@@ -797,9 +797,8 @@ class TestCuda(TestCase):
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
     def test_stream_context_manager(self):
-        stream = torch.cuda.Stream()
         prev_stream = torch.cuda.current_stream()
-        with stream:
+        with torch.cuda.Stream() as stream:
             self.assertEqual(stream, torch.cuda.current_stream())
         self.assertEqual(prev_stream, torch.cuda.current_stream())
 
@@ -808,10 +807,9 @@ class TestCuda(TestCase):
         src_device = 0
         dst_device = 1
         torch.cuda.set_device(src_device)
-        dst_stream = torch.cuda.Stream(dst_device)
         src_prev_stream = torch.cuda.current_stream(src_device)
         dst_prev_stream = torch.cuda.current_stream(dst_device)
-        with dst_stream:
+        with torch.cuda.Stream(dst_device) as dst_stream:
             self.assertEqual(dst_device, torch.cuda.current_device())
             self.assertEqual(dst_stream, torch.cuda.current_stream())
             self.assertEqual(src_prev_stream, torch.cuda.current_stream(src_device))
