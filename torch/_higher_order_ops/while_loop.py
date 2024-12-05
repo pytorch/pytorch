@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    diff_tensor_meta,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -21,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -243,6 +245,22 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
+def check_outputs_carry_consistency(
+    outs: List[torch.Tensor], crys: List[torch.Tensor]
+) -> None:
+    all_diffs_in_meta = []
+    for out, cry in zip(outs, crys):
+        if diff := diff_tensor_meta(
+            _extract_tensor_metadata(cry), _extract_tensor_metadata(out)
+        ):
+            all_diffs_in_meta.append(",".join(diff))
+    if all_diffs_in_meta:
+        diff_str = "\n".join(all_diffs_in_meta)
+        raise RuntimeError(
+            f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diff_str}"
+        )
+
+
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
@@ -282,7 +300,9 @@ def while_loop_fake_tensor_mode(
         with mode.shape_env.ignore_fresh_unbacked_symbols():
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
-            return body_fn(*carried_inputs, *additional_inputs)
+            body_outs = body_fn(*carried_inputs, *additional_inputs)
+            check_outputs_carry_consistency(body_outs, carried_inputs)
+            return body_outs
 
 
 @while_loop_op.py_functionalize_impl
