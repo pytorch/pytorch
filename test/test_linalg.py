@@ -4552,10 +4552,8 @@ class TestLinalg(TestCase):
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
-        # We set the numerical check environment variable here, because further down
-        # in the for loop we test the numerical validity of the solution.
-        # It is possible to hit some invalid numerical solutions due to the small matrix
-        # sizes and the the tuning time limit.
+        # We set the TunableOp numerical check environment variable here because it is
+        # possible to hit some invalid numerical solutions due to the small matrix sizes.
         # Additionally, we put the entire test in try-finally clause so that
         # if the test fails/assert, there is no OS environment variabls leaked that
         # could impact subsequent tests.
