@@ -230,9 +230,7 @@ capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") ==
 # break instead of capturing.  This requires dynamic_shapes to be True.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
-capture_dynamic_output_shape_ops = (
-    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
-)
+capture_dynamic_output_shape_ops = True
 
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
