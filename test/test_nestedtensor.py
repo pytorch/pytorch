@@ -8575,6 +8575,29 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
         self.assertEqual(y[0][0][0], 2)
 
+    def test_nested_tensor_input_mutation_backward(self):
+        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+        # This test checks that AOTD correctly guess NJT tangent as NJT.
+        def fn(x):
+            x.mul_(2)
+            return x + 1
+
+        def _inp():
+            v = torch.zeros(32, 3, requires_grad=True)
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ).clone()
+
+        ref_x = _inp()
+        ref_y = fn(ref_x)
+        ref_y.sum().backward()
+
+        x = _inp()
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+        y.sum().backward()
+
 
 from torch.nested._internal.nested_int import NestedIntNode
 

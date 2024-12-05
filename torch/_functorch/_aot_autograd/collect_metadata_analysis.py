@@ -667,6 +667,12 @@ from a multi-output view call"
                     x.shape, dtype=x.dtype, device=x.device, layout=x.layout
                 )
 
+        def _is_subclass_mutated_input_tangent_always_subclass(inp):
+            return (
+                isinstance(inp, torch.nested._internal.nested_tensor.NestedTensor)
+                or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
+            )
+
         f_input_tangents = [
             # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
             # Generally when creating tangents to trace with, we assume that tangents will have
@@ -697,7 +703,7 @@ from a multi-output view call"
             (
                 _plain_fake_tensor_like_subclass(inp)
                 if is_traceable_wrapper_subclass(inp)
-                and not torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
+                and not _is_subclass_mutated_input_tangent_always_subclass(inp)
                 else inp
             )
             for inp, info in zip(flat_f_args, input_info)
