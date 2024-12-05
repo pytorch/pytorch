@@ -2,6 +2,8 @@ name: docker-builds
 
 on:
   workflow_dispatch:
+  # DEBUG: TO BE REMOVE
+  pull_request:
   push:
     branches:
       - main
