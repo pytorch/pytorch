@@ -25,8 +25,7 @@ ncclComm_t NCCLComm::getNcclComm() {
   }
   // In non-blocking mode, ensure comm is ready.
   if (nonBlocking_) {
-    // If timeout is reached, throw an exception.
-    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+    waitReady();
     // ncclComm_ should be initialized by now
   }
   if (!initialized_) {
@@ -37,6 +36,14 @@ ncclComm_t NCCLComm::getNcclComm() {
               << " is initialized.";
   }
   return ncclComm_;
+}
+
+void NCCLComm::waitReady() {
+  LockType lock(mutex_);
+  if (aborted_)
+    return;
+  // If timeout is reached, throw an exception.
+  C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -103,6 +110,32 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   return comm;
 }
 #endif
+
+void NCCLComm::finalize() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip finalize.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
+}
+
+void NCCLComm::destroy() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip destroy.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
+  // Poison future getNcclComm
+  aborted_ = true;
+}
 
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
