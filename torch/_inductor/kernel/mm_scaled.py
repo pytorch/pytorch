@@ -484,6 +484,13 @@ def get_workspace_arg(num_sms: int, device: torch.device) -> WorkspaceArg:
     )
 
 
+def use_persistent_tma(k: sympy.core.numbers.Integer) -> bool:
+    available = has_triton_tma_device() and triton_config.enable_persistent_matmul
+    # _determine_swizzle_mode_2d requires dim_k to be 32 at least 32 contiguous bytes
+    min_k = k >= 32
+    return available and min_k
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a: TensorBox,
@@ -522,7 +529,7 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        if has_triton_tma_device() and triton_config.enable_persistent_matmul:
+        if use_persistent_tma(k):
             for config in persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
