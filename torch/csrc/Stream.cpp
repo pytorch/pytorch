@@ -287,7 +287,8 @@ static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
   at::impl::PythonTorchFunctionTLS::push_onto_stack(
       std::make_shared<c10::SafePyObject>(
           dst_prev_stream_object, getPyInterpreter()));
-  Py_RETURN_NONE;
+  Py_INCREF(self);
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 

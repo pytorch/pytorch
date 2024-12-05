@@ -69,9 +69,8 @@ class TestAccelerator(TestCase):
         self.assertEqual(c_acc.cpu(), c)
 
     def test_stream_context_manager(self):
-        s = torch.Stream()
         prev_stream = torch.accelerator.current_stream()
-        with s:
+        with torch.Stream() as s:
             self.assertEqual(torch.accelerator.current_stream(), s)
         self.assertEqual(torch.accelerator.current_stream(), prev_stream)
 
@@ -80,10 +79,9 @@ class TestAccelerator(TestCase):
         src_device = 0
         dst_device = 1
         torch.accelerator.set_device_idx(src_device)
-        dst_stream = torch.Stream(dst_device)
         src_prev_stream = torch.accelerator.current_stream()
         dst_prev_stream = torch.accelerator.current_stream(dst_device)
-        with dst_stream:
+        with torch.Stream(dst_device) as dst_stream:
             self.assertEqual(torch.accelerator.current_device_idx(), dst_device)
             self.assertEqual(torch.accelerator.current_stream(), dst_stream)
             self.assertEqual(
