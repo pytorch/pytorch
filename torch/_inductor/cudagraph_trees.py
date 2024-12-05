@@ -832,6 +832,20 @@ class CUDAGraphNode:
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         ]
 
+        # (depth, offset) of live tensors which are alias of previous graph outputs
+        self.live_cudagraph_managed_path_refs: InputList[Optional[PathOutputIndex]] = [
+            (
+                self._is_alias_of_live_recorded_tensor(t)
+                if isinstance(t, torch.Tensor)
+                else None
+            )
+            for t in inputs
+        ]
+
+        # when replay, preserve the liveness of an input if it AliasesPriorGraphOutput
+        # and also aliases an output of the current CUDAGraphNode
+        self.preserved_aliased_inputs: InputList[bool] = [False] * len(inputs)
+
         self.static_input_idxs: List[int] = list(
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
@@ -1038,11 +1052,11 @@ class CUDAGraphNode:
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
-        new_inputs.clear()
 
         self.run_graph()
 
         outputs = self.reconstruct_outputs()
+        new_inputs.clear()
 
         if config.triton.fast_path_cudagraph_asserts:
             self.debug_check_invariants_after_invocation()
@@ -1261,6 +1275,12 @@ class CUDAGraphNode:
             path_ref = self._is_alias_of_live_recorded_tensor(o)
             if path_ref is not None:
                 self._mark_prior_graph_output_as_aliased(path_ref)
+
+                for idx, inp_path_ref in enumerate(
+                    self.live_cudagraph_managed_path_refs
+                ):
+                    if path_ref == inp_path_ref:
+                        self.preserved_aliased_inputs[idx] = True
                 self.output_storage_alias.append(AliasesPriorGraphOutput(path_ref))
                 continue
 
@@ -1667,7 +1687,8 @@ class CUDAGraphNode:
         # this invocation. it is too late to check after we've replayed the graph,
         # because we would have already written over their memory.
         for idx in self.cudagraph_managed_idxs:
-            inputs[idx] = None  # type: ignore[call-overload]
+            if not self.preserved_aliased_inputs[idx]:
+                inputs[idx] = None  # type: ignore[call-overload]
 
         torch._check(
             self._check_liveness(

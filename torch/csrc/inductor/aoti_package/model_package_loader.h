@@ -16,7 +16,7 @@ class TORCH_API AOTIModelPackageLoader {
   std::unordered_map<std::string, std::string> get_metadata();
   std::vector<at::Tensor> run(
       const std::vector<at::Tensor>& inputs,
-      void* stream_handl = nullptr);
+      void* stream_handle = nullptr);
   std::vector<std::string> get_call_spec();
 
  private:
