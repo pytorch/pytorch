@@ -595,14 +595,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         )
         buf_data_legacy_numpy = io.BytesIO(data_legacy_numpy)
 
-        class np_reconstruct:
-            __module__ = "numpy.core.multiarray"
-            __name__ = "_reconstruct"
-            __call__ = np.core.multiarray._reconstruct
-
         with safe_globals(
             [
-                np_reconstruct()
+                (np.core.multiarray._reconstruct, "numpy.core.multiarray._reconstruct")
                 if np.__version__ >= "2.1"
                 else np.core.multiarray._reconstruct,
                 np.ndarray,
