@@ -62,17 +62,6 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _linearize_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    _, primals_argspec = tree_flatten(primals)
-    _, tangent_argspec = tree_flatten(tangents)
-    if tangent_argspec != primals_argspec:
-        raise RuntimeError(
-            f"Expected the tangents {tangent_argspec} to have "
-            f"the same argspec as the primals {primals_argspec}"
-        )
-
-
 def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -1805,7 +1794,11 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
         flat_tangents, tangent_argspec = tree_flatten(tangents)
-        _linearize_treespec_compare(primals, tangents)
+        if tangent_argspec != primals_argspec:
+            raise RuntimeError(
+                f"Expected the tangents {tangent_argspec} to have "
+                f"the same argspec as the primals {primals_argspec}"
+            )
 
         forward_ad_checks(flat_tangents)
 
