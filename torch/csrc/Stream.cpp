@@ -256,6 +256,65 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  // No operation is performed if the stream does not belong to an accelerator.
+  c10::DeviceType dst_device_type =
+      static_cast<c10::DeviceType>(self->device_type);
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(dst_device_type))) {
+    Py_RETURN_NONE;
+  }
+  c10::DeviceIndex src_device_idx = at::accelerator::getDeviceIndex();
+  c10::DeviceIndex dst_device_idx =
+      static_cast<c10::DeviceIndex>(self->device_index);
+  // If the stream is not on the current device, switch the current device to
+  // the device of the stream.
+  if (dst_device_idx != src_device_idx) {
+    at::accelerator::setDeviceIndex(dst_device_idx);
+  }
+  c10::Stream dst_prev_stream =
+      at::accelerator::getCurrentStream(dst_device_idx);
+  at::accelerator::setCurrentStream(
+      c10::Stream::unpack3(self->stream_id, dst_device_idx, dst_device_type));
+  auto src_device_index_object = THPUtils_packDeviceIndex(src_device_idx);
+  auto dst_prev_stream_object = THPStream_Wrap(dst_prev_stream);
+  // Push [src, dst] streams onto the stack.
+  at::impl::PythonTorchFunctionTLS::push_onto_stack(
+      std::make_shared<c10::SafePyObject>(
+          src_device_index_object, getPyInterpreter()));
+  at::impl::PythonTorchFunctionTLS::push_onto_stack(
+      std::make_shared<c10::SafePyObject>(
+          dst_prev_stream_object, getPyInterpreter()));
+  Py_INCREF(self);
+  return (PyObject*)self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_exit(THPStream* self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  // No operation is performed if the stream does not belong to an accelerator.
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type)))) {
+    Py_RETURN_NONE;
+  }
+  // Pop streams from the stack [src, dst].
+  THPStream* dst_prev_stream =
+      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(
+          getPyInterpreter()));
+  auto src_device_idx = THPUtils_unpackDeviceIndex(
+      at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(getPyInterpreter()));
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      dst_prev_stream->stream_id,
+      static_cast<c10::DeviceIndex>(dst_prev_stream->device_index),
+      static_cast<c10::DeviceType>(dst_prev_stream->device_type)));
+  // Reset the current device to the device of original stream.
+  if (static_cast<c10::DeviceIndex>(self->device_index) != src_device_idx) {
+    at::accelerator::setDeviceIndex(src_device_idx);
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_ne(THPStream* self, THPStream* other) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(
@@ -321,6 +380,8 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
+    {"__enter__", (PyCFunction)THPStream_enter, METH_NOARGS, nullptr},
+    {"__exit__", (PyCFunction)THPStream_exit, METH_VARARGS, nullptr},
     {nullptr}};
 
 static PyTypeObject THPStreamType = {
