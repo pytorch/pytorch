@@ -1118,6 +1118,9 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
+    # Experimental. Flag to control whether to include weight in .so
+    package_constants_in_so: bool = True
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
