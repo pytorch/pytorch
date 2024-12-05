@@ -29,11 +29,10 @@ jobs:
   build-docker-images:
     if: github.repository_owner == 'pytorch'
     name: build-docker-images
-    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
     uses: ./.github/workflows/_docker-builds.yml
     with:
       always-rebuild: true
-      push-to-ghcr: ${{ github.event_name == 'push' && true || '' }}
+      push-to-ghcr: ${{ github.event_name == 'push' && true || false }}
       docker-build-matrix: |
         { include: [
           { docker-image-name: "pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9" },
