@@ -19,6 +19,7 @@ void initAOTIPackageBindings(PyObject* module) {
       .def(py::init<const std::string&>())
       .def("get_metadata", &AOTIModelPackageLoader::get_metadata)
       .def("run", &AOTIModelPackageLoader::run)
-      .def("get_call_spec", &AOTIModelPackageLoader::get_call_spec);
+      .def("get_call_spec", &AOTIModelPackageLoader::get_call_spec)
+      .def("load_constants", &AOTIModelPackageLoader::load_constants);
 }
 } // namespace torch::inductor

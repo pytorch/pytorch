@@ -250,6 +250,33 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
+    def test_so_without_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        inductor_configs = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        compiled = compile(model, example_inputs, inductor_configs=inductor_configs)
+        compiled.load_constants(model.state_dict(), False, True)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        print("test")
+        output = compiled(test_inputs)
+        print("after test")
+        self.assertEqual(expected, output)
+
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_duplicate_calls(self):
         options = {

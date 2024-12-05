@@ -240,6 +240,14 @@ class AOTICompiledModel:
     def get_metadata(self) -> Dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
+    def load_constants(
+        self,
+        constants_map: Dict[str, torch.Tensor],
+        use_inactive: bool,
+        check_full_update: bool,
+    ) -> None:
+        self.loader.load_constants(constants_map, use_inactive, check_full_update)  # type: ignore[attr-defined]
+
 
 def load_package(path: str, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
     if not path.endswith(".pt2"):

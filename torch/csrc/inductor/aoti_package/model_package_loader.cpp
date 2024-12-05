@@ -409,5 +409,30 @@ std::vector<std::string> AOTIModelPackageLoader::get_call_spec() {
   return runner_->get_call_spec();
 }
 
+void AOTIModelPackageLoader::load_constants(
+    std::unordered_map<std::string, at::Tensor>& constants_map,
+    bool use_inactive,
+    bool check_full_update) {
+  std::unordered_map<std::string, std::string> constant_name_to_fqn =
+      runner_->getConstantNamesToOriginalFQNs();
+  std::unordered_map<std::string, at::string> fqn_to_constant_name;
+  for (const auto& it : constant_name_to_fqn) {
+    fqn_to_constant_name.emplace(it.second, it.first);
+  }
+
+  std::unordered_map<std::string, at::Tensor> updated_constants_map;
+  for (const auto& it : constants_map) {
+    if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
+      updated_constants_map.emplace(
+          fqn_to_constant_name[it.first], it.second);
+    } else {
+      throw std::runtime_error("Constant not found: " + it.first);
+    }
+  }
+
+  return runner_->update_constant_buffer(
+      updated_constants_map, use_inactive, check_full_update);
+}
+
 } // namespace torch::inductor
 #endif
