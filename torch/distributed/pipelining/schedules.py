@@ -43,7 +43,7 @@ __all__ = [
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
-    "ScheduleZBV",
+    "ScheduleZBVZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -2161,7 +2161,7 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         return result
 
 
-class ScheduleZBV(PipelineScheduleMulti):
+class ScheduleZBVZeroBubble(PipelineScheduleMulti):
     """
     The Zero Bubble schedule (ZBV variant).
     See https://arxiv.org/pdf/2401.10241 Section 6 for details.
@@ -2335,7 +2335,7 @@ def get_schedule_class(schedule_name: str):
         "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
-        "ZBV": ScheduleZBV,
+        "ZBVZeroBubble": ScheduleZBVZeroBubble,
     }
     lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
     lowercase_schedule_name = schedule_name.lower()

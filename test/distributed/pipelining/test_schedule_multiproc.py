@@ -6,6 +6,9 @@ import os
 import sys
 import tempfile
 
+import torch
+import torch.distributed as dist
+
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
 from schedule_registry import (
     ScheduleUnbalanced,
@@ -13,9 +16,6 @@ from schedule_registry import (
     ScheduleWithReorderedB,
     ScheduleWithW,
 )
-
-import torch
-import torch.distributed as dist
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
@@ -25,7 +25,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
-    ScheduleZBV,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -711,11 +711,12 @@ class ScheduleTest(MultiProcContinousTest):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("ScheduleClass", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBV])
+    @parametrize(
+        "ScheduleClass", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
+    )
     @parametrize("use_new_runtime", [False, True])
     def test_non_symmetric_stage_ids(self, ScheduleClass, use_new_runtime):
-        # ScheduleZBV
-        if ScheduleClass is ScheduleZBV:
+        if ScheduleClass is ScheduleZBVZeroBubble:
             n_stages = 4
             rank_stages = {
                 0: [0, 3],
