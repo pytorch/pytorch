@@ -1338,6 +1338,7 @@ def main():
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_export/serde/*.yaml",
+        "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
