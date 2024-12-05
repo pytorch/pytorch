@@ -97,17 +97,25 @@ def diff_meta(tensor_vars1, tensor_vars2) -> str:
         meta2 = _extract_tensor_metadata(
             var2.proxy.node.meta["example_value"], include_contiguity=False
         )
+        # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
+        pair_diffs = []
+        for meta_name in ("dtype", "shape", "stride", "memory_format"):
+            val1 = getattr(meta1, meta_name)
+            val2 = getattr(meta2, meta_name)
+            try:
+                if val1 != val2:
+                    breakpoint()
+                    pair_diffs.append(f"'{meta_name}'")
+            except GuardOnDataDependentSymNode as _:
+                pair_diffs.append(f"'{meta_name}'")
+                continue
 
-        def format_meta(idx, meta1, meta2) -> str:
-            return f"pair {idx}:\n{str(meta1)}\n{str(meta2)}"
-
-        try:
-            if meta1 != meta2:
-                all_diffs.append(format_meta(i, meta1, meta2))
-        except GuardOnDataDependentSymNode as _:
-            all_diffs.append(format_meta(i, meta1, meta2))
-            continue
-    return "\n" + "\n".join(all_diffs)
+        if len(pair_diffs) > 0:
+            fmt_str = ", ".join(pair_diffs)
+            all_diffs.append(
+                f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
+            )
+    return "\n".join(all_diffs)
 
 
 @contextlib.contextmanager
@@ -920,8 +928,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
-                "Expected branches to return tensors with same metadata. "
-                f"Pairs that have different meta:{diffs}"
+                f"Expect branches to return tensors with same metadata but find {diffs}"
             )
 
         (
@@ -1134,8 +1141,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
             unimplemented(
-                "Expected carried_inputs and body outputs return tensors with same metadata. "
-                f"Pairs that have different meta:{diffs}"
+                f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
             )
 
         (

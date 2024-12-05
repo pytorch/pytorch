@@ -733,18 +733,20 @@ class WhileLoopModels:
 
     class DataDependentInOut(torch.nn.Module):
         def forward(self, c, a, b):
-            nz = a.nonzero()
+            inp = torch.zeros(
+                a.sum().to(torch.int64).item(), 3, device=a.device, dtype=torch.int64
+            )
 
-            def cond_fn(c, nz):
+            def cond_fn(c, inp):
                 return c > 0
 
-            def body_fn(c, nz):
-                return c - 1, (nz.sin() + 1).to(torch.int64)
+            def body_fn(c, inp):
+                return c - 1, (inp.sin() + 1).to(torch.int64)
 
             return torch._higher_order_ops.while_loop(
                 cond_fn,
                 body_fn,
-                [c, nz],
+                [c, inp],
             )
 
     class DataDependentInOutMismatch(torch.nn.Module):
@@ -941,12 +943,13 @@ class WhileLoopTests(TestCase):
         with torch._dynamo.config.patch(
             {
                 "capture_dynamic_output_shape_ops": True,
+                "capture_scalar_outputs": True,
             }
         ):
             self._run_test(
                 model=WhileLoopModels.DataDependentInOut(),
                 inputs=(
-                    torch.tensor([1, 2, 3, 4, 5]),
+                    torch.tensor([[1, 2, 3, 4, 5]]),
                     torch.tensor(
                         [True, True, True, True, True],
                     ),
