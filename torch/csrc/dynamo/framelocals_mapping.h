@@ -12,23 +12,23 @@
 
 extern "C" {
 
+#if IS_PYTHON_3_11_PLUS
+using FrameLocalsFrameType = _PyInterpreterFrame;
+#else
+using FrameLocalsFrameType = PyFrameObject;
+#endif // IS_PYTHON_3_11_PLUS
+
 typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
  private:
-  std::unordered_map<std::string, PyObject*> _map;
-  std::vector<std::string> names_ordered;
+  FrameLocalsFrameType* _frame; // non-owning
   py::object _dict{py::none()};
 
- public:
-  void set(const std::string& key, PyObject* value) {
-    if (!_map.count(key)) {
-      names_ordered.push_back(key);
-    }
-    _map[key] = value;
-  }
+  void _realize_dict();
 
-  void erase(const std::string& key) {
-    _map.erase(key);
-  }
+ public:
+  explicit FrameLocalsMapping(FrameLocalsFrameType* frame) : _frame(frame) {}
+
+  PyObject* get(uint64_t idx);
 
   bool dict_realized() const {
     return _dict.is_none();
@@ -37,10 +37,7 @@ typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
   // Borrowed reference
   PyDictObject* to_dict() {
     if (this->dict_realized()) {
-      _dict = py::dict();
-      for (auto& name : names_ordered) {
-        _dict[py::str(name)] = py::cast<py::object>(_map[name]);
-      }
+      _realize_dict();
     }
     return (PyDictObject*)_dict.ptr();
   }
