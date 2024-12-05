@@ -40,10 +40,27 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  build-docker-images:
+    name: build-docker-images
+    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
+    uses: ./.github/workflows/_docker-builds.yml
+    needs:
+      - get-label-type
+    with:
+      docker-build-matrix: |
+        { include: [
+          { "docker-image-name": "pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks" },
+          { "docker-image-name": "pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks" },
+          { "docker-image-name": "pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks" },
+        ]}
+    secrets: inherit
+
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
@@ -74,7 +91,9 @@ jobs:
     # Should be synced with the one in inductor-periodic.yml but this only runs inductor_timm
     name: cuda12.4-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       sync-tag: linux-focal-cuda12_4-py3_10-gcc9-inductor-build
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
@@ -102,7 +121,9 @@ jobs:
   linux-jammy-cpu-py3_9-gcc11-inductor-build:
     name: linux-jammy-cpu-py3.9-gcc11-inductor
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
