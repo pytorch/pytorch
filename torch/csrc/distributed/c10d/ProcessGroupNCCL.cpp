@@ -307,9 +307,6 @@ static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
-// Whether an exception has been fired.
-static std::atomic<bool> exceptionFired(false);
-
 static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -693,8 +690,6 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     }
 
     if (SHOULD_TEAR_DOWN(errorHandling)) {
-      // Ask PG destructor not to call `shutdown`
-      exceptionFired.store(true);
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << logPrefix() << tearDownMsg;
@@ -1478,14 +1473,10 @@ void ProcessGroupNCCL::shutdown() {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  bool cudaContextAlive;
 
   if (terminateProcessGroup_.load())
     // `shutdown()` or `abort` already called. Skip the favor of disposing
-    // communicators.
-    goto join_threads;
-
-  if (exceptionFired.load())
-    // `handleException()` already called teardown. Skip the favor of disposing
     // communicators.
     goto join_threads;
 
@@ -1502,14 +1493,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         "but this warning has only been added since PyTorch 2.4");
   }
 
-  // Note 1: we have rewritten `shutdown` to represent the destroy behavior
-  // (blocking). Thus we route to `abort()` explicitly here to maintain the old
-  // behavior. We should re-validate the choice and document the rationale
-  // better. (TODO)
-  // Note 2: normally we should avoid making CUDA calls in a destructor because
-  // CUDA context can be exiting. Here we can make the `abort()` call because
-  // watchdog thread (joined below) keeps the CUDA context alive.
-  if (ncclCommWatchdogThread_.joinable())
+  // Normally we should avoid making CUDA calls in a destructor because CUDA
+  // context can be exiting. Here we speculate whether the CUDA context is alive
+  // by checking whether the watchdog thread is spawned / alive. If it is, it
+  // should have made CUDA calls, and kept the process's CUDA context from
+  // exiting. And we know that at this point, the watchdog thread isn't
+  // terminated yet.
+  cudaContextAlive = ncclCommWatchdogThread_.joinable();
+  if (cudaContextAlive)
+    // Note: we have rewritten `shutdown` to represent the destroy behavior
+    // (blocking). Thus we route to `abort()` explicitly here to maintain the
+    // old behavior. We should re-validate the choice and document the rationale
+    // better. (TODO)
     abort();
 
 join_threads:
