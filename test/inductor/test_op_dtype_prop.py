@@ -185,6 +185,32 @@ class TestCase(InductorTestCase):
             cast_in_code = re.search(pattern, code, re.MULTILINE) is not None
             self.assertNotEqual(cast_in_code, load_upcast_to_fp32)
 
+    @config.patch("triton.codegen_upcast_to_fp32", False)
+    def test_binary_math_mixed_precision(self):
+        """
+        Test a binary math operator where only one input needs to be upcast.
+        """
+        # Create inputs of different dtypes.
+        inputs = [
+            torch.randn(8, device=GPU_TYPE, dtype=dtype)
+            for dtype in (torch.float16, torch.float32)
+        ]
+
+        func = torch.hypot
+        compiled = torch.compile(backend="inductor")(func)
+        result, (code,) = run_and_get_code(compiled, *inputs)
+
+        # Check accuracy.
+        ref = func(*inputs)
+        self.assertTrue(torch.allclose(ref, result))
+
+        # Check for exactly one upcast.
+        num_upcasts = code.count(".to(tl.float32)")
+        self.assertEqual(num_upcasts, 1)
+
+        # There should be no downcast, since the result is promoted.
+        self.assertNotIn(".to(tl.float16)", code)
+
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_constant(self):
         def fn():

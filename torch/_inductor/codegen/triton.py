@@ -735,25 +735,46 @@ def maybe_upcast_float32(convert_output: bool = True):
     This decorates tl.math/libdevice codegen functions.
     """
 
+    def needs_upcast(var: CSEVariable) -> bool:
+        assert isinstance(var, CSEVariable)
+        return not config.triton.codegen_upcast_to_fp32 and var.dtype in {
+            torch.float16,
+            torch.bfloat16,
+        }
+
+    def maybe_upcast_variable(var: CSEVariable) -> str:
+        assert isinstance(var, CSEVariable)
+        upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
+        return f"{var}{upcast_string}"
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         # Record that this function only supports float32 and float64.
         OpDtypeSupport.register_upcast(func, convert_output)
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
-            dtype = args[0].dtype
-            needs_upcast = not config.triton.codegen_upcast_to_fp32 and dtype in (
-                torch.float16,
-                torch.bfloat16,
-            )
-            upcast_string = ".to(tl.float32)" if needs_upcast else ""
-            upcast_args = [f"{arg}{upcast_string}" for arg in args]
+            upcast_args = [maybe_upcast_variable(arg) for arg in args]
+            upcast_kwargs = {
+                key: maybe_upcast_variable(val) for key, val in kwargs.items()
+            }
 
-            # Call the original function, optionally downcasting the result.
-            result = func(*upcast_args, **kwargs)
-            orig_dtype = triton_type(dtype)
+            # Infer the output dtype from the inputs.
+            # This promotes to the largest input type.
+            all_args = args + tuple(kwargs.values())
+            result_dtype = functools.reduce(
+                torch.promote_types, (var.dtype for var in all_args)
+            )
+
+            # Call the decorated function, optionally downcasting the result.
+            result = func(*upcast_args, **upcast_kwargs)
+            needs_downcast = (
+                any(needs_upcast(var) for var in all_args)
+                and result_dtype != torch.float32
+            )
             downcast_string = (
-                f".to({orig_dtype})" if convert_output and needs_upcast else ""
+                f".to({triton_type(result_dtype)})"
+                if convert_output and needs_downcast
+                else ""
             )
             return f"{result}{downcast_string}"
 
