@@ -140,8 +140,6 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.complex128: ScalarType.COMPLEXDOUBLE,
     torch.bool: ScalarType.BOOL,
     torch.bfloat16: ScalarType.BFLOAT16,
-    torch.float8_e4m3fn: ScalarType.FLOAT8_E4M3FN,
-    torch.float8_e5m2: ScalarType.FLOAT8_E5M2,
 }
 
 
@@ -2425,7 +2423,7 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment]
+        obj = cls(**data)  # type: ignore[assignment,operator]
         type_hints = typing.get_type_hints(cls)
         for f in dataclasses.fields(cls):
             name = f.name

@@ -6494,6 +6494,12 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
+        log.debug(
+            "Extern kernel node added for node %s with target %s.",
+            self.get_name(),
+            self.op_overload,
+        )
+
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
@@ -7336,8 +7342,16 @@ class WhileLoop(ExternKernel):
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
-            assert op.get_size() == bo.get_size(), (i, op, bo)
-            assert op.get_stride() == bo.get_stride(), (i, op, bo)
+
+            def _guard_list_equals(
+                lhs_exprs: List[Union[int, sympy.expr]],
+                rhs_exprs: List[Union[int, sympy.expr]],
+            ) -> None:
+                for lhs, rhs in zip(lhs_exprs, rhs_exprs):
+                    V.graph.sizevars.guard_equals(lhs, rhs)
+
+            _guard_list_equals(op.get_size(), bo.get_size())
+            _guard_list_equals(op.get_stride(), bo.get_stride())
             # assume all carried_inputs and outputs are on the same device
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device() == device, (i, op, bo, device)

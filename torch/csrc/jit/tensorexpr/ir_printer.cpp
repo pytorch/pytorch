@@ -226,7 +226,6 @@ static void formatImm(std::ostream& os, T v) {
   formatIntSuffix(os, v);
 }
 
-// NOLINTNEXTLINE
 #define IMM_PRINT_VISIT(Type, Name)              \
   void IRPrinter::visit(const Name##ImmPtr& v) { \
     formatImm(os(), v->value());                 \
