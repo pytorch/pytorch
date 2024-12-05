@@ -1302,10 +1302,8 @@ def set_rotate_method(rotate_method: str) -> None:
     method is "allgather".
     """
     if rotate_method == "allgather":
-        print("all-gather rotate")
         _cp_options.rotate_method = _RotateMethod.ALL_GATHER
     elif rotate_method == "alltoall":
-        print("all-to-all rotate")
         _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
     else:
         raise NotImplementedError(
