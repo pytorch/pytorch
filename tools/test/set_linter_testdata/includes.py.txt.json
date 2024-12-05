@@ -1,0 +1,35 @@
+[
+  {
+    "char": 0,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 18,
+    "name": "Add import for OrderedSet",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": 20,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": 24,
+    "name": "Builtin `set` is deprecated",
+    "original": null,
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
+    "replacement": null,
+    "severity": "error"
+  },
+  {
+    "char": null,
+    "code": "SET_LINTER",
+    "description": null,
+    "line": null,
+    "name": "Suggested fixes for set_linter",
+    "original": "# mypy: ignore-errors\n\nimport collections\nimport types\nfrom typing import Any, Dict, List, Optional, TYPE_CHECKING\n\nimport torch\nimport torch.fx\nfrom torch._guards import Source\n\nfrom ..utils import (\n    namedtuple_fields,\n    odict_values,\n    # OrderedSet,\n    set_example_value,\n)\nfrom .base import MutableLocal, VariableTracker, VariableTrackerContainer\n\nif TYPE_CHECKING:\n    from torch._dynamo.codegen import PyCodegen\n\n\nclass BaseListVariable(VariableTrackerContainer):\n    our_container = set\n",
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
+    "replacement": "# mypy: ignore-errors\n\nimport collections\nimport types\nfrom typing import Any, Dict, List, Optional, TYPE_CHECKING\n\nimport torch\nimport torch.fx\nfrom torch._guards import Source\n\nfrom ..utils import (\n    namedtuple_fields,\n    odict_values,\n    # OrderedSet,\n    set_example_value,\n)\nfrom .base import MutableLocal, VariableTracker, VariableTrackerContainer\nfrom torch.utils._ordered_set import OrderedSet\n\nif TYPE_CHECKING:\n    from torch._dynamo.codegen import PyCodegen\n\n\nclass BaseListVariable(VariableTrackerContainer):\n    our_container = OrderedSet\n",
+    "severity": "error"
+  }
+]

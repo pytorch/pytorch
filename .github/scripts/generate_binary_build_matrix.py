@@ -20,7 +20,7 @@ CUDA_ARCHES = ["11.8", "12.4", "12.6"]
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.3"}
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
 
-ROCM_ARCHES = ["6.1", "6.2"]
+ROCM_ARCHES = ["6.1", "6.2.4"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -162,7 +162,7 @@ WHEEL_CONTAINER_IMAGES = {
     "12.4": f"pytorch/manylinux-builder:cuda12.4-{DEFAULT_TAG}",
     "12.6": f"pytorch/manylinux2_28-builder:cuda12.6-{DEFAULT_TAG}",
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
@@ -193,13 +193,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
             CXX11_ABI,
         ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        (
-            gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
     },
     **{
         (
@@ -262,7 +255,9 @@ def generate_libtorch_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+            if gpu_arch_type == "rocm" and (
+                "without-deps" in libtorch_variant or "pre-cxx11" in abi_version
+            ):
                 continue
             ret.append(
                 {
@@ -428,7 +423,8 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if arch_version in ["cpu-cxx11-abi", "cpu-aarch64"]
+                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64"])
+                            or gpu_arch_type == "rocm"
                             else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],

@@ -73,6 +73,7 @@ CPU_TEST_FAILURES = {
     "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
+    "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
     "test_foreach_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
     "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
