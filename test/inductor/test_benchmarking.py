@@ -42,6 +42,12 @@ class TestBenchmarker(TestCase):
         return counters["inductor"][
             f"benchmarking.{benchmarker_cls.__name__}.{fn_name}"
         ]
+    
+    @staticmethod
+    def get_fallback_counter_value(benchmarker_cls):
+        return counters["inductor"][
+            f"benchmarking.{benchmarker_cls.feature_name}.disabled"
+        ]
 
     @staticmethod
     def make_params(device, size=100):
@@ -186,7 +192,10 @@ class TestBenchmarker(TestCase):
         })
         def inner():
             benchmarker = InductorBenchmarker()
-            if "many" in fn_name:
+            if fn_name == "benchmark":
+                (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+                _ = getattr(benchmarker, fn_name)(fn, fn_args, fn_kwargs)
+            elif "many" in fn_name:
                 callables = [self.make_params(device)[1] for _ in range(10)]
                 _ = getattr(benchmarker, fn_name)(callables)
             else:
@@ -196,8 +205,17 @@ class TestBenchmarker(TestCase):
         inner()
         if not enabled and fn_name == "benchmark_gpu":
             # "benchmark_gpu" is the only `InductorBenchmarker`-specific feature that
-            # should get disabled
-            self.assertEqual(self.get_counter_value(TritonBenchmarker, fn_name), 1)
+            # should fallback when the feature is disabled
+            self.assertEqual(self.get_fallback_counter_value(InductorBenchmarker), 1)
+            # "benchmark_gpu" should fallback to `TritonBenchmarker`
+            self.assertEqual(self.get_counter_value(TritonBenchmarker, "benchmark_gpu"), 1)
+        elif not enabled and fn_name == "benchmark_many_gpu":
+            # since "benchmark_many_gpu" defaults to calling "benchmark_gpu" for the
+            # `InductorBenchmarker` class, we should also see this falling back to the
+            # `TritonBenchmarker` implementation
+            self.assertEqual(self.get_counter_value(InductorBenchmarker, "benchmark_many_gpu"), 1)
+            self.assertEqual(self.get_fallback_counter_value(InductorBenchmarker), 10)
+            self.assertEqual(self.get_counter_value(TritonBenchmarker, "benchmark_gpu"), 10)
         else:
             # all other benchmark functions should still pass, since they are inherited
             self.assertEqual(self.get_counter_value(InductorBenchmarker, fn_name), 1)
