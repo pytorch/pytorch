@@ -3866,6 +3866,76 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    def test_so_without_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.package_constants_in_so": True,
+            }
+        ):
+            so_path = AOTIRunnerUtil.compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        with torch.no_grad(), config.patch(
+            {
+                "always_keep_tensor_constants": True,
+                "aot_inductor.package_constants_in_so": False,
+            }
+        ):
+            so_path_weightless = AOTIRunnerUtil.compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+        self.assertTrue(os.path.getsize(so_path) > 10_000_000)
+        self.assertTrue(os.path.getsize(so_path_weightless) < 10_000_000)
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path_weightless)
+
+        # Let's check whether the model has correct constant name mapping.
+        expected_original_fqns = {
+            "L__self___weight": "L__self___weight",
+            "L__self___bias": "L__self___bias",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        attach_weights = {
+            "L__self___weight": model.weight,
+            "L__self___bias": model.bias,
+        }
+        runner.update_constant_buffer(attach_weights, False, False)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
     def test_update_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -3987,6 +4057,7 @@ CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
     "test_update_constant_buffer": fail_cpu(is_skip=True),
+    "test_so_without_weight": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip

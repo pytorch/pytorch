@@ -1637,11 +1637,15 @@ class AotCodeCompiler:
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
+            if config.aot_inductor.package_constants_in_so:
+                serialized_weights = b"".join(
+                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                    for name in graph.constants.keys()
+                    if name not in graph.folded_constants
+                )
+            else:
+                serialized_weights = b""
+
             consts_size = len(serialized_weights)
 
             # TODO: Fix mmap weights with cuda
@@ -1711,6 +1715,7 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+
             so_builder = CppBuilder(
                 name=output_name,
                 sources=[output_o, consts_o, kernels_o],
