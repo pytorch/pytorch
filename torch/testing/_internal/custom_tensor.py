@@ -128,14 +128,15 @@ class CustomTensorPlainOut(torch.Tensor):
         out_inner_flat_1, spec = pytree.tree_flatten(out_inner_1)
         out_inner_flat_2, spec = pytree.tree_flatten(out_inner_2)
 
-        if func == torch.ops.aten.detach.default:
-            return pytree.tree_unflatten(
+        if func.is_view:
+            new_out = pytree.tree_unflatten(
                 (
                     CustomTensorPlainOut(tensor1, tensor2)
                     for tensor1, tensor2 in zip(out_inner_flat_1, out_inner_flat_2)
                 ),
                 spec,
             )
+            return return_and_correct_aliasing(func, args, kwargs, new_out)
 
         out_new = (
             out_inner_flat_1[ix] + out_inner_flat_2[ix]
