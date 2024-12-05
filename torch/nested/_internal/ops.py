@@ -1363,12 +1363,18 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
             "for non-contiguous nested tensors with holes"
         )
 
+    from torch.utils._pytree import tree_map
+
     # raggedness reduced away --> return dense tensor
     if reduce_on_ragged:
         # reduction cases: (batch, ragged), (batch, ragged, non-batch), etc.
         if reduce_on_batch:
             # no need to read offsets --> apply sum directly on values
             out = func(inp._values, **new_kwargs)
+            if new_kwargs.get("keepdim", False):
+                # some ops return multiple things; unsqueeze all of them
+                out = tree_map(lambda o: o.unsqueeze(0), out)
+            return out
         else:
             # invalid reduction cases: (ragged, non-batch), etc.
             if reduce_on_non_batch:
@@ -1379,17 +1385,11 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
 
             # reduction cases: (ragged)
             # convert to padded dense and reduce
+            new_kwargs.pop("dim")
             dim_to_pass = [inp._ragged_idx] if is_dimlist else inp._ragged_idx
-            out = func(inp.to_padded_tensor(identity_element), dim=dim_to_pass)
-
-        if new_kwargs.get("keepdim", False):
-            if isinstance(out, (tuple, list)):
-                # some ops return multiple things; unsqueeze all of them
-                out = type(out)(o.unsqueeze(inp._ragged_idx) for o in out)
-            else:
-                out = out.unsqueeze(inp._ragged_idx)
-
-        return out
+            return func(
+                inp.to_padded_tensor(identity_element), dim=dim_to_pass, **new_kwargs
+            )
     # raggedness preserved --> return nested tensor
     else:
         # invalid reduction cases: (batch), (batch, non-batch), etc.
@@ -1415,10 +1415,8 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
                 if d < inp._ragged_idx - 1:
                     out_kwargs["_ragged_idx"] -= 1
 
-        if isinstance(out, (tuple, list)):
-            # some ops return multiple things; wrap each of them as an NJT
-            return type(out)(NestedTensor(o, **out_kwargs) for o in out)
-        return NestedTensor(out, **out_kwargs)
+        # some ops return multiple things; wrap each of them as an NJT
+        return tree_map(lambda o: NestedTensor(o, **out_kwargs), out)
 
 
 @register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")

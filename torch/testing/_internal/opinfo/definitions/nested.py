@@ -469,9 +469,9 @@ def reduction_reference(op, sample):
         if keepdim:
             if isinstance(out, (tuple, list)):
                 # some ops return multiple things; unsqueeze all of them
-                out = type(out)(o.unsqueeze(sample.input._ragged_idx) for o in out)
+                out = type(out)(o.unsqueeze(0) for o in out)
             else:
-                out = out.unsqueeze(sample.input._ragged_idx)
+                out = out.unsqueeze(0)
         return out
 
     if reduce_on_ragged and not reduce_on_batch:
