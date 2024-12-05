@@ -1,4 +1,8 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
+import io
+import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
@@ -9,6 +13,7 @@ import torch.utils._pytree as pytree
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
+    from torch.export import ExportedProgram
 
 
 __all__ = [
@@ -20,9 +25,12 @@ __all__ = [
 ]
 
 
+log = logging.getLogger(__name__)
+
+
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List["InputType"],
+    example_inputs: List[InputType],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -43,11 +51,11 @@ def compile(
 
 
 def aoti_compile_and_package(
-    exported_program,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    exported_program: ExportedProgram,
+    _deprecated_unused_args=None,
+    _deprecated_unused_kwargs=None,
     *,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
@@ -72,8 +80,6 @@ def aoti_compile_and_package(
 
     Args:
         exported_program: An exported program created through a call from torch.export
-        args: Example positional inputs
-        kwargs: Optional example keyword inputs
         package_path: Optional specified path to the generated .pt2 artifact.
         inductor_configs: Optional dictionary of configs to control inductor.
 
@@ -85,9 +91,23 @@ def aoti_compile_and_package(
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
-    assert package_path is None or package_path.endswith(
-        ".pt2"
-    ), f"Expect package path to end with .pt2, got {package_path}"
+    if exported_program.example_inputs is None:
+        raise RuntimeError(
+            "exported_program.example_inputs is required to be set in order "
+            "for AOTInductor compilation."
+        )
+
+    if _deprecated_unused_args is not None or _deprecated_unused_kwargs is not None:
+        log.warning(
+            "You no longer need to specify args/kwargs to aoti_compile_and_package "
+            "as we can get this information from exported_program.example_inputs."
+        )
+
+    assert (
+        package_path is None
+        or isinstance(package_path, io.BytesIO)
+        or (isinstance(package_path, str) and package_path.endswith(".pt2"))
+    ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
 
     inductor_configs = inductor_configs or {}
 
@@ -96,6 +116,8 @@ def aoti_compile_and_package(
             "Please pass in a package path to aot_inductor_compile() instead "
             "of setting the aot_inductor.output_path config."
         )
+
+    args, kwargs = exported_program.example_inputs
 
     # a wrapper around aoti_compile_and_package_inner.
     return aoti_compile_and_package_debug_wrapper(
@@ -113,7 +135,7 @@ def _aoti_compile_and_package_inner(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     load_and_run: bool = False,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -158,7 +180,7 @@ def aoti_compile_and_package_debug_wrapper(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    package_path: Optional[str] = None,
+    package_path: Optional[Union[str, io.BytesIO]] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ):
     m = exported_program.module()
@@ -192,7 +214,7 @@ def aoti_compile_and_package_debug_wrapper(
         raise e
 
 
-def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
     """
     Loads the model from the PT2 package.
 

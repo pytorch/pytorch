@@ -22,6 +22,7 @@ from torch._inductor.select_algorithm import NoValidChoicesError
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.sparse import SparseSemiStructuredTensor, to_sparse_semi_structured
+from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -156,6 +157,95 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=False)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_aoti_rerun_with_different_shapes(self):
+        """
+        Compile with one shape, then re-run with different input shapes
+        """
+        max_autotune_gemm_backends = "CUTLASS"
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                return a @ b
+
+        model = MyModel()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 512).cuda().half()
+        x = torch.randn(256, 32).cuda().half()
+        y = torch.randn(32, 256).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 3,
+            }
+        ):
+            from torch.export import Dim
+
+            M = Dim("M", min=1, max=1024)
+            N = Dim("N", min=1, max=1024)
+            K = Dim("K", min=1, max=1024)
+            dynamic_shapes = {
+                "a": {0: M, 1: K},
+                "b": {0: K, 1: N},
+            }
+
+            actual = AOTIRunnerUtil.run_multiple(
+                "cuda",
+                model,
+                [(a, b), (x, y)],
+                dynamic_shapes=dynamic_shapes,
+            )
+            expected = [model(a, b), model(x, y)]
+            torch.testing.assert_close(actual[0], expected[0])
+            torch.testing.assert_close(actual[1], expected[1])
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @parametrize("dynamic", (False, True))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_diff_matmul_share_same_kernel(self, dynamic):
+        max_autotune_gemm_backends = "CUTLASS"
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                ab = a @ b
+                ac = a @ c
+                return ab, ac
+
+        model = MyModel()
+        a = torch.randn(128, 16).cuda().half()
+        b = torch.randn(16, 128).cuda().half()
+        c = torch.randn(16, 512).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            from torch._inductor.utils import run_and_get_code
+
+            compiled = torch.compile(model, dynamic=dynamic)
+            expected = model(a, b, c)
+            actual, codes = run_and_get_code(compiled, a, b, c)
+            torch.testing.assert_close(actual, expected)
+            FileCheck().check_count(
+                "cuda_fused_0.cuda_fused_0",
+                2,
+            ).run(codes[0])
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")

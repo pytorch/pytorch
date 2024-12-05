@@ -1317,7 +1317,8 @@ def load(
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
         "but it can result in arbitrary code execution. Do it only if you got the file from a "
         "trusted source."
     )
@@ -1343,7 +1344,7 @@ def load(
             )
         else:
             if has_import:
-                return f"Weights only load failed. {message}"
+                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
             else:
                 updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
                 if not has_blocklist:

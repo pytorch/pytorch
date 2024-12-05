@@ -49,8 +49,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result)
     .add_const_input(self)
     .build();
@@ -160,8 +159,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
             __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
             __ubsan_ignore_undefined__ { return a && b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
+        /*ident=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
@@ -170,8 +168,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
               __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               __ubsan_ignore_undefined__ { return a * b; },
-          // NOLINTNEXTLINE(bugprone-argument-comment)
-          /*identity=*/1);
+          /*ident=*/1);
     });
   }
 }

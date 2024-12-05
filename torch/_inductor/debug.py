@@ -565,7 +565,7 @@ class DebugFormatter:
                 "type": type(node).__name__,
             }
             try:
-                layout = node.get_layout()
+                layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
                     offset = 0
                     try:
@@ -580,13 +580,13 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(V.graph.sizevars.size_hints(layout.size)),
-                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        size=[*V.graph.sizevars.size_hints(layout.size)],
+                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
                 else:
-                    node_info["layout"] = str(node.get_layout())
+                    node_info["layout"] = str(layout)
             except Exception as e:
                 pass
             try:

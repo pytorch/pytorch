@@ -131,6 +131,7 @@ pytree.register_pytree_node(
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
     ),
+    serialized_type_name="torch.Size",
 )
 
 
@@ -1189,7 +1190,7 @@ def wrap_key(
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
-        out = f(*tensors)
+        out = f(*tensors)  # type:ignore[call-arg]
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
@@ -2013,6 +2014,13 @@ class _MakefxTracer:
             self._restore_modes(*prev_modes)
 
     def _trace_inner(self, f: Callable, *args: object) -> GraphModule:
+        # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
+        # because dispatch_trace will introduce the lazy import of torch._dynamo,
+        # and some contexts set before calling dispatch_trace will cause problems with the import of torch._dynamo,
+        # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected
+        # by the context set before dispatch_trace.
+        import torch._dynamo
+
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
 
         def _wrap_fake(args: T) -> T:

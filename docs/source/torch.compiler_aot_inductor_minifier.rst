@@ -43,7 +43,7 @@ Here is sample code which will generate an error because we injected an error on
         model = Model().to("cuda")
         example_inputs = (torch.randn(8, 10).to("cuda"),)
         ep = torch.export.export(model, example_inputs)
-        package_path = torch._inductor.aoti_compile_and_package(ep, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(ep)
         compiled_model = torch._inductor.aoti_load_package(package_path)
         result = compiled_model(*example_inputs)
 

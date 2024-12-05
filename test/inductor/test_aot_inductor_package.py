@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import io
 import sys
 import tempfile
 import unittest
@@ -32,7 +33,7 @@ def compile(
         strict=False,
     )
     package_path = torch._inductor.aoti_compile_and_package(
-        ep, args, kwargs, package_path=package_path, inductor_configs=inductor_configs
+        ep, package_path=package_path, inductor_configs=inductor_configs
     )  # type: ignore[arg-type]
     loaded = load_package(package_path)
     return loaded
@@ -138,7 +139,6 @@ class TestAOTInductorPackage(TestCase):
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
                         ep,
-                        example_inputs,
                         package_path=f.name,
                     )  # type: ignore[arg-type]
                 loaded = torch._inductor.aoti_load_package(package_path)
@@ -300,8 +300,12 @@ class TestAOTInductorPackage(TestCase):
             loaded1 = load_package(package_path, "model1")
             loaded2 = load_package(package_path, "model2")
 
-        assert torch.allclose(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
-        assert torch.allclose(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+        self.assertTrue(
+            torch.allclose(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
+        )
+        self.assertTrue(
+            torch.allclose(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+        )
 
     def test_specified_output_dir(self):
         class Model(torch.nn.Module):
@@ -328,7 +332,32 @@ class TestAOTInductorPackage(TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, {"model1": aoti_files})
             loaded = load_package(package_path, "model1")
-        assert torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+        self.assertTrue(
+            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+        )
+
+    def test_save_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.cat([a, b], dim=0)
+
+        example_inputs = (
+            torch.randn(2, 4, device=self.device),
+            torch.randn(3, 4, device=self.device),
+        )
+        ep = torch.export.export(Model(), example_inputs)
+
+        buffer = io.BytesIO()
+        buffer = torch._inductor.aoti_compile_and_package(
+            ep, package_path=buffer
+        )  # type: ignore[arg-type]
+        loaded = load_package(buffer)
+        self.assertTrue(
+            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+        )
 
 
 if __name__ == "__main__":

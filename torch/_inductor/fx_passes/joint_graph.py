@@ -212,7 +212,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 self.symint_nodes[n.meta["val"]] = n
 
@@ -246,7 +246,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
             else:

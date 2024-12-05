@@ -23,6 +23,7 @@ from torch.distributed._symmetric_memory import (
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_multicast_support,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -57,17 +58,6 @@ def requires_cuda_p2p_access():
     )
 
 
-def requires_multicast_support():
-    has_multicast_support = (
-        torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
-    )
-    return skip_but_pass_in_sandcastle_if(
-        not has_multicast_support,
-        "multicast support is not available",
-    )
-
-
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcessTestCase):
@@ -93,6 +83,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             store=store,
         )
         torch.manual_seed(42 + self.rank)
+
+    def test_has_multicast_support(self) -> None:
+        # validate that has_multicast_support() returns "false" instead of throwing
+        self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
+        # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
