@@ -22,8 +22,6 @@ using dyn_quant_matmul_4bit_fn = void (*)(
     const Tensor&,
     const Tensor&,
     const Tensor&,
-    const Tensor&,
-    const std::optional<Tensor>& bias,
     const int64_t,
     const int64_t,
     const int64_t,

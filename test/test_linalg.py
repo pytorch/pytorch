@@ -6721,7 +6721,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("CUDA Backend is unsupported")
 
         torch.manual_seed(1)
-        bias = torch.empty(0)
         block_size = 32
         b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
         in_features = b.size(0)
@@ -6730,10 +6729,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             b, n_bit=4, groupsize=block_size
         )
         b_int4pack = torch._dyn_quant_pack_4bit_weight(
-            b_uint8, b_scales_and_zeros, bias, block_size, in_features, out_features
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
         )
         b_int4pack_meta = torch._dyn_quant_pack_4bit_weight(
-            b_uint8, b_scales_and_zeros, bias, block_size, in_features, out_features
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
         )
         self.assertEqual(b_int4pack.shape, b_int4pack_meta.shape)
 
@@ -6748,7 +6747,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("CUDA is unsupported")
 
         q_group = 32
-        bias = torch.empty(0)
 
         torch.manual_seed(1)
         a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
@@ -6766,19 +6764,17 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             else:
                 b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
             b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, bias, q_group, in_features, out_features
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
             )
 
             return b_int4pack, b_scales_and_zeros
 
         def dyn_quant_matmul_4bit(
-            a, b_int4pack, b_scales_and_zeros, bias, q_group, in_features, out_features
+            a, b_int4pack, q_group, in_features, out_features
         ):
             return torch._dyn_quant_matmul_4bit(
                 a,
                 b_int4pack,
-                b_scales_and_zeros,
-                bias,
                 q_group,
                 in_features,
                 out_features,
@@ -6797,8 +6793,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             res = dyn_quant_matmul_4bit(
                 a,
                 b_int4pack,
-                b_scales_and_zeros,
-                bias,
                 q_group,
                 in_features,
                 out_features,
@@ -6825,7 +6819,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.skipTest("CUDA is unsupported")
 
         q_group = 32
-        bias = torch.empty(0)
 
         torch.manual_seed(1)
         a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
@@ -6844,16 +6837,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         @torch.compile
         def dyn_quant_matmul_4bit(
-            a, b_uint8, b_scales_and_zeros, bias, q_group, in_features, out_features
+            a, b_uint8, b_scales_and_zeros, q_group, in_features, out_features
         ):
             b_int4pack = torch._dyn_quant_pack_4bit_weight(
-                b_uint8, b_scales_and_zeros, bias, q_group, in_features, out_features
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
             )
             return torch._dyn_quant_matmul_4bit(
                 a,
                 b_int4pack,
-                b_scales_and_zeros,
-                bias,
                 q_group,
                 in_features,
                 out_features,
@@ -6863,7 +6854,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_float32,
             b_uint8,
             b_scales_and_zeros,
-            bias,
             q_group,
             in_features,
             out_features,

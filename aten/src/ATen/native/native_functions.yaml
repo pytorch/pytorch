@@ -4181,7 +4181,7 @@
   dispatch:
     CPU: _dyn_quant_pack_4bit_weight_cpu
 
-- func: _dyn_quant_matmul_4bit(Tensor inp, Tensor packed_weights, Tensor scales_zeros, Tensor? bias, int block_size, int in_features, int out_features) -> Tensor
+- func: _dyn_quant_matmul_4bit(Tensor inp, Tensor packed_weights, int block_size, int in_features, int out_features) -> Tensor
   dispatch:
     CPU: _dyn_quant_matmul_4bit_cpu
 

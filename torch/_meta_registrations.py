@@ -3478,15 +3478,14 @@ def meta__dyn_quant_pack_4bit_weight(
             4, out_features, in_features, block_size
         )
         return weights.new_empty(int(packed_weight_size), dtype=torch.uint8)
-    return weights.new_empty(weights.size(), dtype=weights.dtype)
+    packed_weight_size = weights.numel() * scales_zeros.numel()
+    return weights.new_empty(packed_weight_size, dtype=torch.float)
 
 
 @register_meta([aten._dyn_quant_matmul_4bit])
 def meta__dyn_quant_matmul_4bit(
     inp,
     packed_weights,
-    scales_zeros,
-    bias: Optional[Tensor],
     block_size,
     in_features,
     out_features,

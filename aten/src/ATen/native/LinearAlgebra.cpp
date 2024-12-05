@@ -3530,8 +3530,6 @@ Tensor _dyn_quant_pack_4bit_weight_cpu(
 Tensor _dyn_quant_matmul_4bit_cpu(
     const Tensor& inp,
     const Tensor& packed_weights,
-    const Tensor& scales_zeros,
-    const std::optional<Tensor>& bias,
     const int64_t block_size,
     const int64_t in_features,
     const int64_t out_features) {
@@ -3554,8 +3552,6 @@ Tensor _dyn_quant_matmul_4bit_cpu(
       output,
       inp,
       packed_weights,
-      scales_zeros,
-      bias,
       M,
       out_features,
       in_features,

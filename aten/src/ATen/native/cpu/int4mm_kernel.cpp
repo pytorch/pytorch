@@ -11,6 +11,11 @@
 #include <c10/util/Unroll.h>
 #include <c10/util/irange.h>
 #include <cpuinfo.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/cat.h>
+#endif
 
 #if AT_KLEIDIAI_ENABLED()
 #include <ATen/native/kleidiai/kai_kernels.h>
@@ -821,10 +826,14 @@ void dyn_quant_pack_4bit_weight_kernel(
 #endif
   {
     TORCH_CHECK(
-        packed_weights.sizes() == weights.sizes(),
+        bias.has_value() == 0,
         __func__,
-        " : Packed weights shape should be same as weights");
-    packed_weights.copy_(weights);
+        " : Bias is unsupported in reference implementation");
+    packed_weights = packed_weights.to(kFloat);
+    auto weight_reshaped = weights.view({-1}).to(kFloat);
+    auto scales_zeros_reshaped = scales_zeros.view({-1}).to(kFloat);
+    auto res = at::cat({weight_reshaped, scales_zeros_reshaped}, 0);
+    packed_weights.resize_(res.sizes()).copy_(res);
   }
 }
 
@@ -909,7 +918,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
             const float src0_0 = src_ptr[k_idx];
 
             // Scale the values
-            int32_t v0_s32 = (int32_t)(round(src0_0 * scale0));
+            int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
 
             v0_s32 = v0_s32 + nudged_zero_point0;
             v0_s32 = (std::max)(v0_s32, static_cast<int32_t>(INT8_MIN));
@@ -1047,7 +1056,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 
       for (size_t k_idx = 0; k_idx < k; ++k_idx) {
         const float src0_0 = src_ptr[k_idx];
-        int32_t v0_s32 = (int32_t)(round(src0_0 * scale0));
+        int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
         v0_s32 = (std::max)(
             (std::min)(
                 v0_s32 + nudged_zero_point0, static_cast<int32_t>(INT8_MAX)),
@@ -1145,14 +1154,14 @@ void dyn_quant_matmul_4bit_kernel(
     const Tensor& output,
     const Tensor& inp,
     const Tensor& packed_weights,
-    const Tensor& scales_zeros,
-    const std::optional<Tensor>& bias,
     const int64_t M,
     const int64_t N,
     const int64_t K,
     const int64_t block_size) {
 #if AT_KLEIDIAI_ENABLED()
-  if (can_use_kleidiai(scales_zeros, K, block_size)) {
+  const int64_t weight_packed_size =
+      kleidiai::kai_pack_rhs_int4_size(N, K, block_size);
+  if (weight_packed_size == packed_weights.numel()) {
     // KleidiAI interface intenally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(
@@ -1161,13 +1170,16 @@ void dyn_quant_matmul_4bit_kernel(
 #endif
   {
     float* lhs_f32 = reinterpret_cast<float*>(inp.data_ptr());
-    uint8_t* rhs_4bit = reinterpret_cast<uint8_t*>(packed_weights.data_ptr());
-    // Zeropoints will be unused as ref kernel uses symmetric quantization
-    // Reference implemenatation uses float32 scales so we convert
-    Tensor float32_scales = scales_zeros;
-    if (scales_zeros.dtype() == kHalf || scales_zeros.dtype() == kBFloat16) {
-      float32_scales = scales_zeros.to(kFloat);
-    }
+    const auto weights_size = N * K / 2;
+    // The weights needs to be in uint8_t data type after quantization
+    auto extracted_weights =
+        (packed_weights.narrow(0, 0, weights_size)).to(kByte);
+    auto float32_scales =
+        (packed_weights.narrow(
+             0, weights_size, packed_weights.size(0) - weights_size))
+            .to(kFloat);
+    uint8_t* rhs_4bit =
+        reinterpret_cast<uint8_t*>(extracted_weights.data_ptr());
     float* rhs_scales_f32 = reinterpret_cast<float*>(float32_scales.data_ptr());
     float* dst_f32 = reinterpret_cast<float*>(output.data_ptr());
     if (block_size == K) {
