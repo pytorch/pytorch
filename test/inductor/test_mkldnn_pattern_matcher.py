@@ -26,8 +26,8 @@ from torch.testing._internal.common_utils import (
     skipIfNoXPU,
     skipIfRocm,
     xfailIfACL,
-    TEST_MKL,
     TEST_ACL,
+    TEST_MKL,
 )
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
 
@@ -277,7 +277,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 if dtype in (
                     torch.float16,
                     torch.bfloat16,
-                ) and self._check_unary_is_decomposed(unary_fn) and not TEST_ACL:
+                ) and self._check_unary_is_decomposed(unary_fn)
+                and not TEST_ACL:
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 self.assertEqual(
