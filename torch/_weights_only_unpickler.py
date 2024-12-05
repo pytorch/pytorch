@@ -127,8 +127,14 @@ class _safe_globals:
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
     for f in _marked_safe_globals_set:
-        module, name = f.__module__, f.__name__
-        rc[f"{module}.{name}"] = f
+        if isinstance(f, tuple):
+            assert len(f) == 2, "Expected tuple of (global, str of module.name)"
+            assert type(f[1]) is str, "Expected str of module.name"
+            f, name = f
+            rc[name] = f
+        else:
+            module, name = f.__module__, f.__name__
+            rc[f"{module}.{name}"] = f
     return rc
 
 

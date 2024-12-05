@@ -274,6 +274,17 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
     added to this list can be called during unpickling, classes could be instantiated
     and have state set.
 
+    Each item, ``i`` in the list can either be a function/class or a tuple of the form
+    (function/class, string) where string is a string representing ``{__module__}.{__name__}``
+    of the function/class.
+
+    If a single item ``i`` is passed, ``i`` will be the associated function/class for
+    ``GLOBAL {i.__module__} {i.__name__}`` in the checkpoint. Manually passing the string
+    can be useful to override this behavior (e.g. when i.__module__ is unexpectedly different
+    from the module the function/class lives in due to package version differences across
+    saving and loading). For the majority of cases, you should not need to pass the
+    string representation.
+
     Args:
         safe_globals (List[Any]): list of globals to mark as safe
 
