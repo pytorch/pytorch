@@ -249,9 +249,9 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
-    gm: GraphModule, 
-    partitions: List[Dict[Node, None]], 
-    prefix: str = "fused_", 
+    gm: GraphModule,
+    partitions: List[Dict[Node, None]],
+    prefix: str = "fused_",
     always_return_tuple: bool = False,
 ) -> GraphModule:
     for partition_id, partition in enumerate(partitions):
@@ -259,10 +259,10 @@ def fuse_by_partitions(
 
         submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(
-            gm, 
-            sorted_nodes, 
-            submodule_name, 
-            partition, 
+            gm,
+            sorted_nodes,
+            submodule_name,
+            partition,
             always_return_tuple=always_return_tuple,
         )
 
