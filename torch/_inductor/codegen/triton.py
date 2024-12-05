@@ -735,13 +735,18 @@ def maybe_upcast_float32(convert_output: bool = True):
     This decorates tl.math/libdevice codegen functions.
     """
 
-    def needs_upcast(var: CSEVariable) -> bool:
-        return not config.triton.codegen_upcast_to_fp32 and var.dtype in {
-            torch.float16,
-            torch.bfloat16,
-        }
+    def needs_upcast(var) -> bool:
+        return (
+            not config.triton.codegen_upcast_to_fp32
+            and isinstance(var, CSEVariable)
+            and var.dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+            }
+        )
 
-    def maybe_upcast_variable(var: CSEVariable) -> str:
+    def maybe_upcast_arg(var) -> str:
         upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
         return f"{var}{upcast_string}"
 
@@ -751,27 +756,31 @@ def maybe_upcast_float32(convert_output: bool = True):
 
         def wrapped(*args, **kwargs) -> str:
             # Optionally upcast args to float32.
-            upcast_args = [maybe_upcast_variable(arg) for arg in args]
-            upcast_kwargs = {
-                key: maybe_upcast_variable(val) for key, val in kwargs.items()
-            }
+            upcast_args = [maybe_upcast_arg(arg) for arg in args]
+            upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
             # Infer the output dtype from the inputs.
             # This promotes to the largest input type.
             all_args = args + tuple(kwargs.values())
-            result_dtype = functools.reduce(
-                torch.promote_types, (var.dtype for var in all_args)
+            input_dtypes = [
+                var.dtype
+                for var in all_args
+                if isinstance(var, CSEVariable) and var.dtype is not None
+            ]
+            result_dtype = (
+                functools.reduce(torch.promote_types, input_dtypes)
+                if len(input_dtypes) > 0
+                else None
             )
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
-            needs_downcast = (
-                any(needs_upcast(var) for var in all_args)
-                and result_dtype != torch.float32
-            )
+            needs_downcast = any(
+                needs_upcast(var) for var in all_args
+            ) and result_dtype not in {torch.float32, None}
             downcast_string = (
                 f".to({triton_type(result_dtype)})"
-                if convert_output and needs_downcast
+                if result_dtype is not None and convert_output and needs_downcast
                 else ""
             )
             return f"{result}{downcast_string}"
