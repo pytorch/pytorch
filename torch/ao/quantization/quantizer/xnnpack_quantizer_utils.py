@@ -152,6 +152,7 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_spec.qscheme not in [
         torch.per_tensor_symmetric,
         torch.per_channel_symmetric,
+        None,
     ]:
         raise ValueError(
             f"Unsupported quantization_spec {quantization_spec} for weight"
@@ -1009,7 +1010,8 @@ def _annotate_cat(
 
         shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
         for input_act in inputs[1:]:  # type: ignore[index]
-            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
+            if input_act not in input_qspec_map:
+                input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 
