@@ -1,4 +1,4 @@
-# Owner(s): ["module: multi-headed-attention"]
+# Owner(s): ["module: sdpa"]
 
 import contextlib
 from functools import partial

@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
@@ -44,6 +45,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
+    skipIfRocm,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
@@ -1555,7 +1557,28 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
+    @onlyCUDA
+    @dtypes(torch.int8)
+    @largeTensorTest("8GB")
+    @skipIfRocm(msg="ROCM tries to allocate 60GB")
+    def test_nonzero_large(self, device, dtype):
+        indices = (
+            torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
+            torch.tensor((0, 1, 1, 1, 0, 1, 0, 1, 0, 0)),
+        )
+
+        x = torch.zeros(2**31 - 1, 2, device=device, dtype=dtype)
+        x[indices[0], indices[1]] = 1
+        y = torch.nonzero(x, as_tuple=True)
+        self.assertEqual(y, indices)
+        x = x.view(-1).fill_(0)
+        indices = indices[0] * 2
+        x[indices] = 1
+        y = torch.nonzero(x)
+        self.assertEqual(y.view(-1), indices)
+
     # TODO: rationalize with exp OpInfo
+
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     def test_exp(self, device, dtype):
