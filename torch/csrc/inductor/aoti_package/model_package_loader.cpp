@@ -203,19 +203,15 @@ std::string compile_so(
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
-  auto compile_result =
+  auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
-  std::string compile_cmd = std::get<0>(compile_result);
-  std::string output_o = std::get<1>(compile_result);
 
   std::string linker_flags_path =
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
+  auto [link_cmd, output_so] = get_cpp_compile_command(
       filename, {output_o, consts_filename}, linker_flags);
-  std::string link_cmd = std::get<0>(link_result);
-  std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());

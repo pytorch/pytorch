@@ -189,10 +189,10 @@ std::tuple<at::Tensor, std::optional<int64_t>> batch_norm_backward_no_weight_bia
       mean_.contiguous(),
       rstd_.contiguous(),
       training, eps, {true, false, false});
-  auto result0 = std::get<0>(result);
+  auto& result0 = std::get<0>(result);
   result0 = reshape_dim_outof(1, bdim_size, result0); // [B, B0, C, *]
   result0 = result0.transpose(0, 1); // [B0, B, C, *]
-  return std::make_tuple(result0, 0);
+  return std::make_tuple(std::move(result0), 0);
 }
 
 template<typename F, F Func>

@@ -10,10 +10,14 @@ class TestFXNodeHook(TestCase):
         global create_node_hook2_called
         global erase_node_hook1_called
         global erase_node_hook2_called
+        global replace_node_hook1_called
+        global replace_node_hook2_called
         create_node_hook1_called = False
         create_node_hook2_called = False
         erase_node_hook1_called = False
         erase_node_hook2_called = False
+        replace_node_hook1_called = False
+        replace_node_hook2_called = False
 
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -36,11 +40,24 @@ class TestFXNodeHook(TestCase):
             global erase_node_hook2_called
             erase_node_hook2_called = True
 
+        def replace_node_hook1(old, new, user):
+            global replace_node_hook1_called
+            self.assertEqual(old.name, "a")
+            self.assertEqual(new, "a_1")
+            self.assertEqual(user.name, "linear")
+            replace_node_hook1_called = True
+
+        def replace_node_hook2(old, new, user):
+            global replace_node_hook2_called
+            replace_node_hook2_called = True
+
         gm = symbolic_trace(fn)
         gm._register_create_node_hook(create_node_hook1)
         gm._register_create_node_hook(create_node_hook2)
         gm._register_erase_node_hook(erase_node_hook1)
         gm._register_erase_node_hook(erase_node_hook2)
+        gm._register_replace_node_hook(replace_node_hook1)
+        gm._register_replace_node_hook(replace_node_hook2)
 
         graph = gm.graph
         node_a = None
@@ -58,12 +75,17 @@ class TestFXNodeHook(TestCase):
             and create_node_hook2_called
             and erase_node_hook1_called
             and erase_node_hook2_called
+            and replace_node_hook1_called
+            and replace_node_hook2_called
         )
 
         gm._unregister_create_node_hook(create_node_hook1)
         gm._unregister_create_node_hook(create_node_hook2)
         gm._unregister_erase_node_hook(erase_node_hook1)
         gm._unregister_erase_node_hook(erase_node_hook2)
+        gm._unregister_replace_node_hook(replace_node_hook1)
+        gm._unregister_replace_node_hook(replace_node_hook2)
 
         assert gm._create_node_hooks == []
         assert gm._erase_node_hooks == []
+        assert gm._replace_hooks == []
