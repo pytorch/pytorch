@@ -57,6 +57,7 @@ jobs:
           push: true
 
       - name: Pull docker image
+        if: ${{ inputs.push-to-ghcr }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
