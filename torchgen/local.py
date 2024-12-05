@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
+from typing import Iterator
 
 
 # Simple dynamic scoping implementation.  The name "parametrize" comes

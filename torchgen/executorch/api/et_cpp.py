@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 from torchgen import local
 from torchgen.api.types import (
@@ -38,10 +38,6 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 """

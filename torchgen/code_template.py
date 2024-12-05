@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+from typing import Mapping, Sequence
 
 
 # match $identifier or ${identifier} and replace with value in env

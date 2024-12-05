@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import string
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -28,10 +28,6 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import concatMap
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 # See Note: [Out ops with functional variants that don't get grouped properly]

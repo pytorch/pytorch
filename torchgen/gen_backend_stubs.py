@@ -5,7 +5,7 @@ import os
 import re
 from collections import Counter, defaultdict, namedtuple
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 import yaml
 
@@ -26,10 +26,6 @@ from torchgen.model import (
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
 from torchgen.yaml_utils import YamlLoader
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.

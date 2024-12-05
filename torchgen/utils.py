@@ -10,7 +10,18 @@ import textwrap
 from dataclasses import fields, is_dataclass
 from enum import auto, Enum
 from pathlib import Path
-from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    Iterable,
+    Iterator,
+    Literal,
+    NoReturn,
+    Sequence,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import Self
 
 from torchgen.code_template import CodeTemplate
@@ -18,7 +29,6 @@ from torchgen.code_template import CodeTemplate
 
 if TYPE_CHECKING:
     from argparse import Namespace
-    from collections.abc import Iterable, Iterator, Sequence
 
 
 REPO_ROOT = Path(__file__).absolute().parent.parent
@@ -103,7 +113,7 @@ def assert_never(x: NoReturn) -> NoReturn:
     raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
-@functools.cache
+@functools.lru_cache(maxsize=None)
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 

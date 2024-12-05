@@ -101,7 +101,6 @@ Memory management
     :nosignatures:
 
      empty_cache
-     get_per_process_memory_fraction
      list_gpu_processes
      mem_get_info
      memory_stats
