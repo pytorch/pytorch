@@ -382,6 +382,8 @@ if torch._C._has_mkldnn:
             return False
 
         def _check_input_sizes(n, computation_op):
+            # Check if the tensor shape of the 'other' node is the same as or
+            # can be broadcasted to the tensor shape of the computation node.
             computation_node = (
                 n.args[0] if n.args[1] is match.kwargs["other"] else n.args[1]
             )
@@ -401,6 +403,7 @@ if torch._C._has_mkldnn:
                         torch.Size([1 for _ in range(len(computation_node_size))]),
                     ]
             else:
+                assert len(computation_node_size) > 2
                 broadcast_sizes = [
                     torch.Size(
                         [computation_node_size[0], computation_node_size[1]]
