@@ -362,6 +362,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch.export._trace import (
         _export_to_aten_ir,
         _fakify_params_buffers,
+        _get_original_state_dict,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -502,9 +503,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             gm, new_graph_signature
         )
 
-        named_parameters = dict(mod.named_parameters(remove_duplicate=False))
-        named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-        return gm, new_graph_signature, named_parameters | named_buffers
+        return gm, new_graph_signature, _get_original_state_dict(mod)
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
