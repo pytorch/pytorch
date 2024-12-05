@@ -36,6 +36,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
 )
@@ -322,6 +323,25 @@ class TestCuda(TestCase):
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
+
+    @serialTest()
+    def test_get_per_process_memory_fraction(self):
+        # get the initial memory fraction
+        init_fraction = torch.cuda.get_per_process_memory_fraction()
+
+        # set and get the limiting cases
+        torch.cuda.set_per_process_memory_fraction(1.0)
+        self.assertEqual(torch.cuda.get_per_process_memory_fraction(), 1.0)
+        torch.cuda.set_per_process_memory_fraction(0.0)
+        self.assertEqual(torch.cuda.get_per_process_memory_fraction(), 0.0)
+
+        # test a few random cases
+        for val in torch.rand(3):
+            torch.cuda.set_per_process_memory_fraction(float(val))
+            self.assertEqual(torch.cuda.get_per_process_memory_fraction(), float(val))
+
+        # restore the initial memory fraction
+        torch.cuda.set_per_process_memory_fraction(init_fraction)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "uuid attribute not yet available")
     def test_uuid(self):
@@ -1050,6 +1070,12 @@ except RuntimeError as e:
         self.assertTrue(
             abs(run(torch.device("cuda")) - run(torch.device("cpu"))) < 10_000
         )
+
+    @largeTensorTest("20GB", "cuda")
+    def test_randint_generation_for_large_numel(self) -> None:
+        numel = 2**31 + 1
+        s = torch.randint(2, (numel,), device="cuda", dtype=torch.int8).sum()
+        self.assertTrue(s > 0, "expected randint in [0, 1] to generate nonzero values")
 
     @parametrize("dtype", [torch.float32, torch.double])
     def test_random_no_reused_random_states(self, dtype: torch.dtype) -> None:
