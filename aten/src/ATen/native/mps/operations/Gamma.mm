@@ -333,7 +333,7 @@ kernel void lgamma(device {0} *input [[buffer(0)]],
                    device {1} *output [[buffer(1)]],
                    uint id [[thread_position_in_grid]])
 {{
-    output[id] = LogGamma(static_cast<float>(input[id]));
+    output[id] = static_cast<{1}>(LogGamma(static_cast<float>(input[id])));
 }}
 
 
@@ -346,24 +346,21 @@ kernel void digamma (device {0} *input [[buffer(0)]],
         if (x == trunc(x)) {{
             // As per C++ standard for gamma related functions and SciPy,
             // If the argument is a negative integer, NaN is returned
-            output[id] = NAN;
-        }}
-        else {{
+            output[id] = static_cast<{1}>(NAN);
+        }} else {{
             // Extracts the fractional part of x as r, since tan(pi * r) is more numerically
             // accurate than tan(pi * x). While these operations are mathematically equivalent
             // since both x and r are in radians and tan() has a periodicity of pi, in practice
             // the computation of pi * x is a source of error (when |x| > 1).
             float r = fract(x);
-            output[id] = calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r);
+            output[id] = static_cast<{1}>(calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r));
         }}
-    }}
-    else if (x == 0.0f) {{
+    }} else if (x == 0.0f) {{
         // As per C++ standard for gamma related functions and SciPy,
         // If the argument is ±0, ±∞ is returned
-        output[id] = copysign(INFINITY, -x);
-    }}
-    else {{
-        output[id] = calc_digamma_positive_domain(x);
+        output[id] = static_cast<{1}>(copysign(INFINITY, -x));
+    }} else {{
+        output[id] = static_cast<{1}>(calc_digamma_positive_domain(x));
     }}
 }}
 
@@ -373,7 +370,7 @@ kernel void trigamma(device {0} *input [[buffer(0)]],
                      uint id [[thread_position_in_grid]])
 {{
     float x = input[id];
-    output[id] = calc_trigamma(x);
+    output[id] = static_cast<{1}>(calc_trigamma(x));
 }}
 
 
@@ -385,7 +382,7 @@ kernel void polygamma(device {0} *input [[buffer(0)]],
   float x = input[id];
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
-  output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
+  output[id] = static_cast<{1}>(sgn * Gamma(n + 1) * calc_zeta(n + 1, x));
 }}
 
 )METAL",
@@ -424,9 +421,7 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
       getMPSProfiler().beginProfileKernel(cplState, "lgamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-
+      mtl_setArgs(computeEncoder, self, output);
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -464,8 +459,7 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
       getMPSProfiler().beginProfileKernel(cplState, "digamma_out", {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_setArgs(computeEncoder, self, output);
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -515,8 +509,7 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
       getMPSProfiler().beginProfileKernel(cplState, func_name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
+      mtl_setArgs(computeEncoder, self, output);
 
       if (func_name == "polygamma") {
         mtl_setBytes(computeEncoder, order, 2);

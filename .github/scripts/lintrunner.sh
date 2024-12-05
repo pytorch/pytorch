@@ -17,6 +17,11 @@ if [[ -d "${CACHE_DIRECTORY}" ]]; then
     cp -r "${CACHE_DIRECTORY}" . || true
 fi
 
+# if lintrunner is not installed, install it
+if ! command -v lintrunner &> /dev/null; then
+    python3 -m pip install lintrunner==0.12.5
+fi
+
 # This has already been cached in the docker image
 lintrunner init 2> /dev/null
 
@@ -33,10 +38,11 @@ python3 torch/utils/data/datapipes/gen_pyi.py
 
 RC=0
 # Run lintrunner on all files
-if ! lintrunner --force-color --all-files --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
+if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then
     echo ""
     echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner -m origin/main\`. (If you don't get the same results, run \'lintrunner init\' to update your local linter)\e[0m"
-    echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
+    echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions. To apply suggested patches automatically, use the -a flag. Before pushing another commit,\e[0m"
+    echo -e "\e[1m\e[36mplease verify locally and ensure everything passes.\e[0m"
     RC=1
 fi
 

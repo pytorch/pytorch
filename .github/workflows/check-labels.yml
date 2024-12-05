@@ -30,6 +30,9 @@ concurrency:
 
 jobs:
   check-labels:
+    permissions:
+      contents: read
+      pull-requests: write
     name: Check labels
     if: github.repository_owner == 'pytorch'
     runs-on: linux.20_04.4x
@@ -43,7 +46,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip

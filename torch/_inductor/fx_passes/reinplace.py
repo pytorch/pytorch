@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
+from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -499,29 +501,57 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         node_name,
         old_tensors_to_clone,
         tensors_to_clone,
-        possibly_missed_reinplacing_opportunities,
+        missed_args,
+        missed_nodes,
+        trigger,
     ):
+        # Total size of possibly_missed_reinplacing_opportunities for tensors with static shapes.
+        missed_bytes = 0
+
+        def bytes(node):
+            t = node.meta.get("val", None)
+            if (
+                t is not None
+                and isinstance(t.element_size(), int)
+                and isinstance(t.numel(), int)
+            ):
+                return t.element_size() * t.numel()
+            else:
+                return 0
+
+        for node in missed_nodes:
+            if isinstance(node, (list, tuple)):
+                for n in node:
+                    missed_bytes += bytes(n)
+            else:
+                missed_bytes += bytes(node)
+
         log.info(
             "For node %s, attempted to reinplace %s. We were unable to reinplace %s; "
             "%s (if non-empty) are possible missed reinplacing opportunities that may be bad for "
-            "memory usage and performance.",
+            "memory usage and performance. Total size of missed opportunities with static shapes is"
+            " : %s bytes.",
             node_name,
             old_tensors_to_clone,
             tensors_to_clone,
-            possibly_missed_reinplacing_opportunities,
+            missed_args,
+            missed_bytes,
         )
-        torch._dynamo.utils.counters["inductor"][
-            "possibly_missed_reinplacing_opportunities"
-        ] += len(possibly_missed_reinplacing_opportunities)
+
+        ReinplaceCounters.add_missed_opportunities(trigger, len(missed_args))
+        ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, auto_functionalize_v2=False
+        old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: List[str] = []
         storage_of_reinplaced_args = set()
-        possibly_missed_reinplacing_opportunities = []
+
+        # Those used to count possibly_missed_reinplacing_opportunities
+        missed_nodes = []
+        missed_args = []
 
         def tensor_with_same_storage_already_reinplaced(arg):
             if isinstance(arg, (list, tuple)):
@@ -553,7 +583,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                if not auto_functionalize_v2:
+                if not trigger == ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output atindex size(out)+i.
@@ -569,14 +599,18 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     storage_of_reinplaced_args.add(get_node_storage(mutated_arg))
             else:
                 if should_attempt_reinplace:
-                    possibly_missed_reinplacing_opportunities.append(arg)
+                    missed_args.append(arg)
+                    missed_nodes.append(mutated_arg)
+
                 tensors_to_clone.append(arg)
 
         log_inplace_results(
             node_name,
             old_tensors_to_clone,
             tensors_to_clone,
-            possibly_missed_reinplacing_opportunities,
+            missed_args,
+            missed_nodes,
+            trigger,
         )
         return tensors_to_clone
 
@@ -602,7 +636,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 bases_to_clone,
                 base_tensors_dct,
                 node.target,
-                auto_functionalize_v2=True,
+                ReInplaceTrigger.AUTO_FUNC_V2,
             )
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
@@ -621,7 +655,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 tensors_to_clone,
                 node.kwargs,
                 _mutable_op._name,
-                auto_functionalize_v2=False,
+                ReInplaceTrigger.AUTO_FUNC_V1,
             )
 
             # Stash the metadata. There is a pass later on where we decompose
@@ -653,7 +687,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"], kernel_name
+                node.kwargs["tensors_to_clone"],
+                node.kwargs["kwargs"],
+                kernel_name,
+                ReInplaceTrigger.TRITON_OPS,
             )
 
             kwargs = dict(node.kwargs)
@@ -683,6 +720,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
 
 def reinplace_inplaceable_ops(graph: torch.fx.Graph) -> None:
-    canonicalize_view_scatter_ops(graph)
-    reinplace_inplaceable_ops_core(graph)
-    decompose_generalized_scatter(graph)
+    with enable_python_dispatcher():
+        canonicalize_view_scatter_ops(graph)
+        reinplace_inplaceable_ops_core(graph)
+        decompose_generalized_scatter(graph)

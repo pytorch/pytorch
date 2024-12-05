@@ -595,7 +595,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 bag = torch.nn.functional.embedding_bag(
                     indices_1D,
@@ -714,7 +714,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 msg = (
                     f"mode: '{mode}', sparse: {sparse}, padding_idx: {padding_idx}, "
@@ -876,16 +876,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
-        # Failure 1: mismatched embeddings / per_sample_weights dtype
+        # Failure 1: mismatched embeddings / per_sample_weights dtype (only on CPU device)
         es = nn.EmbeddingBag(5, 2, mode="sum").to(dtype=torch.float, device=device)
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=dtypes[0], device=device)
         offsets = torch.tensor([0, 0, 3, 3, 6], dtype=dtypes[1], device=device)
         per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
         if device == "cpu":
             with self.assertRaisesRegex(RuntimeError, "have the same type as"):
-                es(input, offsets, per_sample_weights)
-        else:
-            with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
                 es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)

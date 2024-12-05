@@ -53,6 +53,10 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     m.graph.eliminate_dead_code()
     m.recompile()
 
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(m)
+
     for inplace in [False, True]:
 
         def dropout_train(x):
@@ -64,17 +68,25 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
         example_inputs = (torch.randn(1),)
         if train_to_eval:
             match_pattern = _get_aten_graph_module_for_pattern(
-                _WrapperModule(dropout_train), example_inputs
+                _WrapperModule(dropout_train),
+                example_inputs,
+                using_training_ir=using_training_ir,
             )
             replacement_pattern = _get_aten_graph_module_for_pattern(
-                _WrapperModule(dropout_eval), example_inputs
+                _WrapperModule(dropout_eval),
+                example_inputs,
+                using_training_ir=using_training_ir,
             )
         else:
             match_pattern = _get_aten_graph_module_for_pattern(
-                _WrapperModule(dropout_eval), example_inputs
+                _WrapperModule(dropout_eval),
+                example_inputs,
+                using_training_ir=using_training_ir,
             )
             replacement_pattern = _get_aten_graph_module_for_pattern(
-                _WrapperModule(dropout_train), example_inputs
+                _WrapperModule(dropout_train),
+                example_inputs,
+                using_training_ir=using_training_ir,
             )
 
         from torch.fx.subgraph_rewriter import replace_pattern_with_filters
@@ -107,6 +119,10 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
     m.recompile()
+
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(m)
 
     def bn_train(
         x: torch.Tensor,
@@ -144,11 +160,13 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         _WrapperModule(bn_train),
         example_inputs,
         is_cuda,
+        using_training_ir=using_training_ir,
     )
     bn_eval_aten = _get_aten_graph_module_for_pattern(
         _WrapperModule(bn_eval),
         example_inputs,
         is_cuda,
+        using_training_ir=using_training_ir,
     )
 
     if train_to_eval:

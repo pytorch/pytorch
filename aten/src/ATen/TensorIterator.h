@@ -250,7 +250,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIteratorBase();
   void build(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
@@ -788,6 +787,9 @@ class TORCH_API TensorIteratorConfig final {
   TensorIteratorConfig() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
+  TensorIteratorConfig(TensorIteratorConfig&&) = default;
+  TensorIteratorConfig& operator=(TensorIteratorConfig&&) = default;
+  ~TensorIteratorConfig() = default;
 
   /// Construction
   // Stores input/output Tensors without incrementing the reference count.
@@ -993,10 +995,13 @@ class TORCH_API TensorIteratorConfig final {
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
 struct TORCH_API SplitUntil32Bit {
+  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct TORCH_API iterator {
     iterator() = default;
     iterator(const TensorIteratorBase& iter);
     iterator(iterator&&) = default;
+    iterator& operator=(iterator&&) = default;
+    ~iterator() = default;
 
     // Guaranteed to be a TensorIterator proper!
     TensorIterator& operator*() const;

@@ -28,7 +28,8 @@ struct TORCH_API EnumType : public NamedType {
             std::move(enum_names_values),
             std::move(cu)));
       default:
-        AT_ERROR(
+        TORCH_CHECK(
+            false,
             "Cannot create Enum with value type '",
             value->str(),
             "', only int, float and string are supported");
@@ -49,7 +50,7 @@ struct TORCH_API EnumType : public NamedType {
 
   bool equals(const Type& rhs) const override {
     if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
-      return name().value() == enum_rhs->name().value() &&
+      return name().has_value() && name() == enum_rhs->name() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
           this->compilation_unit() == enum_rhs->compilation_unit();
     }
@@ -88,7 +89,7 @@ struct TORCH_API EnumType : public NamedType {
         cu_(std::move(cu)) {}
 
   std::string annotation_str_impl(
-      C10_UNUSED const TypePrinter& printer = nullptr) const override {
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }

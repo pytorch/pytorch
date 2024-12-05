@@ -2,8 +2,7 @@
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // This IR was copied from code-generated output, but the entire _to_copy
 // operator cannot be trivially code genereated since it is only desirable to
@@ -123,5 +122,4 @@ class ToCopy : public torch::lazy::TsNode {
   std::optional<at::MemoryFormat> memory_format;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

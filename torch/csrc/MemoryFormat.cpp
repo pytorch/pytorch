@@ -40,7 +40,8 @@ static PyMethodDef THPMemoryFormat_methods[] = {
 };
 
 PyTypeObject THPMemoryFormatType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.memory_format", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.memory_format", /* tp_name */
     sizeof(THPMemoryFormat), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

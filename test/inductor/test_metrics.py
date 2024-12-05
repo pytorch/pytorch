@@ -14,11 +14,11 @@ example_kernel = """
     reduction_hint=ReductionHint.INNER,
     filename=__file__,
     triton_meta={
-        'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'},
+        'signature': {'in_out_ptr0': '*fp32', 'in_ptr0': '*fp32', 'xnumel': 'i32', 'rnumel': 'i32'},
         'device': 0,
         'device_type': 'GPU_TYPE',
         'constants': {},
-        'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=(), ids_of_folded_args=(), divisible_by_8=(2, 3))]},
+        'configs': [AttrsDescriptor(divisible_by_16=(0, 1, 2, 3), equal_to_1=())]},
     inductor_meta={
         'autotune_hints': set(),
         'kernel_name': 'triton_red_fused_add_sum_2',

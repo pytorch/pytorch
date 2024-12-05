@@ -33,7 +33,9 @@
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
 // The constants are NOT readonly because they may be mutated.
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_start[];
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
@@ -56,6 +58,14 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
+enum ConstantType : uint8_t {
+  Unknown = 0,
+  Parameter = 1,
+  Buffer = 2,
+  TensorConstant = 3,
+  FoldedConstant = 4,
+};
+
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
@@ -97,20 +107,26 @@ class AOTInductorModelBase {
       size_t num_outputs,
       size_t num_constants,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir)
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(std::move(cubin_dir)) {
+        cubin_dir_(std::move(cubin_dir)),
+        include_weights(include_weights) {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+    } else {
+      // If device_idx_ is passed in, we need to set the current device to it
+      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
@@ -194,6 +210,9 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
       constant_blob_ = RAII_cudaMalloc(blob_size);
 #endif
+    }
+    if (!include_weights) {
+      return;
     }
 
     size_t bytes_read = 0;
@@ -392,6 +411,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).from_folded;
   }
 
+  int32_t constant_type(int64_t idx) const {
+    return constants_info_.at(idx).type;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
@@ -473,6 +496,7 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+    // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
 #else
     if (self_mmap) {
@@ -526,6 +550,7 @@ class AOTInductorModelBase {
     int64_t opaque_metadata_size{};
     const char* original_fqn = nullptr;
     bool from_folded{};
+    int32_t type{};
   };
 
   std::vector<ParamInfo> inputs_info_;
@@ -547,6 +572,11 @@ class AOTInductorModelBase {
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
+
+  // This is the flag that implies whether the weight is included in the model.
+  // If True, we would prepare the weight when loading the model, otherwise the
+  // model will be loaded without weights, and need to be provided by the user.
+  bool include_weights;
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
@@ -573,7 +603,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir);
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true);
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,

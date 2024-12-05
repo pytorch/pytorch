@@ -72,3 +72,9 @@
           Pointwise operators are operators where each element of the output is computed only by accessing
           the corresponding element of all the broadcasted inputs. The output shape will be the broadcasted
           shape of the inputs.
+- tag: maybe_aliasing_or_mutating
+  desc: |
+          For some ops, we can't statically determine whether the op is functional or not. Note that this is only
+          relevant to CIA ops that decompose before functionalization/autograd. It is useful to
+          know this information for export as we would want to decompose these ops as they are unsafe to be
+          preserved.

@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 import logging
+from typing import Any
 
 import torch
 from torch._inductor.kernel.mm_common import mm_args
@@ -22,13 +22,12 @@ aten__weight_int8pack_mm = ExternKernelChoice(
     torch._weight_int8pack_mm, "at::_weight_int8pack_mm", has_out_variant=False
 )
 
-
 quantized = torch.ops.quantized
 _quantized = torch.ops._quantized
 aten = torch.ops.aten
 
 
-def register_quantized_ops():
+def register_quantized_ops() -> None:
     lowering.add_needs_realized_inputs(
         [
             quantized.max_pool2d,
@@ -36,15 +35,20 @@ def register_quantized_ops():
             _quantized.wrapped_fbgemm_linear_fp16_weight,
         ]
     )
-
     lowering.make_fallback(quantized.max_pool2d)
     lowering.make_fallback(_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16)
     lowering.make_fallback(_quantized.wrapped_fbgemm_linear_fp16_weight)
 
 
-def register_woq_mm_ops():
-    @register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)
-    def int8pack_mm(input, weight, scale, *, layout=None):
+def register_woq_mm_ops() -> None:
+    @register_lowering(aten._weight_int8pack_mm, type_promotion_kind=None)  # type: ignore[misc]
+    def int8pack_mm(
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        scale: torch.Tensor,
+        *,
+        layout: Any = None,
+    ) -> Any:
         _, _, _, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
@@ -63,7 +67,7 @@ def register_woq_mm_ops():
 
         # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
         # for broadcasting, as it's 1D.
-        def _mul_epilogue(buf):
+        def _mul_epilogue(buf: torch.Tensor) -> Any:
             return create_epilogue_with_attr(
                 buf, "mul", other=realize_inputs(expand(scale, layout.size))
             )
@@ -74,7 +78,7 @@ def register_woq_mm_ops():
                 aten_layout,
                 [mat1, mat2, scale],
                 trans_w=True,
-                epilogue_creator=_mul_epilogue,
+                epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
             )
 
         if (

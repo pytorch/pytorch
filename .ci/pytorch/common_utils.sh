@@ -81,14 +81,15 @@ function pip_install_whl() {
 
 function pip_install() {
   # retry 3 times
-  # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
+  pip_install_pkg="python3 -m pip install --progress-bar off"
+  ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
 function get_exit_code() {
@@ -104,9 +105,9 @@ function get_bazel() {
   # version of Bazelisk to fetch the platform specific version of
   # Bazel to use from .bazelversion.
   retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
+    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
   shasum --algorithm=1 --check \
-    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
+    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
   chmod u+x tools/bazel
 }
 
@@ -191,9 +192,22 @@ function install_torchrec_and_fbgemm() {
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
+
+  # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
+  # seems to be an sccache-related issue
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    unset CMAKE_CUDA_COMPILER_LAUNCHER
+    sudo mv /opt/cache/bin /opt/cache/bin-backup
+  fi
+
   # See https://github.com/pytorch/pytorch/issues/106971
   CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+
+  if [[ "$IS_A100_RUNNER" == "1" ]]; then
+    export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
+    sudo mv /opt/cache/bin-backup /opt/cache/bin
+  fi
 }
 
 function clone_pytorch_xla() {
@@ -225,6 +239,12 @@ function checkout_install_torchbench() {
   echo "Print all dependencies after TorchBench is installed"
   python -mpip freeze
   popd
+}
+
+function install_torchao() {
+  local commit
+  commit=$(get_pinned_commit torchao)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git@${commit}"
 }
 
 function print_sccache_stats() {

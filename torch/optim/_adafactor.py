@@ -9,6 +9,7 @@ from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     Optimizer,
     ParamsT,
     TensorListList,
@@ -223,8 +224,7 @@ Adafactor.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): unlike other optimizers, Adafactor does not require a
             learning rate, and Shazeer, Noam, and Mitchell Stern do not use lr at all.
             Deviating from the paper, this implementation uses lr for applying weight
@@ -541,9 +541,7 @@ def _multi_tensor_adafactor(
             ]
             torch._foreach_mul_(row_means, row_means)
             torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
-            torch._foreach_mul_(device_row_vars, beta2_ts)
-            torch._foreach_mul_(row_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_row_vars, row_means)
+            torch._foreach_lerp_(device_row_vars, row_means, one_minus_beta2_ts)
             del row_means
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
@@ -552,9 +550,7 @@ def _multi_tensor_adafactor(
             ]
             torch._foreach_mul_(col_means, col_means)
             torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
-            torch._foreach_mul_(device_col_vars, beta2_ts)
-            torch._foreach_mul_(col_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_col_vars, col_means)
+            torch._foreach_lerp_(device_col_vars, col_means, one_minus_beta2_ts)
             del col_means
 
             var_estimates = [
@@ -574,9 +570,7 @@ def _multi_tensor_adafactor(
             ), "variance should be defined when grad is a vector"
 
             grads_squared = torch._foreach_mul(device_grads, device_grads)
-            torch._foreach_mul_(device_variances, beta2_ts)
-            torch._foreach_mul_(grads_squared, one_minus_beta2_ts)
-            torch._foreach_add_(device_variances, grads_squared)
+            torch._foreach_lerp_(device_variances, grads_squared, one_minus_beta2_ts)
             del grads_squared
 
             # avoid writing into variance during update
@@ -584,8 +578,7 @@ def _multi_tensor_adafactor(
 
         # square the eps1 as we sqrt after to keep eps1's magnitude
         torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
-        torch._foreach_sqrt_(var_estimates)
-        torch._foreach_reciprocal_(var_estimates)
+        torch._foreach_rsqrt_(var_estimates)
         torch._foreach_mul_(var_estimates, device_grads)
         updates = var_estimates
 

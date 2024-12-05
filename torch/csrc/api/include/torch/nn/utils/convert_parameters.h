@@ -3,9 +3,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace utils {
+namespace torch::nn::utils {
 
 // This helper function is to check if the parameters are located
 // in the same device. Currently, the conversion between model parameters
@@ -77,6 +75,4 @@ inline void vector_to_parameters(
   }
 }
 
-} // namespace utils
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::utils
