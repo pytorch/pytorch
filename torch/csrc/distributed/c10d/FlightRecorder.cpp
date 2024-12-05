@@ -108,7 +108,7 @@ control_plane::RegisterHandler jsonDumpHandler{
           "application/json");
     }};
 
-void DebugInfoWriter::write(const std::string& ncclTrace) {
+void DebugInfoWriter::write(const std::string& trace) {
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
   std::ofstream file(filename_, std::ios::binary);
@@ -120,7 +120,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
+  file.write(trace.data(), static_cast<std::streamsize>(trace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -155,7 +155,7 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
 // Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
 // the GIL. If you don't want to block the current thread or take the risk of a
 // GIL deadlock, you can use an asynchronous calling mechanism like std::async.
-std::string NCCLTraceBuffer::Entry::getTraceback() {
+std::string FlightRecorder::Entry::getTraceback() {
   torch::CapturedTraceback* traceback = traceback_.get();
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
   // We use 0 because we only have one traceback here.
@@ -178,7 +178,7 @@ std::string NCCLTraceBuffer::Entry::getTraceback() {
   return oss.str();
 }
 
-std::optional<size_t> NCCLTraceBuffer::record(
+std::optional<size_t> FlightRecorder::record(
     size_t pg_id,
     const std::tuple<std::string, std::string>& pg_name,
     size_t collective_seq_id,
@@ -252,7 +252,7 @@ std::optional<size_t> NCCLTraceBuffer::record(
   return id_++;
 }
 
-void NCCLTraceBuffer::record_pg_ranks(
+void FlightRecorder::record_pg_ranks(
     const std::tuple<std::string, std::string>& pg_name,
     std::vector<uint64_t> ranks) {
   if (!enabled_) {
@@ -262,7 +262,7 @@ void NCCLTraceBuffer::record_pg_ranks(
   pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
-void NCCLTraceBuffer::update_state(Entry& r) {
+void FlightRecorder::update_state(Entry& r) {
   if (r.start_ != nullptr) {
     bool started = r.start_->query();
     if (started && !r.time_discovered_started_) {
@@ -277,7 +277,7 @@ void NCCLTraceBuffer::update_state(Entry& r) {
   }
 }
 
-std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
+std::vector<FlightRecorder::Entry> FlightRecorder::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
@@ -299,7 +299,7 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
 
 // Returns the entry with the given id, if it exists. Otherwise, returns
 // std::nullopt.
-std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
+std::optional<FlightRecorder::Entry> FlightRecorder::getEntry(
     std::optional<size_t> id) {
   if (!enabled_ || !id) {
     return std::nullopt;
@@ -314,7 +314,7 @@ std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
   }
 }
 
-void NCCLTraceBuffer::retire_id(
+void FlightRecorder::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
   if (!enabled_ || !id) {
@@ -363,7 +363,7 @@ void NCCLTraceBuffer::retire_id(
   }
 }
 
-const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
+const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
     bool includeStacktraces,
     bool onlyActive) {
   auto entries = new_list();
@@ -467,7 +467,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
   return entries;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> NCCLTraceBuffer::getPgConfig() {
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgConfig() {
   auto pg_config = new_dict();
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
     auto pg_info = new_dict();
@@ -479,7 +479,7 @@ const c10::Dict<c10::IValue, c10::IValue> NCCLTraceBuffer::getPgConfig() {
   return pg_config;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> NCCLTraceBuffer::
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
     getPgConfigJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
@@ -492,7 +492,7 @@ const std::map<std::string, std::map<std::string, std::string>> NCCLTraceBuffer:
   return result;
 }
 
-const c10::Dict<c10::IValue, c10::IValue> NCCLTraceBuffer::getPgStatus() {
+const c10::Dict<c10::IValue, c10::IValue> FlightRecorder::getPgStatus() {
   auto all_pg_status = new_dict();
   for (const auto& [pg_id, status] : all_pg_status_) {
     auto pg_status = new_dict();
@@ -504,7 +504,7 @@ const c10::Dict<c10::IValue, c10::IValue> NCCLTraceBuffer::getPgStatus() {
   return all_pg_status;
 }
 
-const std::map<std::string, std::map<std::string, std::string>> NCCLTraceBuffer::
+const std::map<std::string, std::map<std::string, std::string>> FlightRecorder::
     getPgStatusJson() {
   std::map<std::string, std::map<std::string, std::string>> result;
   for (const auto& [pg_id, status] : all_pg_status_) {
@@ -520,7 +520,7 @@ const std::map<std::string, std::map<std::string, std::string>> NCCLTraceBuffer:
   return result;
 }
 
-std::string NCCLTraceBuffer::dump_json(
+std::string FlightRecorder::dump_json(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
@@ -611,14 +611,14 @@ std::string NCCLTraceBuffer::dump_json(
   return result.dump();
 }
 
-std::string NCCLTraceBuffer::dump(
+std::string FlightRecorder::dump(
     const std::optional<std::unordered_map<
         std::string,
         std::unordered_map<std::string, std::string>>>& ncclDumpMap,
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.NCCLTraceBuffer__dump);
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.FlightRecorder__dump);
   auto result = new_dict();
   // common values
   result.insert(version_key, version_val);

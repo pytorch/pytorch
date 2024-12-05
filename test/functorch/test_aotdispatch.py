@@ -44,6 +44,7 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
+from torch._inductor.output_code import MockFXGraphCacheOutput
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
@@ -6327,6 +6328,42 @@ metadata incorrectly.
         out.sum().backward()
         self.assertEqual(ref_x.grad, x.grad)
 
+    def test_rrelu_with_noise_mutation(self):
+        def fn_functional(x):
+            noise = torch.ones_like(x)
+            result, noise_out = torch.ops.aten.rrelu_with_noise_functional(
+                x, noise, 0.2, 0.8, True
+            )
+            return result, noise_out
+
+        def fn_mutation(x):
+            noise = torch.ones_like(x)
+            result = torch.ops.aten.rrelu_with_noise(x, noise, 0.2, 0.8, True)
+            return result, noise
+
+        def fn_inplace(x):
+            noise = torch.ones_like(x, requires_grad=False)
+            torch.ops.aten.rrelu_with_noise_(x, noise, 0.2, 0.8, True)
+            return x, noise
+
+        def _test_fn(fn, check_backward=True):
+            x = -torch.abs(torch.randn(4, 4, dtype=torch.bfloat16, requires_grad=True))
+
+            ref_y, ref_noise = fn(x)
+            self.assertTrue(torch.all(ref_noise < torch.ones_like(ref_noise)).item())
+
+            comp_y, comp_noise = torch.compile(fn, backend="inductor", fullgraph=True)(
+                x
+            )
+
+            if check_backward:
+                comp_y.sum().backward()
+            self.assertTrue(torch.all(comp_noise < torch.ones_like(comp_noise)).item())
+
+        _test_fn(fn_functional)
+        _test_fn(fn_mutation)
+        _test_fn(fn_inplace, check_backward=False)
+
 
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
@@ -6732,25 +6769,22 @@ class MockFXGraphCache:
         self.cache[key] = gm
 
     def load(self, gm, inputs):
-        key, _ = compiled_fx_graph_hash(gm, inputs, {}, {})
-        if key in self.cache:
-            gm = make_boxed_func(gm)
-            gm._fx_graph_cache_key = key
-            return gm
-        else:
-            self.save(key, gm)
-            gm = make_boxed_func(gm)
-            gm._fx_graph_cache_key = key
-            return gm
+        key, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
+        if key not in self.cache:
+            self.cache[key] = gm
+        gm, _ = self.load_with_key(key, [], inputs, None, None, None, None)
+        return gm
 
-    def load_with_key(self, key, debug_lines, inputs, local, remote_cache, is_backward):
+    def load_with_key(
+        self, key, debug_lines, inputs, local, remote_cache, is_backward, constants
+    ):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
+            gm = MockFXGraphCacheOutput(gm)
+            gm._fx_graph_cache_key = key
+            gm._time_taken_ns = 0
         return gm, {}
-
-    def post_compile(self, gm, inputs, cudagraphs):
-        return gm
 
 
 # The following tests fail in strict caching mode (i.e. they bypass or
@@ -6823,9 +6857,6 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         with patch(
             "torch._inductor.codecache.FxGraphCache.load_with_key",
             new=self.inductor_cache.load_with_key,
-        ), patch(
-            "torch._inductor.codecache.FxGraphCache.post_compile",
-            new=self.inductor_cache.post_compile,
         ):
             return super().verify_aot_autograd(
                 f,
