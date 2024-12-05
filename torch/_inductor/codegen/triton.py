@@ -775,12 +775,14 @@ def maybe_upcast_float32(convert_output: bool = True):
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
-            needs_downcast = any(
-                needs_upcast(var) for var in all_args
-            ) and result_dtype not in {torch.float32, None}
+            needs_downcast = (
+                convert_output
+                and any(needs_upcast(var) for var in all_args)
+                and result_dtype not in {torch.float32, None}
+            )
             downcast_string = (
                 f".to({triton_type(result_dtype)})"
-                if result_dtype is not None and convert_output and needs_downcast
+                if needs_downcast and result_dtype is not None
                 else ""
             )
             return f"{result}{downcast_string}"
