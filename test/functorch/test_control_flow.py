@@ -118,10 +118,19 @@ def get_scan_combine_fn(name, associative=True):
     def div(x: torch.Tensor, y: torch.Tensor):
         return x / y
 
-    def s5_operator(x, y):
+    def s5_operator(x: torch.Tensor, y: torch.Tensor):
         A_i, Bu_i = x
         A_j, Bu_j = y
         return A_j * A_i, A_j * Bu_i + Bu_j
+
+    def different_input_size_operator(x: torch.Tensor, y: torch.Tensor):
+        x_o, dA_o, dB_o, C_o, y_o = x
+        x_n, dA_n, dB_n, C_n, y_n = y
+
+        x_new = x_n + x_o
+        y_new = torch.einsum("bdn,bn->bd", x_new, C_n)
+
+        return x_new, dA_n + 0.0, dB_n + 0.0, C_n + 0.0, y_new
 
     def tuple_fct(x, y):
         return (x[0] + y[0], x[1] * y[1])
@@ -149,6 +158,8 @@ def get_scan_combine_fn(name, associative=True):
         fct = div
     elif name == "s5_operator":
         fct = s5_operator
+    elif name == "different_input_size_operator":
+        fct = different_input_size_operator
     elif name == "tuple_fct":
         fct = tuple_fct
     elif name == "complex_pointwise":
@@ -3305,6 +3316,82 @@ class AssociativeScanTests(TestCase):
             inputs=elements,
         )
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        C = torch.randn((batch, dstate, length), requires_grad=True, device=device)
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        y = torch.randn((batch, hidden_dim, length), requires_grad=True, device=device)
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("different_input_size_operator", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_different_input_size_wrong_dim(self):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        y = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # ValueError,
+            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            out = associative_scan(
+                get_scan_combine_fn("different_input_size_operator", True),
+                elements,
+                3,
+                combine_mode="pointwise",
+            )
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
@@ -3906,9 +3993,10 @@ class <lambda>(torch.nn.Module):
                 add: "f32[s2, s2]" = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
                 sub_1: "f32[s2, s2]" = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
                 return (clone, sub, add, sub_1)
-""",
+""",  # noqa: B950
         )
 
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @parametrize("backend", ["eager", "aot_eager"])
     def test_while_loop_int_carry_compile(self, backend):
         fn, args = WHILE_LOOP_TESTS["int_carry"]
@@ -3942,36 +4030,8 @@ class GraphModule(torch.nn.Module):
             return (add, symint_0, child)
 """,  # noqa: B950
             )
-        elif backend == "aot_eager":
-            self.assertExpectedInline(
-                captured_graph,
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[2, 2]"):
-        l_x_ = L_x_
 
-        cond_fn_0 = self.cond_fn_0
-        body_fn_0 = self.body_fn_0
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, 2, l_x_), ());  cond_fn_0 = body_fn_0 = l_x_ = None
-        getitem: "Sym(u0 + 1)" = while_loop[0]
-        getitem_1: "Sym(u1)" = while_loop[1]
-        getitem_2: "f32[2, 2]" = while_loop[2];  while_loop = None
-        return (getitem, getitem_1, getitem_2)
-
-    class cond_fn_0(torch.nn.Module):
-        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", l_x_: "f32[2, 2]"):
-            lt: "Sym(u0 < u1)" = symint < symint_0;  symint = symint_0 = None
-            return lt
-
-    class body_fn_0(torch.nn.Module):
-        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", l_x_: "f32[2, 2]"):
-            add: "Sym(u0 + 1)" = symint + 1
-            sin: "f32[2, 2]" = l_x_.sin();  l_x_ = None
-            child: "f32[2, 2]" = sin + symint;  sin = symint = None
-            return (add, symint_0, child)
-""",
-            )
-
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @parametrize("backend", ["eager", "aot_eager"])
     def test_while_loop_int_carry_nested_compile(self, backend):
         fn, args = WHILE_LOOP_TESTS["int_carry_nested"]
@@ -4019,49 +4079,6 @@ class GraphModule(torch.nn.Module):
                 return (add, child)
 """,  # noqa: B950
             )
-        elif backend == "aot_eager":
-            self.assertExpectedInline(
-                captured_graph,
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[2, 2]"):
-        l_x_ = L_x_
-
-        cond_fn_1 = self.cond_fn_1
-        body_fn_1 = self.body_fn_1
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_1, body_fn_1, (0, l_x_), ());  cond_fn_1 = body_fn_1 = l_x_ = None
-        getitem: "Sym(u0 + 1)" = while_loop[0]
-        getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
-        return (getitem, getitem_1)
-
-    class cond_fn_1(torch.nn.Module):
-        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
-            lt: "Sym(u0 < 2)" = symint < 2;  symint = None
-            return lt
-
-    class body_fn_1(torch.nn.Module):
-        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
-            cond_fn_0 = self.cond_fn_0
-            body_fn_0 = self.body_fn_0
-            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (symint,));  cond_fn_0 = body_fn_0 = l_x_ = None
-            getitem: "Sym(u1 + 1)" = while_loop[0];  getitem = None
-            new_x: "f32[2, 2]" = while_loop[1];  while_loop = None
-
-            add: "Sym(u0 + 1)" = symint + 1;  symint = None
-            return (add, new_x)
-
-        class cond_fn_0(torch.nn.Module):
-            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
-                lt: "Sym(u1 < u0)" = symint < symint_cond_fn;  symint = symint_cond_fn = None
-                return lt
-
-        class body_fn_0(torch.nn.Module):
-            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
-                add: "Sym(u1 + 1)" = symint + 1;  symint = None
-                child: "f32[2, 2]" = l_x_ + 1;  l_x_ = None
-                return (add, child)
-""",
-            )
 
     def test_while_loop_int_carry_tracing(self):
         fn, args = WHILE_LOOP_TESTS["int_carry"]
@@ -4090,7 +4107,7 @@ class <lambda>(torch.nn.Module):
             sin: "f32[2, 2]" = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(sin, arg0_1);  sin = arg0_1 = None
             return (add, arg1_1, add_1)
-""",
+""",  # noqa: B950
         )
 
     def test_while_loop_int_carry_nested_tracing(self):
@@ -4133,7 +4150,7 @@ class <lambda>(torch.nn.Module):
                 add: "Sym(u1 + 1)" = arg0_1 + 1;  arg0_1 = None
                 add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
                 return (add, add_1)
-""",
+""",  # noqa: B950
         )
 
     def test_cond_nested_traced(self):
