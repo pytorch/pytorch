@@ -387,7 +387,7 @@ inline_inbuilt_nn_modules = not is_fbcode()
 use_graph_deduplication = False
 
 # Whether to track nodes for deduplication (testing only)
-# This flag is ignoed if use_graph_deduplication is True
+# This flag is ignored if use_graph_deduplication is True
 track_nodes_for_deduplication = False
 
 
