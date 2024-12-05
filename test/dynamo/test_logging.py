@@ -91,7 +91,7 @@ def single_record_test(**kwargs):
 
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(2, output_code=True)
+    test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
@@ -668,7 +668,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             """\
 +- LAMBDA_GUARD: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
 +- LAMBDA_GUARD: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- LAMBDA_GUARD: Eq(Mod(2*L['z'].size()[0], 3), 0)  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- LAMBDA_GUARD: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
 +- LAMBDA_GUARD: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
