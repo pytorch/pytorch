@@ -63,8 +63,6 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_minimal_arrayref_interface(is_skip=True),
     "test_conv_freezing": fail_minimal_arrayref_interface(is_skip=True),
     "test_deconv_freezing": fail_minimal_arrayref_interface(is_skip=True),
-    "test_addmm_multiple_dynamic": fail_minimal_arrayref_interface(),
-    "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_cond_nested": fail_minimal_arrayref_interface(),
     "test_cond_simple": fail_minimal_arrayref_interface(),
     "test_cond_symint_input": fail_minimal_arrayref_interface(),
@@ -73,9 +71,7 @@ CPU_TEST_FAILURES = {
     "test_cond_with_outer_code_before_after": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
-    "test_foreach_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_nested_tensor_from_jagged": fail_minimal_arrayref_interface(),
-    "test_poi_multiple_dynamic": fail_minimal_arrayref_interface(),
     "test_while_loop_with_parameters": fail_minimal_arrayref_interface(),
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
@@ -87,8 +83,6 @@ CPU_TEST_FAILURES = {
     "test_dup_unbacked_sym_decl_with_refinement": fail_minimal_arrayref_interface(
         is_skip=True
     ),
-    # TODO:  error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/129550
     # https://github.com/pytorch/pytorch/issues/123691
     "test_dynamic_scalar": fail_minimal_arrayref_interface(is_skip=True),
@@ -103,9 +97,6 @@ CPU_TEST_FAILURES = {
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: AssertionError: unsupported Optional type in convert_arg_type: Generator
     "test_normal_functional": fail_stack_allocation(is_skip=True),
-    # TODO: The same issue as https://github.com/pytorch/pytorch/issues/122978
-    # error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     # TODO: failed internally
@@ -136,7 +127,6 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
-    "test_simple_dynamic": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
