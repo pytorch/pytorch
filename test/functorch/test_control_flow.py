@@ -3627,7 +3627,7 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
-
+    
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
