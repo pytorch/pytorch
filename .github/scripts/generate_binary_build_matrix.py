@@ -380,7 +380,8 @@ def generate_wheels_matrix(
                             "cxx11-abi"
                             if (
                                 arch_version == "cuda-aarch64" or arch_version == "12.6"
-                            ) else ""
+                            )
+                            else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
