@@ -151,3 +151,29 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
+
+  linux-focal-cuda12_1-py3_13-gcc9-inductor-build:
+    name: cuda12.1-py3.13-gcc9-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-focal-cuda12.1-py3.13-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3.13-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_1-py3_13-gcc9-inductor-test:
+    name: cuda12.1-py3.13-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_1-py3_13-gcc9-inductor-build
+    with:
+      build-environment: linux-focal-cuda12.1-py3.13-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_13-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_13-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
