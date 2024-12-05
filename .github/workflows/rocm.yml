@@ -26,10 +26,35 @@ jobs:
       id-token: write
       contents: read
 
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch'
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build-docker-images:
+    name: build-docker-images
+    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
+    uses: ./.github/workflows/_docker-builds.yml
+    needs:
+      - get-label-type
+    with:
+      docker-build-matrix: |
+        { include: [
+          { "docker-image-name": "pytorch-linux-focal-rocm-n-py3" },
+        ]}
+    secrets: inherit
+
   linux-focal-rocm6_2-py3_10-build:
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - build-docker-images
     with:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3

@@ -47,10 +47,28 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  build-docker-images:
+    name: build-docker-images
+    # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
+    uses: ./.github/workflows/_docker-builds.yml
+    needs:
+      - get-label-type
+    with:
+      docker-build-matrix: |
+        { include: [
+          { "docker-image-name": "pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9" },
+          { "docker-image-name": "pytorch-linux-focal-py3.9-clang10" },
+          { "docker-image-name": "pytorch-linux-focal-rocm-n-py3" },
+          { "docker-image-name": "pytorch-linux-jammy-py3-clang15-asan" },
+        ]}
+    secrets: inherit
+
   linux-focal-cuda12_1-py3_10-gcc9-sm86-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
@@ -77,7 +95,9 @@ jobs:
   linux-focal-py3_9-clang10-build:
     name: linux-focal-py3.9-clang10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-py3.9-clang10
@@ -102,7 +122,9 @@ jobs:
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-focal-rocm6.2-py3.10
@@ -130,7 +152,9 @@ jobs:
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
+    needs:
+      - get-label-type
+      - build-docker-images
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang15-asan
