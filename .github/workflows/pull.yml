@@ -46,7 +46,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   build-docker-images:
-    if: github.repository_owner == 'pytorch'
     name: build-docker-images
     # TODO: SWITCH TO pytorch/pytorch/.github/workflows/_docker-builds.yml@main BEFORE LANDING
     uses: ./.github/workflows/_docker-builds.yml
