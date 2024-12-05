@@ -19,9 +19,8 @@ fi
 echo "Free space on filesystem before build:"
 df -h
 
-pushd "$BUILDER_ROOT"
 export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
-./windows/internal/build_wheels.bat
+./ci/pytorch/windows/internal/build_wheels.bat
 
 echo "Free space on filesystem after build:"
 df -h
