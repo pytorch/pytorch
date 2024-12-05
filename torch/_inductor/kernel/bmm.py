@@ -12,6 +12,7 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
+    use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
 )
@@ -179,6 +180,15 @@ def tuned_bmm(mat1, mat2, *, layout=None):
         from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+
+    if use_cpp_bmm_template(layout, mat1, mat2):
+        from ..codegen.cpp_bmm_template import CppBmmTemplate
+
+        CppBmmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
 
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")
