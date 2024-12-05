@@ -104,7 +104,6 @@ def diff_meta(tensor_vars1, tensor_vars2) -> str:
             val2 = getattr(meta2, meta_name)
             try:
                 if val1 != val2:
-                    breakpoint()
                     pair_diffs.append(f"'{meta_name}'")
             except GuardOnDataDependentSymNode as _:
                 pair_diffs.append(f"'{meta_name}'")

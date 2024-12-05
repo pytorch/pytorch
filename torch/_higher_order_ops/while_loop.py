@@ -263,21 +263,23 @@ def while_loop_fake_tensor_mode(
         #     nz = x.nonzero()
         #     return it+1. nz.sum()
         # we can just ignore the newly created unbacked symints because it has
-        # no effect on the output of while_loop.
+        # no effect on the output of while_loop and it's tracked when we tracing.
+        # the subgraph.
         #
         # Case 2.1:
         # if the unbacked symints are part of output of while_loop e.g.
         #   def body_fn(it, x):
         #     nz = x.nonzero()
         #     return it+1, nz
-        # This will fail the check that in each iteration, the carried_input's shape
-        # must match the output shape as nz.shape contains newly allocated unbacked symint
+        # This will fail the shape check because in each iteration, the carried_input's shape
+        # must match the output shape as nz.shape contains newly allocated unbacked symint, this
+        # won't match the carried_input's shape.
         #
         # Case 2.2:
-        # if the unbacked symints are from the inputs e.g.
+        # if the unbacked symints are part of carried_inputs e.g.
         #   nz = a.nonzero()
         #   body_fn(it, nz):
-        #     return it+1. - nz.sin() + 1
+        #     return it+1. nz.sin() + 1,
         # There's no new unbacked symints allocated in subgraph, so we're safe.
         with mode.shape_env.ignore_fresh_unbacked_symbols():
             return body_fn(*carried_inputs, *additional_inputs)
