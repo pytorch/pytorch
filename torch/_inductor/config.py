@@ -543,33 +543,8 @@ optimize_scatter_upon_const_tensor = (
     os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
 )
 
-
-# The multiprocessing start method to use for inductor workers in the codecache.
-# Can be "subprocess" or "fork".
-def decide_worker_start_method() -> str:
-    # TODO: For internal rollout, we use a killswitch to disable the "subprocess"
-    # start method. The justknob check should not be performed at import, however,
-    # so for fbcode, we assign worker_start_method to None below and call this method
-    # lazily in async_compile.py. Remove this after "subprocess" rollout completes.
-    if "TORCHINDUCTOR_WORKER_START" in os.environ:
-        start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
-    elif is_fbcode() and not torch._utils_internal.justknobs_check(
-        "pytorch/inductor:subprocess_parallel_compile"
-    ):
-        start_method = "fork"
-    else:
-        start_method = "subprocess"
-    assert start_method in (
-        "subprocess",
-        "fork",
-    ), f"Invalid start method: {start_method}"
-    return start_method
-
-
-# TODO: Set start method directly after internal rollout of "subprocess".
-worker_start_method: Optional[str] = (
-    None if is_fbcode() else decide_worker_start_method()
-)
+# Deprecated. This setting does nothing.
+worker_start_method: Optional[str] = None
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
