@@ -2699,11 +2699,16 @@ def _index_add(
 @register_decomposition(aten.pad_sequence.default)
 @aten.pad_sequence.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     torch._check(len(sequences) > 0, lambda: "received an empty list of sequences")
     sequences_size = len(sequences)
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
-    max_len = max(x.size(0) for x in sequences)
+    max_len = sequences[0].size(0)
+    for x in sequences[1:]:
+        if guard_size_oblivious(x.size(0) > max_len):
+            max_len = x.size(0)
     if batch_first:
         out_dims = (sequences_size, max_len)
     else:
