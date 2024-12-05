@@ -1641,6 +1641,50 @@ class Tensor(torch._C.TensorBase):
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
 
+    def repeat(self, *sizes):
+        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list, torch.Size)):
+            sizes = sizes[0]
+
+        if not isinstance(sizes, (tuple, list, torch.Size)):
+            raise TypeError(
+                f"repeat() requires a sequence of integers or integer varargs, but got {type(sizes)}"
+            )
+
+        sizes = tuple(sizes)
+
+        if any(not isinstance(s, (int, torch.SymInt)) or s < 0 for s in sizes):
+            raise ValueError(
+                f"Received negative or non-integer repeat sizes: {sizes}. "
+                f"All repeat sizes must be non-negative integers."
+            )
+
+        if len(sizes) < len(self.shape):
+            raise RuntimeError(
+                f"Invalid number of repeat dimensions: got {len(sizes)} repeat sizes "
+                f"for tensor with {len(self.shape)} dimensions.\n"
+                f"Input tensor shape: {self.shape}\n"
+                f"Provided repeat sizes: {sizes}"
+            )
+
+        try:
+            total_elements = self.numel() * torch.prod(torch.tensor(sizes)).item()
+            max_elements = torch.iinfo(torch.int64).max
+            if total_elements > max_elements:
+                raise ValueError(
+                    f"Repeat operation would result in tensor with {total_elements} elements, "
+                    f"which exceeds maximum supported size of {max_elements}."
+                )
+        except OverflowError as err:
+            raise ValueError(
+                f"Repeat sizes would result in tensor too large to allocate.\n"
+                f"Input tensor shape: {self.shape}\n"
+                f"Requested repeat sizes: {sizes}"
+            ) from err
+
+        # Call the underlying implementation
+        # Note: _C._TensorBase.repeat expects a sequence, so we pass sizes as-is
+        return torch._C._TensorBase.repeat(self, sizes)
+
     __module__ = "torch"
 
 
