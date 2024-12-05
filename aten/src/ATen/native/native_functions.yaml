@@ -1248,12 +1248,44 @@
     CompositeExplicitAutograd: copysign_out
   tags: pointwise
 
-- func: _lazy_clone(Tensor self) -> Tensor
-  # Like clone, but the copy takes place lazily, only if either the
-  # input or the output are written.
+# This function should be called on the output of any operator that currently
+# conditionally returns either a view or a copy of the input, in cases where a
+# view is returned, in order to deprecate the conditional view and enable future
+# lazy clone behavior.
+#
+# If `torch.get_future_lazy_clone() == False`, the output is a view of the
+# input, but COW (Copy-on-Write) behavior is simulated in order to raise
+# warnings in the appropriate cases.
+#
+# If `torch.get_future_lazy_clone() == True`, the output is a semantic copy of
+# the input, but it is a COW tensor. The function also converts any aliases of
+# the input to COW tensors.
+#
+# From Python, this function should only be called for testing COW behavior.
+- func: _lazy_clone(Tensor(a) self, bool _force_alias=False) -> Tensor(a)
+  variants: function, method
+
+- func: _lazy_clone_future(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: _lazy_clone
+    CompositeExplicitAutograd: _lazy_clone_future
+
+- func: _lazy_clone_alias(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _lazy_clone_alias
+
+- func: _lazy_clone_copy(Tensor self, bool _force_alias=False) -> Tensor
+  variants: function
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _lazy_clone_copy
+
+- func: _lazy_clone_alias_copy(Tensor self) -> Tensor
+  variants: function
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _lazy_clone_alias_copy
 
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator

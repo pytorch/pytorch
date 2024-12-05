@@ -218,6 +218,7 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
 }
 
 TEST(TensorIteratorTest, ForEachConstInput) {
+  c10::impl::cow::FutureLazyCloneGuard guard(true);
   at::Tensor out = at::zeros({10});
   at::Tensor a = at::_lazy_clone(at::arange({10}).to(at::kFloat));
   EXPECT_TRUE(c10::impl::cow::is_cow_data_ptr(a.storage().data_ptr()));

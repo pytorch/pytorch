@@ -2,6 +2,7 @@
 
 import functools
 import warnings
+from itertools import product
 from typing import Any, Callable, List, Union
 
 import torch
@@ -22,13 +23,16 @@ aten = torch._ops.ops.aten
 
 def outputs_alias_inputs(outputs, inputs):
     input_storages = {
-        inp._typed_storage()._cdata
+        inp.untyped_storage()
         for inp in tree_flatten_only(torch.Tensor, inputs)
         if torch._C._has_storage(inp)
     }
     return any(
-        torch._C._has_storage(out) and out._typed_storage()._cdata in input_storages
-        for out in tree_flatten_only(torch.Tensor, outputs)
+        torch._C._has_storage(out)
+        and torch._C._is_alias_of(out.untyped_storage(), input_storages)
+        for out, input in product(
+            tree_flatten_only(torch.Tensor, outputs), input_storages
+        )
     )
 
 
@@ -42,8 +46,8 @@ def output_alias_each_other(outputs):
     for out in tree_flatten_only(torch.Tensor, outputs):
         if not torch._C._has_storage(out):
             continue
-        stor = out._typed_storage()._cdata
-        if stor in storages:
+        stor = out.untyped_storage()
+        if any(torch._C._is_alias_of(stor, other) for other in storages):
             return True
         storages.add(stor)
     return False

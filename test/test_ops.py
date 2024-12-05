@@ -55,6 +55,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
+    futureLazyCloneGuard,
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
@@ -1816,6 +1817,7 @@ class TestCompositeCompliance(TestCase):
             )
 
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @futureLazyCloneGuard()
     def test_cow_input(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 

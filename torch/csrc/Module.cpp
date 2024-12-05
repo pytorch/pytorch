@@ -2361,7 +2361,14 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& tensor) {
         return reinterpret_cast<std::intptr_t>(tensor.storage().data());
       },
-      "Gets the memory address of the Tensor's data pointer.");
+      "Gets the memory address of the Tensor's data pointer without COW materialization.");
+
+  py_module.def(
+      "_storage_data_ptr",
+      [](const at::Storage& storage) {
+        return reinterpret_cast<std::intptr_t>(storage.data());
+      },
+      "Gets the memory address of the Storage's data pointer without COW materialization.");
 
   py_module.def(
       "_is_cow_tensor",
@@ -2369,6 +2376,43 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_is_cowsim_tensor",
+      [](const at::Tensor& tensor) {
+        return c10::impl::cow::is_cowsim_data_ptr(tensor.storage().data_ptr());
+      },
+      "Checks if a tensor's data pointer is COWSim");
+
+  py_module.def(
+      "_is_cowsim_storage",
+      [](const at::Storage& storage) {
+        return c10::impl::cow::is_cowsim_data_ptr(storage.data_ptr());
+      },
+      "Checks if a storage's data pointer is COWSim");
+
+  py_module.def(
+      "_set_extra_conditional_view_warnings",
+      [](bool mode) {
+        c10::impl::cow::set_extra_conditional_view_warnings(mode);
+      },
+      "Enables extra warnings related to deprecation of conditional views.");
+
+  py_module.def(
+      "_get_extra_conditional_view_warnings",
+      []() { return c10::impl::cow::get_extra_conditional_view_warnings(); },
+      "Check if extra warnings related to deprecation of conditional views are enabled.");
+
+  py_module.def(
+      "_set_future_lazy_clone",
+      [](bool mode) { c10::impl::cow::set_future_lazy_clone(mode); },
+      ("Enables future behavior to make operators always return a copy in "
+       "cases where they currently conditionally return a view or a copy"));
+
+  py_module.def(
+      "_get_future_lazy_clone",
+      []() { return c10::impl::cow::get_future_lazy_clone(); },
+      "Check if future behavior to make operators always return a copy is enabled.");
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",

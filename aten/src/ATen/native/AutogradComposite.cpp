@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/MapAllocator.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
 
@@ -12,6 +13,10 @@
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
+#include <ATen/ops/_lazy_clone_alias.h>
+#include <ATen/ops/_lazy_clone_alias_native.h>
+#include <ATen/ops/_lazy_clone_future.h>
+#include <ATen/ops/_lazy_clone_future_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -91,19 +96,64 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
-Tensor _lazy_clone(Tensor const& self) {
+static Tensor _lazy_clone_impl(Tensor const& self, bool future) {
   c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
+
+  // If data pointer is shared between processes, we cannot convert it to
+  // a COW data pointer. So for future behavior, we just clone it, and for
+  // simulated behavior, we view it and emit a warning.
+  if (MapAllocator::fromDataPtr(self_storage->_data_ptr_no_checks())) {
+    if (future) {
+      return self.clone();
+    } else {
+      TORCH_WARN(
+          "This operation creates a conditional view of a tensor that is ",
+          "shared between multiple processes. This behavior is deprecated, ",
+          "and in the future it will unconditionally create a clone instead.");
+      return self.view_symint(self.sym_sizes());
+    }
+  }
+
   c10::intrusive_ptr<c10::StorageImpl> storage =
-    c10::impl::cow::lazy_clone_storage(*self_storage);
-  TORCH_CHECK(storage != nullptr);
-  auto tensor = c10::make_intrusive<c10::TensorImpl>(
-      c10::Storage(std::move(storage)),
-      self.key_set(),
-      self.dtype());
-  tensor->set_sizes_and_strides(self.sym_sizes(),
-                                self.sym_strides(),
-                                self.sym_storage_offset());
-  return Tensor(std::move(tensor));
+    c10::impl::cow::lazy_clone_storage(*self_storage, future);
+
+  if (storage == nullptr) {
+    if (future) {
+      return self.clone();
+    } else {
+      // It's not easy to give more information about why the tensor cannot be
+      // lazily cloned here. For instance, if it is a numpy-based tensor, there
+      // is nothing currently attached to the tensor that says so.
+      TORCH_WARN(
+          "This operation creates a conditional view of a tensor that has a ",
+          "non-standard data pointer. This behavior is deprecated, and in the ",
+          "future it will unconditionally create a clone instead.");
+      return self.view_symint(self.sym_sizes());
+    }
+  }
+  auto tensor = self.view_symint(self.sym_sizes());
+  tensor.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
+  return tensor;
+}
+
+Tensor _lazy_clone_alias(Tensor const& self) {
+  return _lazy_clone_impl(self, /*future=*/false);
+}
+
+Tensor _lazy_clone_future(Tensor const& self) {
+  return _lazy_clone_impl(self, /*future=*/true);
+}
+
+Tensor _lazy_clone(Tensor const& self, bool _force_alias) {
+  if (_force_alias) {
+    return self._lazy_clone_alias();
+  }
+
+  if (c10::impl::cow::get_future_lazy_clone()) {
+    return self._lazy_clone_future();
+  } else {
+    return self._lazy_clone_alias();
+  }
 }
 
 } // namespace at::native

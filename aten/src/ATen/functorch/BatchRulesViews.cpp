@@ -279,6 +279,13 @@ std::tuple<Tensor, std::optional<int64_t>> _reshape_alias_batch_rule(const Tenso
   return std::make_tuple(at::reshape_symint(self_, new_shape), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> _lazy_clone_alias_batch_rule(
+    const Tensor &self, optional<int64_t> bdim) {
+  TORCH_INTERNAL_ASSERT(bdim.has_value());
+  auto self_ = moveBatchDimToFront(self, bdim);
+  return std::make_tuple(at::_lazy_clone_alias(self), 0);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> roll_batch_rule(const Tensor& self, std::optional<int64_t> bdim, SymIntArrayRef shifts, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
@@ -439,7 +446,6 @@ std::tuple<Tensor, std::optional<int64_t>> view_copy_batch_rule(
   return std::make_tuple(at::view_copy_symint(self_, view_size), 0);
 }
 
-
 template <typename F, F Func>
 std::tuple<Tensor, std::optional<int64_t>> expand_batch_rule(
     const Tensor &self, std::optional<int64_t> self_bdim, SymIntArrayRef size, bool implicit)
@@ -566,6 +572,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
   VMAP_SUPPORT2(squeeze, dims, squeeze_dims_batch_rule);
   VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
+  VMAP_SUPPORT(_lazy_clone_alias, _lazy_clone_alias_batch_rule);
   VMAP_SUPPORT(roll, roll_batch_rule);
   VMAP_SUPPORT(permute, permute_batching_rule);
   VMAP_SUPPORT(diagonal, diagonal_batching_rule);

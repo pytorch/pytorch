@@ -88,6 +88,11 @@ MATCHER(is_copy_on_write, "") {
   return cow::is_cow_data_ptr(storage.data_ptr());
 }
 
+MATCHER(is_cowsim, "") {
+  const c10::StorageImpl& storage = std::ref(arg);
+  return cow::is_cowsim_data_ptr(storage.data_ptr());
+}
+
 TEST(lazy_clone_storage_test, no_context) {
   StorageImpl original_storage(
       {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
@@ -95,7 +100,7 @@ TEST(lazy_clone_storage_test, no_context) {
   ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
 
   intrusive_ptr<StorageImpl> new_storage =
-      cow::lazy_clone_storage(original_storage);
+      cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The original storage was modified in-place to now hold a copy on
@@ -107,6 +112,29 @@ TEST(lazy_clone_storage_test, no_context) {
   // But it is also copy-on-write.
   ASSERT_THAT(*new_storage, is_copy_on_write());
   // But they share the same data!
+  ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
+}
+
+TEST(simulate_lazy_clone_test, basic) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/7, GetDefaultCPUAllocator(), /*resizable=*/false);
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_THAT(original_storage, testing::Not(is_cowsim()));
+  ASSERT_TRUE(cow::has_simple_data_ptr(original_storage));
+
+  intrusive_ptr<StorageImpl> new_storage =
+      cow::lazy_clone_storage(original_storage, /*future=*/false);
+  ASSERT_THAT(new_storage.get(), testing::NotNull());
+
+  // The original storage was modified in-place to now hold a cowsim context.
+  ASSERT_THAT(original_storage, is_cowsim());
+  ASSERT_THAT(original_storage, testing::Not(is_copy_on_write()));
+  ASSERT_TRUE(!cow::has_simple_data_ptr(original_storage));
+
+  // The result is a different StorageImpl, also cowsim, and shares the same
+  // data
+  ASSERT_THAT(&*new_storage, testing::Ne(&original_storage));
+  ASSERT_THAT(*new_storage, is_cowsim());
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
 }
 
@@ -142,7 +170,8 @@ TEST(lazy_clone_storage_test, different_context) {
       /*resizable=*/false);
 
   // We can't handle an arbitrary context.
-  ASSERT_THAT(cow::lazy_clone_storage(storage), testing::IsNull());
+  ASSERT_THAT(
+      cow::lazy_clone_storage(storage, /*future=*/true), testing::IsNull());
 }
 
 TEST(lazy_clone_storage_test, already_copy_on_write) {
@@ -164,7 +193,7 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
   ASSERT_THAT(original_storage, is_copy_on_write());
 
   intrusive_ptr<StorageImpl> new_storage =
-      cow::lazy_clone_storage(original_storage);
+      cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage.get(), testing::NotNull());
 
   // The result is a different storage.
@@ -234,7 +263,7 @@ TEST(materialize_test, copy_on_write) {
   std::memcpy(original_storage.mutable_data(), "abcd", 4);
   void const* original_data = original_storage.data();
 
-  auto new_storage = cow::lazy_clone_storage(original_storage);
+  auto new_storage = cow::lazy_clone_storage(original_storage, /*future=*/true);
   ASSERT_THAT(new_storage, testing::NotNull());
 
   auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(

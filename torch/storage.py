@@ -241,7 +241,31 @@ class _StorageBase:
         memo = memo.setdefault("torch", {})
         if self._cdata in memo:
             return memo[self._cdata]
-        new_storage = self.clone()
+        if torch._C._is_cowsim_storage(cast(Storage, self)):
+            # Keep a second memo entry to track COWSim aliases
+            if "cowsim" not in memo:
+                memo["cowsim"] = {}
+            cowsim_memo = memo["cowsim"]
+            data_ptr = torch._C._storage_data_ptr(cast(Storage, self))
+
+            # Two different COWSim storages that share the same data (aliases)
+            # will have different _cdata, so we use the data_ptr as the key.
+            if data_ptr in cowsim_memo:
+                # If there is a match for this storage in the COWSim memo, we
+                # need to create a new alias of it.
+                memo_storage = cowsim_memo[data_ptr]
+                new_storage = (
+                    torch.tensor([], dtype=torch.uint8, device=self.device)
+                    .set_(cast(Storage, memo_storage))
+                    ._lazy_clone(_force_alias=True)
+                    .untyped_storage()
+                )
+            else:
+                new_storage = self.clone()
+                cowsim_memo[data_ptr] = new_storage
+        else:
+            new_storage = self.clone()
+
         memo[self._cdata] = new_storage
         return new_storage
 
