@@ -2486,8 +2486,8 @@ def compile(
 
     """
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Dynamo is not supported on Python 3.13+")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("Dynamo is not supported on Python 3.14+")
 
     # Decorator mode
     if model is None:
