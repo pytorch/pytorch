@@ -190,6 +190,7 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.sym_sum": TorchInGraphFunctionVariable,
+    "torch.sym_fresh_size": UserFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
@@ -3265,7 +3266,7 @@ if torch.distributed.is_available():
         "torch.distributed._composable.replicate",
     }
     if not torch._dynamo.config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3311,6 +3312,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
@@ -3324,7 +3326,7 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     if not torch._dynamo.config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 @functools.lru_cache(None)
