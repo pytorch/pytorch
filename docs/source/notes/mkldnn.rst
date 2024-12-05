@@ -31,14 +31,14 @@ for `float32` operators.
 
 .. code:: python
 
-  # The flag below controls the internal computation precision for mkldnn matmul. Default is float32.
-  torch.backends.mkldnn.matmul.fp32_precision = "default"
+  # The flag below controls the internal computation precision for mkldnn matmul. Default ieee is float32.
+  torch.backends.mkldnn.matmul.fp32_precision = "ieee"
 
-  # The flag below controls the internal computation precision for mkldnn conv. Default is float32.
-  torch.backends.mkldnn.conv.fp32_precision = "default"
+  # The flag below controls the internal computation precision for mkldnn conv. Default ieee is float32.
+  torch.backends.mkldnn.conv.fp32_precision = "ieee"
 
-  # The flag below controls the internal computation precision for mkldnn rnn. Default is float32.
-  torch.backends.mkldnn.rnn.fp32_precision = "default"
+  # The flag below controls the internal computation precision for mkldnn rnn. Default ieee is float32.
+  torch.backends.mkldnn.rnn.fp32_precision = "ieee"
 
 Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
 matmuls or convolutions are also affected. These include :class:`torch.nn.Linear`, :class:`torch.nn._ConvNd`, :func:`torch.cdist`,
@@ -66,7 +66,7 @@ To get an idea of the precision and speed, see the example code and benchmark da
   print(error, relative_error)
 
   # Do matmul FP32 mode.
-  torch.backends.mkldnn.matmul.fp32_precision = 'default'
+  torch.backends.mkldnn.matmul.fp32_precision = 'ieee'
   ab_fp32 = a @ b
   error = (ab_fp32 - ab_full).abs().max()  # 0.0003
   relative_error = error / mean  # 0.00000317
@@ -78,25 +78,25 @@ If full FP32 precision is needed, users can disable BF16 by:
 
 .. code:: python
 
-  torch.backends.mkldnn.matmul.fp32_precision = 'default'
-  torch.backends.mkldnn.conv.fp32_precision = 'default'
-  torch.backends.mkldnn.rnn.fp32_precision = 'default'
+  torch.backends.mkldnn.matmul.fp32_precision = 'ieee'
+  torch.backends.mkldnn.conv.fp32_precision = 'ieee'
+  torch.backends.mkldnn.rnn.fp32_precision = 'ieee'
 
 To toggle the BF16 flags off in C++, you can do
 
 .. code:: C++
 
-  at::globalContext().setFloat32Precision("default", "mkldnn", "matmul");
-  at::globalContext().setFloat32Precision("default", "mkldnn", "conv");
-  at::globalContext().setFloat32Precision("default", "mkldnn", "rnn");
+  at::globalContext().setFloat32Precision("ieee", "mkldnn", "matmul");
+  at::globalContext().setFloat32Precision("ieee", "mkldnn", "conv");
+  at::globalContext().setFloat32Precision("ieee", "mkldnn", "rnn");
 
-We can override a generic setting for a specific operator or backend if the fp32_precision is set to `default`.
+We can override a generic setting for a specific operator or backend if the fp32_precision is set to `ieee`.
 
 .. code:: python
 
   torch.backends.fp32_precision = "bf16"
-  torch.backends.mkldnn.fp32_precision = "default"
-  torch.backends.mkldnn.matmul.fp32_precision = "default"
+  torch.backends.mkldnn.fp32_precision = "ieee"
+  torch.backends.mkldnn.matmul.fp32_precision = "ieee"
 
 For such case, both `torch.backends.mkldnn.fp32_precision` and `torch.backends.mkldnn.matmul.fp32_precision`
 is overrided to bf16.
