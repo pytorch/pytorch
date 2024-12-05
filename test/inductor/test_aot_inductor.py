@@ -3946,6 +3946,28 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_misaligned_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.cos()
+
+        N = 64 * 64 * 64 + 64
+        arg = torch.randn(N, device=self.device)
+        example_inputs = (arg,)
+        model = Model()
+        expected = model(*example_inputs)
+
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
+
+        m_arg = torch.zeros(N + 1, device=self.device)
+        m_arg = m_arg[1:]
+        m_arg.copy_(arg)
+        msg = ".* API call failed at .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            actual = optimized(m_arg)
+            torch.testing.assert_close(actual, expected)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
