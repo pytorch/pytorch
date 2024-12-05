@@ -789,6 +789,11 @@ check_stack_no_cycles_TESTING_ONLY: bool = False
 # When True, complex_memory_overlap always reports True
 always_complex_memory_overlap_TESTING_ONLY: bool = False
 
+# enable linear binary folding
+enable_linear_binary_folding = (
+    os.environ.get("TORCHINDUCTOR_ENABLE_LINEAR_BINARY_FOLDING", "0") == "1"
+)
+
 
 # config specific to codegen/cpp.py
 class cpp:
