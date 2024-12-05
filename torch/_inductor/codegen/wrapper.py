@@ -889,7 +889,7 @@ class PythonWrapperCodegen(CodeGen):
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
             self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
@@ -1237,11 +1237,12 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_input_symbol_assignment(
         self,
-        code: IndentedBuffer,
         name: str,
         value: ir.TensorBox,
         bound_vars: Set[sympy.Symbol],
     ):
+        code = self.prefix
+
         @functools.lru_cache(None)
         def sizeof(name):
             code.writeline(f"{name}_size = {name}.size()")
@@ -1269,13 +1270,11 @@ class PythonWrapperCodegen(CodeGen):
         else:
             raise AssertionError(f"Unknown value type: {type(value)}")
 
-    def codegen_inputs(
-        self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
-    ):
+    def codegen_inputs(self):
         """Assign all symbolic shapes to locals"""
         bound_vars: Set[sympy.Symbol] = set()
-        for name, value in graph_inputs.items():
-            self.codegen_input_symbol_assignment(code, name, value, bound_vars)
+        for name, value in V.graph.graph_inputs.items():
+            self.codegen_input_symbol_assignment(name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
