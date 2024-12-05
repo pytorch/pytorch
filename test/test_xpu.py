@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyXPU,
     OpDTypes,
     ops,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
@@ -455,6 +456,22 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+
+    @skipXPUIf(
+        int(torch.version.xpu) < 20250000,
+        "Test requires SYCL compiler version 2025.0.0 or newer.",
+    )
+    def test_mem_get_info(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
+        # increasing to 1MB to force acquiring a new block.
+        t = torch.randn(1024 * 256, device="xpu")
+        torch.xpu.synchronize()
+        after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
+
+        self.assertGreaterEqual(before_free_bytes, after_free_bytes)
+        self.assertEqual(before_total_bytes, after_total_bytes)
 
     def test_get_arch_list(self):
         arch_list = torch.xpu.get_arch_list()
