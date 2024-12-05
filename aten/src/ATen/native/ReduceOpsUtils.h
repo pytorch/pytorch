@@ -219,7 +219,7 @@ inline TensorIterator make_reduction(
   // not generalize this to common mismatched input/output types to avoid cross
   // product of templated kernel launches.
   const bool gpu_lowp_to_f32 = (
-    self.is_cuda() && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
+        (self.is_cuda() || self.is_xpu()) && (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) && out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type()
                    : self.is_complex() ? c10::toComplexType(out_dtype)
                                        : out_dtype;
