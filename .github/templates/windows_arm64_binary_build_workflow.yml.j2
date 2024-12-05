@@ -79,8 +79,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  "ozanMSFT/builder"
-          ref: "users/ozanMSFT/win-arm64"
+          repository:  common.builder_repo
+          ref:  common.builder_branch
           path: "builder"
       - name: Bootstrap folders
         shell: cmd
@@ -151,8 +151,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  "ozanMSFT/builder"
-          ref: "users/ozanMSFT/win-arm64"
+          repository:  common.builder_repo
+          ref:  common.builder_branch
           path: "builder"
       - name: Bootstrap Git
         shell: cmd

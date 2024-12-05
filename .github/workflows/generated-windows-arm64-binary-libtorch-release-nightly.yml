@@ -72,8 +72,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  "ozanMSFT/builder"
-          ref: "users/ozanMSFT/win-arm64"
+          repository:  common.builder_repo
+          ref:  common.builder_branch
           path: "builder"
       - name: Bootstrap folders
         shell: cmd
@@ -165,13 +165,13 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  "ozanMSFT/builder"
-          ref: "users/ozanMSFT/win-arm64"
-          path: "builder"    
+          repository:  common.builder_repo
+          ref:  common.builder_branch
+          path: "builder"
       - name: Bootstrap Git
         shell: cmd
         run: |
-          "builder/windows/arm64/bootstrap_git.bat"  
+          "builder/windows/arm64/bootstrap_git.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
