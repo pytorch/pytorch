@@ -611,7 +611,11 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     for param_group in optim.param_groups:
         if "lr" in param_group:
             lrs.append(param_group["lr"])
-            param_group["lr"] = 0.0
+            param_group["lr"] = (
+                torch.tensor(0.0)
+                if isinstance(param_group["lr"], torch.Tensor)
+                else 0.0
+            )
     optim.step(closure=None)
     # Whether to recover the "lr" should not matter too much as we will
     # restore checkpointing later.
