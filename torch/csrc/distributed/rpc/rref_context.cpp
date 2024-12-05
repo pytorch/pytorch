@@ -136,7 +136,7 @@ std::unordered_map<std::string, std::string> RRefContext::getDebugInfo() {
   std::unique_lock<std::mutex> lock(mutex_);
   auto ownerSize = owners_.size();
   auto numPendingUsers = pendingUsers_.size();
-  int numForks = 0;
+  size_t numForks = 0;
   for (const auto& owner : forks_) {
     numForks += owner.second.size();
   }

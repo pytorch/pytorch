@@ -68,7 +68,7 @@ class JitLlgaTestCase(JitTestCase):
         with torch.no_grad(), torch._jit_internal._disable_emit_hooks():
             if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
-                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
+                with torch.autocast(device_type="cpu", cache_enabled=False, dtype=torch.bfloat16):
                     traced = torch.jit.trace(m, x)
                     if isinstance(m, torch.nn.Module):
                         traced = torch.jit.freeze(traced)
@@ -788,7 +788,7 @@ class TestDynamoAOT(JitTestCase):
         mod = Seq()
 
         import torch._dynamo
-        aot_mod = torch._dynamo.optimize("aot_ts", nopython=True)(mod)
+        aot_mod = torch.compile(mod, backend="aot_ts", fullgraph=True)
 
         for _ in range(10):
             with torch.jit.fuser("fuser3"):

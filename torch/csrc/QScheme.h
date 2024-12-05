@@ -9,7 +9,8 @@
 constexpr int QSCHEME_NAME_LEN = 64;
 
 struct THPQScheme {
-  PyObject_HEAD at::QScheme qscheme;
+  PyObject_HEAD
+  at::QScheme qscheme;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   char name[QSCHEME_NAME_LEN + 1];
 };

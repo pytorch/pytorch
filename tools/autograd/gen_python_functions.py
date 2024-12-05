@@ -135,7 +135,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_to_copy_out",
     "_reshape_copy",
     "_reshape_copy_out",
-    "_lazy_clone_alias",
     "_lazy_clone_alias_copy",
     "_lazy_clone_copy",
     "_lazy_clone_future",
@@ -390,9 +389,9 @@ def group_filter_overloads(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     pred: Callable[[NativeFunction], bool],
 ) -> dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]:
-    grouped: dict[
-        BaseOperatorName, list[PythonSignatureNativeFunctionPair]
-    ] = defaultdict(list)
+    grouped: dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]] = (
+        defaultdict(list)
+    )
     for pair in pairs:
         if pred(pair.function):
             grouped[pair.function.func.name.name].append(pair)
@@ -526,12 +525,12 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> str:
         return kv[0].base
 
     def env_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> dict[str, list[str]]:
         name, fn_pairs = kv
         return {
@@ -683,9 +682,7 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert (
-            any_schema_found
-        ), f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
 
     return results
 
@@ -1106,7 +1103,7 @@ def method_def(
     if module == "torch":
         flags += " | METH_STATIC"
 
-    return f'{{"{name}", {pycname}, {flags}, NULL}},'
+    return f'{{"{name}", {pycname}, {flags}, nullptr}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

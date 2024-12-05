@@ -782,8 +782,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     } else if (bias_dim == 3) {
       attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
     } else {
-      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
       TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
     }
   }
 
@@ -814,7 +814,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
                                       philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   Tensor debugmask;
 
   run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
@@ -913,7 +913,7 @@ _flash_attention_forward(
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
   std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
@@ -1160,7 +1160,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
   }
 
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
@@ -1293,7 +1293,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (window_size.has_value()) {
       p.window_size = *window_size;
     }
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
@@ -1387,7 +1387,7 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
   return at::Tensor();
 }
 
-REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
+REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda)
 
 #if defined(USE_MEM_EFF_ATTENTION) and !defined(USE_ROCM)
 namespace {

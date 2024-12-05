@@ -16,8 +16,15 @@
 
 namespace c10 {
 
-C10_API void throwNullDataPtrError();
+[[noreturn]] C10_API void throwNullDataPtrError();
 C10_API void warnDeprecatedDataPtr();
+
+// Used in StorageImpl to store extra metadata.
+// Currently used only for storing a custom error message
+// used when throwing an exception when data_ptr is accessed.
+struct C10_API StorageExtraMeta {
+  std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+};
 
 // A storage represents the underlying backing data buffer for a
 // tensor.  This concept was inherited from the original Torch7
@@ -123,6 +130,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const at::DataPtr& data_ptr() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     maybe_check_cowsim_read();
     return data_ptr_;
   }
@@ -132,7 +142,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   at::DataPtr& mutable_data_ptr() {
-    if (C10_UNLIKELY(has_data_ptr_check_)) {
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
       }
@@ -165,12 +178,18 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   const void* data() const {
+    if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
+      throw_data_ptr_access_error();
+    }
     maybe_check_cowsim_read();
     return data_ptr_.get();
   }
 
   void* mutable_data() {
-    if (C10_UNLIKELY(has_data_ptr_check_)) {
+    if (C10_UNLIKELY(has_mutable_data_ptr_check_)) {
+      if (throw_on_immutable_data_ptr_) {
+        throw_data_ptr_access_error();
+      }
       if (throw_on_mutable_data_ptr_) {
         throwNullDataPtrError();
       }
@@ -257,6 +276,22 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
+  StorageExtraMeta& get_extra_meta() {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<StorageExtraMeta>();
+    }
+    return *extra_meta_;
+  }
+
+  [[noreturn]] void throw_data_ptr_access_error() const;
+
+  void release_data_and_set_meta_custom_data_ptr_error_msg_(
+      std::optional<std::string> s) {
+    throw_on_immutable_data_ptr_ = true;
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+    refresh_has_data_ptr_check();
+  }
+
   void set_throw_on_mutable_data_ptr() {
     throw_on_mutable_data_ptr_ = true;
     refresh_has_data_ptr_check();
@@ -282,8 +317,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
-    has_data_ptr_check_ = is_cow() || is_cowsim() || throw_on_mutable_data_ptr_ ||
-        warn_deprecated_on_mutable_data_ptr_;
+    has_mutable_data_ptr_check_ = is_cow() || is_cowsim() ||
+        throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_ ||
+        throw_on_immutable_data_ptr_;
   }
 
   inline bool is_cow() const {
@@ -323,13 +359,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // All special checks in data/data_ptr calls are guarded behind this single
   // boolean. This is for performance: .data/.data_ptr calls are commonly in the
   // hot-path.
-  bool has_data_ptr_check_ = false;
+  bool has_mutable_data_ptr_check_ = false;
   // If we should throw when mutable_data_ptr() or mutable_data() is called.
   bool throw_on_mutable_data_ptr_ = false;
+  // If we should throw when data_ptr() or data() is called.
+  bool throw_on_immutable_data_ptr_ = false;
   // If we warn when mutable_data_ptr() or mutable_data() is called.
   bool warn_deprecated_on_mutable_data_ptr_ = false;
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
+  std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
 };
 
 // Declare StorageImpl create function pointer types.

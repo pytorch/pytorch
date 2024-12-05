@@ -20,5 +20,5 @@ static void airy_ai_kernel(TensorIteratorBase& iterator) {
 } // airy_ai_kernel(TensorIteratorBase& iterator)
 } // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(special_airy_ai_stub, &CPU_CAPABILITY::airy_ai_kernel);
+REGISTER_DISPATCH(special_airy_ai_stub, &CPU_CAPABILITY::airy_ai_kernel)
 } // namespace at::native

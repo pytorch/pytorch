@@ -17,6 +17,10 @@ namespace {
 class DeleteTracker {
  public:
   explicit DeleteTracker(int& delete_count) : delete_count_(delete_count) {}
+  DeleteTracker(const DeleteTracker&) = delete;
+  DeleteTracker(DeleteTracker&&) = delete;
+  DeleteTracker& operator=(const DeleteTracker&) = delete;
+  DeleteTracker& operator=(DeleteTracker&&) = delete;
   ~DeleteTracker() {
     ++delete_count_;
   }
@@ -137,6 +141,10 @@ TEST(simulate_lazy_clone_test, basic) {
 struct MyDeleterContext {
   MyDeleterContext(void* bytes) : bytes(bytes) {}
 
+  MyDeleterContext(const MyDeleterContext&) = delete;
+  MyDeleterContext(MyDeleterContext&&) = delete;
+  MyDeleterContext& operator=(const MyDeleterContext&) = delete;
+  MyDeleterContext& operator=(MyDeleterContext&&) = delete;
   ~MyDeleterContext() {
     delete[] static_cast<std::byte*>(bytes);
   }

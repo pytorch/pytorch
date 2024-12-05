@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import copy
 import dataclasses
 import itertools
 import operator
@@ -666,9 +667,17 @@ def _fuse_conv_bn_qat_helper(
     """
     m.graph.eliminate_dead_code()
     m.recompile()
+
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(m)
+
     conv_bn_pattern = _get_conv_bn_pattern(conv_fn)
     match_pattern = _get_aten_graph_module_for_pattern(
-        conv_bn_pattern, example_inputs, is_cuda
+        conv_bn_pattern,
+        example_inputs,
+        is_cuda,
+        using_training_ir=using_training_ir,
     )
 
     # Step (1): Replace patterns with conv bias
@@ -682,6 +691,7 @@ def _fuse_conv_bn_qat_helper(
         qat_conv_bn_pattern,
         example_inputs,
         is_cuda,
+        using_training_ir=using_training_ir,
     )
     replacements_with_conv_bias = replace_pattern_with_filters(
         m,
@@ -699,6 +709,7 @@ def _fuse_conv_bn_qat_helper(
         qat_conv_bn_pattern_no_conv_bias,
         example_inputs,
         is_cuda,
+        using_training_ir=using_training_ir,
     )
     replacements_no_conv_bias = replace_pattern_with_filters(
         m,
@@ -729,9 +740,21 @@ def _fuse_conv_bn_qat_helper(
 
     all_original_to_replacement_nodes = {}
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
-        for original_node, replacement_node in _get_conv_bn_pattern_nodes(r).values():
+        replacement_dict = _get_conv_bn_pattern_nodes(r)
+        # The original conv node's "nn_module_stack"
+        conv_nn_module = replacement_dict["conv"][0].meta.get("nn_module_stack", None)
+        for k, node_tuple in replacement_dict.items():
+            original_node, replacement_node = node_tuple
             # Step (3a): Copy over metadata for all nodes in [conv - bn - getitem]
             replacement_node.meta = original_node.meta
+            # If original_node is a get_attr node, it doesn't have nn_module_stack.
+            # In this case, we copy nn_module_stack from the original conv node.
+            if (
+                k in ["conv_input", "conv_weight"]
+                and conv_nn_module
+                and "nn_module_stack" not in replacement_node.meta
+            ):
+                replacement_node.meta["nn_module_stack"] = copy.deepcopy(conv_nn_module)
             if _is_conv_or_conv_transpose_node(original_node):
                 # Step (3b): Copy over conv literal args
                 _copy_over_literal_conv_args(original_node, replacement_node)
@@ -880,6 +903,10 @@ def _fold_conv_bn_qat_helper(
     """
     Replace the quantized (conv + bn) pattern with conv with bn weights folded into the weights of conv.
     """
+    from torch._export import gm_using_training_ir
+
+    using_training_ir = gm_using_training_ir(m)
+
     m.graph.eliminate_dead_code()
     m.recompile()
     _duplicate_dequantize_node(m)
@@ -909,13 +936,21 @@ def _fold_conv_bn_qat_helper(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )
         match_pattern = _get_aten_graph_module_for_pattern(
-            match_pattern, example_inputs, is_cuda, **kwargs
+            match_pattern,
+            example_inputs,
+            is_cuda,
+            using_training_ir=using_training_ir,
+            **kwargs,
         )
         replacement_pattern = _get_folded_quantized_qat_conv_bn_pattern(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )
         replacement_pattern = _get_aten_graph_module_for_pattern(
-            replacement_pattern, example_inputs, is_cuda, **kwargs
+            replacement_pattern,
+            example_inputs,
+            is_cuda,
+            using_training_ir=using_training_ir,
+            **kwargs,
         )
         replacements.extend(
             replace_pattern_with_filters(

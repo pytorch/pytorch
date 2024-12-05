@@ -56,6 +56,7 @@ un_ops_under_test = [
     torch._foreach_sign,
     torch._foreach_abs,
     torch._foreach_sqrt,
+    torch._foreach_rsqrt,
 ]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(

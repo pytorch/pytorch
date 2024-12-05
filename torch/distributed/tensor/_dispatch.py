@@ -77,7 +77,7 @@ def found_inf_reduce_handler(
         cast(List[object], op_info.local_args), op_info.args_tree_spec
     )
     local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+    op_call(*local_tensor_args, **op_info.local_kwargs)
 
     grad_dtensor = cast(list[dtensor.DTensor], args[0])[0]
     grad_placements = grad_dtensor.placements
@@ -401,9 +401,11 @@ class OpDispatcher:
             mesh,
             OpSchema(
                 op_call,
-                pytree.tree_unflatten(args_schema, args_spec)
-                if args_spec
-                else tuple(args_schema),
+                (
+                    pytree.tree_unflatten(args_schema, args_spec)
+                    if args_spec
+                    else tuple(args_schema)
+                ),
                 kwargs_schema,
                 schema_info=runtime_schema_info,
             ),

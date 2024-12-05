@@ -5,8 +5,7 @@
 
 #include <sstream>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
     : TsNode(
@@ -26,7 +25,7 @@ const DeviceData* DeviceData::Cast(const Node* node) {
   return NodeCast<DeviceData>(node);
 }
 
-NodePtr DeviceData::Create(std::shared_ptr<BackendData> data) {
+NodePtr DeviceData::Create(const std::shared_ptr<BackendData>& data) {
   NodePtr node = ReuseOrMakeNode<DeviceData>(data);
   // ReuseOrMakeNode may return a reused node which has the same shape,
   // however, we need to replace the old data_ with the new one.
@@ -38,5 +37,4 @@ NodePtr DeviceData::Create(std::shared_ptr<BackendData> data) {
   return node;
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

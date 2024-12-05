@@ -52,10 +52,12 @@ void EmitMetricInfo(
     int64_t delta_time =
         samples.back().timestamp_ns - samples.front().timestamp_ns;
     if (delta_time > 0) {
-      double value_sec = 1e6 * (total / (delta_time / 1000.0));
+      double value_sec =
+          1e6 * (total / (static_cast<double>(delta_time) / 1000.0));
       (*ss) << "  ValueRate: " << data->Repr(value_sec) << " / second" << '\n';
-      double count_sec =
-          1e6 * (static_cast<double>(samples.size()) / (delta_time / 1000.0));
+      double count_sec = 1e6 *
+          (static_cast<double>(samples.size()) /
+           (static_cast<double>(delta_time) / 1000.0));
       (*ss) << "  Rate: " << count_sec << " / second" << '\n';
     }
   }
@@ -67,7 +69,8 @@ void EmitMetricInfo(
       });
   (*ss) << "  Percentiles: ";
   for (const auto i : c10::irange(metrics_percentiles.size())) {
-    size_t index = metrics_percentiles[i] * samples.size();
+    size_t index = static_cast<size_t>(
+        metrics_percentiles[i] * static_cast<double>(samples.size()));
     if (i > 0) {
       (*ss) << "; ";
     }
@@ -225,12 +228,20 @@ std::vector<Sample> MetricData::Samples(
   std::lock_guard<std::mutex> lock(lock_);
   std::vector<Sample> samples;
   if (count_ <= samples_.size()) {
-    samples.insert(samples.end(), samples_.begin(), samples_.begin() + count_);
+    samples.insert(
+        samples.end(),
+        samples_.begin(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(count_));
   } else {
     size_t position = count_ % samples_.size();
-    samples.insert(samples.end(), samples_.begin() + position, samples_.end());
     samples.insert(
-        samples.end(), samples_.begin(), samples_.begin() + position);
+        samples.end(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(position),
+        samples_.end());
+    samples.insert(
+        samples.end(),
+        samples_.begin(),
+        samples_.begin() + static_cast<std::ptrdiff_t>(position));
   }
   if (accumulator != nullptr) {
     *accumulator = accumulator_;

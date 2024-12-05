@@ -122,7 +122,7 @@ def fn():
                 z *= 3
             return z
 
-        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
@@ -226,7 +226,7 @@ def fn():
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
+            dummy_opt = torch.compile(dummy_fn, backend="eager")
             self.assertEqual(dummy_opt(), test[3])
 
     def test_exception_table_encode_varint(self):
@@ -526,6 +526,23 @@ def fn():
                     self.assertIn("JUMP", insts[insts_i].opname)
                     self.assertIs(insts[insts_i].target, insts[-1])
             insts_i += 1
+
+    def test_bytecode_analysis_jump_backward_no_interrupt(self):
+        # bytecode_analysis fails if JUMP_BACKWARD_NO_INTERRUPT is not terminal in 3.13+
+        @torch.compile(backend="eager")
+        def fn(x):
+            # graph break causes bytecode_analysis to analyze the rest of this function
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                try:
+                    x = x + 1
+                except NotImplementedError:
+                    x = x + 1
+                except Exception as e:
+                    x = x + 1
+            return x
+
+        self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
 
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):

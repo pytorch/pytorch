@@ -12,7 +12,7 @@ import sys
 from datetime import timedelta
 from typing import Callable, Dict, Iterator, Optional, Tuple
 
-from torch.distributed import FileStore, PrefixStore, Store, TCPStore
+from torch.distributed import FileStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
@@ -181,17 +181,22 @@ def _create_c10d_store(
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
     if _torchelastic_use_agent_store():
-        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
-        tcp_store = TCPStore(hostname, port, world_size, False, timeout)
-        return PrefixStore(f"/worker/attempt_{attempt}", tcp_store)
+        # We create a new TCPStore for every retry so no need to add prefix for each attempt.
+        return TCPStore(
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=False,
+            timeout=timeout,
+        )
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname,
-            port,
-            world_size,
-            start_daemon,
-            timeout,
+            host_name=hostname,
+            port=port,
+            world_size=world_size,
+            is_master=start_daemon,
+            timeout=timeout,
             multi_tenant=True,
             use_libuv=use_libuv,
         )

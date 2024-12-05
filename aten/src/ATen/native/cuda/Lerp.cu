@@ -9,7 +9,7 @@
 namespace at::native {
 namespace {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char lerp_tensor_name[] = "lerp_tensor";
+constexpr char lerp_tensor_name[] = "lerp_tensor";
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if(at::isComplexType(dtype)) {
@@ -63,7 +63,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   }
 }
 
-CONSTEXPR_EXCEPT_WIN_CUDA char lerp_scalar_name[] = "lerp_scalar";
+constexpr char lerp_scalar_name[] = "lerp_scalar";
 void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -121,7 +121,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
-REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
+REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel)
+REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel)
 
 } // namespace at::native
