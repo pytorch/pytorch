@@ -11,6 +11,7 @@ from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config
+from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
@@ -138,6 +139,7 @@ def filtered_configs(
 # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
 mm_kernel_configs = (
     [
+        # {"config": (128, 256, 64, 3, 8), "cond": True},
         {"config": (32, 32, 16, 1, 2), "cond": True},
         {"config": (32, 32, 128, 2, 4), "cond": True},
         {"config": (32, 64, 32, 5, 8), "cond": True},
@@ -215,6 +217,19 @@ mixed_mm_kernel_configs = (
     if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
     else mm_kernel_configs
 )
+
+persistent_mm_kernel_configs = [
+    {"config": (128, 256, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 3, 8), "cond": True},
+    # {"config": (128, 128, 128, 4, 8), "cond": True},
+    # {"config": (128, 128, 128, 4, 4), "cond": True},
+    {"config": (128, 128, 128, 3, 4), "cond": True},
+    # {"config": (128, 128, 128, 5, 4), "cond": True},
+    # {"config": (128, 128, 128, 5, 8), "cond": True},
+    # {"config": (128, 128, 128, 6, 8), "cond": True},
+    # {"config": (128, 128, 64, 4, 8), "cond": True},
+]
 
 scaled_mm_kernel_configs = [
     {"config": (128, 256, 32, 3, 8), "cond": True},
@@ -338,6 +353,11 @@ mixed_mm_platform_configs = tuple(
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
+persistent_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in persistent_mm_kernel_configs
+    if config["cond"]
+)
 scaled_mm_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
     for config in scaled_mm_kernel_configs
@@ -372,6 +392,11 @@ mixed_mm_configs = functools.partial(
     configs=mixed_mm_platform_configs,
 )
 
+persistent_mm_configs = functools.partial(
+    filtered_configs,
+    configs=persistent_mm_platform_configs,
+)
+
 scaled_mm_configs = functools.partial(
     filtered_configs,
     configs=scaled_mm_platform_configs,
@@ -385,10 +410,39 @@ def mm_grid(m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
+def mm_grid_persistent(m, n, meta):
+    """Defines the grid for persistent kernels."""
+    return (
+        min(meta["NUM_SMS"], cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"])),
+        1,
+        1,
+    )
+
+
 def acc_type(dtype):
     if dtype in (torch.float16, torch.bfloat16):
         return "tl.float32"
     return f"tl.{dtype}".replace("torch.", "")
+
+
+@functools.lru_cache
+def _get_sm_count():
+    return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+TMA_SIZE = 128
+
+
+def get_tma_workspace_arg(num_tma_descriptors, device: torch.device) -> WorkspaceArg:
+    """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
+    zero_mode = WorkspaceZeroMode.from_bool(False)
+    size = _get_sm_count() * num_tma_descriptors * TMA_SIZE
+    return WorkspaceArg(
+        count=size,
+        zero_mode=zero_mode,
+        device=device,
+        outer_name=WorkspaceArg.unique_name(),
+    )
 
 
 def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
@@ -413,6 +467,15 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
+    )
+
+
+def mm_options_persistent(mat1, mat2):
+    return dict(
+        A_ROW_MAJOR=not mat1.layout.is_transposed(),
+        B_ROW_MAJOR=not mat2.layout.is_transposed(),
+        NUM_SMS=_get_sm_count(),
+        TMA_SIZE=TMA_SIZE,
     )
 
 

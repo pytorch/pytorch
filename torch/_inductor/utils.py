@@ -100,6 +100,7 @@ GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
+TMA_ALIGNMENT = 16
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -1171,6 +1172,32 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
+
+
+def use_triton_tma_template(*matrices):
+    from .virtualized import V
+    from torch.utils._triton import has_triton_tma_device
+
+    def _is_compatible(x):
+        if len(x.get_size()) != 2:
+            return False
+
+        dtype = x.get_dtype()
+        if dtype not in (torch.float16, torch.bfloat16):
+            return False
+
+        layout = x.get_layout()
+        transposed = layout.is_transposed()
+        if not (layout.is_contiguous() or transposed):
+            return False
+
+        inner_dim = layout.size[1]
+        if transposed:
+            inner_dim = layout.size[0]
+        inner_bytes = inner_dim * dtype.itemsize
+        return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    return has_triton_tma_device() and all(_is_compatible(m) for m in matrices)
 
 
 def use_cutlass_template(layout, m, n, k):
