@@ -262,7 +262,7 @@ class TritonTemplateKernel(TritonKernel):
         super().__init__(
             {
                 "x": numel,
-                "r": sympy.S.One,
+                "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
         )

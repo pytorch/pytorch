@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import textwrap
 from typing import (
     Any,
     Callable,
@@ -20,6 +21,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Type,
     Union,
 )
 
@@ -57,6 +59,7 @@ from ..utils import (
     unique,
 )
 from ..virtualized import ops, OpsWrapper, V
+from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
 from .simd_kernel_features import (
@@ -142,7 +145,6 @@ class IterationRangesRoot(IterationRanges):
         self,
         name: str,
         numel: sympy.Expr,
-        # TODO: this is probably SymTy.INDEX and SymTy.RINDEX
         prefix: str,
         index: int,
         kernel: SIMDKernel,
@@ -359,7 +361,7 @@ class SIMDKernel(Kernel):
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
-        self.inside_reduction = self.numels["r"] != 1
+        self.inside_reduction = features.is_reduction()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -385,6 +387,12 @@ class SIMDKernel(Kernel):
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
 
+    @property
+    @cache_on_self
+    @no_type_check  # https://github.com/python/mypy/issues/17184
+    def num_reduction_dims(self) -> int:
+        return sum(prefix_is_reduction(prefix) for prefix in self.numels)
+
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
@@ -396,25 +404,25 @@ class SIMDKernel(Kernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        no_r_dim = not self.inside_reduction or self.numels["r"] == 1
+        prefixes = ["z", "y", "x", "r0_", "r1_"]
+        active_prefixes = [prefix for prefix in prefixes if prefix in self.numels]
+        no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
 
-        prefixes = "zyxr"
-        active_prefixes = prefixes[-len(self.numels) :]
-
-        grid_dims = "xyz"
+        grid_dims = ["x", "y", "z"]
+        reduction_dims = ["r0_", "r1_"]
         if self.no_x_dim:
-            tensor_dims = "r"
+            tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = "xyz"
+            tensor_dims = grid_dims
         else:
-            tensor_dims = "xyzr"
+            tensor_dims = grid_dims + reduction_dims
 
-        tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
+        tensor_dims = [p for p in tensor_dims if p in active_prefixes]
 
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
-            tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
-            grid_dim = None if is_reduction else grid_dims.find(prefix)
+            tensor_dim = tensor_dims.index(prefix) if prefix in tensor_dims else None
+            grid_dim = None if is_reduction else grid_dims.index(prefix)
             index = i if grid_dim is None else grid_dim
             self.range_trees.append(
                 IterationRangesRoot(
@@ -427,7 +435,7 @@ class SIMDKernel(Kernel):
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
-                    has_zdim="z" in active_prefixes,
+                    has_zdim="z" in self.numels,
                 )
             )
 
@@ -468,12 +476,14 @@ class SIMDKernel(Kernel):
 
     def dense_size_list(self) -> List[str]:
         sizes = ["1"] * self.triton_tensor_ndim()
+
         for tree in self.range_trees:
             if tree.tensor_dim is None:
                 continue
 
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
+
         return sizes
 
     def dense_size_str(self):
@@ -528,7 +538,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.numels["r"] == 1:
+            if self.features.reduction_numel == 1:
                 assert not self.inside_reduction
                 yield
                 return
@@ -558,6 +568,10 @@ class SIMDKernel(Kernel):
     def _split_iteration_ranges(
         groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
     ):
+        # Special case: if a node's sizes are ([], []), there's nothing to split.
+        if all(len(length) == 0 for length in lengths):
+            return [[] for group in groups], []
+
         sv = V.graph.sizevars
         new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
@@ -616,9 +630,9 @@ class SIMDKernel(Kernel):
                     )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        # Check that the total number of iterations matches.
+        if not all(V.graph.sizevars.size_hint(s) == 1 for s in remaining):
+            raise CantSplit
 
         return new_ranges, return_getters_groups
 
@@ -963,7 +977,7 @@ class SIMDKernel(Kernel):
     def welford_reduce_fallback(self, dtype, value):
         sum_ = ops.reduction(dtype, dtype, "sum", value)
         self.inside_reduction = False
-        rnumel = ops.index_expr(self.numels["r"], dtype)
+        rnumel = ops.index_expr(self.features.reduction_numel, dtype)
         mean = ops.truediv(sum_, rnumel)
 
         self.inside_reduction = True
@@ -983,7 +997,7 @@ class SIMDKernel(Kernel):
 
 
 class SIMDScheduling(BaseScheduling):
-    kernel_type = SIMDKernel  # override in subclass
+    kernel_type: Type[Any] = SIMDKernel  # override in subclass
 
     def __init__(self, scheduler) -> None:
         super().__init__()
@@ -1495,74 +1509,126 @@ class SIMDScheduling(BaseScheduling):
 
         self.scheduler.free_buffers()
 
-    @staticmethod
+    @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(node):
-        ranges, reduction_ranges = node.get_ranges()
-        if len(ranges) <= 1:
-            return ()
+    def candidate_tilings(cls, node, is_pointwise: bool) -> List[CandidateTiling]:
+        def tile_ranges(is_pointwise: bool, ranges, rw) -> List[CandidateTiling]:
+            """
+            Compute tiling candidates by dividing up the iteration ranges.
+            """
+            assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
 
-        rw = node.pointwise_read_writes()
-        assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
+            # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
+            # that need to access the entire tensor; they don't contribute read indexing
+            # information (and practically, they don't have dep.index so they can't be used
+            # for stride_hints below
+            dep_sources = [rw.reads, rw.writes]
+            assert all(
+                isinstance(dep, (MemoryDep, StarDep))
+                for dep in itertools.chain.from_iterable(dep_sources)
+            )
+            deps = [
+                dep
+                for dep in itertools.chain.from_iterable(dep_sources)
+                if dep.name not in V.graph.removed_buffers
+                and isinstance(dep, MemoryDep)
+            ]
+            write_names = {dep.name for dep in rw.writes}
 
-        # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
-        # that need to access the entire tensor; they don't contribute read indexing
-        # information (and practically, they don't have dep.index so they can't be used
-        # for stride_hints below
-        dep_sources = [rw.reads, rw.writes]
-        assert all(
-            isinstance(dep, (MemoryDep, StarDep))
-            for dep in itertools.chain.from_iterable(dep_sources)
+            def collapse_ranges(ranges: Sequence[sympy.Expr]) -> sympy.Expr:
+                return V.graph.sizevars.simplify(sympy_product(ranges))
+
+            # Default to no tiling.
+            tilings = [
+                CandidateTiling(
+                    tiling=cls.create_partial_tiling(
+                        [collapse_ranges(ranges)], is_pointwise
+                    ),
+                    name="none",
+                    score=0,
+                )
+            ]
+
+            # Find non-trivial tiling candidates.
+            for dep in deps:
+                strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
+                assert len(strides) == len(ranges)
+                try:
+                    split = strides.index(1) + 1
+                    if split == len(ranges):
+                        continue
+                    if all(s == 0 for s in strides[split:]):
+                        # if this is a broadcasted tensor and all dimensions after split are broadcast,
+                        # this is not a real split
+                        continue
+
+                except ValueError:
+                    continue
+
+                tiled_groups = (
+                    collapse_ranges(ranges[:split]),
+                    collapse_ranges(ranges[split:]),
+                )
+
+                # score by number of elements
+                score = V.graph.sizevars.size_hint(
+                    sympy_product(
+                        size for size, stride in zip(ranges, strides) if stride != 0
+                    )
+                )
+                if dep.name in write_names:
+                    # ngimel said contiguous writes is more important than reads
+                    score *= 2
+                if CandidateTiling.is_good_size(tiled_groups[0]):
+                    score *= 2
+                if CandidateTiling.is_good_size(tiled_groups[1]):
+                    score *= 2
+
+                if (
+                    V.graph.sizevars.size_hint(
+                        score - sympy_product(itertools.chain(ranges, reduction_ranges))
+                    )
+                    >= 0
+                ):
+                    tilings.append(
+                        CandidateTiling(
+                            tiling=cls.create_partial_tiling(
+                                [
+                                    collapse_ranges(ranges[:split]),
+                                    collapse_ranges(ranges[split:]),
+                                ],
+                                is_pointwise,
+                            ),
+                            score=score,
+                            name=dep.name,
+                        )
+                    )
+
+            return tilings
+
+        pointwise_ranges, reduction_ranges = node.get_ranges()
+        if len(pointwise_ranges) <= 1 and len(reduction_ranges) <= 1:
+            return []
+
+        # Tile either pointwise or reduction dims.
+        pointwise_ranges, reduction_ranges = node.get_ranges()
+        partial_tilings = tile_ranges(
+            is_pointwise,
+            pointwise_ranges if is_pointwise else reduction_ranges,
+            node.pointwise_or_reduction_read_writes(is_pointwise),
         )
-        deps = [
-            dep
-            for dep in itertools.chain.from_iterable(dep_sources)
-            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
+
+        # Fill in the missing ranges.
+        full_tilings = [
+            CandidateTiling(
+                tiling=cls.complete_partial_tiling(tiling.tiling, node),
+                score=tiling.score,
+                name=tiling.name,
+            )
+            for tiling in partial_tilings
         ]
-        write_names = {dep.name for dep in rw.writes}
 
-        tilings: List[CandidateTiling] = []
-
-        for dep in deps:
-            strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
-            assert len(strides) == len(ranges)
-            try:
-                split = strides.index(1) + 1
-                if split == len(ranges):
-                    continue
-                if all(s == 0 for s in strides[split:]):
-                    # if this is a broadcasted tensor and all dimensions after split are broadcast,
-                    # this is not a real split
-                    continue
-
-            except ValueError:
-                continue
-            tiled_groups = (
-                V.graph.sizevars.simplify(sympy_product(ranges[:split])),
-                V.graph.sizevars.simplify(sympy_product(ranges[split:])),
-            )
-            # score by number of elements
-            score = V.graph.sizevars.size_hint(
-                sympy_product(
-                    size for size, stride in zip(ranges, strides) if stride != 0
-                )
-            )
-            if dep.name in write_names:
-                # ngimel said contiguous writes is more important than reads
-                score *= 2
-            if CandidateTiling.is_good_size(tiled_groups[0]):
-                score *= 2
-            if CandidateTiling.is_good_size(tiled_groups[1]):
-                score *= 2
-
-            if (
-                V.graph.sizevars.size_hint(
-                    score - sympy_product(itertools.chain(ranges, reduction_ranges))
-                )
-                >= 0
-            ):
-                tilings.append(CandidateTiling(tiled_groups, score, dep.name))
-        return tilings
+        return full_tilings
 
     @classmethod
     def create_tiling(
@@ -1572,11 +1638,115 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
-        reduction_prefixes = ["r"][: len(reduction_tiling)]
+        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
         return immutable_dict(
-            list(zip(pw_prefixes, pw_tiling))
-            + list(zip(reduction_prefixes, reduction_tiling))
+            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
         )
+
+    @classmethod
+    def create_partial_tiling(
+        cls,
+        tiling: Sequence[sympy.Expr],
+        is_pointwise: bool,
+    ) -> Dict[str, sympy.Expr]:
+        return cls.create_tiling(
+            tiling if is_pointwise else [],
+            tiling if not is_pointwise else [],
+        )
+
+    @classmethod
+    def complete_partial_tiling(
+        cls, tiling: Dict[str, sympy.Expr], node
+    ) -> Dict[str, sympy.Expr]:
+        """
+        Given a tiling for only pointwise or reduction dimensions, adds the missing one.
+        """
+        splits = list(tiling.values())
+        is_pointwise = "x" in tiling
+        missing_ranges = node.get_ranges()[1 if is_pointwise else 0]
+        missing_numel = [sympy_product(missing_ranges)]
+
+        tiling_args = (
+            (splits, missing_numel) if is_pointwise else (missing_numel, splits)
+        )
+        return cls.create_tiling(*tiling_args)
+
+    @classmethod
+    def get_nd_tilings(
+        cls,
+        node_schedule,
+        is_pointwise: bool,
+    ) -> List[Dict[str, Tuple[sympy.Expr]]]:
+        """
+        Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
+        by tiling the kernel into higher dimensions.
+
+        Returns a list of tilings ranked by dimensionality.
+        """
+        tilings = []
+        for node in EnableReduction.filter(node_schedule):
+            if not isinstance(node, scheduler.SchedulerNode):
+                continue
+
+            # If we have modular indexing expressions, try to subdivide ranges into
+            # their parameters.
+            range_idx = 0 if is_pointwise else 1
+            node_ranges = node.get_ranges()
+            node_tilings = [node_ranges[range_idx]]
+            for dep in node.read_writes.reads_and_writes():
+                # Check if the variable ranges coincide with the node ranges.
+                # This lets us partition the variables into pointwise and reduction
+                # splits.
+                # FIXME right now we mishandle cases like [[], [8,8]]. In those cases, we
+                # should count all variables towards reduction splits.
+                var_ranges = tuple(dep.ranges.values())
+                if len(var_ranges) != len(node_ranges) or var_ranges != tuple(
+                    itertools.chain.from_iterable(node_ranges)
+                ):
+                    continue
+
+                # Pattern match the subexpression pertaining to each index variable.
+                var, numel = list(dep.ranges.items())[range_idx]
+                index = BlockPatternMatcher.get_subexpr_involving_symbol(dep.index, var)
+
+                # Heuristic to bound the maximum dimensionality of the block.
+                num_dims = max(
+                    2,
+                    index.count(FloorDiv) + index.count(ModularIndexing),
+                    len(node_ranges[range_idx]),
+                )
+
+                # Attempt to pattern match the index expr.
+                # Failed matches default to the full range.
+                match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                    index, var, numel, num_dims
+                )
+                dims = match_result[0] if match_result is not None else [numel]
+                node_tilings.append(dims)
+
+            # Flatten leading dimensions, and assign labels to each dim.
+            for node_tiling in node_tilings:
+                num_leading_dims = max(0, len(node_tiling) - config.triton.max_tiles)
+                first_trailing_dim = num_leading_dims + 1
+                collapsed_leading_dim = sympy_product(node_tiling[:first_trailing_dim])
+                collapsed_splits = (collapsed_leading_dim,) + tuple(
+                    node_tiling[first_trailing_dim:]
+                )
+                tilings.append(
+                    cls.complete_partial_tiling(
+                        cls.create_partial_tiling(collapsed_splits, is_pointwise), node
+                    )
+                )
+
+        # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
+        # Since this is a stable sort, ties are broken by schedule order.
+        ranked_tilings = sorted(
+            tilings,
+            key=len,
+            reverse=True,
+        )
+
+        return ranked_tilings
 
     @classmethod
     def select_tiling(
@@ -1590,49 +1760,92 @@ class SIMDScheduling(BaseScheduling):
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
 
         """
+        # If this is a reduction, only tile reduction dims.
+        is_pointwise = reduction_numel == 1
+
+        # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
-        if reduction_numel != 1 or config.triton.max_tiles <= 1:
-            # TODO(jansel): should we tile reductions?
-            # do perf hint here if stride-1 dim is not being reduced
+        if (
+            not is_pointwise and not config.triton.tile_reductions
+        ) or config.triton.max_tiles <= 1:
+            # Emit a perf hint in case we miss an opportunity to tile a reduction.
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
-                    if len(cls.candidate_tilings(node)) > 0:
-                        perf_hint_log.info("reduction over non-contiguous dims")
+                    if (
+                        not config.triton.tile_reductions
+                        and len(cls.candidate_tilings(node, is_pointwise)) > 0
+                    ):
+                        perf_hint_log.info(
+                            textwrap.dedent(
+                                """
+                                Reduction over non-contiguous dims.
+                                Consider setting config.triton.tile_reductions to True.
+                                """
+                            )
+                        )
                         break
             return default_tiling
 
         seen_names: OrderedSet[str] = OrderedSet()
-        candidate_tiles: Counter[Any] = collections.Counter()
+        candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
-            for tiling in cls.candidate_tilings(node):
-                if tiling.name in seen_names:
+            for candidate_tiling in cls.candidate_tilings(node, is_pointwise):
+                if candidate_tiling.name in seen_names:
                     continue
-                seen_names.add(tiling.name)
-                candidate_tiles[tiling.tiling] += tiling.score
+                elif candidate_tiling.name is not None:
+                    seen_names.add(candidate_tiling.name)
+                candidate_tiles[candidate_tiling] += candidate_tiling.score
 
-        ranked_tilings = [tiling for tiling, score in candidate_tiles.most_common()]
+        ranked_tilings: List[Dict[str, sympy.Expr]] = [
+            candidate_tiling.tiling
+            for candidate_tiling, score in candidate_tiles.most_common()
+        ]
 
-        if config.triton.max_tiles >= 3:
+        if config.triton.max_tiles >= 3 and is_pointwise:
             # Consider adding a third dimension of tiling, but only
             # when a1 is a multiple of b1; otherwise, you have a lot
             # of stragglers which is annoying to generate code for.
             #
             # NB: More than three max tiles is not enabled by default.
 
-            # Add one 3D tiling choice
-            for i in range(1, len(ranked_tilings)):
-                a0, a1 = ranked_tilings[0]
-                b0, b1 = ranked_tilings[i]
+            def convert_tiling_to_3d(
+                tiling0: Dict[str, sympy.Expr], tiling1: Dict[str, sympy.Expr]
+            ) -> Optional[Dict[str, sympy.Expr]]:
+                a0, a1 = tiling0["x"], tiling0["y"]
+                b0, b1 = tiling1["x"], tiling1["y"]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
-                    continue
+                    return None
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
-                    a0, a1 = ranked_tilings[i]
-                    b0, b1 = ranked_tilings[0]
+                    (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
-                if V.graph.sizevars.statically_known_multiple_of(a1, b1):
-                    tiling = (a0, FloorDiv(a1, b1), b1)
-                    ranked_tilings = [tiling] + ranked_tilings
+                if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
+                    return None
+
+                new_tiling = {
+                    "z": a0,
+                    "y": FloorDiv(a1, b1),
+                    "x": b1,
+                    "r0_": reduction_numel,
+                }
+
+                # Copy the existing reduction tiling
+                new_tiling.update(
+                    {
+                        dim: split
+                        for dim, split in tiling0.items()
+                        if dim not in new_tiling
+                    }
+                )
+
+                return new_tiling
+
+            for i in range(1, len(ranked_tilings)):
+                new_3d_tiling = convert_tiling_to_3d(
+                    ranked_tilings[0], ranked_tilings[i]
+                )
+                if new_3d_tiling is not None:
+                    ranked_tilings = [new_3d_tiling] + ranked_tilings
                     break  # only 1 choice for now
 
         if len(ranked_tilings) > 1:
@@ -1640,34 +1853,39 @@ class SIMDScheduling(BaseScheduling):
 
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling:
-            # Get candidate tilings from the node ranges.
-            node_ranges = [
-                node.get_ranges()[0]
-                for node in EnableReduction.filter(node_schedule)
-                if isinstance(node, scheduler.SchedulerNode)
-            ]
-            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
-            for node_range in node_ranges:
-                # Collapse leading dims, to fit in the maximum dimensionality.
-                num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
-                first_trailing_dim = num_leading_dims + 1
-                collapsed_leading_dim = sympy_product(node_range[:first_trailing_dim])
-                tiling = [collapsed_leading_dim] + list(node_range[first_trailing_dim:])
-                new_tilings.add(tuple(tiling))
+            ranked_tilings = (
+                cls.get_nd_tilings(node_schedule, is_pointwise) + ranked_tilings
+            )
 
-            # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
-            # Since this is a stable sort, ties are broken by schedule order.
-            ranked_new_tilings = sorted(new_tilings, key=len, reverse=True)
-            ranked_tilings = ranked_new_tilings + ranked_tilings
+        def is_compatible_with_numels(tiling: Dict[str, sympy.Expr]) -> bool:
+            """
+            Check if the tiling agrees with the global pointwise and reduction numels.
+            """
+            tiling_total_numel = sympy_product(tiling.values())
+            tiling_reduction_numel = sympy_product(
+                size for var, size in tiling.items() if var[0] == "r"
+            )
+            tiling_pointwise_numel = sympy_product(
+                size for var, size in tiling.items() if var[0] != "r"
+            )
+            sizevars = V.graph.sizevars
+            return sizevars.statically_known_equals(
+                tiling_pointwise_numel, numel
+            ) and sizevars.statically_known_equals(
+                tiling_reduction_numel, reduction_numel
+            )
 
-        for tiled_groups in ranked_tilings:
-            new_groups = (*tiled_groups, reduction_numel)
+        for tiling in ranked_tilings:
+            assert isinstance(tiling, dict)
             if all(
-                SIMDKernel.is_compatible(new_groups, node.get_ranges())
+                (
+                    is_compatible_with_numels(tiling)
+                    and SIMDKernel.is_compatible(tiling.values(), node.get_ranges())
+                )
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ):
-                return cls.create_tiling(tiled_groups, [reduction_numel])
+                return tiling
 
         return default_tiling
 
@@ -1710,9 +1928,9 @@ class SIMDScheduling(BaseScheduling):
         raise NotImplementedError
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class CandidateTiling:
-    tiling: Tuple[sympy.Expr, sympy.Expr]
+    tiling: Dict[str, sympy.Expr]
     score: int  # higher is better
     name: Optional[str] = None
 
