@@ -1804,6 +1804,41 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 }
                 self._check_annotation_stat(fq_m, expected_annotation_stat)
 
+    @skipIfNoX86
+    def test_linear_dynamic_fp16(self):
+        """
+        Test pattern of linear_dynamic_fp16.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias in [True, False]:
+                m = TestHelperModules.SingleLinearModule(use_bias).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                quantizer.set_module_type_qconfig(
+                    torch.nn.Linear, xiq.get_x86_inductor_linear_dynamic_fp16_config()
+                )
+                node_occurrence = {
+                    # 2 convert_element_type nodes are inserted for weight
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.convert_element_type.no_fuse: 2,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.convert_element_type.no_fuse,
+                    torch.ops.aten.linear.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
     @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d(self):
