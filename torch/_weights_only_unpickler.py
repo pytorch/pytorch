@@ -132,11 +132,11 @@ def _get_user_allowed_globals():
         if isinstance(f, tuple):
             if len(f) != 2:
                 raise ValueError(
-                    f"Expected tuple of length 2 (global, str of module.name), but got tuple of length: {len(f)}"
+                    f"Expected tuple of length 2 (global, str of callable full path), but got tuple of length: {len(f)}"
                 )
             if type(f[1]) is not str:
                 raise TypeError(
-                    f"Expected second item in tuple to be str of module.name, but got: {type(f[1])}"
+                    f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
                 )
             f, name = f
             rc[name] = f

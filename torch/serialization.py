@@ -274,7 +274,7 @@ def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) 
     added to this list can be called during unpickling, classes could be instantiated
     and have state set.
 
-    Each item, ``i`` in the list can either be a function/class or a tuple of the form
+    Each item in the list can either be a function/class or a tuple of the form
     (function/class, string) where string is the full path of the function/class.
 
     Within the serialized format, each function is identified with its full
