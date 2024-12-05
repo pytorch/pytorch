@@ -6021,6 +6021,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @torch._dynamo.utils.disable_cache_limit()
     @dtypes(torch.float32)
     @parametrize("env", ["eager", "compile", "compile_dynamic"])
