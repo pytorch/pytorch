@@ -4,13 +4,7 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    NoTest,
-    run_tests,
-    TEST_CUDA,
-    TEST_XPU,
-    TestCase,
-)
+from torch.testing._internal.common_utils import NoTest, run_tests, TestCase
 
 
 if not torch.accelerator.is_available():
@@ -74,14 +68,30 @@ class TestAccelerator(TestCase):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    @unittest.skipIf((not TEST_CUDA) and (not TEST_XPU), "requires CUDA or XPU")
-    def test_specific_stream_compatibility(self):
-        s1 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
-        s2 = torch.cuda.Stream() if torch.cuda.is_available() else torch.xpu.Stream()
-        torch.accelerator.set_stream(s1)
-        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
-        torch.accelerator.set_stream(s2)
-        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+    def test_stream_context_manager(self):
+        s = torch.Stream()
+        prev_stream = torch.accelerator.current_stream()
+        with s:
+            self.assertEqual(torch.accelerator.current_stream(), s)
+        self.assertEqual(torch.accelerator.current_stream(), prev_stream)
+
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
+    def test_multi_device_stream_context_manager(self):
+        src_device = 0
+        dst_device = 1
+        torch.accelerator.set_device_idx(src_device)
+        dst_stream = torch.Stream(dst_device)
+        src_prev_stream = torch.accelerator.current_stream()
+        dst_prev_stream = torch.accelerator.current_stream(dst_device)
+        with dst_stream:
+            self.assertEqual(torch.accelerator.current_device_idx(), dst_device)
+            self.assertEqual(torch.accelerator.current_stream(), dst_stream)
+            self.assertEqual(
+                torch.accelerator.current_stream(src_device), src_prev_stream
+            )
+        self.assertEqual(torch.accelerator.current_device_idx(), src_device)
+        self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
+        self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
 
 if __name__ == "__main__":
