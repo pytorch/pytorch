@@ -13223,8 +13223,7 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
-    >>> with s_cuda:
+    >>> with torch.Stream(device='cuda') as s_cuda:
     >>>     a = torch.randn(10, 5, device='cuda')
     >>>     b = torch.randn(5, 10, device='cuda')
     >>>     c = torch.mm(a, b)
