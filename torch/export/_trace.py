@@ -51,7 +51,6 @@ from torch._functorch._aot_autograd.input_output_analysis import (
 from torch._functorch._aot_autograd.traced_function_transforms import (
     create_functional_call,
 )
-
 from torch._functorch._aot_autograd.utils import (
     create_tree_flattened_fn,
     register_buffer_assignment_hook,
@@ -1869,7 +1868,7 @@ def _export_for_training(
 
     _update_gm_meta_if_possible(gm, mod)
 
-    from torch._export.verifier import TrainingIRVerifier    
+    from torch._export.verifier import TrainingIRVerifier
 
     exported_program = ExportedProgram(
         root=gm,

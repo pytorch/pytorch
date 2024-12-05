@@ -1414,7 +1414,7 @@ def forward(self, x, y):
         with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
-    
+
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization(self):
@@ -1437,7 +1437,9 @@ def forward(self, x, y):
         ref_out = m(ref_x)
 
         ep_training = torch.export.export_for_training(m, (ref_x,))
-        self.assertExpectedInline(str(ep_training.graph).strip(), """\
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
@@ -1446,11 +1448,13 @@ graph():
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
-    return (add_1,)"""
+    return (add_1,)""",
         )
 
         ep = export(m, (ref_x,)).run_decompositions({})
-        self.assertExpectedInline(str(ep.graph).strip(), """\
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
@@ -1462,8 +1466,8 @@ graph():
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_2,), kwargs = {})
     %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
-    return (add_3,)"""
-)
+    return (add_3,)""",
+        )
         res = ep.module()(ref_x)
 
         self.assertEqual(res, ref_out)

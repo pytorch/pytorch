@@ -68,7 +68,7 @@ class ConstantExtraMetadataTensor(torch.Tensor):
 
 
 # A simple tensor subclass that always returns plain tensor during __torch_dispatch__
-# It is similar to TwoTensor and is used to simulate torchao quantized tensors 
+# It is similar to TwoTensor and is used to simulate torchao quantized tensors
 class CustomTensorPlainOut(torch.Tensor):
     @staticmethod
     def __new__(cls, elem1, elem2):
@@ -129,8 +129,17 @@ class CustomTensorPlainOut(torch.Tensor):
         out_inner_flat_2, spec = pytree.tree_flatten(out_inner_2)
 
         if func == torch.ops.aten.detach.default:
-            return pytree.tree_unflatten((CustomTensorPlainOut(tensor1, tensor2) for tensor1, tensor2 in zip(out_inner_flat_1, out_inner_flat_2)), spec)
+            return pytree.tree_unflatten(
+                (
+                    CustomTensorPlainOut(tensor1, tensor2)
+                    for tensor1, tensor2 in zip(out_inner_flat_1, out_inner_flat_2)
+                ),
+                spec,
+            )
 
-        out_new = (out_inner_flat_1[ix] + out_inner_flat_2[ix] for ix in range(len(out_inner_flat_1)))
+        out_new = (
+            out_inner_flat_1[ix] + out_inner_flat_2[ix]
+            for ix in range(len(out_inner_flat_1))
+        )
 
         return pytree.tree_unflatten(out_new, spec)
