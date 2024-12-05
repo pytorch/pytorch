@@ -241,6 +241,7 @@ class AutogradCompilerInstance:
         psaved_tensors,
         pctx,
         ctx,
+        maybe_backward_state_idx,
     ):
         psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
 
@@ -262,27 +263,6 @@ class AutogradCompilerInstance:
             )
             return out
 
-        # def call_aot_bwd_prologue(
-        #     *args: Any,
-        # ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-        #     all_args = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(fakectx, *args)
-
-        #     # non-traceable calls originally in call_aot_bwd_impl
-        #     if forward_cls._lazy_backward_info is None:
-        #         raise RuntimeError(
-        #             """This compiled backward function was saved by AOTAutogradCache, which does not support
-        #         compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
-        #         )
-
-        #     # assert fakectx.symints is not None
-        #     # assert fakectx.bw_module is not None
-        #     if hasattr(forward_cls, "_backward_state_indices"):
-        #         # probably need to pass proxy to this func
-        #         assert fakectx._compiled_autograd_backward_state.proxy is not None
-        #         all_args.append(fakectx._compiled_autograd_backward_state)
-
-        #     return all_args
-
         @torch._dynamo.allow_in_graph  # type: ignore[misc]
         def call_aot_bwd_epilogue(
             out: List[torch.Tensor],
@@ -290,6 +270,10 @@ class AutogradCompilerInstance:
             return torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(
                 metadata, maybe_subclass_metadata, out
             )
+
+        pbackward_state = None
+        if maybe_backward_state_idx is not None:
+            pbackward_state = self.hooks_proxy[maybe_backward_state_idx]  # type: ignore[index]
 
         pall_args = self.fx_tracer.create_proxy(
             kind="call_function",
@@ -308,6 +292,7 @@ class AutogradCompilerInstance:
                 pctx,
                 psaved_tensors,
                 pall_args,
+                pbackward_state,
             ),
             kwargs={},
         )
@@ -326,6 +311,7 @@ class AutogradCompilerInstance:
         saved_tensors,
         backward_idx: int,
         ctx: torch.autograd.function.BackwardCFunction,
+        maybe_backward_state_idx: Optional[int],
     ):
         assert self.hooks_proxy is not None
         pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
@@ -333,7 +319,9 @@ class AutogradCompilerInstance:
         psaved_tensors = self.to_proxy(saved_tensors)
         if hasattr(ctx._forward_cls, "_aot_id"):  # type: ignore[attr-defined]
             # AOT backward
-            proxies = self.proxy_call_aot_backward(pinputs, psaved_tensors, pctx, ctx)
+            proxies = self.proxy_call_aot_backward(
+                pinputs, psaved_tensors, pctx, ctx, maybe_backward_state_idx
+            )
         else:
             proxies = self.fx_tracer.create_proxy(
                 kind="call_function",
@@ -980,7 +968,7 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        if isinstance(t, torch.SymInt) or isinstance(t, torch.SymFloat):
+        if isinstance(t, (torch.SymInt, torch.SymFloat)):
             return self.symnode_proxy_lookup[id(t.node)]
         if not isinstance(t, torch.Tensor):
             return t

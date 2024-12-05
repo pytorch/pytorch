@@ -237,16 +237,22 @@ auto PyNode::defer_to_dynamo(
   TORCH_INTERNAL_ASSERT(
       _backward_idx.has_value(),
       "indices should already be set by compiled_args, called before apply_with_saved");
-  TORCH_INTERNAL_ASSERT(!_backward_state_idx.has_value());
+  PyObject* backward_state_idx = Py_None;
+  if (_backward_state_idx.has_value()) {
+    backward_state_idx = PyLong_FromLong(_backward_state_idx.value());
+    // this might be simplifiable now that we no longer inline
+    Py_CLEAR(py_fn->compiled_autograd_backward_state);
+  }
   THPObjectPtr r(PyObject_CallMethod(
       *compiler,
       "proxy_call_backward",
-      "OOOiO",
+      "OOOiOO",
       pyInputs.get(),
       fwdInputMetadatas.get(),
       saved_tensors.get(),
       *_backward_idx,
-      obj));
+      obj,
+      backward_state_idx));
 
   if (!r)
     throw_python_error();

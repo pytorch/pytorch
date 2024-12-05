@@ -108,17 +108,17 @@ def normalize_as_list(x: Any) -> List[Any]:
 
 
 def call_aot_bwd_impl(
-    pctx: torch.autograd.function.BackwardCFunction,
-    psaved_tensors: List[torch.Tensor],
-    all_args: List[torch.Tensor],
+    ctx: torch.autograd.function.BackwardCFunction,
+    saved_tensors: List[torch.Tensor],
+    all_args: List[
+        Union[torch.Tensor, torch.fx.experimental._backward_state.BackwardState]
+    ],
+    backward_state: Optional[torch.fx.experimental._backward_state.BackwardState],
 ) -> List[torch.Tensor]:
-    fakectx = FakeBackwardCFunction(pctx, psaved_tensors)
-    # TODO: this is split on aot autograd main path,
-    # doesn't work with backward state
-    # all_args = args[0]
+    fakectx = FakeBackwardCFunction(ctx, saved_tensors)
     bw_module = fakectx._bw_module
-    # symints = fakectx.symints
-    # all_args[: len(symints)] = symints
+    if backward_state is not None:
+        all_args.append(backward_state)
     out = bw_module(*all_args)
     return normalize_as_list(out)
 
