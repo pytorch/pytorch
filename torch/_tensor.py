@@ -1641,33 +1641,28 @@ class Tensor(torch._C.TensorBase):
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
 
-    def repeat(self, *sizes):
-        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list, torch.Size)):
-            sizes = sizes[0]
+    def repeat(self, *repeats):
+        # Handle case where repeats is passed as a sequence
+        if len(repeats) == 1 and isinstance(repeats[0], (tuple, list, torch.Size)):
+            repeats = repeats[0]
 
-        if not isinstance(sizes, (tuple, list, torch.Size)):
-            raise TypeError(
-                f"repeat() requires a sequence of integers or integer varargs, but got {type(sizes)}"
-            )
-
-        sizes = tuple(sizes)
-
-        if any(not isinstance(s, (int, torch.SymInt)) or s < 0 for s in sizes):
+        # Validation checks
+        if any(not isinstance(s, (int, torch.SymInt)) or s < 0 for s in repeats):
             raise ValueError(
-                f"Received negative or non-integer repeat sizes: {sizes}. "
+                f"Received negative or non-integer repeat sizes: {repeats}. "
                 f"All repeat sizes must be non-negative integers."
             )
 
-        if len(sizes) < len(self.shape):
+        if len(repeats) < len(self.shape):
             raise RuntimeError(
-                f"Invalid number of repeat dimensions: got {len(sizes)} repeat sizes "
+                f"Invalid number of repeat dimensions: got {len(repeats)} repeat sizes "
                 f"for tensor with {len(self.shape)} dimensions.\n"
                 f"Input tensor shape: {self.shape}\n"
-                f"Provided repeat sizes: {sizes}"
+                f"Provided repeat sizes: {repeats}"
             )
 
         try:
-            total_elements = self.numel() * torch.prod(torch.tensor(sizes)).item()
+            total_elements = self.numel() * torch.prod(torch.tensor(repeats)).item()
             max_elements = torch.iinfo(torch.int64).max
             if total_elements > max_elements:
                 raise ValueError(
@@ -1678,12 +1673,10 @@ class Tensor(torch._C.TensorBase):
             raise ValueError(
                 f"Repeat sizes would result in tensor too large to allocate.\n"
                 f"Input tensor shape: {self.shape}\n"
-                f"Requested repeat sizes: {sizes}"
+                f"Requested repeat sizes: {repeats}"
             ) from err
 
-        # Call the underlying implementation
-        # Note: _C._TensorBase.repeat expects a sequence, so we pass sizes as-is
-        return torch._C._TensorBase.repeat(self, sizes)
+        return torch._C._TensorBase.repeat(self, repeats)
 
     __module__ = "torch"
 
