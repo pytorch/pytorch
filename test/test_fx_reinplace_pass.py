@@ -193,9 +193,6 @@ def forward(self, a__1):
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
     slice_2 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
     select_2 = torch.ops.aten.select.int(slice_2, 1, 1);  slice_2 = select_2 = None
-    slice_3 = torch.ops.aten.slice.Tensor(clone, 0, 0, 9223372036854775807)
-    select_3 = torch.ops.aten.select.int(slice_3, 1, 1);  slice_3 = None
-    select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = select_4 = None
     return clone
     """)
 

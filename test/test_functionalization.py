@@ -440,7 +440,6 @@ def forward(self, arg0_1):
     view_copy = torch.ops.aten.view_copy.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
     add = torch.ops.aten.add.Tensor(view_copy, 1);  view_copy = None
     view_copy_1 = torch.ops.aten.view_copy.default(add, [3]);  add = None
-    view_copy_2 = torch.ops.aten.view_copy.default(view_copy_1, [-1]);  view_copy_2 = None
     return view_copy_1
     """,
         )
@@ -458,7 +457,6 @@ def forward(self, arg0_1):
     view = torch.ops.aten.view.default(lift_fresh_copy, [-1]);  lift_fresh_copy = None
     add = torch.ops.aten.add_.Tensor(view, 1);  add = None
     view_1 = torch.ops.aten.view.default(view, [3]);  view = None
-    view_2 = torch.ops.aten.view.default(view_1, [-1]);  view_2 = None
     return view_1
     """,
         )
