@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/core/GradMode.h>
+#include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -10,7 +11,7 @@ PyObject* torch_c_dynamo_guards_init();
 // interfaces for extra_state and eval_frame.c because RootGuardManager class is
 // not visible there.
 void* convert_to_root_guard_manager(py::object root);
-bool run_root_guard_manager(void* root, PyObject* f_locals);
+bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals);
 
 struct LocalState {
   // TLS state that changes operators
