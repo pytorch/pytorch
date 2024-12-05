@@ -191,82 +191,6 @@ def _warn_tf32_disabled() -> None:
         )
 
 
-def _unlift_graph(
-    mod: GraphModule, gm: GraphModule, graph_signature: GraphSignature
-) -> GraphModule:
-    from torch.export.unflatten import _assign_attr, _AttrKind
-
-    state_dict: Dict[str, Union[torch.nn.parameter.Parameter, torch.Tensor]] = {}
-    for name, param in mod.named_parameters(remove_duplicate=False):
-        state_dict[name] = param
-        _assign_attr(
-            param,
-            gm,
-            name,
-            attr_kind=_AttrKind.PARAMETER,
-        )
-    for name, buffer in mod.named_buffers(remove_duplicate=False):
-        state_dict[name] = buffer
-        _assign_attr(
-            buffer,
-            gm,
-            name,
-            attr_kind=_AttrKind.BUFFER,
-        )
-
-    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
-    lifted_inputs: List[Optional[FQN]] = []
-
-    # In AOTI, module parameters and buffers are not lifted as graph inputs.
-    # As a result, mutation to buffers has side effect which makes their initial
-    # values different from Eager. So we clone them here as a copy.
-    # We are not cloning for parameters, although it will be needed if we want to
-    # support training.
-    for node in placeholder_nodes:
-        node_name = node.name
-        if node_name in graph_signature.inputs_to_parameters:
-            parameter_name = graph_signature.inputs_to_parameters[node_name]
-            lifted_inputs.append(parameter_name)
-        elif node_name in graph_signature.inputs_to_buffers:
-            buffer_name = graph_signature.inputs_to_buffers[node_name]
-            lifted_inputs.append(buffer_name)
-            gm.meta[
-                get_cloned_parameter_buffer_name(buffer_name)
-            ] = clone_preserve_strides(state_dict[buffer_name])
-        else:
-            assert node_name in graph_signature.user_inputs
-            lifted_inputs.append(None)
-
-    from torch.export._unlift import _unlift
-
-    outputs = list(gm.graph.nodes)[-1].args[0]
-    mutated_outputs = []
-    buffer_mutations = graph_signature.buffers_to_mutate
-    user_input_mutations = graph_signature.user_inputs_to_mutate
-    output_tokens = graph_signature.output_tokens
-    for idx, out in enumerate(outputs):
-        value: Optional[Union[FQN, GraphInputName]] = None
-
-        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
-            if out.name in buffer_mutations:
-                value = buffer_mutations[out.name]
-            elif out.name in user_input_mutations:
-                value = user_input_mutations[out.name]
-
-        mutated_outputs.append(value)
-
-    unlifted_gm = _unlift(
-        gm,
-        lifted_inputs,
-        mutated_outputs,
-        pytree.LeafSpec(),
-        None,
-        state_dict,
-        {},
-    )
-    return unlifted_gm
-
-
 def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
     for node in sorted(
         itertools.chain(
@@ -1777,13 +1701,13 @@ def compile_fx(
 
         if V.aot_compilation is True:
             with functorch_config.patch(unlift_effect_tokens=True):
-                gm, graph_signature = aot_export_module(
+                ep = torch.export.export_for_inference(
                     model_,
-                    example_inputs_,
-                    trace_joint=False,
-                    decompositions=decompositions,
+                    tuple(example_inputs_),
+                    strict=False,
+                    decomp_table=decompositions,
                 )
-            unlifted_gm = _unlift_graph(model_, gm, graph_signature)
+            unlifted_gm = ep.module()
             if "dynamo_flat_name_to_original_fqn" in model_.meta:
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
