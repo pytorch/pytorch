@@ -715,16 +715,51 @@ class WhileLoopModels:
                 cond_fn, body_fn, (it, pytree_input)
             )
 
-    class DataDependentOutput(torch.nn.Module):
+    class DataDependentOpInSubgraph(torch.nn.Module):
         def forward(self, c, a, b):
-            def cond_fn(c):
+            def cond_fn(c, reduced_carry):
                 return c > 0
 
-            def body_fn(c):
-                _ = torch.masked_select(a, b)
-                return c - 1
+            def body_fn(c, reduced_carry):
+                k = torch.masked_select(a, b)
+                d = torch.concat([k, k * 2])
+                return c - 1, torch.min(d).unsqueeze(0) + reduced_carry
 
-            return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c])
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, torch.zeros([1], dtype=torch.int64, device=c.device)],
+            )
+
+    class DataDependentInOut(torch.nn.Module):
+        def forward(self, c, a, b):
+            nz = a.nonzero()
+
+            def cond_fn(c, nz):
+                return c > 0
+
+            def body_fn(c, nz):
+                return c - 1, (nz.sin() + 1).to(torch.int64)
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, nz],
+            )
+
+    class DataDependentInOutMismatch(torch.nn.Module):
+        def forward(self, c, a, b):
+            def cond_fn(c, a):
+                return c > 0
+
+            def body_fn(c, a):
+                return c - 1, a.nonzero()
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a],
+            )
 
 
 class WhileLoopTests(TestCase):
@@ -888,7 +923,7 @@ class WhileLoopTests(TestCase):
             }
         ):
             self._run_test(
-                model=WhileLoopModels.DataDependentOutput(),
+                model=WhileLoopModels.DataDependentOpInSubgraph(),
                 inputs=(
                     torch.tensor([1, 2, 3, 4, 5]),
                     torch.tensor(
@@ -898,6 +933,50 @@ class WhileLoopTests(TestCase):
                 device=device,
                 dynamic=dynamic,
             )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_data_dependent_in_out(self, device, dynamic):
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentInOut(),
+                inputs=(
+                    torch.tensor([1, 2, 3, 4, 5]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+            )
+
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"while_loop doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch._dynamo.config.patch(
+                {
+                    "capture_dynamic_output_shape_ops": True,
+                }
+            ):
+                self._run_test(
+                    model=WhileLoopModels.DataDependentInOutMismatch(),
+                    inputs=(
+                        torch.tensor([1, 2, 3, 4, 5]),
+                        torch.tensor(
+                            [True, True, True, True, True],
+                        ),
+                    ),
+                    device="cpu",
+                    dynamic=dynamic,
+                )
 
 
 class AssociativeScanTests(TestCase):
