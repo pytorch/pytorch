@@ -8,8 +8,8 @@ from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,

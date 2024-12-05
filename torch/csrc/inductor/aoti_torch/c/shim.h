@@ -96,6 +96,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
@@ -120,7 +121,18 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_coo();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csc();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsc();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_jagged();
+
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_contiguous_format();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError

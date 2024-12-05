@@ -807,13 +807,8 @@ class _FromTorchTensor(torch.autograd.Function):
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
-    # If functionalization is turned on, we are almost definitely compiling/tracing.
-    # (In particular, AOTAutograd traces a model once with functionalization on
-    #  but proxy tracing turned of, so this is how we detect it).
-    if (
-        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-        is not None
-    ):
+    # If fake mode is turned on, we are almost definitely compiling/tracing.
+    if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
     return get_proxy_mode() is not None
 
