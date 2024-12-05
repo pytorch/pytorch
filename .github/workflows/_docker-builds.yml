@@ -2,16 +2,17 @@ name: _docker-builds
 
 on:
   workflow_call:
-    always-rebuild:
-      description: If set to any value, always build a fresh docker image
-      required: false
-    docker-build-matrix:
-      required: true
-      type: string
-      description: JSON description of what docker images to build
-    push-to-ghcr:
-      description: If set to any value, push the image to ghcr.io
-      required: false
+    inputs:
+      always-rebuild:
+        description: If set to any value, always build a fresh docker image
+        required: false
+      docker-build-matrix:
+        required: true
+        type: string
+        description: JSON description of what docker images to build
+      push-to-ghcr:
+        description: If set to any value, push the image to ghcr.io
+        required: false
 
 env:
   ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
