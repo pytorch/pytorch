@@ -2114,6 +2114,7 @@ def flex_attention_backward(*args, **kwargs):
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
+        + joint_outputs.mutated_grads
     )
     input_gen_fns = {
         8: create_num_blocks_fake_generator(kv_indices),  # kv_num_blocks
