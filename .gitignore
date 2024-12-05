@@ -124,9 +124,9 @@ torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 minifier_launcher.py
 #Generated CK instances
-aten/src/ATen/native/transformers/hip/flash_attn/fmha_*
-aten/src/ATen/native/transformers/hip/flash_attn/fwd_blob*
-aten/src/ATen/native/transformers/hip/flash_attn/bwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/fwd_blob*
+aten/src/ATen/native/transformers/hip/flash_attn/ck/bwd_blob*
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
