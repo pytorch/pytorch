@@ -35,13 +35,12 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.common import IndentedBuffer, KernelTemplate, OpOverrides, WorkspaceArg
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
     TritonKernel,
-    TritonPrinter,
     TritonScheduling,
 )
 from .codegen.triton_utils import config_of, signature_to_meta
@@ -249,8 +248,10 @@ class TritonTemplateKernel(TritonKernel):
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
-            numel,
-            sympy.S.One,
+            {
+                "x": numel,
+                "r": sympy.S.One,
+            },
             features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
@@ -562,7 +563,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
-            indices = list(map(TritonPrinter.paren, indices))
+            indices = list(map(OpOverrides.paren, indices))
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
@@ -630,7 +631,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(name, str)
         assert isinstance(mask, str)
         stride = self.named_input_nodes[name].get_stride()
-        indices = list(map(TritonPrinter.paren, indices))
+        indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
@@ -1729,9 +1730,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 for n in input_nodes
             ]
         )
+        if config.autotune_num_choices_displayed == 0:
+            return
+        elif config.autotune_num_choices_displayed is None:
+            n = -1
+        else:
+            n = config.autotune_num_choices_displayed
 
-        n = None if log.getEffectiveLevel() == logging.DEBUG else 10
         top_k = sorted(timings, key=timings.__getitem__)[:n]
+
         best = top_k[0]
 
         def get_choice_info(choice):

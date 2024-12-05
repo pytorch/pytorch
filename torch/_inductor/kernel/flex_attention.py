@@ -4,6 +4,7 @@
 import logging
 import math
 from dataclasses import dataclass
+from enum import auto, Enum
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import sympy
@@ -671,12 +672,17 @@ _rocm_default_config = {
 }
 
 
-def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
+class Mode(Enum):
+    fwd = auto()
+    bwd = auto()
+
+
+def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
 
-    if mode == "fwd":
+    if mode == Mode.fwd:
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 1)
@@ -690,6 +696,7 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 32, 4, 1)
         return fwd_config
     else:  # bwd
+        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256:
@@ -703,14 +710,14 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
 
-    if mode == "fwd":
+    if mode == Mode.fwd:
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 3)
@@ -728,6 +735,7 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
         return fwd_config
 
     else:  # bwd
+        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
@@ -750,16 +758,16 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, "fwd")
+        return _get_nv_config(query, mode=Mode.fwd)
     else:
-        return _get_rocm_config(query, "fwd")
+        return _get_rocm_config(query, mode=Mode.fwd)
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, "bwd")
+        return _get_nv_config(query, mode=Mode.bwd)
     else:
-        return _get_rocm_config(query, "bwd")
+        return _get_rocm_config(query, mode=Mode.bwd)
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -810,6 +818,8 @@ def flex_attention(
     mask_mod_other_buffers,
 ):
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -968,12 +978,6 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -1509,7 +1513,7 @@ def bwd_dq_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1541,7 +1545,7 @@ def bwd_dq_block_mn(
 
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1691,7 +1695,7 @@ def bwd_dkdv_block_mn(
             n="n",
         ) | indent_except_first(2) }}
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1749,7 +1753,7 @@ def bwd_dkdv_block_mn(
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1860,6 +1864,8 @@ def flex_attention_backward(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -2022,7 +2028,7 @@ def flex_attention_backward(*args, **kwargs):
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
-                for w in [4, 8]
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
                 for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
@@ -2035,6 +2041,9 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_KV_BLOCK_SIZE % BLOCK2 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
+            continue
+        if num_warps == 8:
+            # Working around https://github.com/pytorch/pytorch/issues/141603
             continue
 
         # Performance tuning
