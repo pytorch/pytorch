@@ -736,14 +736,12 @@ def maybe_upcast_float32(convert_output: bool = True):
     """
 
     def needs_upcast(var: CSEVariable) -> bool:
-        assert isinstance(var, CSEVariable)
         return not config.triton.codegen_upcast_to_fp32 and var.dtype in {
             torch.float16,
             torch.bfloat16,
         }
 
     def maybe_upcast_variable(var: CSEVariable) -> str:
-        assert isinstance(var, CSEVariable)
         upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
         return f"{var}{upcast_string}"
 

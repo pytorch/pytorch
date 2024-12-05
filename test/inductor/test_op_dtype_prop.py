@@ -208,7 +208,7 @@ class TestCase(InductorTestCase):
         num_upcasts = code.count(".to(tl.float32)")
         self.assertEqual(num_upcasts, 1)
 
-        # There should be no downcast, since the result is promoted.
+        # There should be no downcast, since the input is promoted to float32.
         self.assertNotIn(".to(tl.float16)", code)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
