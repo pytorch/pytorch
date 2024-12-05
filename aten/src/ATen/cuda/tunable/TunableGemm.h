@@ -89,7 +89,6 @@ class DefaultScaledGemmOp : public Callable<ScaledGemmParams<T>> {
           params->c_scale_ptr,
           params->ldc,
           params->c_dtype,
-          params->amax_ptr,
           params->use_fast_accum);
       return OK;
     }

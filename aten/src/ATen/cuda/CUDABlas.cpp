@@ -1408,7 +1408,6 @@ void scaled_gemm(
     const void *result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr,
     bool use_fast_accum) {
 #if CUDA_VERSION >= 11080 || defined(USE_ROCM)
   const auto computeType = CUBLAS_COMPUTE_32F;
@@ -1421,13 +1420,9 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
-  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
-#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 60200)
-  // Amax support in ROCm as of 6.2
-  if (isFloat8Type(result_dtype)) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+  if (result_scale_ptr != nullptr) {
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
   }
-#endif
 #ifndef USE_ROCM
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif

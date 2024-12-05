@@ -819,9 +819,97 @@ static bool _scaled_mm_allowed_device() {
 #endif
 }
 
-// Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
+namespace{
+
+enum class ScalingType {
+  TensorWise,
+  RowWise,
+  Error
+};
+/*
+ * Scaling Type Determination:
+ * ---------------------------
+ * Conditions and corresponding Scaling Types:
+ *
+ * - If scale_a.numel() == 1 && scale_b.numel() == 1:
+ *   - Returns TensorWise.
+ *
+ * - Else if scale_a.dim() == 1 && scale_a.size(0) == dim_m && scale_b.size(0) == dim_n:
+ *   - Returns RowWise.
+ *
+ * - Otherwise:
+ *   - Returns Error.
+ */
+
+// Validates the scale tensors to scaled_mm
+// And returns the type of scaling/which kernel to use
+ScalingType get_scaling_type(
+    const at::Tensor& scale_a,
+    const at::Tensor& scale_b,
+    int64_t dim_m,
+    int64_t dim_n) {
+  // Both Per-Tensor and Row-wise scaling expect fp32 tensors
+  TORCH_CHECK(
+      scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "Both scale_a and scale_b must be float (fp32) tensors.");
+
+  // Check the singluar scale case for per-tensor scaling
+  if (scale_a.numel() == 1 && scale_b.numel() == 1) {
+    return ScalingType::TensorWise;
+  }
+
+  // For non-TensorWise scaling, enforce 2D input tensors
+  TORCH_CHECK(
+      scale_a.dim() == 2 && scale_b.dim() == 2,
+      "For non-TensorWise scaling, scale tensors must be 2-dimensional, "
+      "but got scale_a.dim()=",
+      scale_a.dim(),
+      " and scale_b.dim()=",
+      scale_b.dim());
+
+  // Check for RowWise scaling
+  if (scale_a.size(0) == dim_m && scale_a.size(1) == 1 &&
+      scale_b.size(0) == 1 && scale_b.size(1) == dim_n) {
+#if !defined(USE_ROCM) && !defined(_MSC_VER) || \
+    (defined(USE_ROCM) && ROCM_VERSION >= 60000)
+    TORCH_CHECK(
+        scale_a.is_contiguous() && scale_b.is_contiguous(),
+        "Both scale_a and scale_b must be contiguous for RowWise scaling.");
+    return ScalingType::RowWise;
+#else
+    TORCH_CHECK(false, "Per-row scaling is not supported for this platform!");
+    return ScalingType::Error;
+#endif
+  }
+
+  // If we reach here, the input doesn't match any valid scaling type
+  TORCH_CHECK(
+      false,
+      "Invalid scaling configuration. For TensorWise scaling, both scales should be scalar. "
+      "For RowWise scaling, scale_a should be (",
+      dim_m,
+      ", 1) and scale_b should be (1, ",
+      dim_n,
+      "). "
+      "Got scale_a.size()=(",
+      scale_a.size(0),
+      ", ",
+      scale_a.size(1),
+      ") and ",
+      "scale_b.size()=(",
+      scale_b.size(0),
+      ", ",
+      scale_b.size(1),
+      ")");
+
+  return ScalingType::Error;
+}
+
+} // namespace
+
+// Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
-// If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
+// If output matrix type is 16 or 32-bit type, scale_result is not applied.
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
@@ -965,7 +1053,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       params.c_scale_ptr = scale_result ? scale_result->data_ptr() : nullptr;
       params.ldc = args.result_ld;
       params.c_dtype = out_dtype_;
-      params.amax_ptr = amax.data_ptr();
       params.use_fast_accum = use_fast_accum;
       if (transa_ && transb_) {
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
@@ -989,11 +1076,6 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   else
 #endif
   {
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-  // hipBlasLT requires scaleD to be set to something in order to use AMAX
-    auto dummy_options = TensorOptions().dtype(kFloat).device(kCUDA);
-    auto dummy_scale = at::ones(1, dummy_options);
-#endif
     at::cuda::blas::scaled_gemm(
         args.transa,
         args.transb,
@@ -1011,14 +1093,9 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         bias ? bias->data_ptr(): nullptr,
         bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_,
         args.result->data_ptr(),
-#if defined(USE_ROCM) && ROCM_VERSION >= 60200
-        scale_result ? scale_result->data_ptr() : dummy_scale.data_ptr(),
-#else
         scale_result ? scale_result->data_ptr() : nullptr,
-#endif
         args.result_ld,
         out_dtype_,
-        amax.data_ptr(),
         use_fast_accum);
   }
 
