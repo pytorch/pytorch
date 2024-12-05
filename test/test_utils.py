@@ -412,9 +412,6 @@ class TestCheckpoint(TestCase):
         self.assertEqual(t1, res[6])
 
     def test_checkpoint_partial_grad(self):
-        import os
-        import signal
-        os.kill(os.getpid(), signal.SIGUSR1)
         def run_fn(tensor1, tensor2):
             # tensor 2 is used for other application logic
             return tensor1, tensor2
@@ -565,7 +562,6 @@ class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
     def test_random_seed(self):
-        self.assertEqual(1, 2)
         def run():
             dataloader = torch.utils.data.DataLoader(
                 RandomDatasetMock(),

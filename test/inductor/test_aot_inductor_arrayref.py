@@ -164,7 +164,7 @@ CPU_TEST_FAILURES = {
     "test_seq": fail_stack_allocation(is_skip=True),
     "test_output_misaligned": fail_stack_allocation(is_skip=True),
     "test_no_args": fail_stack_allocation(is_skip=True),
-    # "test_fqn": fail_stack_allocation(is_skip=True),
+    "test_fqn": fail_stack_allocation(is_skip=True),
 }
 
 
