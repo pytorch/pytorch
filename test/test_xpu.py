@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
     suppress_warnings,
-    TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
 )
@@ -342,7 +341,6 @@ print(torch.xpu.device_count())
 
     @onlyXPU
     @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
