@@ -48,7 +48,7 @@ void FrameLocalsMapping::_realize_dict() {
     }
 
     if (value != nullptr) {
-      auto name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
+      py::handle name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
       _dict[name] = value;
     }
   };
@@ -78,7 +78,7 @@ void FrameLocalsMapping::_realize_dict() {
 
   auto update_mapping =
       [&](PyObject* names, int i, PyObject* value, bool deref) {
-        auto name = PyTuple_GET_ITEM(names, i);
+        py::handle name = PyTuple_GET_ITEM(names, i);
         if (deref) {
           CHECK(value != nullptr && PyCell_Check(value));
           value = PyCell_GET(value);
