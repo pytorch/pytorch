@@ -1579,8 +1579,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Shared implementation of mutable_data_ptr_impl() and the future
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
-  __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
-      const Func& get_data) const {
+  T* data_ptr_impl_impl(const Func& get_data) const {
     if (C10_UNLIKELY(!has_storage())) {
       throw_data_ptr_access_error();
     }
@@ -1596,8 +1595,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
     // (for example if created as `torch.empty(5)[10:]`) that triggers
-    // applying non-zero offset to null pointer in UBSan
-    return get_data() + storage_offset_;
+    auto ptr = get_data();
+    if (C10_UNLIKELY(ptr == nullptr)) {
+      return ptr;
+    }
+    return ptr + storage_offset_;
   }
 
  public:
