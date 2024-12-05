@@ -32,17 +32,20 @@
 #include <tuple>
 #include <utility>
 
-// For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
-// underlying tuple and access the item. Before Python 3.12 version, the
-// datastructure is in tupleobject.c file -
+// Certain CPython data structures are defined in `.c` files in earlier Python
+// versions, e.g., for TupleIteratorGetItemAccessor, we need a fast way to
+// retrieve the underlying tuple and access the item. Before Python 3.12
+// version, the data structure is in tupleobject.c file -
 // https://github.com/python/cpython/blob/9afc6d102d16080535325f645849cd84eb04d57d/Objects/tupleobject.c#L1058-L1062
-// To handle this, we manually copy the struct here and manually cast it to this
-// new struct. From 3.12, the struct is included in the header file.
+//
+// To handle the older python versions, we manually copy the struct here and
+// manually cast it to this new struct. For newer versions, the struct is
+// included in the header file.
 #if IS_PYTHON_3_12_PLUS
 
 #define Py_BUILD_CORE
-// Bring _PyTupleIterObject from the header file
-#include <internal/pycore_tuple.h>
+#include <internal/pycore_range.h> // _PyRangeIterObject
+#include <internal/pycore_tuple.h> // _PyTupleIterObject
 #undef Py_BUILD_CORE
 
 #else
@@ -53,6 +56,19 @@ typedef struct {
   Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
+
+// Copied from CPython, and given a unified name for different Python verions.
+// https://github.com/python/cpython/blob/7f71003b222ad398713514c2b55d34dc05dba6bc/Objects/rangeobject.c#L765-L771
+typedef struct {
+  PyObject_HEAD
+  // NOTE for Python 3.12+, `index` is removed, and `start` is updated in place
+  // instead, upon each `next(...)` call. See
+  // https://github.com/python/cpython/pull/27986
+  long index;
+  long start;
+  long step;
+  long len;
+} _PyRangeIterObject;
 
 #endif // IS_PYTHON_3_12_PLUS
 
@@ -1140,6 +1156,52 @@ class EQUALS_MATCH : public LeafGuard {
 
   // Type of the value
   PyTypeObject* _value_type;
+};
+
+class RANGE_ITERATOR_MATCH : public LeafGuard {
+ public:
+  RANGE_ITERATOR_MATCH(
+      py::object start,
+      py::object stop,
+      py::object step,
+      py::object type_id,
+      py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)),
+        _type_id(py::cast<intptr_t>(std::move(type_id))) {
+    PyObject* start_obj = start.ptr();
+    PyObject* stop_obj = stop.ptr();
+    PyObject* step_obj = step.ptr();
+    _start = THPUtils_unpackLong(start_obj);
+    _stop = THPUtils_unpackLong(stop_obj);
+    _step = THPUtils_unpackLong(step_obj);
+    TORCH_CHECK(
+        !PyErr_Occurred(), "values of start/stop/step must fit in a long type");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Do a type match first.
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    if (Py_TYPE(value) != (void*)_type_id) {
+      return false;
+    }
+    _PyRangeIterObject* iter = (_PyRangeIterObject*)value;
+
+#if IS_PYTHON_3_12_PLUS
+    long start = iter->start;
+#else
+    long start = iter->start + iter->index * iter->step;
+#endif // IS_PYTHON_3_12_PLUS
+
+    long stop = iter->start + iter->len * iter->step;
+    return start == _start && stop == _stop && iter->step == _step;
+  }
+
+ private:
+  intptr_t _type_id;
+  // Normalized representation of a range iterator.
+  long _start;
+  long _stop;
+  long _step;
 };
 
 class TUPLE_ITERATOR_LEN : public LeafGuard {
@@ -4382,6 +4444,12 @@ PyObject* torch_c_dynamo_guards_init() {
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
       .def(py::init<py::object, py::object, py::list>())
       .def("__call__", &TUPLE_ITERATOR_LEN::check);
+  py::class_<
+      RANGE_ITERATOR_MATCH,
+      LeafGuard,
+      std::shared_ptr<RANGE_ITERATOR_MATCH>>(py_m, "RANGE_ITERATOR_MATCH")
+      .def(py::init<py::object, py::object, py::object, py::object, py::list>())
+      .def("__call__", &RANGE_ITERATOR_MATCH::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
@@ -4604,6 +4672,22 @@ PyObject* torch_c_dynamo_guards_init() {
             SKIP_IF_GUARD_ALREADY_PRESENT("TUPLE_ITERATOR_LEN");
             self.add_leaf_guard(std::make_shared<TUPLE_ITERATOR_LEN>(
                 std::move(length),
+                std::move(type_id),
+                std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_range_iterator_match_guard",
+          [](GuardManager& self,
+             py::object start,
+             py::object stop,
+             py::object step,
+             py::object type_id,
+             py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("RANGE_ITERATOR_MATCH");
+            self.add_leaf_guard(std::make_shared<RANGE_ITERATOR_MATCH>(
+                std::move(start),
+                std::move(stop),
+                std::move(step),
                 std::move(type_id),
                 std::move(verbose_code_parts)));
           })
