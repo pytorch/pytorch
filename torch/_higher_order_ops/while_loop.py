@@ -233,8 +233,6 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             "call_function", while_loop_op, proxy_args, {}, name="while_loop"
         )
 
-        # body_fn return output with the same pytree and tensor meta data as carried_inputs
-        # so we could just return the output after one iteration.
         out = while_loop_op(cond_graph, body_graph, carried_inputs, additional_inputs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
@@ -282,6 +280,8 @@ def while_loop_fake_tensor_mode(
         #     return it+1. nz.sin() + 1,
         # There's no new unbacked symints allocated in subgraph, so we're safe.
         with mode.shape_env.ignore_fresh_unbacked_symbols():
+            # body_fn return output with the same pytree and tensor meta data as carried_inputs
+            # so we could just return the output after one iteration.
             return body_fn(*carried_inputs, *additional_inputs)
 
 
