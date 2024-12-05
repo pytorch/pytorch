@@ -438,7 +438,7 @@ class ConfigModule(ModuleType):
         else:
             config = maybe_pickled_config
         for k, v in config.items():
-            if k in self._config:
+            if k in self._config and self._config[k].alias is None:
                 setattr(self, k, v)
             else:
                 warnings.warn(
