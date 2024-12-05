@@ -105,6 +105,7 @@ jobs:
 
       - name: Build docker image
         id: build-docker-image
+        # TESTING
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@wait-for-docker-build
         with:
           docker-image-name: ${{ matrix.docker-image-name }}

@@ -136,6 +136,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
+        # TESTING
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@wait-for-docker-build
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
