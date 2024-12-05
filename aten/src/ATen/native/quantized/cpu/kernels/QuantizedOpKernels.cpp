@@ -2422,8 +2422,7 @@ inline void do_bn_compute(
     auto beta_v = Vectorized<float>::loadu(beta + idx * kVLen);
     vals_dq[idx] = vec::fmadd(alpha_v, vals_dq[idx], beta_v);
   }
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+  auto outputs_q = Vec::quantize(vals_dq, /*scale=*/1.0f, out_zero_point, /*inverse_scale=*/1.0f);
   // Fake scale again
   if constexpr (ReluFused) {
     outputs_q = outputs_q.maximum(out_zero_point_v);
@@ -3358,12 +3357,9 @@ void quantize_tensor_per_tensor_affine_cpu(
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (const auto task_id : c10::irange(begin, end)) {
             fbgemm::Quantize<underlying_t, false /*LEGACY*/>(
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 rd, /*src=*/
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 qd, /*dst=*/
                 rtensor.numel(), /*len*/
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 qparams, /*qparams=*/
                 task_id, /*thread_id*/
                 num_tasks /*num_threads*/);
@@ -3382,8 +3378,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
         check_tensor_memory_format(qtensor, rtensor);
         const auto* qd =
             reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-        fbgemm::TensorQuantizationParams qparams;
+        fbgemm::TensorQuantizationParams qparams{};
         qparams.scale = scale;
         qparams.zero_point = zero_point;
         qparams.precision = CHAR_BIT * sizeof(underlying_t);
@@ -3392,13 +3387,9 @@ void dequantize_tensor_per_tensor_affine_cpu(
         at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
           for (const auto task_id : c10::irange(begin, end)) {
             fbgemm::Dequantize<underlying_t>(
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 qd, /*src=*/
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 rd, /*dst=*/
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 qtensor.numel(), /*len=*/
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 qparams, /*qparams=*/
                 task_id, /*thread_id*/
                 num_tasks /*num_threads*/);

@@ -32,7 +32,7 @@ import logging
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 logger.setLevel(logging.DEBUG)
 device = "cuda"

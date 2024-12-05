@@ -1,5 +1,6 @@
+from contextlib import contextmanager
 from dataclasses import dataclass, field  # noqa: F811
-from typing import Callable, List
+from typing import Any, Callable, Generator, List
 
 
 @dataclass
@@ -60,6 +61,17 @@ class CompilationCallbackHandler:
         """
         for callback in self.end_callbacks:
             callback()
+
+    @contextmanager
+    def install_callbacks(self) -> Generator[None, Any, Any]:
+        """
+        Context manager to install the callbacks and run them when the context is exited.
+        """
+        try:
+            self.run_start_callbacks()
+            yield
+        finally:
+            self.run_end_callbacks()
 
     def clear(self) -> None:
         """

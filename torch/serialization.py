@@ -342,7 +342,13 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
     Returns:
         A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
     """
-    safe_global_strings = set(_weights_only_unpickler._get_allowed_globals().keys())
+    default_safe_globals_strings = set(
+        _weights_only_unpickler._get_allowed_globals().keys()
+    )
+    user_safe_global_strings = set(
+        _weights_only_unpickler._get_user_allowed_globals().keys()
+    )
+    safe_global_strings = default_safe_globals_strings.union(user_safe_global_strings)
 
     with _open_file_like(f, "rb") as opened_file:
         if not _is_zipfile(opened_file):
@@ -1311,7 +1317,8 @@ def load(
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
         "but it can result in arbitrary code execution. Do it only if you got the file from a "
         "trusted source."
     )
@@ -1325,6 +1332,8 @@ def load(
         has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
         blocklist_pattern = r"whose module (\S+) is blocked"
         has_blocklist = re.search(blocklist_pattern, message) is not None
+        import_pattern = r"(\S+) must be (\S+) to load"
+        has_import = re.search(import_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
                 "Weights only load failed. This file can still be loaded, to do so you have two options, "
@@ -1334,12 +1343,15 @@ def load(
                 + message
             )
         else:
-            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
-            if not has_blocklist:
-                updated_message += (
-                    "Please file an issue with the following so that we can make "
-                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
-                )
+            if has_import:
+                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
+            else:
+                updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+                if not has_blocklist:
+                    updated_message += (
+                        "Please file an issue with the following so that we can make "
+                        "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                    )
             updated_message += message
         return updated_message + DOCS_MESSAGE
 

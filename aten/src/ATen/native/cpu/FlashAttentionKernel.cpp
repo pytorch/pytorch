@@ -139,13 +139,14 @@ inline void _mul_reduce_max_fusion_kernel(
     tmp_max = std::max(tmp_max, tmp1);
     out[i] = tmp1;
   }
-  max = std::max(
-      tmp_max,
-      vec::vec_reduce_all<scalar_t>(
-          [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
-            return vec::maximum(x, y);
-          },
-          vec_tmp_max));
+  auto reduced_tmp_max = vec::vec_reduce_all<scalar_t>(
+      [](vec::Vectorized<scalar_t>& x, vec::Vectorized<scalar_t>& y) {
+        return vec::maximum(x, y);
+      },
+      vec_tmp_max);
+  // Guard against Q*K^T being NaN
+  max = std::isnan(reduced_tmp_max) ? std::numeric_limits<scalar_t>::quiet_NaN()
+                                    : std::max(tmp_max, reduced_tmp_max);
 }
 
 template <typename scalar_t>
@@ -316,7 +317,7 @@ void cpu_flash_attention(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
@@ -814,7 +815,7 @@ void cpu_flash_attention_backward(
   using accum_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<accum_t>;
   accum_t scaling_factor =
-      sdp::calculate_scale(query, scale).as_float_unchecked();
+      sdp::calculate_scale(query, scale).expect_float();
 
   // Sizes
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),

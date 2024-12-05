@@ -413,12 +413,22 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "native_batch_norm"),
     (None, None, "_upsample_bilinear2d_aa"),
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
+    (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
+    (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 all_decomposed = set()
@@ -558,6 +568,13 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
     def test_quick_core_backward(self, device, dtype, op):
+        test_keys = [
+            (torch.device(device).type, dtype, op.name),
+            (None, dtype, op.name),
+            (None, None, op.name),
+        ]
+        if any(key in CROSS_REF_BACKWARD_EXCLUDE_SET for key in test_keys):
+            self.skipTest(f"{op.name} in {dtype} not supported")
         for sample_input in op.sample_inputs(device, dtype, requires_grad=True):
             aten_name = op.decomp_aten_name or op.aten_name
             args = [sample_input.input] + list(sample_input.args)
@@ -591,6 +608,28 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_bernoulli_p(self, device):
+        p = 0.3
+        input_t = torch.rand(100, 100)
+        torch.manual_seed(123)
+        ref = torch.ops.aten.bernoulli.p(input_t, p)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.bernoulli_p(input_t, p)
+        ref_p = ref.sum() / torch.prod(torch.tensor(ref.size()))
+        res_p = res.sum() / torch.prod(torch.tensor(res.size()))
+        self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
+
+    def test_bernoulli_default(self, device):
+        p = 0.3
+        p_t = p * torch.ones(5, 5)
+        torch.manual_seed(123)
+        ref = torch.ops.aten.bernoulli.default(p_t)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.bernoulli(p_t)
+        ref_p = ref.sum() / torch.prod(torch.tensor(ref.size()))
+        res_p = res.sum() / torch.prod(torch.tensor(res.size()))
+        self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)
@@ -616,50 +655,6 @@ class TestDecomp(TestCase):
 
         for dim in (-1, 0, 1):
             self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
-
-    def test_rrelu_with_noise(self, device):
-        # rrelu_with_noise behavior depends on a) whether elements in the input
-        # are <= 0, and b) whether we're in training mode. Cover all cases:
-        dtype = torch.float64
-        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
-        lower = 1.0
-        upper = 4.0
-        training = False
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
-        # Now with training=True:
-        training = True
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
 
     @suppress_warnings
     @tf32_off()
@@ -1201,6 +1196,31 @@ class DecompOneOffTests(TestCase):
             )
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
+
+    @onlyCPU
+    def test_native_layer_norm_cpu_decomp(self, device):
+        def f(x, w, b):
+            return torch.ops.aten.native_layer_norm.default(x, [1, 2, 3], w, b, eps=0.5)
+
+        x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+        w = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        b = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        out_ref = f(x, w, b)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with enable_python_dispatcher(), FakeTensorMode():
+            x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+            w = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            b = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            out = f(x, w, b)
+
+        for o_ref, o in zip(out_ref, out):
+            self.assertEqual(o_ref.dtype, o.dtype)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

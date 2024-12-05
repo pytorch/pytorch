@@ -107,11 +107,13 @@ class AOTInductorModelBase {
       size_t num_outputs,
       size_t num_constants,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir)
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(std::move(cubin_dir)) {
+        cubin_dir_(std::move(cubin_dir)),
+        include_weights(include_weights) {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
@@ -208,6 +210,9 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
       constant_blob_ = RAII_cudaMalloc(blob_size);
 #endif
+    }
+    if (!include_weights) {
+      return;
     }
 
     size_t bytes_read = 0;
@@ -568,6 +573,11 @@ class AOTInductorModelBase {
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
 
+  // This is the flag that implies whether the weight is included in the model.
+  // If True, we would prepare the weight when loading the model, otherwise the
+  // model will be loaded without weights, and need to be provided by the user.
+  bool include_weights;
+
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
 #ifdef USE_CUDA
@@ -593,7 +603,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir);
+      std::optional<std::string> cubin_dir,
+      bool include_weights = true);
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,

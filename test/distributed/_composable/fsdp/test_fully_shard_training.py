@@ -12,18 +12,18 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
+)
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
     OffloadPolicy,
     register_fsdp_forward_method,
 )
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
-    apply_activation_checkpointing,
-)
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -671,7 +671,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         module_grouping: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
-        testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
+        testing_compile = fully_shard != torch.distributed.fsdp.fully_shard
         if testing_compile and checkpoint_impl == "composable":
             return
         torch.manual_seed(42)
