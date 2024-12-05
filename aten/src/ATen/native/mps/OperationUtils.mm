@@ -1,4 +1,7 @@
 //  Copyright © 2022 Apple Inc.
+#include <ATen/core/TensorBase.h>
+#include <ATen/native/mps/MetalShaderLibrary.h>
+#include <functional>
 #include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
@@ -853,6 +856,25 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
   return cplMap[key];
 }
 
+std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
+  if (C10_UNLIKELY(!library && nparams > 0)) {
+    throw std::runtime_error("Library must be initialized first");
+  }
+  std::vector<std::string> rc;
+  @autoreleasepool {
+    NSArray<NSString*>* names = [getLibrary() functionNames];
+    rc.reserve([names count]);
+    for (auto idx : c10::irange([names count])) {
+      rc.emplace_back([[names objectAtIndex:idx] UTF8String]);
+    }
+  }
+  return rc;
+}
+
+std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
+  return std::make_shared<MetalKernelFunction>(getPipelineStateForFunc(name));
+}
+
 class BundledShaderLibary : public MetalShaderLibrary {
  public:
   BundledShaderLibary() : MetalShaderLibrary("") {}
@@ -899,6 +921,65 @@ class BundledShaderLibary : public MetalShaderLibrary {
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   static BundledShaderLibary l;
   return l;
+}
+
+// DynamicMetalShaderLibrary implementation
+DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
+  [library release];
+}
+
+// MetalKernelFunction implementation
+MetalKernelFunction::MetalKernelFunction(MTLComputePipelineState_t cps_) : cps([cps_ retain]) {}
+
+MetalKernelFunction::~MetalKernelFunction() {
+  [cps release];
+}
+
+void MetalKernelFunction::runCommandBlock(std::function<void(void)> run) {
+  dispatch_sync_with_rethrow(getCurrentMPSStream()->queue(), ^() {
+    @autoreleasepool {
+      run();
+    }
+  });
+}
+
+void MetalKernelFunction::startEncoding() {
+  encoder = getCurrentMPSStream()->commandEncoder();
+  [encoder setComputePipelineState:cps];
+}
+
+void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> group_size) {
+  auto group_size_val = group_size.value_or(std::min(length, getMaxThreadsPerThreadgroup()));
+  [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
+}
+
+void MetalKernelFunction::dispatch(std::array<uint64_t, 2> length, std::optional<std::array<uint64_t, 2>> group_size) {
+  auto group_size_val =
+      group_size.value_or(std::array<uint64_t, 2>{std::min(length[0], getMaxThreadsPerThreadgroup()), 1});
+  [encoder dispatchThreads:MTLSizeMake(length[0], length[1], 1)
+      threadsPerThreadgroup:MTLSizeMake(group_size_val[0], group_size_val[1], 1)];
+}
+
+void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
+  TORCH_CHECK(t.device().type() == kMPS, "Tensor must be on GPU");
+  mtl_setBuffer(encoder, t, idx);
+}
+
+void MetalKernelFunction::setArg(unsigned idx, const void* ptr, uint64_t size) {
+  TORCH_CHECK(size > 0);
+  [encoder setBytes:ptr length:size atIndex:idx];
+}
+
+uint64_t MetalKernelFunction::getMaxThreadsPerThreadgroup() const {
+  return [cps maxTotalThreadsPerThreadgroup];
+}
+
+uint64_t MetalKernelFunction::getThreadExecutionWidth() const {
+  return [cps threadExecutionWidth];
+}
+
+uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
+  return [cps staticThreadgroupMemoryLength];
 }
 
 } // namespace at::native::mps

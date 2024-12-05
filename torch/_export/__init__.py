@@ -75,7 +75,7 @@ def capture_pre_autograd_graph_warning():
 def print_export_warning():
     log.warning("Using torch.export.export_for_training(...,strict=True)")
 
-def gm_using_training_ir(graph_module):
+def gm_using_training_ir(graph_module: torch.fx.GraphModule) -> bool:
     """
     Returns true if the graph module is detected to use training IR.
 
@@ -232,7 +232,7 @@ def capture_pre_autograd_graph(
             )
 
             setattr(module, "capture_pre_autograd_graph_tag", True)  # noqa: B010
-            for node in module.graph.nodes:  # type: ignore[union-attr]
+            for node in module.graph.nodes:
                 node.meta["capture_pre_autograd_graph_tag"] = True
 
     error_message = \
