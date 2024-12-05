@@ -731,6 +731,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import (
             BuiltinVariable,
             ConstantVariable,
+            TorchInGraphFunctionVariable,
             TupleVariable,
             UserMethodVariable,
         )
@@ -771,7 +772,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     args[0].as_python_constant() in self.value
                 )
 
-            if method is set.__contains__ and len(args) == 1:
+            if (
+                method is set.__contains__
+                and len(args) == 1
+                and isinstance(args[0], TorchInGraphFunctionVariable)
+            ):
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
