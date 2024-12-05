@@ -382,6 +382,11 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Issues a warning in Python 3.13.0 for possibly slower guard evaluation and
+# instructs user to attempt using 3.13.1+, where the CPython bug is fixed.
+# Should be disabled in dynamo-wrapped tests since some tests check that no warnings are issued.
+issue_3_13_0_warning = True
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
@@ -428,7 +433,7 @@ cudagraph_backend_support_input_mutation = False
 only_allow_pt2_compliant_ops = False
 
 # This flag is ignored and maintained for backwards compatibility.
-capture_autograd_function = False
+capture_autograd_function = True
 
 # This flag is ignored and maintained for backwards compatbility.
 capture_func_transforms = True
