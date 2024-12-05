@@ -2462,6 +2462,20 @@ class CPUReproTests(TestCase):
                     self.assertEqual(res_vec, res_scalar)
 
     @requires_vectorization
+    def test_bitwise_and_bool(self):
+        def fn(a, b):
+            c = (a > 1) & (b > 1)
+            return c
+
+        a = torch.ones((64), dtype=torch.int64)
+        b = torch.ones((64), dtype=torch.uint8)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (a, b))
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
