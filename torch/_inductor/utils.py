@@ -2150,16 +2150,18 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append(
-                    tuple(
-                        (
-                            shape_env.evaluate_symexpr(e)
-                            if shape_env is not None
-                            else int(e)
-                        )
-                        for e in exprs
-                    )
-                )
+                fakify_first_call = False
+                if ctx := torch._guards.TracingContext.try_get():
+                    fakify_first_call = ctx.fakify_first_call
+
+                def map_expr(e):
+                    if shape_env is None:
+                        return int(e)
+                    if fakify_first_call:
+                        return shape_env.deserialize_symexpr(e)
+                    return shape_env.evaluate_symexpr(e)
+
+                context.output_strides.append(tuple(map_expr(e) for e in exprs))
 
 
 def should_use_remote_fx_graph_cache():
@@ -2183,6 +2185,34 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
+
+
+_triton_type_re = re.compile(r"^.*[.]")
+
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_type_to_torch(dtype: str) -> torch.dtype:
+    adjusted_type = _torch_triton_mapping.get(dtype, dtype)
+    type_name = adjusted_type.replace("tl.", "")
+    out_dtype = getattr(torch, type_name)
+    assert isinstance(out_dtype, torch.dtype)
+    return out_dtype
 
 
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
