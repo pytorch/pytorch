@@ -249,10 +249,13 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         self._key_fmt = f"pt2:{cache_id}:{{key}}"
-        self._redis = redis.Redis(
-            host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
-            port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
-        )
+        if "TORCHINDUCTOR_REDIS_URL" in os.environ:
+            self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
+        else:
+            self._redis = redis.Redis(
+                host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
+                port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
+            )
 
     def __get_key(self, key: str) -> str:
         return self._key_fmt.format(key=key)
