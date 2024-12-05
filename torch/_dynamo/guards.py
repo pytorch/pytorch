@@ -962,8 +962,12 @@ class GuardBuilder(GuardBuilderBase):
             # RootGuardManager accepts a dict but still its not a
             # DictGuardManager because we will eventually move to
             # fastlocals.
-            out = root_guard_manager.dict_getitem_manager(
-                key=source.local_name,
+            # NOTE: assumes scope["L"].keys() has the same order as the
+            # names in frame's f_locals. This should be the case if self.scope["L"]
+            # is set to frame.f_locals.
+            framelocals_idx = list(self.scope["L"].keys()).index(source.local_name)
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
