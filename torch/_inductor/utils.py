@@ -1114,14 +1114,25 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index_or_device: Union[int, torch.device, None] = None) -> bool:
+def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
-        device = torch.device("cuda", index_or_device or 0)
+        device = torch.device("cuda", index_or_device)
+
+    prop = DeviceProperties.create(device)
+
+    # SM logic is not relevant to ROCm gpus
+    # Arbitrarily skipping the older models
+    if torch.version.hip:
+        assert prop.major is not None
+        if prop.major <= 10:
+            log.warning("GPU arch does not support max_autotune_gemm mode usage")
+            return False
+        return True
 
     min_sms = 68  # 3080
-    avail_sms = DeviceProperties.create(device).multi_processor_count
+    avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
             "Not enough SMs to use max_autotune_gemm mode",
