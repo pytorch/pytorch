@@ -661,9 +661,13 @@ class BaseSchedulerNode:
             assert isinstance(self.node, ir.IRNode)
             try:
                 return estimate_nccl_collective_runtime(self.node)
-            except Exception as e:
+            except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
+                log.info(e)
+                return 0
+            except TypeError as e:
+                # this happens when the collective is not of type ir._CollectiveKernel
                 log.info(e)
                 return 0
 

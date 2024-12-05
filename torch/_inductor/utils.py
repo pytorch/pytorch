@@ -1725,11 +1725,22 @@ def is_collective(node, op=None):
         # communication ops. But in order to allow better communication and computation
         # overlap, torchrec's communication ops should be not used.
         type(node) == ir.FallbackKernel
-        and getattr(node, "python_kernel_name", None)
-        in (
-            "torch.ops.torchrec.all_to_all_single.default",
-            "torch.ops.torchrec.reduce_scatter_tensor.default",
-            "torch.ops.torchrec.all_gather_into_tensor.default",
+        and (
+            # NOTE: the `hasattr()` check is to bypass errors such as the following:
+            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
+            (
+                hasattr(torch.ops.torchrec, "all_to_all_single")
+                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
+                and node.op_overload
+                == torch.ops.torchrec.all_gather_into_tensor.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
+                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
+            )
         )
     )
 
