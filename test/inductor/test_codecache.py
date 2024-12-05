@@ -255,10 +255,9 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.fx_graph.cache.keys():
-                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
+        # Check that the cache entries seem reasonable
+        for k in global_stats.fx_graph.cache.keys():
+            self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -1217,12 +1216,11 @@ class TestAutotuneCache(TestCase):
 
         self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.autotune_remote.cache.keys():
-                self.assertRegex(k, r"[0-9a-z]{52}\.py")
-            for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c11")
+        # Check that the cache entries seem reasonable
+        for k in global_stats.autotune_remote.cache.keys():
+            self.assertRegex(k, r"[0-9a-z]{52}\.py")
+        for k in global_stats.triton.cache.keys():
+            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
@@ -1261,14 +1259,13 @@ class TestAutotuneCache(TestCase):
         self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
         self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.autotune_local.cache.keys():
-                self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
-            for k in global_stats.bundled_autotune.cache.keys():
-                self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
-            for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+        # Check that the cache entries seem reasonable
+        for k in global_stats.autotune_local.cache.keys():
+            self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
+        for k in global_stats.bundled_autotune.cache.keys():
+            self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
+        for k in global_stats.triton.cache.keys():
+            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
 
 class TestRemoteAOTAutogradCache(TestCase):
@@ -1297,13 +1294,12 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(global_stats.aot_autograd, Stats(1, 1, 1))
             self.assertEqual(global_stats.fx_graph, Stats(1, 1, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.aot_autograd.cache.keys():
-                self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c10")
+        # Check that the cache entries seem reasonable
+        for k in global_stats.aot_autograd.cache.keys():
+            self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c[0-9]+")
 
-            for k in global_stats.fx_graph.cache.keys():
-                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
+        for k in global_stats.fx_graph.cache.keys():
+            self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
