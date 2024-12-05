@@ -1535,8 +1535,8 @@ def forward(self, primals_1, primals_2, primals_3):
     mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
     mul_1 = torch.ops.aten.mul.Tensor(clone_1, 3);  clone_1 = None
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
-    view_2 = torch.ops.aten.view.default(mul_1, [2, 2])
-    return (mul, mul_1, view, view_2)""",
+    view_1 = torch.ops.aten.view.default(mul_1, [2, 2])
+    return (mul, mul_1, view, view_1)""",
         )
 
     def test_input_output_view_metadata_mutate_multiple(self):
@@ -1568,9 +1568,9 @@ def forward(self, primals_1, primals_2, primals_3):
     mul = torch.ops.aten.mul.Tensor(clone, 3);  clone = None
     t = torch.ops.aten.t.default(view);  view = None
     view_1 = torch.ops.aten.view.default(primals_1, [2, 2]);  primals_1 = None
+    view_2 = torch.ops.aten.view.default(mul, [2, 2])
     view_3 = torch.ops.aten.view.default(t, [2, 2])
-    view_4 = torch.ops.aten.view.default(mul, [2, 2])
-    return (mul, t, view_1, view_4, view_3)""",
+    return (mul, t, view_1, view_2, view_3)""",
         )
 
     def test_input_mutation_and_output_view(self):
@@ -1591,8 +1591,8 @@ def forward(self, primals_1, primals_2, primals_3):
 def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
-    view_1 = torch.ops.aten.view.default(add, [-1])
-    return (add, view_1)""",
+    view = torch.ops.aten.view.default(add, [-1])
+    return (add, view)""",
         )
 
     def test_input_mutation_output_view_multiple(self):
@@ -2132,10 +2132,10 @@ def forward(self, primals_1):
     t_1 = torch.ops.aten.t.default(clone);  clone = None
     select_scatter = torch.ops.aten.select_scatter.default(t_1, mul, 0, 0);  t_1 = mul = None
     t_2 = torch.ops.aten.t.default(select_scatter);  select_scatter = None
-    t_4 = torch.ops.aten.t.default(t_2)
-    t_6 = torch.ops.aten.t.default(t_2);  t_2 = None
-    view_1 = torch.ops.aten.view.default(t_6, [3, 3]);  t_6 = None
-    return (t_4, view_1)""",
+    t_3 = torch.ops.aten.t.default(t_2)
+    t_5 = torch.ops.aten.t.default(t_2);  t_2 = None
+    view_1 = torch.ops.aten.view.default(t_5, [3, 3]);  t_5 = None
+    return (t_3, view_1)""",
         )
 
     def test_view_and_inplace_view(self):
@@ -2724,10 +2724,9 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  add = as_strided_4 = None
     return (as_strided_scatter, add_1)""",
         )  # noqa: B950
 
@@ -2757,10 +2756,9 @@ def forward(self, primals_1):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [2], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
+    add_1 = torch.ops.aten.add.Tensor(add, as_strided_4);  add = as_strided_4 = None
     return (as_strided_scatter, add_1)""",
         )  # noqa: B950
 
@@ -2790,8 +2788,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_5, [4]);  as_strided_5 = None
     return (as_strided_scatter, view_1)""",
         )  # noqa: B950
 
@@ -2825,11 +2823,10 @@ def forward(self, primals_1, primals_2):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
-    return (as_strided_scatter, add, view_1)""",
+    view = torch.ops.aten.view.default(mul, [-1])
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
+    return (as_strided_scatter, add, view)""",
         )  # noqa: B950
 
     def test_input_metadata_mutation_aliases(self):
@@ -2898,8 +2895,8 @@ def forward(self, primals_1, primals_2):
     as_strided = torch.ops.aten.as_strided.default(primals_1, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided, 2);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(primals_1, mul, [4], [1], 0);  primals_1 = mul = None
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided_3, 1);  as_strided_3 = None
+    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_2, 1);  as_strided_2 = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return (as_strided_scatter, add, add_1)""",
         )  # noqa: B950
@@ -2953,14 +2950,13 @@ def forward(self, primals_1, primals_2, primals_3):
     clone = torch.ops.aten.clone.default(primals_1);  primals_1 = None
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_4, 0);  as_strided_4 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
-    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
-    return (as_strided_scatter, add_2, view_2, unsqueeze_1)""",
+    view = torch.ops.aten.view.default(add, [-1]);  add = None
+    return (as_strided_scatter, add_2, view, unsqueeze_1)""",
         )  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -3026,11 +3022,10 @@ def forward(self, primals_1, primals_2):
     view = torch.ops.aten.view.default(primals_2, [2, 2]);  primals_2 = None
     as_strided_1 = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
-    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
-    as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = as_strided_2 = None
+    as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = None
+    as_strided_4 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_4, mul);  as_strided_4 = mul = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
@@ -4170,8 +4165,8 @@ def forward(self, arg0_1, arg1_1):
     matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
     add = torch.ops.aten.add.Tensor(matmul, 2);  matmul = None
     sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
-    view_1 = torch.ops.aten.view.default(add, [1, 4]);  add = None
-    sum_2 = torch.ops.aten.sum.default(view_1);  view_1 = None
+    view = torch.ops.aten.view.default(add, [1, 4]);  add = None
+    sum_2 = torch.ops.aten.sum.default(view);  view = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
     return (add_1,)""",
         )
@@ -4914,7 +4909,7 @@ def forward(self, arg0_1):
     gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, 3, 4]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = cond[0];  cond = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
@@ -4924,7 +4919,7 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
             """\
-def forward(self, arg0_1):
+def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 4)
     add_1 = torch.ops.aten.add.Tensor(add, 5);  add = add_1 = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
@@ -4934,7 +4929,7 @@ def forward(self, arg0_1):
         self.assertExpectedInline(
             gm.false_graph_0.code.strip(),
             """\
-def forward(self, arg0_1):
+def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 5)
     add_1 = torch.ops.aten.add.Tensor(add, 6);  add = add_1 = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None

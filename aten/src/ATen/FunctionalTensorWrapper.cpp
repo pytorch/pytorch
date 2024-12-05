@@ -150,6 +150,9 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
   view_metas_.push_back(meta);
   maybe_mark_symbolic(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
+  // Optimization: if the base already had a mutation on it,
+  // we can treat this view as already having the mutation too.
+  generation_ = base->generation_;
 }
 
 
@@ -167,7 +170,7 @@ void FunctionalTensorWrapper::commit_update() {
   // doesn't result in an unnecessary materialization of the base.
   // This optimization results in the slice temporarily haven't incorrect
   // stride/storage_offset though, and DCE should handle that optimization anyway.
-  // generation_ = storage_impl->generation();
+  generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {

@@ -4181,10 +4181,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 def forward(self, x_1):
     view = torch.ops.aten.view.default(x_1, [4, 5])
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
-    view_1 = torch.ops.aten.view.default(add, [4, 5]);  add = None
-    view_2 = torch.ops.aten.view.default(view_1, [4, 5])
-    sin = torch.ops.aten.sin.default(view_2);  view_2 = None
+    sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    view_1 = torch.ops.aten.view.default(add, [4, 5]);  add = None
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )
@@ -4222,10 +4221,9 @@ def forward(self, x_1):
 def forward(self, x_1):
     view = torch.ops.aten.view.default(x_1, [5, 5])
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
-    view_1 = torch.ops.aten.view.default(add, [5, 5]);  add = None
-    view_2 = torch.ops.aten.view.default(view_1, [5, 5])
-    cos = torch.ops.aten.cos.default(view_2);  view_2 = None
+    cos = torch.ops.aten.cos.default(add)
     sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    view_1 = torch.ops.aten.view.default(add, [5, 5]);  add = None
     copy_ = torch.ops.aten.copy_.default(x_1, view_1);  x_1 = view_1 = copy_ = None
     return sum_1""",
         )

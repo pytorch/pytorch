@@ -581,7 +581,6 @@ def forward(self, arg0_1):
     as_strided_copy = torch.ops.aten.as_strided_copy.default(arg0_1, [2], [2], 1)
     add = torch.ops.aten.add.Tensor(as_strided_copy, 1);  as_strided_copy = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
-    as_strided_copy_1 = torch.ops.aten.as_strided_copy.default(as_strided_scatter, [2], [2], 1);  as_strided_copy_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = copy_ = None
     return as_strided_scatter
     """,
@@ -601,7 +600,6 @@ def forward(self, arg0_1):
     as_strided = torch.ops.aten.as_strided.default(arg0_1, [2], [2], 1)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(arg0_1, add, [2], [2], 1);  add = None
-    as_strided_1 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [2], 1);  as_strided_1 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, as_strided_scatter);  arg0_1 = copy_ = None
     return as_strided_scatter
     """,
