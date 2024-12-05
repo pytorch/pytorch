@@ -564,13 +564,17 @@ class CppWrapperCpu(PythonWrapperCodegen):
         num_inputs = len(V.graph.graph_inputs)
         num_outputs = len(V.graph.graph_outputs)
         num_constants = len(V.graph.constants)
+        include_weights = (
+            "true" if config.aot_inductor.package_constants_in_so else "false"
+        )
         self.prefix.splice(
             f"""
             AOTInductorModel::AOTInductorModel(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
-                                               std::optional<std::string> cubin_dir)
-                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir) {{
+                                               std::optional<std::string> cubin_dir,
+                                               bool include_weights)
+                : AOTInductorModelBase({num_inputs}, {num_outputs}, {num_constants}, device_str, cubin_dir, {include_weights}) {{
             """
         )
 
