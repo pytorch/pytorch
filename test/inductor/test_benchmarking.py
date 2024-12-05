@@ -147,9 +147,10 @@ class TestBenchmarker(TestCase):
                 getattr(config.benchmarking, feature_name).oss_default,
             )
     
+    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
     @parametrize("fn_name", ("benchmark", "benchmark_cpu", "benchmark_gpu",))
     @parametrize("enabled", (True, False,))
-    @parametrize("device", (GPU_TYPE, "cpu,"))
+    @parametrize("device", (GPU_TYPE, "cpu",))
     def test_inductor_benchmarker_fallback(self, fn_name, enabled, device):
         @config.patch({
             f"benchmarking.{InductorBenchmarker.feature_name}.env_val": 1 if enabled else 0
