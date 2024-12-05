@@ -40,6 +40,12 @@ class TestBenchmarker(TestCase):
         return counters["inductor"][
             f"benchmarking.{benchmarker_cls.__name__}.{fn_name}"
         ]
+    
+    @staticmethod
+    def get_fallback_counter_value(benchmarker_cls):
+        return counters["inductor"][
+            f"benchmarking.{benchmarker_cls.feature_name}.disabled"
+        ]
 
     @staticmethod
     def make_params(device, size=100):
@@ -157,14 +163,20 @@ class TestBenchmarker(TestCase):
         })
         def inner():
             benchmarker = InductorBenchmarker()
-            _, _callable = self.make_params(device)
-            _ = getattr(benchmarker, fn_name)(_callable)
+            if fn_name == "benchmark":
+                (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+                _ = getattr(benchmarker, fn_name)(fn, fn_args, fn_kwargs)
+            else:
+                _, _callable = self.make_params(device)
+                _ = getattr(benchmarker, fn_name)(_callable)
 
         inner()
         if not enabled and fn_name == "benchmark_gpu":
             # "benchmark_gpu" is the only `InductorBenchmarker`-specific feature that
-            # should get disabled
-            self.assertEqual(self.get_counter_value(TritonBenchmarker, fn_name), 1)
+            # should fallback when the feature is disabled
+            self.assertEqual(self.get_fallback_counter_value(InductorBenchmarker), 1)
+            # "benchmark_gpu" should fallback to `TritonBenchmarker`
+            self.assertEqual(self.get_counter_value(TritonBenchmarker, "benchmark_gpu"), 1)
         else:
             # all other benchmark functions should still pass, since they are inherited
             self.assertEqual(self.get_counter_value(InductorBenchmarker, fn_name), 1)
