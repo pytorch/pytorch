@@ -846,6 +846,39 @@ def forward(self, x_1: "f32[2][1]cpu"):
         )
         self.assertTrue(chromium_event in self.buffer.getvalue())
 
+    @requires_tlparse
+    @torch._dynamo.config.patch("compiled_autograd", True)
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @show_chrome_events
+    def test_compiled_autograd_id(self):
+        def fn(a):
+            return a.sin().sum().backward()
+
+        x = torch.tensor([1.0], requires_grad=True)
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt(x)
+        torch._dynamo.reset()
+        # Trigger a cache hit
+        fn_opt(x)
+        # Should print twice, including inductor_output_code
+        self.assertParses()
+        chromium_events = [
+            (
+                '{"chromium_event": {}, "compiled_autograd_id": null, "frame_id": 0, "frame_compile_id": 0, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+            (
+                '{"compiled_autograd_graph": {}, "compiled_autograd_id": 0, "frame_id": null, "frame_compile_id": null, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+            (
+                '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 1, "frame_compile_id": 0, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+        ]
+        logs = self.buffer.getvalue()
+        self.assertTrue(all(event in logs for event in chromium_events))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
