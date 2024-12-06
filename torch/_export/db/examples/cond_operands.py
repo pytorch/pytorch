@@ -15,6 +15,9 @@ class CondOperands(torch.nn.Module):
     - match arguments of `true_fn` and `false_fn`
 
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
+
+    NOTE: Currently `torch._dynamo.export` not suport dynamic flow control, like `if-else` statement.
+    You will get `UserError` if you try to export, replace them with `cond` operator like below.
     """
 
     def forward(self, x, y):

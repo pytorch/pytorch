@@ -637,7 +637,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                # TODO link the torch.cond doc later
                 raise exc.UserError(
                     exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                     "Dynamic control flow is not supported at the moment. Please use "
