@@ -4,6 +4,7 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -755,6 +756,19 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
+
+    @with_comms
+    def test_mesh_slice_fake_tensor_mode(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        with FakeTensorMode():
+            dp_mesh = mesh_2d["DP"]
+            tp_mesh = mesh_2d["TP"]
+            dp_tp_mesh = mesh_2d["DP", "TP"]
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
