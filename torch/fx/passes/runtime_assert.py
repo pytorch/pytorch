@@ -173,8 +173,10 @@ def insert_deferred_runtime_asserts(
         )
         try:
             target = node.target
-            if isinstance(node.target, str):
-                target = getattr(torch.Tensor, node.target)
+            if node.op == "call_method":
+                assert isinstance(node.target, str)
+                target = getattr(fake_args[0], node.target)
+                fake_args = fake_args[1:]
             node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
