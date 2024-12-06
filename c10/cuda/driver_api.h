@@ -43,23 +43,28 @@
 #define C10_LIBCUDA_DRIVER_API_12030(_)
 #endif
 
+#ifndef USE_ROCM
 #define C10_NVML_DRIVER_API(_)           \
   _(nvmlInit_v2)                         \
   _(nvmlDeviceGetHandleByPciBusId_v2)    \
   _(nvmlDeviceGetNvLinkRemoteDeviceType) \
   _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
-
+#endif
 namespace c10::cuda {
 
 struct DriverAPI {
 #define CREATE_MEMBER(name) decltype(&name) name##_;
   C10_LIBCUDA_DRIVER_API(CREATE_MEMBER)
   C10_LIBCUDA_DRIVER_API_12030(CREATE_MEMBER)
+#ifndef USE_ROCM
   C10_NVML_DRIVER_API(CREATE_MEMBER)
+#endif
 #undef CREATE_MEMBER
   static DriverAPI* get();
+#ifndef USE_ROCM
   static void* get_nvml_handle();
+#endif
 };
 
 } // namespace c10::cuda

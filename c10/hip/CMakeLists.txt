@@ -42,6 +42,12 @@ if(NOT BUILD_LIBTORCHLESS)
 
   # If building shared library, set dllimport/dllexport proper.
   target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
+
+# HIP virtual memory managment API is currently implemented on linux only
+if(NOT WIN32)
+target_compile_options(c10_hip PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
+endif()
+
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
