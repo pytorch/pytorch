@@ -109,7 +109,7 @@ set LIB=%LIB%;%install_root%\lib\x64
 set PATH=%PATH%;%install_root%\lib
 
 
-cd %BUILDER_ROOT%\test_example_code\
+cd %PYTORCH_ROOT%\.ci\pytorch\test_example_code\
 mkdir build
 cd build
 
