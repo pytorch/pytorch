@@ -6844,7 +6844,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
+        ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(epm(*inp), eager))
@@ -6912,7 +6912,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
+        ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(epm(*inp), eager))
@@ -7018,7 +7018,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
+        ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7076,7 +7076,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(N0(), inp)
+        ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7166,7 +7166,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(N0(), inp)
+        ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7311,7 +7311,7 @@ graph():
         n0 = N0()
         inp = (torch.ones(1),)
         eager = n0(*inp)
-        ep = torch.export.export(N0(), inp)
+        ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7356,15 +7356,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7421,15 +7421,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7485,15 +7485,15 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7568,16 +7568,16 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
                 "n1.n2.n3.n4",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7694,18 +7694,18 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
                 "n1.n2.n3.n4",
                 "n1.n2.n3.n4.n5",
                 "n1.n2.n3.n4.n5.n6",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7882,11 +7882,10 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            strict=False,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
                 "n1.n2.n3",
@@ -7896,7 +7895,12 @@ graph():
                 "n1.n2.n3.n4.n5.n6.n7",
                 "n1.n2.n3.n4.n5.n6.n7.n8",
                 "n1.n2.n3.n4.n5.n6.n7.n8.n9",
-            ),
+            )
+        ep = export(
+            N0(),
+            inp,
+            strict=False,  # strict export is slow with large random dags
+            preserve_module_call_signature=fqns,
         )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7937,15 +7941,14 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            strict=False,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
@@ -7985,15 +7988,14 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        ep = torch.export.export(
-            N0(),
-            inp,
-            strict=False,
-            preserve_module_call_signature=(
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
                 "n1",
                 "n1.n2",
-            ),
-        )
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
         assert torch.allclose(epm(*inp), eager)
