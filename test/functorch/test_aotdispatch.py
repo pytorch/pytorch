@@ -44,7 +44,7 @@ from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
     aot_export_module,
-    AOTDispatchCompiler,
+    AOTDispatchCompilerWithOutput,
 )
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
@@ -6835,7 +6835,7 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
             fw_graph_cell[0] = gm
             return result
 
-        compiler = AOTDispatchCompiler(MockFXGraphCacheOutput, compiler)
+        compiler = AOTDispatchCompilerWithOutput(MockFXGraphCacheOutput, compiler)
         return compiler
 
     def run_autograd(

@@ -10,6 +10,7 @@ from typing import (
     List,
     NewType,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Type,
@@ -450,10 +451,24 @@ FakifiedFlatArgs = NewType("FakifiedFlatArgs", List[Any])
 TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
 
 
-class AOTDispatchCompiler:
+class AOTDispatchCompiler(Protocol):
     """
     Represents a fw or bw_compiler passed to AOTAutograd.
-    AOTDispatchCompiler always return an OutputCode, and are callable.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any:
+        ...
+
+
+# TODO: bikeshed on this name
+class AOTDispatchCompilerWithOutput(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. AOTDispatchCompilerWithOutput always return an OutputCode.
     A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
     the kwargs in _CompileFxKwargs.
     """
@@ -992,12 +1007,12 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 def aot_module_simplified(
     mod: nn.Module,
     args,
-    fw_compiler: Callable,
-    bw_compiler: Optional[Callable] = None,
+    fw_compiler: AOTDispatchCompiler,
+    bw_compiler: Optional[AOTDispatchCompiler] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
-    inference_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
 ) -> nn.Module:
     """
@@ -1126,7 +1141,7 @@ def aot_module_simplified(
     remote = should_use_remote_autograd_cache()
     local = should_use_local_autograd_cache()
     # We only care if the forward will return an OutputCode.
-    if (local or remote) and isinstance(fw_compiler, AOTDispatchCompiler):
+    if (local or remote) and isinstance(fw_compiler, AOTDispatchCompilerWithOutput):
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile,
             mod,
