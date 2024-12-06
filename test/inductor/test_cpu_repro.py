@@ -4743,31 +4743,16 @@ class CPUReproTests(TestCase):
                 return layer_output
 
         model = Model()
-        example_batch = {
-            "context_layer": torch.rand(1, 197, 768),
-            "hidden_states": torch.rand(1, 197, 768),
-        }
-        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-        from torch._export import capture_pre_autograd_graph
-        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-        from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
-            X86InductorQuantizer,
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        from torch.testing._internal.common_quantization import (
+            _generate_qdq_quantized_model,
         )
 
         with torch.no_grad():
-            exported_model = capture_pre_autograd_graph(
-                model,
-                (),
-                kwargs=example_batch,
-            )
-            quantizer = X86InductorQuantizer()
-            quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-            prepared_model = prepare_pt2e(exported_model, quantizer)
-            prepared_model(**example_batch)
-            converted_model = convert_pt2e(prepared_model)
+            converted_model = _generate_qdq_quantized_model(model, example_batch)
             torch.ao.quantization.move_exported_model_to_eval(converted_model)
             metrics.reset()
-            torch.compile(converted_model)(**example_batch)
+            torch.compile(converted_model)(*example_batch)
             check_metrics_vec_kernel_count(3)
 
 
