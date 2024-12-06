@@ -15,7 +15,7 @@ find_package(CUDAToolkit 11.8)
 target_link_libraries(simple-torch-test CUDA::cudart CUDA::cufft CUDA::cusparse CUDA::cublas CUDA::cusolver)
 find_library(CUDNN_LIBRARY NAMES cudnn)
 target_link_libraries(simple-torch-test  ${CUDNN_LIBRARY} )
-if (MSVC)
+if(MSVC)
   file(GLOB TORCH_DLLS  "$ENV{CUDA_PATH}/bin/cudnn64_8.dll" "$ENV{NVTOOLSEXT_PATH}/bin/x64/*.dll")
   message("dlls to copy "  ${TORCH_DLLS})
   add_custom_command(TARGET simple-torch-test
@@ -23,4 +23,4 @@ if (MSVC)
                      COMMAND ${CMAKE_COMMAND} -E copy_if_different
                      ${TORCH_DLLS}
                      $<TARGET_FILE_DIR:simple-torch-test>)
-endif (MSVC)
+endif(MSVC)
