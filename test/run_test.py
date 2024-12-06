@@ -1636,6 +1636,11 @@ def parse_args():
         help="exclude torch export tests",
     )
     parser.add_argument(
+        "--exclude-aot-dispatch-tests",
+        action="store_true",
+        help="exclude aot dispatch tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
