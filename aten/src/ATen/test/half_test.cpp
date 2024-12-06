@@ -123,10 +123,10 @@ TEST(TestHalf, CommonMath) {
 #endif
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
-  assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);
-  assert(std::abs(std::log10(Half(1000.0)) - std::log10(1000.0f)) <= threshold);
-  assert(std::abs(std::log1p(Half(0.0)) - std::log1p(0.0f)) <= threshold);
-  assert(std::abs(std::log2(Half(1000.0)) - std::log2(1000.0f)) <= threshold);
+  assert(std::abs(::log(Half(1.0)) - ::log(1.0f)) <= threshold);
+  assert(std::abs(::log10(Half(1000.0)) - ::log10(1000.0f)) <= threshold);
+  assert(std::abs(::log1p(Half(0.0)) - ::log1p(0.0f)) <= threshold);
+  assert(std::abs(::log2(Half(1000.0)) - ::log2(1000.0f)) <= threshold);
   assert(std::abs(std::expm1(Half(1.0)) - std::expm1(1.0f)) <= threshold);
   assert(std::abs(std::cos(Half(0.0)) - std::cos(0.0f)) <= threshold);
   assert(std::abs(std::sin(Half(0.0)) - std::sin(0.0f)) <= threshold);

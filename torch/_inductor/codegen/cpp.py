@@ -719,7 +719,7 @@ class CppOverrides(OpOverrides):
         if bug == "accuracy":
             return f"{x} + decltype({x})(1)"
         elif bug is None:
-            return f"std::log1p({x})"
+            return f"::log1p({x})"
         else:
             raise AssertionError(
                 f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
@@ -751,7 +751,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"std::log({x})"
+        return f"::log({x})"
 
     @staticmethod
     def round(x):
@@ -860,11 +860,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log10(x):
-        return f"std::log10({x})"
+        return f"::log10({x})"
 
     @staticmethod
     def log2(x):
-        return f"std::log2({x})"
+        return f"::log2({x})"
 
     @staticmethod
     def nextafter(x, y):

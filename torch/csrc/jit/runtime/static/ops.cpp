@@ -2714,7 +2714,7 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
 
     for (const auto i : c10::irange(N)) {
       const int sign = input_data[i] < 0 ? -1 : 1;
-      output_data[i] = std::log1p(abs_if_signed(input_data[i])) * sign;
+      output_data[i] = ::log1p(abs_if_signed(input_data[i])) * sign;
     }
   });
 }
