@@ -19459,6 +19459,7 @@ op_db: List[OpInfo] = [
     OpInfo('bucketize',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfMPS=integral_types_and(torch.bfloat16, torch.float16, torch.float32), # Float64 unsupported on mps
            sample_inputs_func=sample_inputs_bucketize,
            reference_inputs_func=reference_inputs_bucketize,
            error_inputs_func=error_inputs_bucketize,
@@ -19466,6 +19467,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Segfaults on MPS"), 'TestCommon', 'test_out', device_type="mps"),
            )),
     OpInfo('searchsorted',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
@@ -21309,7 +21311,7 @@ op_db: List[OpInfo] = [
                 device_type='cuda',
             ),
             DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         dtypes=(torch.half,), device_type="mps"),
+                         dtypes=(torch.half,), device_type='mps'),
 
         ),
     ),
