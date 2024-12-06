@@ -195,7 +195,12 @@ def _move_exported_model_to_eval(model: torch.fx.GraphModule):
 
     This is equivalent to model.eval() but only for certain special ops like dropout, batchnorm.
     QAT users should call this before performing inference on the model.
+
+    This call is idempotent; if the model is already in eval mode, nothing will happen.
     """
+    if not model.training:
+        return model
+    model.training = False
     _replace_dropout(model, train_to_eval=True)
     _replace_batchnorm(model, train_to_eval=True)
     return model
@@ -207,7 +212,12 @@ def _move_exported_model_to_train(model: torch.fx.GraphModule):
 
     This is equivalent to model.train() but only for certain special ops like dropout, batchnorm.
     QAT users should call this before performing training on the model.
+
+    This call is idempotent; if the model is already in train mode, nothing will happen.
     """
+    if model.training:
+        return model
+    model.training = True
     _replace_dropout(model, train_to_eval=False)
     _replace_batchnorm(model, train_to_eval=False)
     return model
