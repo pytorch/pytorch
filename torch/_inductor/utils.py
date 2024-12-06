@@ -47,7 +47,6 @@ from unittest import mock
 import sympy
 
 import torch
-from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
@@ -125,7 +124,7 @@ class align(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, value):
+    def eval(cls, value: sympy.Expr) -> Optional[sympy.Expr]:
         if isinstance(value, (int, sympy.Integer)):
             return _align(int(value))
         if _is_aligned(value):
@@ -241,11 +240,11 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     return device
 
 
-def sympy_product(it):
+def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
     return functools.reduce(operator.mul, it, sympy.S.One)
 
 
-def sympy_dot(seq1, seq2):
+def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
@@ -337,7 +336,7 @@ def convert_shape_to_symint(
     ]
 
 
-def is_view(op: torch._ops.OpOverload):
+def is_view(op: torch._ops.OpOverload) -> bool:
     """
     Does this op overload have aliasing
     """
@@ -347,7 +346,7 @@ def is_view(op: torch._ops.OpOverload):
 
 def is_pointwise_use(
     use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
-):
+) -> bool:
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
 
@@ -392,7 +391,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, graph_args
 
 
-def synchronize(device: str = "cuda"):
+def synchronize(device: str = "cuda") -> None:
     if device == "cpu":
         return
     device_interface = get_interface_for_device(device)
@@ -1114,19 +1113,13 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
-    if isinstance(index_or_device, torch.device):
-        device = index_or_device
-    else:
-        device = torch.device("cuda", index_or_device)
-
-    prop = DeviceProperties.create(device)
+def is_big_gpu(index) -> bool:
+    prop = torch.cuda.get_device_properties(index)
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
     if torch.version.hip:
-        assert prop.major is not None
-        if prop.major <= 10:
+        if prop.major < 9 or prop.major == 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
         return True
@@ -1152,7 +1145,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
-        and is_big_gpu(layout.device)
+        and is_big_gpu(layout.device.index or 0)
     )
 
 
@@ -1646,23 +1639,23 @@ def get_device_tflops(dtype):
 
 
 @functools.lru_cache(None)
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps():
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
 
 
-def get_gpu_shared_memory() -> int:
+def get_gpu_shared_memory():
     from triton.runtime import driver
 
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
-def is_welford_reduction(reduction_type: str) -> bool:
+def is_welford_reduction(reduction_type):
     return reduction_type.startswith("welford")
 
 
-def reduction_num_outputs(reduction_type: str) -> int:
+def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
@@ -1670,15 +1663,15 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def is_windows() -> bool:
+def is_windows():
     return sys.platform == "win32"
 
 
-def has_free_symbols(itr: Iterable[Any]) -> bool:
+def has_free_symbols(itr: Iterable[Any]):
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
-def is_dynamic(*args) -> bool:
+def is_dynamic(*args):
     from . import ir
 
     for t in args:
