@@ -1551,6 +1551,9 @@ def cat(inputs, dim=0):
 
         return False
 
+    if config.force_pointwise_cat:
+        return pointwise_cat(inputs, dim)
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
     if cpu_device:
