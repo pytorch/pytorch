@@ -65,7 +65,7 @@ specialize_int = False
 # Whether or not to specialize on float inputs.  Dynamo will always promote
 # float inputs into Tensor inputs, but at the moment, backends inconsistently
 # support codegen on float (this is to be fixed).
-specialize_float = True if is_fbcode() else False
+specialize_float = False
 
 # legacy config, does nothing now!
 dynamic_shapes = True
@@ -446,6 +446,12 @@ log_compilation_metrics = True
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+
+# A set of methods that will be ignored while tracing,
+# to prevent graph breaks.
+# Add logging.Logger.<method> to ignore all calls for method,
+# or logger.<method> to ignore calls for method from this logger instance only.
+ignore_logger_methods: Set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing

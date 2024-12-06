@@ -667,7 +667,7 @@ def _fused_all_gather_matmul_native(
     B: torch.Tensor,
     group_name: str,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    symm_mem = _SymmetricMemory.rendezvous(A_shard)
+    symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
             group_name, A_shard.numel() * A_shard.element_size()
@@ -1235,7 +1235,7 @@ def _low_contention_all_gather(
           symmetric memory workspace.
         - Symmetric memory workspace size requirement: the size of `tensor`.
     """
-    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    symm_mem = rendezvous(tensor, group_name)
     if symm_mem is not None:
         input_is_symm_mem = True
     else:
@@ -1376,7 +1376,7 @@ def _low_contention_reduce_scatter(
     TODO(yifu): the SM-based copy can be avoided with a list-based reduction
     kernel.
     """
-    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    symm_mem = rendezvous(tensor, group_name)
     if symm_mem is not None:
         return _low_contention_reduce_scatter_with_symm_mem_input(
             tensor, reduce_op, symm_mem
