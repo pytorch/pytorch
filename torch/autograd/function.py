@@ -497,7 +497,7 @@ class Function(_SingleLevelFunction):
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
-            f"{self.__class__} should not be instantiated. Methods on autograd functions"
+            f"{self.__class__} should not be instantiated. Methods on autograd functions "
             "are all static, so you should invoke them on the class itself. "
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",

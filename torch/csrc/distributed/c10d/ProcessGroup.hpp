@@ -125,11 +125,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int size);
   ~ProcessGroup() override;
 
-  int getRank() const {
+  virtual int getRank() const {
     return rank_;
   }
 
-  int getSize() const {
+  virtual int getSize() const {
     return size_;
   }
 
@@ -811,7 +811,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
-        uint16_t(backendType_),
+        backendType_,
         " for Process Group with name ",
         getBackendName(),
         ".");
@@ -832,9 +832,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
         "Could not find backend type ",
-        uint16_t(backendType),
-        " for Process Group with name ",
-        backendTypeToString(backendType),
+        backendType,
         ".");
     return backendTypeToBackend_.at(backendType);
   }
@@ -865,10 +863,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
-  const std::string& getGroupName() const;
-  void setGroupName(const std::string& name);
-  const std::string& getGroupDesc() const;
-  void setGroupDesc(const std::string& name);
+  virtual const std::string& getGroupName() const;
+  virtual void setGroupName(const std::string& name);
+  virtual const std::string& getGroupDesc() const;
+  virtual void setGroupDesc(const std::string& name);
   void enableCollectivesTiming();
 
   void release_resources() override;

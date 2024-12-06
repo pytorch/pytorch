@@ -14,18 +14,15 @@
 namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor, std::optional<int64_t>> _binary_pointwise_batch_rule(
+static Tensor _binary_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
 
-  auto tensor_other = _binary_pointwise_helper(
+  auto [tensor_, other_]= _binary_pointwise_helper(
       tensor, tensor_batch_dim, other, other_batch_dim);
-  auto tensor_ = std::get<0>(tensor_other);
-  auto other_ = std::get<1>(tensor_other);
 
-  auto result = Func(tensor_, other_, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple(result, 0);
+  return Func(tensor_, std::move(other_), std::forward<ExtraArgs>(extra_args)...);
 }
 
 template <typename A, A a, typename C>
@@ -37,9 +34,9 @@ struct BinaryPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
       const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
       const Tensor& other, std::optional<int64_t> other_batch_dim,
       T... extra_args) {
-    return _binary_pointwise_batch_rule<F, Func, T...>(
+    return std::tuple(_binary_pointwise_batch_rule<F, Func, T...>(
         tensor, tensor_batch_dim, other, other_batch_dim,
-        std::forward<T>(extra_args)...);
+        std::forward<T>(extra_args)...), 0);
   }
 };
 
@@ -82,7 +79,7 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     auto res = _binary_pointwise_batch_rule<F, Func, T...>(
       tensor_value, tensor_bdim, other_value, other_bdim,
       std::forward<T>(extra_args)...);
-    return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+    return makeBatched(std::move(res), 0, cur_level);
   }
 };
 
@@ -93,7 +90,7 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename M, M Meth, typename... ExtraArgs>
-void binary_pointwise_inplace_batch_rule(
+static void binary_pointwise_inplace_batch_rule(
     Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim,
     ExtraArgs... extra_args) {
@@ -120,7 +117,7 @@ void binary_pointwise_inplace_batch_rule(
 }
 
 template <typename F, F Func>
-std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
+static std::tuple<Tensor, std::optional<int64_t>> comparison_pointwise_batch_rule(
     const Tensor& tensor, std::optional<int64_t> tensor_batch_dim,
     const Tensor& other, std::optional<int64_t> other_batch_dim) {
   // compute max logical rank
@@ -165,9 +162,7 @@ static std::tuple<Tensor, std::optional<int64_t>> gelu_backward_batch_rule(
     c10::string_view approximate) {
 
   // repeat the preprocessing from _binary_pointwise_batch_rule
-  const auto tensor_other = _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
-  auto grad_out_ = std::get<0>(tensor_other);
-  auto input_ = std::get<1>(tensor_other);
+  auto [grad_out_, input_]= _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);
 
   // gelu_backward doesn't broadcast well so we need to insist all inputs have a bdim
   const auto batch_size = get_bdim_size2(grad_out, grad_out_bdim, input, input_bdim);
@@ -243,8 +238,8 @@ static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
   // We need to apply the same preprocessing on x1 and x2 as in the forward pass
   // _binary_pointwise_batch_rule
   auto x12 = _binary_pointwise_helper(x1_, x1_bdim, x2, x2_bdim);
-  x1_ = std::get<0>(x12);
-  auto x2_ = std::get<1>(x12);
+  x1_ = std::move(std::get<0>(x12));
+  auto& x2_ = std::get<1>(x12);
 
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
   if ((x1_bdim || x2_bdim) && !grad_bdim) {
@@ -283,6 +278,44 @@ static void fill__Tensor_batch_rule(
   auto self_and_other = _binary_pointwise_helper(
       self, self_bdim, other, other_bdim, /*do_type_promotion*/false);
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
+}
+
+static
+std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>>
+rrelu_with_noise_batch_rule(
+    const Tensor& self,
+    std::optional<int64_t> self_bdim,
+    Tensor& noise,
+    std::optional<int64_t> noise_bdim,
+    const at::Scalar& lower,
+    const at::Scalar& upper,
+    bool training,
+    std::optional<at::Generator> generator) {
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto noise_ = moveBatchDimToFront(self, noise_bdim);
+
+  auto ret = at::rrelu_with_noise(self_, noise_, lower, upper, training, std::move(generator));
+
+  return std::make_tuple(ret, 0, noise_, 0);
+}
+
+static Tensor rrelu_with_noise_batch(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
+  int64_t cur_level = maybe_layer->layerId();
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
+  auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
+  TORCH_CHECK(!noise_bdim.has_value(), "vmap: Attempted to vmap over 'noise' in torch.rrelu_with_noise. This is not supported.");
+  auto res = rrelu_with_noise_batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, std::move(generator));
+  return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rule(
@@ -426,7 +459,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(polygamma);
   BINARY_SCALAR_2(sub, Tensor, Scalar);
   BINARY_SCALAR_3(remainder, Tensor, Scalar, Scalar_Tensor);
-  BINARY_POINTWISE(rrelu_with_noise);
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
@@ -514,6 +546,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(masked_select_backward, masked_select_backward_batch_rule);
 
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
+  m.impl("rrelu_with_noise", rrelu_with_noise_batch);
 }
 
 } // namespace at::functorch

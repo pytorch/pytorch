@@ -325,6 +325,10 @@ set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
 
+set(GENERATED_CXX_TORCH_XPU
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
@@ -333,6 +337,10 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
   )
+
+if(USE_XPU)
+  list(APPEND TORCH_GENERATED_CODE ${GENERATED_CXX_TORCH_XPU})
+endif()
 
 set(GEN_PER_OPERATOR_FLAG)
 if(USE_PER_OPERATOR_HEADERS)
@@ -567,6 +575,15 @@ if(USE_CUDA)
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
     endif()
+
+    set(ASYNC_MM_FILE "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/AsyncMM.cu")
+    # Disable the warning to make cutlass warp-specialized cooperative kernel build for gcc-9
+    if(CMAKE_COMPILER_IS_GNUCXX)
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-Wno-unused-but-set-variable")
+    endif()
+    if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
+      set_source_files_properties(${ASYNC_MM_FILE} PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+    endif()
   endif()
   set_source_files_properties(
     ${TORCH_ROOT}/aten/src/ATen/cuda/detail/LazyNVRTC.cpp
@@ -762,6 +779,7 @@ endif()
 
 if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
+target_compile_definitions(torch_cpu PRIVATE -DEXPORT_AOTI_FUNCTIONS)
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -946,6 +964,7 @@ elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+  target_compile_definitions(torch_cuda PRIVATE -DEXPORT_AOTI_FUNCTIONS)
 
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
@@ -1032,9 +1051,11 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+  target_compile_definitions(torch_xpu PRIVATE -DEXPORT_AOTI_FUNCTIONS)
   if(WIN32)
     target_compile_options(torch_xpu PRIVATE /permissive-)
   endif()
@@ -1098,6 +1119,10 @@ if(USE_XPU)
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
     include_directories(SYSTEM ${ATen_XPU_INCLUDE_DIRS})
+    message(INFO "Install ${TORCH_XPU_OPS_DIR}/src/ATen/xpu to ${TORCH_INSTALL_INCLUDE_DIR}/ATen/xpu")
+    install(DIRECTORY "${TORCH_XPU_OPS_DIR}/src/ATen/xpu"
+        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/ATen/
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
   endif()
 endif()
@@ -1204,7 +1229,7 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/miniz-2.1.0)
+  ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
@@ -1816,9 +1841,6 @@ if(BUILD_TEST)
         endif()
       endif()
     endforeach()
-    if(TARGET context_gpu_test)
-      target_link_libraries(context_gpu_test caffe2::curand caffe2::cublas)
-    endif()
   endif()
 
   if(USE_XPU)

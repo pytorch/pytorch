@@ -75,8 +75,7 @@ void _propagate_functional_input_mutation(
   // It would probably be more reasonable to check that the two tensors are
   // aliased, but we can't do that unless we give BatchedTensorImpl a notion of
   // storage.
-  if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
-  } else {
+  if (unwrapped.unsafeGetTensorImpl() != wrapped_inner.unsafeGetTensorImpl()) {
     if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
       // ehre.
