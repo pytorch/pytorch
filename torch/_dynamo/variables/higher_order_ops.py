@@ -82,6 +82,34 @@ def discard_graph_changes(tx):
         ctx.__exit__(None, None, None)
 
 
+def diff_meta(tensor_vars1, tensor_vars2) -> str:
+    from torch._higher_order_ops.utils import diff_tensor_meta
+
+    from . import TensorVariable
+
+    assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
+    all_diffs = []
+    for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
+        # We have vmap x cond tests and querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format is not yet implemented.
+        # And it seems the remaining metas are good enough for now.
+        meta1 = _extract_tensor_metadata(
+            var1.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        meta2 = _extract_tensor_metadata(
+            var2.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
+        pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
+
+        if len(pair_diffs) > 0:
+            fmt_str = ", ".join(pair_diffs)
+            all_diffs.append(
+                f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
+            )
+    return "\n".join(all_diffs)
+
+
 @contextlib.contextmanager
 def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
     from . import GradModeVariable
@@ -888,28 +916,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        def diff_meta(tensor_vars1, tensor_vars2):
-            assert all(
-                isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2
-            )
-            all_diffs = []
-            for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-                # We check the meta data associated with meta["example_value"]
-                meta1 = _extract_tensor_metadata(
-                    var1.proxy.node.meta["example_value"], include_contiguity=False
-                )
-                meta2 = _extract_tensor_metadata(
-                    var2.proxy.node.meta["example_value"], include_contiguity=False
-                )
-                if meta1 != meta2:
-                    all_diffs.append((f"pair{i}:", meta1, meta2))
-            return all_diffs
-
         if diffs := diff_meta(
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
-                f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
+                f"Expect branches to return tensors with same metadata but find {diffs}"
             )
 
         (
@@ -1119,6 +1130,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
+
+        if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
+            unimplemented(
+                f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
+            )
+
         (
             cond_graph,
             body_graph,
