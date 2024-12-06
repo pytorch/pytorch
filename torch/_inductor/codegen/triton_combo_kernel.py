@@ -34,7 +34,7 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import SIMDScheduling
+from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
@@ -562,18 +562,18 @@ class ComboKernel(Kernel):
         self.min_x_blocks_list.append(min_x_blocks)
         self.x_numels_list.append(x_numels)
 
-    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
-        size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels.values()
-        ]
+    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, Dict[str, int]]:
+        size_hints = {
+            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
+            for prefix, numel in sub_kernel.numels.items()
+            if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
+        }
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
             heuristics = "persistent_reduction"
         elif sub_kernel.inside_reduction:
             heuristics = "reduction"
         else:
-            size_hints.pop()
             heuristics = "pointwise"
         return heuristics, size_hints
 
