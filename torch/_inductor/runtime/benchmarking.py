@@ -3,7 +3,7 @@ import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import mean, median
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -68,6 +68,24 @@ def count(fn: Callable[Concatenate[Any, P], T]) -> Callable[Concatenate[Any, P],
         return fn(self, *args, **kwargs)
 
     return wrapper
+
+
+class LazyBenchmark:
+    def __init__(self: Self, benchmark: Callable[[], float]) -> None:
+        self.benchmark = benchmark
+
+    @cached_property
+    def timing_ms(self: Self) -> float:
+        counters["inductor"]["benchmarking_finalize_lazy_benchmark"] += 1
+        timing_ms = self.benchmark()
+        # I don't think this helps with saving memory at all,
+        # but at least it gives good signal if we ever try
+        # to call self.benchmark again
+        del self.benchmark
+        return timing_ms
+
+    def __float__(self: Self) -> float:
+        return float(self.timing_ms)
 
 
 class Benchmarker:
@@ -181,6 +199,22 @@ class Benchmarker:
         return [
             self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
         ]
+    
+    @maybe_time
+    @count
+    def lazy_benchmark(
+        self: Self,
+        fn: Callable[..., Any],
+        fn_args: Tuple[Any, ...],
+        fn_kwargs: Dict[str, Any],
+        **kwargs: Any,
+    ) -> Union[LazyBenchmark, float]:
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        fn_args_and_kwargs = list(fn_args) + list(fn_kwargs.values())
+        if is_cpu_device(fn_args_and_kwargs):
+            return self.lazy_benchmark_cpu(_callable, **kwargs)
+        else:
+            return self.lazy_benchmark_gpu(_callable, **kwargs)
 
 
 class TritonBenchmarker(Benchmarker):
