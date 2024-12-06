@@ -75,6 +75,8 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
+
 
 def prefix_is_reduction(prefix: str) -> bool:
     return prefix[0] == "r"
@@ -402,9 +404,8 @@ class SIMDKernel(Kernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
         active_prefixes = OrderedSet(
-            prefix for prefix in prefixes if prefix in self.numels
+            prefix for prefix in all_prefixes if prefix in self.numels
         )
         no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
 
@@ -425,7 +426,7 @@ class SIMDKernel(Kernel):
         # Filter out unused tensor dims.
         # Convert to dicts for O(1) index lookup.
         tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
-        grid_dim_map = filtered_index_map(grid_dims, prefixes)
+        grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
 
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
