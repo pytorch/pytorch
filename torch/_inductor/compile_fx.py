@@ -54,8 +54,8 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import (
     aot_export_module,
-    AOTDispatchCompilerWithOutput,
     make_boxed_func,
+    SerializableAOTDispatchCompiler,
 )
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
@@ -1749,7 +1749,7 @@ def compile_fx(
         fw_compiler: Callable[
             [GraphModule, Sequence[InputType]], OutputCode
         ] = functools.partial(fw_compiler_base, is_inference=False)
-        fw_compiler = AOTDispatchCompilerWithOutput(OutputCode, fw_compiler)
+        fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
         if config.freezing and not torch.is_grad_enabled():
             inference_compiler: Callable[..., Any] = functools.partial(
@@ -1763,7 +1763,7 @@ def compile_fx(
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
-            inference_compiler = AOTDispatchCompilerWithOutput(
+            inference_compiler = SerializableAOTDispatchCompiler(
                 OutputCode, inference_compiler
             )
 
@@ -1813,7 +1813,7 @@ def compile_fx(
                         boxed_forward_device_index=forward_device,
                     )
 
-        bw_compiler = AOTDispatchCompilerWithOutput(OutputCode, bw_compiler)
+        bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
         fake_mode = detect_fake_mode(
             example_inputs_

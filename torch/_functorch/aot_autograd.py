@@ -465,10 +465,10 @@ class AOTDispatchCompiler(Protocol):
 
 
 # TODO: bikeshed on this name
-class AOTDispatchCompilerWithOutput(AOTDispatchCompiler):
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
     """
     Represents an AOTDispatchCompiler that returns an OutputCode, and is
-    therefore cacheable. AOTDispatchCompilerWithOutput always return an OutputCode.
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
     A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
     the kwargs in _CompileFxKwargs.
     """
@@ -1138,19 +1138,21 @@ def aot_module_simplified(
         return compiled_fn
 
     # We only care if the forward will return an OutputCode.
-    if isinstance(fw_compiler, AOTDispatchCompilerWithOutput) \
-        and (should_use_local_autograd_cache() \
-            or should_use_remote_autograd_cache()
-    ):
-        compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile,
-            mod,
-            fake_flat_args,
-            aot_config,
-            cudagraphs,
-            local,
-            remote,
-        )
+    if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        local = should_use_local_autograd_cache()
+        remote = should_use_remote_autograd_cache()
+        if local or remote:
+            compiled_fn = AOTAutogradCache.load(
+                dispatch_and_compile,
+                mod,
+                fake_flat_args,
+                aot_config,
+                cudagraphs,
+                local,
+                remote,
+            )
+        else:
+            compiled_fn = dispatch_and_compile()
     else:
         compiled_fn = dispatch_and_compile()
 
