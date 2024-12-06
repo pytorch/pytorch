@@ -1768,7 +1768,7 @@ def cooperative_reduction(
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
-            [xnumel, rnumel // split], reduction_hint, inductor_meta
+            {"x": xnumel, "r": rnumel // split}, reduction_hint, inductor_meta
         )
     else:
         configs = _reduction_configs(
