@@ -422,7 +422,7 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_opcount_threshold = 30
+realize_opcount_threshold = 100
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8

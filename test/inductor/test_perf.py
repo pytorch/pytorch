@@ -11,6 +11,10 @@ from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 ########################
 # Explanation of Tests #
@@ -684,6 +688,45 @@ class TilingTests(TestCase):
 
         inp = (T(10, 10, 10), T(10, 10, 10), T(10, 10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """4000""")
+
+
+@instantiate_parametrized_tests
+class EnableFusionTest(TestCase):
+    @parametrize(
+        "fusion_enabled",
+        (True, False),
+    )
+    def test_fusion_thresholds(self, fusion_enabled: bool):
+        """
+        Test that config thresholds enable/disable fusion.
+        """
+
+        inductor_config = (
+            {
+                "max_fusion_size": 1,
+                "realize_reads_threshold": 1,
+                "realize_opcount_threshold": 1,
+                "inplace_buffers": False,
+            }
+            if not fusion_enabled
+            else {}
+        )
+
+        def foo(x, y, z):
+            return x + y + z
+
+        inputs = [T(32) for input_idx in range(3)]
+
+        # Run and test accuracy
+        with config.patch(inductor_config):
+            result, code = run_and_get_code(torch.compile(foo), *inputs)
+        ref = foo(*inputs)
+        self.assertTrue(torch.allclose(result, ref))
+
+        # Check the number of kernels. Everything should be fused into a single kernel
+        # iff fusion is enabled.
+        num_kernels = code[0].count("triton.jit")
+        self.assertEqual(num_kernels, 1 if fusion_enabled else 2)
 
 
 class MinCutPartitioningTests(TestCase):
