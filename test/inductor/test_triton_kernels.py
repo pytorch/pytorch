@@ -1497,6 +1497,50 @@ def forward(self, x_1, output_1):
         f(x, x)
 
     @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_empty_autotune_config_dict(self, backend):
+        @triton.autotune(
+            configs=[
+                triton.Config({}, num_stages=2),
+                triton.Config({}, num_stages=3),
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        f(x, x)
+
+    @requires_gpu
     @common_utils.parametrize("autotune", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_params(self, autotune, backend):
@@ -2119,7 +2163,7 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         if wrapped:
-            triton_kernel = torch._library.triton_op(
+            triton_kernel = torch.library.triton_op(
                 "constexpr_test::square", triton_kernel_impl, mutates_args={}
             )
         else:
@@ -3054,7 +3098,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3092,7 +3136,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3128,7 +3172,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3150,7 +3194,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(out, expected)
 
     @requires_gpu
-    def test_capture_triton_disabled_in_triton_op(self):
+    def test_wrap_triton_disabled_in_triton_op(self):
         import triton  # @manual
         import triton.language as tl  # @manual
 
@@ -3171,18 +3215,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        add_kernel_decorated = torch._library.capture_triton(add_kernel)
+        add_kernel_decorated = torch.library.wrap_triton(add_kernel)
 
         status = []
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             import torch._higher_order_ops.triton_kernel_wrap
 
-            status.append(torch._library.triton.is_capture_triton_enabled())
+            status.append(torch._library.triton.is_wrap_triton_enabled())
 
             # capture_triton should return the kernel directly if disabled
-            result = torch._library.capture_triton(add_kernel)
+            result = torch.library.wrap_triton(add_kernel)
             self.assertIs(result, add_kernel)
 
             # Smoke test: check that with capture_triton disabled this still does something
@@ -3265,7 +3309,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
