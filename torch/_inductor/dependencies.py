@@ -249,7 +249,7 @@ class MemoryDep(Dep):
                 V.graph.get_dtype(self.name)
             )
         except NotImplementedError:  # NoneLayout
-            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(None)
+            return 0
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0

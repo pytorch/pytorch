@@ -3717,7 +3717,7 @@ class Buffer(IRNode):
 
     @property
     def dtype(self) -> torch.dtype:
-        return self.get_layout().dtype
+        return getattr(self.layout, "dtype", None)
 
     def get_size(self) -> Sequence[Expr]:
         return [*self.get_layout().size]
@@ -3729,9 +3729,7 @@ class Buffer(IRNode):
         return self.get_layout().offset
 
     def get_layout(self) -> Layout:
-        if isinstance(self.layout, Layout):
-            return self.layout
-        raise NotImplementedError(type(self.layout).__name__)
+        return self.layout
 
     def get_output_spec(self) -> OutputSpec:
         return self.layout
