@@ -177,7 +177,7 @@ if __name__ == "__main__":
         branch = "master"
 
     print("Building PyTorch wheel")
-    build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 "
+    build_vars = "MAX_JOBS=5 CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000 TORCH_CUDA_ARCH_LIST='9.0'"
     os.system("cd /pytorch; python setup.py clean")
 
     override_package_version = os.getenv("OVERRIDE_PACKAGE_VERSION")
