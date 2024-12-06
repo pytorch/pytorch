@@ -29,6 +29,11 @@ def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
 
     .. warning::
         This function eagerly initializes CUDA.
+
+    .. warning::
+        The RNG state(s) returned by this function are only applicable to the local process.
+        In a torch distributed context, ``get_rng_state(...)`` should be used in conjunction
+        with distributed collectives to copy RNG state across processes.
     """
     _lazy_init()
     if isinstance(device, str):
