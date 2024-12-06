@@ -279,6 +279,14 @@ if HAS_PYDOT:
             tensor_meta = node.meta.get("tensor_meta")
             label += self._tensor_meta_to_label(tensor_meta)
 
+            node_val = node.meta.get("val", None)
+            if tensor_meta is None and node_val is not None:
+                if isinstance(node_val, torch.Tensor):
+                    label += f"|output={self._get_tensor_label(node_val)}" + r"\n"
+                if isinstance(node_val, (list, tuple)):
+                    for i, v in enumerate(node_val):
+                        label += f"|output[{i}]={self._get_tensor_label(v)}" + r"\n"
+
             # for original fx graph
             # print buf=buf0, n_origin=6
             buf_meta = node.meta.get("buf_meta", None)
