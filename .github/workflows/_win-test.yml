@@ -106,6 +106,16 @@ jobs:
             set -eu
             python3 -m pip install 'xdoctest>=1.1.0'
 
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        if: ${{ !inputs.disable-monitor }}
+        continue-on-error: true
+        run: |
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@v4
         with:
@@ -116,16 +126,6 @@ jobs:
         shell: powershell
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
-
-      - name: Start monitoring script
-        id: monitor-script
-        shell: bash
-        if: ${{ !inputs.disable-monitor }}
-        continue-on-error: true
-        run: |
-          # Windows conda doesn't have python3 binary, only python, but it's python3
-          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download TD artifacts
         continue-on-error: true
