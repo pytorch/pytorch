@@ -23,6 +23,17 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run(
       inputs, reinterpret_cast<AOTInductorStreamHandle>(cuda_stream.stream()));
 }
 
+std::vector<at::Tensor> AOTIModelContainerRunnerCuda::steal_inputs_and_run(
+    std::vector<at::Tensor>& inputs,
+    void* cuda_stream_handle) {
+  if (cuda_stream_handle == nullptr) {
+    at::cuda::CUDAStream cuda_stream = c10::cuda::getCurrentCUDAStream();
+    cuda_stream_handle = cuda_stream.stream();
+  }
+  return AOTIModelContainerRunner::steal_inputs_and_run(
+      inputs, cuda_stream_handle);
+}
+
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_with_cuda_stream(
     const std::vector<at::Tensor>& inputs,
     at::cuda::CUDAStream cuda_stream) {

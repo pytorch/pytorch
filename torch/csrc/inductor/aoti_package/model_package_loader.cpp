@@ -396,8 +396,15 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    const std::vector<at::Tensor>& inputs) {
-  return runner_->run(inputs);
+    const std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  return runner_->run(inputs, stream_handle);
+}
+
+std::vector<at::Tensor> AOTIModelPackageLoader::steal_inputs_and_run(
+    std::vector<at::Tensor>& inputs,
+    void* stream_handle) {
+  return runner_->steal_inputs_and_run(inputs, stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::

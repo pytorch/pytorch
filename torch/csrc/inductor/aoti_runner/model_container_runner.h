@@ -22,11 +22,15 @@ class TORCH_API AOTIModelContainerRunner {
       delete;
   AOTIModelContainerRunner& operator=(AOTIModelContainerRunner&& other) =
       delete;
-  ~AOTIModelContainerRunner();
+  virtual ~AOTIModelContainerRunner();
 
   std::vector<at::Tensor> run(
       const std::vector<at::Tensor>& inputs,
-      AOTInductorStreamHandle cuda_stream_handle = nullptr);
+      void* stream_handle = nullptr);
+
+  virtual std::vector<at::Tensor> steal_inputs_and_run(
+      std::vector<at::Tensor>& inputs,
+      void* stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
@@ -84,6 +88,10 @@ class TORCH_API AOTIModelContainerRunner {
 
  private:
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
+
+  std::vector<at::Tensor> run_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle);
 };
 
 using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
