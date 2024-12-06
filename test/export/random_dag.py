@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: export"]
 
 
-def random_dag(n):
+def random_dag(n: int):
     """
     Util to generate a random DAG with n nodes.
 
@@ -18,7 +18,6 @@ def random_dag(n):
             if random.choice([True, False]):
                 edges[i].append(j)
 
-    print(edges)
     return edges
 
 
@@ -33,14 +32,14 @@ class Block:
     def __repr__(self):
         return "".join(self._code)
 
-    def new_line(self, line):
+    def new_line(self, line: str):
         """
         Add a new line of code. The line is automatically suffixed
         with a newline character.
         """
         self._code.append(line + "\n")
 
-    def new_block(self, block):
+    def new_block(self, block: "Block"):
         """
         Add a new block of code. All lines in the new block are
         automatically prefixed by a tab character.
@@ -92,13 +91,13 @@ class NNModuleGenerator:
     should return a block of code that defines the forward() of the nn.Module.
     """
 
-    def gen_init_body(self, i):
+    def gen_init_body(self, i: int):
         raise NotImplementedError
 
-    def gen_forward_body(self, i):
+    def gen_forward_body(self, i: int):
         raise NotImplementedError
 
-    def gen_nn_module(self, i):
+    def gen_nn_module(self, i: int):
         def gen_nn_module_body():
             code = Block()
             code.new_line("def __init__(self):")
@@ -123,25 +122,25 @@ class Unflatten(TestGenerator):
     compared against the eager model.
     """
 
-    def __init__(self, n):
+    def __init__(self, n: int):
         super().__init__()
         self.n = n
 
     def nn_module_generator(self):
         class GenNNModule(NNModuleGenerator):
-            def __init__(self, n):
+            def __init__(self, n: int):
                 super().__init__()
                 self.n = n
                 self.calls = random_dag(self.n)
 
-            def gen_init_body(self, i):
+            def gen_init_body(self, i: int):
                 code = Block()
                 code.new_line("super().__init__()")
                 if i < self.n - 1:
                     code.new_line(f"self.n{i+1} = N{i+1}()")
                 return code
 
-            def gen_forward_body(self, i):
+            def gen_forward_body(self, i: int):
                 def path(i, j):
                     if i + 1 == j:
                         return f"n{j}"
@@ -203,7 +202,7 @@ class ConstantUnflatten(Unflatten):
                 self.accesses = random_dag(self.n)
                 self.calls = random_dag(self.n)
 
-            def gen_init_body(self, i):
+            def gen_init_body(self, i: int):
                 code = Block()
                 code.new_line("super().__init__()")
                 code.new_line("self.const = torch.ones(1)")
@@ -211,7 +210,7 @@ class ConstantUnflatten(Unflatten):
                     code.new_line(f"self.n{i+1} = N{i+1}()")
                 return code
 
-            def gen_forward_body(self, i):
+            def gen_forward_body(self, i: int):
                 def path(i, j):
                     if i + 1 == j:
                         return f"n{j}"
@@ -245,7 +244,7 @@ class BufferUnflatten(Unflatten):
                 self.mutations = random_dag(self.n)
                 self.calls = random_dag(self.n)
 
-            def gen_init_body(self, i):
+            def gen_init_body(self, i: int):
                 code = Block()
                 code.new_line("super().__init__()")
                 code.new_line("self.buf = torch.nn.Buffer(torch.ones(1))")
@@ -253,7 +252,7 @@ class BufferUnflatten(Unflatten):
                     code.new_line(f"self.n{i+1} = N{i+1}()")
                 return code
 
-            def gen_forward_body(self, i):
+            def gen_forward_body(self, i: int):
                 def path(i, j):
                     if i + 1 == j:
                         return f"n{j}"
