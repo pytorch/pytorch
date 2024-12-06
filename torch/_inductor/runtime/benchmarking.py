@@ -1,8 +1,9 @@
+from random import randint
 import time
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
@@ -22,8 +23,7 @@ def time_and_count(
     fn: Callable[Concatenate[Any, P], T]
 ) -> Callable[Concatenate[Any, P], T]:
     """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
-    counters. It is expected that `fn` is a method of `Benchmarker` or one of its
-    subclasses; typing limitations prevent us from declaring this directly.
+    counters.
     """
 
     @wraps(fn)
@@ -143,6 +143,18 @@ class Benchmarker:
         return [
             self.benchmark_gpu(_callable, *args, **kwargs) for _callable in callables
         ]
+    
+    @time_and_count
+    def lazy_benchmark(self: Self, *args: Any, **kwargs: Any) -> float:
+        return self.benchmark(*args, **kwargs)
+    
+    @time_and_count
+    def lazy_benchmark_cpu(self: Self, *args: Any, **kwargs: Any) -> float:
+        return self.benchmark_cpu(*args, **kwargs)
+    
+    @time_and_count
+    def lazy_benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
+        return self.benchmark_gpu(*args, **kwargs)
 
 
 class TritonBenchmarker(Benchmarker):
@@ -407,4 +419,135 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         ]
 
 
-benchmarker = GroupedInductorBenchmarker()
+class LazyBenchmark:
+    def __init__(self: Self, benchmark: Callable[[], float]) -> None:
+        self.benchmark = benchmark
+
+    @cached_property
+    @time_and_count
+    def timing_ms(self: Self) -> float:
+        counters["inductor"]["benchmarking_finalize_lazy_benchmark"] += 1
+        timing_ms = self.benchmark()
+        # I don't think this helps with saving memory at all,
+        # but at least it gives good signal if we ever try
+        # to call self.benchmark again
+        del self.benchmark
+        return timing_ms
+
+    def __float__(self: Self) -> float:
+        return float(self.timing_ms)
+
+
+class LazyInductorBenchmarker(GroupedInductorBenchmarker):
+    def __init__(self: Self) -> None:
+        self.memory_cache: Dict[str, float] = {}
+        self.kwargs_hash_to_futures_gpu: Dict[
+            str, List[Tuple[Callable[[], Any], str]]
+        ] = {}
+
+    @time_and_count
+    def lazy_benchmark(
+        self: Self,
+        fn: Callable[..., Any],
+        fn_args: Tuple[Any],
+        fn_kwargs: Dict[str, Any],
+        **kwargs: Any,
+    ) -> Union[LazyBenchmark, float]:
+        """Lazily enque `fn(*fn_args, *fn_kwargs)` for benchmarking. Follows the same
+        principles as `Benchmarking.benchmark` except that the benchmarking is delayed,
+        in the form of returning a `LazyBenchmark` object, such that benchmarking does
+        not occur until the benchmarking results are required. This allows us to have
+        better benchmark grouping (i.e. we can utilize `GroupedInductorBenchmarker`)
+        without having to refactor user callsites.
+
+        Arguments:
+        - fn: The function to benchmark.
+        - fn_args: The function's arguments.
+        - fn_kwargs: The function's kwargs.
+
+        Keyword Arguments:
+        - **kwargs: The benchmarking implementation's kwargs.
+
+        Returns:
+        - A `LazyBenchmark`, `x`, that evaluates to the actual benchmark result
+        when `float(x)` is evaluated, or the actual runtime of `fn(*fn_args, **fn_kwargs)`,
+        in milliseconds, if the device type is `"cpu"` (since lazy benchmarking is only
+        implemented for `"gpu"` device types).
+        """
+        inferred_device = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            if not isinstance(arg_or_kwarg, torch.Tensor):
+                continue
+            if inferred_device is None:
+                inferred_device = arg_or_kwarg.device
+            elif arg_or_kwarg.device != inferred_device:
+                raise ValueError(
+                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                )
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+            )
+        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+        if inferred_device == torch.device("cpu"):
+            return self.lazy_benchmark_cpu(_callable, **kwargs)
+        return self.lazy_benchmark_gpu(_callable, **kwargs)
+    
+    @time_and_count
+    def lazy_benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> Union[LazyBenchmark, float]:
+        # we should try the callable before queueing it for benchmarking, in
+        # case it throws an exception. we could catch and handle any exception
+        # later on, but some codepaths expect and handle certain exceptions
+        _callable()
+        torch.cuda.synchronize()
+
+        # we want to group benchmarks based on the kwargs hash, this handles
+        # grouping benchmarks by ranking keys and pruning keys, and also ensures
+        # that we only benchmark callables that should run under the same conditions
+        # with respect to warmup, benchmarking, etc.
+        kwargs_hash = str(hash(tuple(sorted(kwargs.items()))))
+        # we've seen that just hash(_callable) and the kwargs_hash are not enough to
+        # differentiate callables; if _callable is something like a lambda, which then
+        # goes out of scope and gets garbage collected, its memory address may be later
+        # reused for a different _callable. if this is the case, the latter _callable would
+        # incorrectly exist in the memory cache, which could lead to memory leaks if we
+        # have a lazy benchmark grouping of one, because we would never remove _callable
+        # from the lazy benchmark queue and as such any memory referenced by _callable
+        # would remain allocated
+        key = str(hash(_callable) + randint(-(2**100), 2**100)) + kwargs_hash
+        self.kwargs_hash_to_futures_gpu.setdefault(kwargs_hash, []).append(
+            (_callable, key)
+        )
+
+        def benchmark() -> float:
+            # all but the first benchmark in a grouping of lazy benchmarks
+            # should be cached in memory, so we should return that cached timing
+            if key in self.memory_cache:
+                return self.memory_cache[key]
+
+            futures_gpu = self.kwargs_hash_to_futures_gpu.pop(kwargs_hash)
+            callables, keys = zip(*futures_gpu)
+            callables, keys = list(callables), list(keys)
+
+            try:
+                timings_ms = self.benchmark_many_gpu(callables, **kwargs)
+            except Exception as e:  # noqa: TRY302
+                raise e
+            else:
+                self.memory_cache.update(zip(keys, timings_ms))
+                return self.memory_cache[key]
+            finally:
+                # we have seen cases where not explicitly deleting the GPU futures
+                # can prevent the memory allocated for the callables from being
+                # properly and timely cleaned up, which can have fatal interactions
+                # in cudagraphs mode
+                del futures_gpu
+
+        return LazyBenchmark(benchmark)
+
+
+benchmarker = LazyInductorBenchmarker()
