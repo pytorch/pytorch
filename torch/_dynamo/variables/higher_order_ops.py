@@ -83,9 +83,10 @@ def discard_graph_changes(tx):
 
 
 def diff_var_meta(vars1, vars2) -> str:
-    from torch._higher_order_ops.utils import diff_meta_pairs 
+    from torch._higher_order_ops.utils import diff_meta_pairs
 
     from . import TensorVariable
+
     def _unwrap_var(var):
         if isinstance(var, TensorVariable):
             return var.proxy.node.meta["example_value"]
@@ -95,7 +96,7 @@ def diff_var_meta(vars1, vars2) -> str:
             return var.as_python_constant()
         else:
             unimplemented(f"Cannot unwrap var {var}")
-    
+
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 

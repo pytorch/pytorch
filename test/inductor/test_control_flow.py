@@ -1014,7 +1014,7 @@ class WhileLoopTests(TestCase):
             self._run_test(
                 model=WhileLoopModels.DataDependentInOut(),
                 inputs=(
-                    torch.tensor([[1, 2, 3, 4, 5]]),
+                    torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
                     torch.tensor(
                         [True, True, True, True, True],
                     ),
@@ -1037,7 +1037,7 @@ class WhileLoopTests(TestCase):
                 self._run_test(
                     model=WhileLoopModels.DataDependentInOutMismatch(),
                     inputs=(
-                        torch.tensor([1, 2, 3, 4, 5]),
+                        torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
                         torch.tensor(
                             [True, True, True, True, True],
                         ),
