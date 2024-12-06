@@ -7,7 +7,7 @@ import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -110,10 +110,7 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        member = getattr(self.value, name)
-        if callable(member):
-            raise NotImplementedError
-        return member
+        return getattr(self.value, name)
 
     def call_method(
         self,
@@ -220,7 +217,4 @@ class EnumVariable(VariableTracker):
         return self.value
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        member = getattr(self.value, name)
-        if callable(member):
-            raise NotImplementedError
-        return member
+        return getattr(self.value, name)
