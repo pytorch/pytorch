@@ -998,7 +998,7 @@ class triton:
 
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
-        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "1") == "1"
     )
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
