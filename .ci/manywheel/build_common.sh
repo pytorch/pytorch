@@ -382,7 +382,7 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#@linux_x86_64#@"${PLATFORM}"# $wheel_file;
+        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
     fi
 
     # regenerate the RECORD file with new hashes
@@ -426,7 +426,7 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
 
     # Rename wheel for Manylinux 2_28
     if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
-        pkg_name=$(echo $(basename $pkg) | sed -e s#@linux_x86_64#@"${PLATFORM}"#)
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_x86_64#"${PLATFORM}"#)
         zip -rq $pkg_name $PREIX*
         rm -f $pkg
         mv $pkg_name $(dirname $pkg)/$pkg_name
