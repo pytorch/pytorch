@@ -26,6 +26,7 @@ class TensorMetadata(NamedTuple):
     requires_grad: bool
     stride: Tuple[int, ...]
     memory_format: Optional[torch.memory_format]
+    device: torch.device
 
     # Quantization metadata
     is_quantized: bool
@@ -42,6 +43,7 @@ def _extract_tensor_metadata(
     dtype = result.dtype
     requires_grad = result.requires_grad
     stride = result.stride() if not is_sparse_any(result) else ()
+    device = result.device
 
     memory_format = None
 
@@ -77,7 +79,7 @@ def _extract_tensor_metadata(
             qparams["axis"] = result.q_per_channel_axis()  # type: ignore[assignment]
 
     return TensorMetadata(
-        shape, dtype, requires_grad, stride, memory_format, is_quantized, qparams
+        shape, dtype, requires_grad, stride, memory_format, device, is_quantized, qparams
     )
 
 
