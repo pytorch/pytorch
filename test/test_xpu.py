@@ -80,6 +80,13 @@ class TestXpu(TestCase):
         torch.xpu.set_device(current_device)
         self.assertEqual(current_device, torch.xpu.current_device())
 
+    def test_device_behavior_by_accelerator_hooks(self):
+        current_device = torch._C._accelerator_hooks_get_current_device()
+        torch._C._accelerator_hooks_set_current_device(current_device)
+        self.assertEqual(
+            current_device, torch._C._accelerator_hooks_get_current_device()
+        )
+
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
     def test_multi_device_behavior(self):
         current_device = torch.xpu.current_device()
@@ -92,6 +99,27 @@ class TestXpu(TestCase):
         with torch.xpu._DeviceGuard(target_device):
             self.assertEqual(target_device, torch.xpu.current_device())
         self.assertEqual(current_device, torch.xpu.current_device())
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_multi_device_behavior_by_accelerator_hooks(self):
+        current_device = torch._C._accelerator_hooks_get_current_device()
+        target_device = (current_device + 1) % torch.xpu.device_count()
+
+        with torch.xpu.device(target_device):
+            self.assertEqual(
+                target_device, torch._C._accelerator_hooks_get_current_device()
+            )
+        self.assertEqual(
+            current_device, torch._C._accelerator_hooks_get_current_device()
+        )
+
+        with torch.xpu._DeviceGuard(target_device):
+            self.assertEqual(
+                target_device, torch._C._accelerator_hooks_get_current_device()
+            )
+        self.assertEqual(
+            current_device, torch._C._accelerator_hooks_get_current_device()
+        )
 
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()

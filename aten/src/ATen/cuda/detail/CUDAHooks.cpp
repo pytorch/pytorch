@@ -443,6 +443,10 @@ DeviceIndex CUDAHooks::getCurrentDevice() const {
   return at::cuda::detail::current_device();
 }
 
+void CUDAHooks::setCurrentDevice(DeviceIndex device) const {
+  c10::cuda::set_device(device);
+}
+
 #ifdef USE_ROCM
 bool CUDAHooks::isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const {
   hipDeviceProp_t* prop = at::cuda::getDeviceProperties(device_index);

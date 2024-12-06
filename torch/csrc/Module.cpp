@@ -86,6 +86,7 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -2217,6 +2218,7 @@ Call this whenever a new thread is created in order to propagate values from
       [](c10::DeviceIndex device_index) {
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
+          torch::utils::device_lazy_init(device_type.value());
           at::globalContext()
               .getAcceleratorHooksInterface(device_type)
               .setCurrentDevice(device_index);
@@ -2226,6 +2228,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_accelerator_hooks_get_current_device", []() {
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
+      torch::utils::device_lazy_init(device_type.value());
       return at::globalContext()
           .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
@@ -2237,6 +2240,7 @@ Call this whenever a new thread is created in order to propagate values from
       "_accelerator_hooks_exchange_device", [](c10::DeviceIndex device_index) {
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
+          torch::utils::device_lazy_init(device_type.value());
           return at::globalContext()
               .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
@@ -2249,6 +2253,7 @@ Call this whenever a new thread is created in order to propagate values from
       [](c10::DeviceIndex device_index) {
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
+          torch::utils::device_lazy_init(device_type.value());
           return at::globalContext()
               .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);

@@ -51,6 +51,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   int getNumGPUs() const override;
   DeviceIndex deviceCount() const override;
   DeviceIndex getCurrentDevice() const override;
+  void setCurrentDevice(DeviceIndex device) const override;
 
 #ifdef USE_ROCM
   bool isGPUArch(DeviceIndex device_index, const std::vector<std::string>& archs) const override;
