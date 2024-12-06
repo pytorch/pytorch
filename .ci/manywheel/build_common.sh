@@ -379,6 +379,12 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         $PATCHELF_BIN --print-rpath $sofile
     done
 
+    # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
+        sed -i -e s#@linux_x86_64#@"${$PLATFORM}"# $wheel_file;
+    fi
+
     # regenerate the RECORD file with new hashes
     record_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/RECORD/g')
     if [[ -e $record_file ]]; then
@@ -418,19 +424,17 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         popd
     fi
 
-    # zip up the wheel back
-    zip -rq $(basename $pkg) $PREIX*
-    # remove original wheel
-    rm -f $pkg
-
-    # tag the wheel with approproiate tags
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" ]]; then
-        LD_LIBRARY_PATH="/usr/local/cuda/extras/CUPTI/lib64/:/usr/local/cuda/lib64/:/usr/lib64/:${LD_LIBRARY_PATH}"
-        auditwheel repair --exclude libcuda.so.1 --plat ${PLATFORM} $(basename $pkg)
-        # replace original wheel with audited
-        mv //wheelhouse/*.whl /$WHEELHOUSE_DIR/
+    # Rename wheel for Manylinux 2_28
+    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e 's#@linux_x86_64#@"${$PLATFORM}"#')
+        zip -rq $pkg_name $PREIX*
+        rm -f $pkg
+        mv $pkg_name $(dirname $pkg)/$pkg_name
     else
-        # replace original wheel
+        # zip up the wheel back
+        zip -rq $(basename $pkg) $PREIX*
+        # remove original wheel
+        rm -f $pkg
         mv $(basename $pkg) $pkg
     fi
 
