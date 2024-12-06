@@ -24,6 +24,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
+from torch._dynamo.variables.lazy import LazyVariableTracker, VariableTracker
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1084,11 +1085,6 @@ class TritonHOPifier:
                         != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
                     )
                     or (
-                        "prune_configs_by" in defaults
-                        and defaults["prune_configs_by"].default
-                        != kernel.early_config_prune
-                    )
-                    or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
@@ -1178,6 +1174,51 @@ class TritonHOPifier:
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
+
+        # Run prune_configs_by to filter the configs
+        if isinstance(variable.kernel, Autotuner):
+            # args and kwargs aren't real values yet
+            # e.g., LazyVariableTracker
+            # If a user wants to access them, we should realize them
+            def maybe_lazy_unwrap(
+                var: LazyVariableTracker,
+            ) -> Union[Any, VariableTracker, LazyVariableTracker]:
+                if isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
+                    realized = var.realize()
+                    if hasattr(realized, "value"):
+                        # if we can return the value, do it
+                        return realized.value
+                    # if we realized we might as well return the realized var
+                    return realized
+                # If we can't realize, just return as is
+                return var
+
+            # we want to lazily realize values if possible
+            class LazyRealizeArgsKwargs(dict):
+                def __init__(self, *args: Any, **kwargs: Any) -> None:
+                    super().__init__(*args, **kwargs)
+
+                def __getitem__(self, key: Any) -> Any:
+                    item = super().__getitem__(key)
+                    # TensorVariable is an instance of LazyVariableTracker
+                    # But we have to handle it differently (there may be no value)
+                    return maybe_lazy_unwrap(item)
+
+            # We only do this for prune_configs_by
+            # We have to eagerly realize kwargs
+            # This is because the dict gets unpacked in prune_configs, so we can't rely on __getitem__
+            lazyKwargs = LazyRealizeArgsKwargs(
+                {key: maybe_lazy_unwrap(kwarg) for key, kwarg in kwargs.items()}
+            )
+            # set up nargs
+            lazyArgs = LazyRealizeArgsKwargs(zip(variable.kernel.arg_names, args))
+            variable.kernel.nargs = lazyArgs
+
+            variable.kernel.prune_configs(lazyKwargs)
+            # Reset Autotuner vars to the default so we don't run prune_configs again
+            variable.kernel.perf_model = None
+            variable.kernel.configs_top_k = 1.0
+            variable.kernel.early_config_prune = None
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
