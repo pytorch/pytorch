@@ -18,9 +18,13 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
       const std::string& device_str = "cuda",
       const std::string& cubin_dir = "");
 
-  ~AOTIModelContainerRunnerCuda();
+  ~AOTIModelContainerRunnerCuda() override;
 
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs);
+
+  std::vector<at::Tensor> steal_inputs_and_run(
+      std::vector<at::Tensor>& inputs,
+      void* cuda_stream_handle = nullptr) override;
 
   std::vector<at::Tensor> run_with_cuda_stream(
       const std::vector<at::Tensor>& inputs,
