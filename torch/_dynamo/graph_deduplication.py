@@ -141,7 +141,7 @@ def _get_external_inputs(
 
 def _get_all_output_indices(regions: List[Region]) -> List[int]:
     # Scan all regions to get the set of all possible output nodes indices in the region
-    # perhaps it's possible to get this info some other way?
+    # perhaps we can record this information during region creation for more efficiency?
     inds_with_external_users: Set[int] = set()
     for region in regions:
         _get_inds_with_external_users(region, inds_with_external_users)
