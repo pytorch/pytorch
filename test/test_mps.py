@@ -12492,13 +12492,25 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, torch.arange(12.0, device='mps', dtype=torch.half))
 
     def test_metal_arange_with_arg(self):
-        x = torch.zeros(12, device="mps", dtype=torch.half)
+        x = torch.zeros(12, device="mps")
         lib = torch.mps._compile_shader("""
-            kernel void arange(device half* x, constant float& start, constant float& step, uint idx [[thread_position_in_grid]]) {
+            kernel void arange(device float* x, constant float& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
               x[idx] = start + idx * step;
             }
         """)
         lib.arange(x, 3.14, .5)
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_cast(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device half* x, constant half2& start_step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start_step.x + idx * start_step.y;
+            }
+        """)
+        lib.arange(x, [3.14, .5], arg_casts={1: "fp16"})
         self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=torch.half))
 
 

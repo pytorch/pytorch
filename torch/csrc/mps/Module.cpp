@@ -302,9 +302,44 @@ std::optional<std::vector<T>> fetch_optional_vec_from_kwargs(
   TORCH_CHECK(vec.size() > 0 && vec.size() < 3);
   return vec;
 }
+
 struct OptionalArgCaster {
  public:
-  OptionalArgCaster(const py::object& arg) : cast_arg(arg) {}
+  OptionalArgCaster(const py::object& arg) {
+    if (arg.is_none()) {
+    } else if (py::isinstance<std::string>(arg)) {
+      default_cast = arg.cast<std::string>();
+    } else if (py::isinstance<py::dict>(arg)) {
+      cast_map = arg.cast<std::unordered_map<unsigned, std::string>>();
+    } else {
+      TORCH_CHECK(false, "Unexpected caster arg");
+    }
+  }
+  template <typename T>
+  void setValue(
+      ::at::native::mps::MetalKernelFunction& f,
+      unsigned idx,
+      const std::vector<T>& values) {
+    auto cast_str =
+        cast_map.find(idx) != cast_map.end() ? cast_map[idx] : default_cast;
+    if (cast_str.size() == 0) {
+      f.setArg(idx, values);
+    } else if (cast_str == "fp16") {
+      std::vector<c10::Half> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
+    } else if (cast_str == "bf16") {
+      std::vector<c10::BFloat16> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
+    } else if (cast_str == "int32") {
+      std::vector<int32_t> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
+    } else if (cast_str == "int16") {
+      std::vector<int16_t> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
+    } else {
+      TORCH_CHECK(false, "Unsupported cast instruction ", default_cast);
+    }
+  }
   void setValue(
       ::at::native::mps::MetalKernelFunction& f,
       unsigned idx,
@@ -316,10 +351,10 @@ struct OptionalArgCaster {
       auto element = arg.attr("__getitem__")(0);
       if (py::isinstance<py::int_>(element)) {
         auto values = arg.cast<std::vector<int64_t>>();
-        f.setArg(idx, values);
+        setValue(f, idx, values);
       } else if (py::isinstance<py::float_>(element)) {
         auto values = arg.cast<std::vector<float>>();
-        f.setArg(idx, values);
+        setValue(f, idx, values);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
@@ -332,7 +367,8 @@ struct OptionalArgCaster {
   }
 
  private:
-  const py::object cast_arg;
+  std::string default_cast;
+  std::unordered_map<unsigned, std::string> cast_map;
 };
 
 } // namespace
@@ -361,7 +397,8 @@ void initModule(PyObject* module) {
             auto group_size =
                 fetch_optional_vec_from_kwargs(kwargs, "group_size");
             OptionalArgCaster caster(
-                kwargs.contains("casts") ? kwargs["casts"] : py::none());
+                kwargs.contains("arg_casts") ? kwargs["arg_casts"]
+                                             : py::none().cast<py::object>());
             self.runCommandBlock([&] {
               self.startEncoding();
               for (auto idx : c10::irange(args.size())) {
@@ -382,10 +419,22 @@ void initModule(PyObject* module) {
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
               if (threads->size() == 1) {
-                self.dispatch(threads->at(0));
+                if (group_size.has_value()) {
+                  self.dispatch(threads->at(0), group_size->at(0));
+                } else {
+                  self.dispatch(threads->at(0));
+                }
               } else if (threads->size() == 2) {
-                self.dispatch({threads->at(0), threads->at(1)});
+                if (group_size.has_value()) {
+                  self.dispatch(
+                      {threads->at(0), threads->at(1)},
+                      std::array<uint64_t, 2>(
+                          {group_size->at(0), group_size->at(1)}));
+                } else {
+                  self.dispatch({threads->at(0), threads->at(1)});
+                }
               } else {
+                TORCH_CHECK(false, "3D shaders are not supported yet");
               }
             });
           })
