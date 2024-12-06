@@ -301,6 +301,11 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         last_dim = dim[-1]
         last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
         output_sizes[last_dim] = last_dim_halfsize
+    else:
+        raise AssertionError(
+            "High-dimensional shapes not yet supported with some FFT operations, "
+            "see: https://github.com/pytorch/pytorch/pull/106319"
+        )
 
     return self.new_empty(
         output_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
