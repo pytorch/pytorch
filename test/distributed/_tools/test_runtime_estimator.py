@@ -99,19 +99,20 @@ class TestRuntimeEstimator(TestCase):
         runtime_estimator = RuntimeEstimator()
         with runtime_estimator(estimate_mode_type=estimate_mode):
             func(*args)
-        return runtime_estimator.total_runtime
+        return runtime_estimator.total_compute_time
 
     def _init_model_and_args(
         self,
         model_type: str,
         model_args: Union[ConvArgs, ModelArgs],
         bsz: int,
+        dtype: torch.dtype = torch.float32,
     ) -> Tuple[nn.Module, optim.Optimizer, torch.Tensor]:
         dev = torch.cuda.current_device()
         if model_type == "Transformer":
             model_args = cast(ModelArgs, model_args)
             with torch.device(dev):
-                model = Transformer(model_args)
+                model = Transformer(model_args).to(dtype=dtype)
             optimizer = optim.Adam(model.parameters(), lr=1e-2, foreach=True)
             inp = torch.randint(
                 0, model_args.vocab_size, (bsz, model_args.max_seq_len), device=dev
@@ -119,10 +120,15 @@ class TestRuntimeEstimator(TestCase):
         elif model_type == "CNN":
             model_args = cast(ConvArgs, model_args)
             with torch.device(dev):
-                model = SimpleCNN(model_args)
+                model = SimpleCNN(model_args).to(dtype=dtype)
             optimizer = optim.SGD(model.parameters(), lr=1e-2, foreach=True)
             inp = torch.randn(
-                bsz, 3, model_args.image_size, model_args.image_size, device=dev
+                bsz,
+                3,
+                model_args.image_size,
+                model_args.image_size,
+                device=dev,
+                dtype=dtype,
             )
         else:
             raise NotImplementedError("Only Transformer and CNN is supported")

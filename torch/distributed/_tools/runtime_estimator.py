@@ -2,15 +2,22 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import active_fake_mode
-from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.mod_tracker import ModTracker
+from torch.distributed._tools.runest_utils import (
+    CREATE_OPS,
+    get_estimation_configs,
+    get_flattened_tensor,
+    REDUCTION_OPS,
+    resolve_gpu_type,
+    VIEW_OPS,
+)
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.flop_counter import flop_registry
@@ -24,54 +31,8 @@ _PYTORCH_MIN_ALLOCATE = (
     2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
 )
 
-# No fall-back kernel needed/exists for view ops
-_VIEW_OPS = {
-    aten.lift_fresh,
-    aten.t,
-    aten.transpose,
-    aten.view,
-    aten.detach,
-    aten._unsafe_view,
-    aten.split,
-    aten.adjoint,
-    aten.as_strided,
-    aten.diagonal,
-    aten.expand,
-    aten.expand_as,
-    aten.movedim,
-    aten.permute,
-    aten.select,
-    aten.squeeze,
-    aten.mT,
-    aten.mH,
-    aten.real,
-    aten.imag,
-    aten.view_as,
-    aten.unflatten,
-    aten.unfold,
-    aten.unbind,
-    aten.unsqueeze,
-    aten.vsplit,
-    aten.hsplit,
-    aten.split_with_sizes,
-    aten.swapaxes,
-    aten.swapdims,
-    aten.chunk,
-}
-# We can ignore benchmarking tensor create ops
-_CREATE_OPS = {
-    aten.randint,
-    aten.randn,
-    aten.rand,
-    aten.randn_like,
-    aten.rand_like,
-    aten.randint_like,
-    aten.arange,
-    aten.ones_like,
-    aten.zeros_like,
-}
 
-_IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
+_IGNORE_OPS = VIEW_OPS | CREATE_OPS
 
 __all__ = ["RuntimeEstimator"]
 
@@ -94,14 +55,12 @@ class RuntimeEstimator(TorchDispatchMode):
         mod_bw_pre_order (List[str]): List of module FQNs in pre-backward execution order.
         mod_fw_post_order (List[str]): List of module FQNs in post-forward execution order.
         mod_bw_post_order (List[str]): List of module FQNs in post-backward execution order.
-        total_runtime (float): The total estimated runtime in milliseconds.
+        total_compute_time (float): The total estimated compute time in milliseconds.
 
     Note:
         1) The benchmarking estimate mode will execute kernels on GPU and assumes that every operation can run in
             isolation without causing an OOM error. It is also designed to be used only under ``FakeTensorMode``.
-        2) Currently wrapper tensor sub-classes such as ``DTensor`` won't produce correct estimates. We plan to support
-            them in future PRs.
-        3) We only estimate the compute time, if your code has communication, it will not be considered. Again, we will
+        2) We only estimate the compute time, if your code has communication, it will not be considered. Again, we will
             support this in future PRs.
 
     Example usage:
@@ -127,7 +86,11 @@ class RuntimeEstimator(TorchDispatchMode):
         torch.float32,
         torch.float64,
     }
+    _peak_flops_reg: Dict[torch.dtype, float]
+    _peak_flops_factors: Dict[torch.dtype, float]
+    _peak_bandwidth: float
     _no_fallback_kernel: Set[torch._ops._OpNamespace] = set()
+    _gpu_type: str = ""
     fake_mode: FakeTensorMode
 
     def __init__(self) -> None:
@@ -142,7 +105,56 @@ class RuntimeEstimator(TorchDispatchMode):
         self.mod_bw_pre_order: List[str] = []
         self.mod_fw_post_order: List[str] = []
         self.mod_bw_post_order: List[str] = []
-        self.total_runtime: float = 0.0
+        self.total_compute_time: float = 0.0
+
+    @classmethod
+    def init_configs(
+        cls,
+        gpu_type: str = "",
+        custom_config: Optional[
+            Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]
+        ] = None,
+    ) -> None:
+        """
+        Initialize the configuration for the GPU type, including peak FLOPS, FLOPS factors, and bandwidth.
+
+        Args:
+            gpu_type (str, optional):
+                The type of GPU to configure specific settings (e.g., "H100_SXM_80GB").
+                Defaults to an empty string, which triggers automatic configuration based on the available GPU.
+            custom_config (Optional[Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]], optional):
+                A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
+                If provided, this overrides the default estimation based on the GPU type.
+
+        Returns:
+            None
+        Raises:
+            TypeError: If `runtime_kwargs` contains invalid types for any of the supported keys.
+        """
+        if gpu_type and not isinstance(gpu_type, str):
+            raise TypeError(f"`gpu_type` must be a str, got {type(gpu_type).__name__}")
+        if custom_config:
+            if not (isinstance(custom_config, tuple) and len(custom_config) == 3):
+                raise TypeError("`custom_config` must be a tuple of length 3")
+            if not all(isinstance(custom_config[i], dict) for i in range(2)):
+                raise TypeError(
+                    "The first two elements of `custom_config` must be dictionaries"
+                )
+            if not isinstance(custom_config[2], float):
+                raise TypeError("The third element of `custom_config` must be a float")
+        cls._gpu_type = resolve_gpu_type(gpu_type)
+        (
+            cls._peak_flops_reg,
+            cls._peak_flops_factors,
+            cls._peak_bandwidth,
+        ) = (
+            get_estimation_configs(cls._gpu_type)
+            if not custom_config
+            else custom_config
+        )
 
     # Adapted from: https://github.com/pytorch/pytorch/blob/9b902b3ee3bd608a19543362b66bf06c373dd374/torch/_subclasses/fake_tensor.py#L1969  # noqa: PGH004,B950
     # NB: returns fake tensors
@@ -259,7 +271,7 @@ class RuntimeEstimator(TorchDispatchMode):
             cls.fake_mode, FakeTensorMode
         ), "Initialize/Assign FakeTensorMode before using this function"
         mean_op_time = 0.0
-        if func._overloadpacket not in _VIEW_OPS:
+        if func._overloadpacket not in _IGNORE_OPS:
             try:
                 res, mean_op_time = cls._maybe_run_and_benchmark_fallback_kernel(
                     func,
@@ -324,24 +336,22 @@ class RuntimeEstimator(TorchDispatchMode):
                 float: The estimated compute time in nanoseconds.
             """
             if func_packet in flop_registry:
-                assert (
-                    len(out_dtypes) == 1
-                ), f"Only support single out dtype got {out_dtypes} for {func_packet}"
-                dtype = out_dtypes.pop()
-                # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
-                peak_gpu_flops = get_device_tflops(dtype) * 1e15
-                # We can expect to achieve 75% of theoretical peak flops
-                factor = 0.75
+                float_dtypes = out_dtypes & cls._float_types
+                dtype = min(float_dtypes, key=lambda x: x.itemsize)
+                # This gives GFLOPS/sec for the given dtype
+                peak_gpu_flops = cls._peak_flops_reg[dtype]
+                # factor determines the peak flops that are empirically attained by compute ops
+                factor = cls._peak_flops_factors[dtype]
                 peak_empirical_flops = factor * peak_gpu_flops
                 flop_count_func = flop_registry[func_packet]
                 # We divide by a factor of 2 to get the MACs (multiply and accumulate)
                 flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
-                # We multiply by 1e9 to get the time in nano seconds
-                compute_time = (flop_count / peak_empirical_flops) * 1e9
+                # FLOPS/(GFLOPS/sec) gives us time in nanoseconds
+                compute_time = flop_count / peak_empirical_flops
                 return compute_time
             return 0.0
 
-        def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
+        def get_transfer_time(func_packet, flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
             """
             Estimates the memory transfer time of input and output tensors.
 
@@ -352,7 +362,8 @@ class RuntimeEstimator(TorchDispatchMode):
             Returns:
                 float: The estimated memory transfer time in nanoseconds.
             """
-            gpu_memory_bandwidth = get_gpu_dram_gbps()
+            # The GPU memory bandwidth is in GB/s
+            gpu_memory_bandwidth = cls._peak_bandwidth
             read_bytes = sum(
                 get_num_bytes(t)
                 for t in flat_args_kwargs
@@ -364,6 +375,8 @@ class RuntimeEstimator(TorchDispatchMode):
             counted_bytes = read_bytes + write_bytes
             # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
             transfer_time = counted_bytes / gpu_memory_bandwidth
+            if func_packet in REDUCTION_OPS:
+                transfer_time *= 2
             return transfer_time
 
         # Roofline Cost Model Explanation
@@ -395,20 +408,27 @@ class RuntimeEstimator(TorchDispatchMode):
         op_time = 0.0
         func_packet = func._overloadpacket
         if func_packet not in _IGNORE_OPS:
-            flat_args_kwargs, args_spec = pytree.tree_flatten((args, kwargs))
-            flat_outs, out_spec = pytree.tree_flatten(out)
-            transfer_time = get_transfer_time(flat_args_kwargs, flat_outs)
+            desugared_args = pytree.tree_map_only(
+                torch.Tensor, get_flattened_tensor, args
+            )
+            desugared_kwargs = pytree.tree_map_only(
+                torch.Tensor, get_flattened_tensor, kwargs
+            )
+            desugared_out = pytree.tree_map_only(
+                torch.Tensor, get_flattened_tensor, out
+            )
 
-            out_dtypes = {
-                t.dtype
-                for t in flat_outs
-                if isinstance(t, torch.Tensor) and t.dtype in cls._float_types
-            }
-
-            args, kwargs = pytree.tree_unflatten(flat_args_kwargs, args_spec)
-            out = pytree.tree_unflatten(flat_outs, out_spec)
-
-            compute_time = get_compute_time(func_packet, args, kwargs, out, out_dtypes)
+            flat_args_kwargs, _ = pytree.tree_flatten(
+                (desugared_args, desugared_kwargs)
+            )
+            flat_outs, _ = pytree.tree_flatten(desugared_out)
+            transfer_time = (
+                get_transfer_time(func_packet, flat_args_kwargs, flat_outs) / 1.5
+            )
+            out_dtypes = {t.dtype for t in flat_outs if isinstance(t, torch.Tensor)}
+            compute_time = get_compute_time(
+                func_packet, desugared_args, desugared_kwargs, desugared_out, out_dtypes
+            )
             # We get the estimated time as the max of the transfer time and
             # compute time. We divide by 1e6 to get the time in ms
             op_time = max(transfer_time, compute_time) / 1e6
@@ -446,33 +466,53 @@ class RuntimeEstimator(TorchDispatchMode):
             )
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
-        # TODO: @sanketpurandare: Flatten tensors by desugaring the tensor subclasses
         # TODO: @sanketpurandare: Add logic for incorporating communication time
         res, op_time = self._estimate(func, args, kwargs)
+        # if func._overloadpacket not in OPS_TO_ALWAYS_SKIP:
+        #     print(f"{func._overloadpacket}: {op_time:.3f}")
         for par in self._mod_tracker.parents:
             if self._mod_tracker.is_bw:
                 self.mod_runtimes[par]["bw"] += op_time
             else:
                 self.mod_runtimes[par]["fw"] += op_time
-        self.total_runtime += op_time
+        self.total_compute_time += op_time
         return res
 
-    def __call__(self, estimate_mode_type: str) -> Self:
+    def __call__(
+        self,
+        estimate_mode_type: str,
+        gpu_type: str = "",
+        custom_config: Optional[
+            Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]
+        ] = None,
+    ) -> Self:
         """
-        Sets the estimate mode type.
+        Configures the runtime estimation mode and initializes GPU-specific configurations.
 
-        Currently supported modes:
-            - "operator-level-benchmark": Estimates runtime using operator benchmarking.
-            - "operator-level-cost-model": Estimates runtime using roofline cost model.
+        Supported Modes:
+            - `"operator-level-benchmark"`: Estimates runtime using operator benchmarking.
+            - `"operator-level-cost-model"`: Estimates runtime using a roofline cost model.
 
         Args:
-            estimate_mode_type (str): The type of estimate mode to use.
+            estimate_mode_type (str):
+                The runtime estimation mode to use. Must be one of the supported modes.
+            gpu_type (str, optional):
+                The GPU type to configure specific settings (e.g., `"H100_SXM_80GB"`).
+                Defaults to an empty string, which triggers automatic configuration based on the available GPU.
+            custom_config (Optional[Tuple[Dict[torch.dtype, float], Dict[torch.dtype, float], float]], optional):
+                A tuple containing:
+                    - A dictionary mapping `torch.dtype` to peak FLOPS (in GFLOPS/s).
+                    - A dictionary mapping `torch.dtype` to peak FLOPS factors.
+                    - The peak bandwidth (in GB/s).
+                If provided, this overrides the default estimation based on the GPU type.
 
         Returns:
-            RuntimeEstimator: The runtime estimator instance.
+            Self:
+                The current instance of `RuntimeEstimator` with the configured estimation mode.
 
         Raises:
-            NotImplementedError: If the estimate mode type is not supported.
+            NotImplementedError:
+                If `estimate_mode_type` is not a supported runtime estimation mode.
         """
         if estimate_mode_type == "operator-level-benchmark":
             self._estimate = RuntimeEstimator._benchmark_estimate
@@ -483,6 +523,7 @@ class RuntimeEstimator(TorchDispatchMode):
                 f"estimate_mode_type {estimate_mode_type} not supported"
             )
         self._estimate_mode_type = estimate_mode_type
+        RuntimeEstimator.init_configs(gpu_type, custom_config)
         return self
 
     def __enter__(self) -> Self:
@@ -491,7 +532,7 @@ class RuntimeEstimator(TorchDispatchMode):
             fake_mode, FakeTensorMode
         ), "No FakeTensorMode found, designed to used under FakeTensorMode"
         RuntimeEstimator.fake_mode = fake_mode
-        self.total_runtime = 0.0
+        self.total_compute_time = 0.0
         self.mod_runtimes = defaultdict(lambda: defaultdict(lambda: 0.0))
         self.mod_fw_pre_order.clear()
         self.mod_bw_pre_order.clear()
@@ -502,13 +543,13 @@ class RuntimeEstimator(TorchDispatchMode):
                 self._mod_tracker.get_known_fqn(mod)
             ),
             pre_bw_hook=lambda mod, g_out: self.mod_bw_pre_order.append(
-                self._mod_tracker.get_known_fqn(mod)
+                self._mod_tracker.get_known_fqn(mod) if mod is not None else ""
             ),
             post_fw_hook=lambda mod, inp, out: self.mod_fw_post_order.append(
                 self._mod_tracker.get_known_fqn(mod)
             ),
             post_bw_hook=lambda mod, g_inp: self.mod_bw_post_order.append(
-                self._mod_tracker.get_known_fqn(mod)
+                self._mod_tracker.get_known_fqn(mod) if mod is not None else ""
             ),
         )
         self._mod_tracker.__enter__()
@@ -516,10 +557,6 @@ class RuntimeEstimator(TorchDispatchMode):
         return self
 
     def __exit__(self, *args: Any) -> None:
-        print(
-            f"Estimated ({self._estimate_mode_type})"
-            f"total_time: {self.total_runtime:.3f} ms"
-        )
         if len(self._no_fallback_kernel) > 0:
             print("no_fallback_kernel: ", list(self._no_fallback_kernel))
         super().__exit__(*args)
