@@ -3605,6 +3605,39 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             self.assertTrue(records['capture_kwargs'] is not None)
             self.assertTrue(records['capture_named_args'] is not None)
 
+    # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/test/unit/language/test_decorator.py#L31
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_heuristic(self, backend, autotune_at_compile_time):
+        N = 1023
+        src = torch.empty(N, device=GPU_TYPE)
+        dst = torch.zeros(N, device=GPU_TYPE)
+
+        do_bench = lambda kernel, quantiles: triton.testing.do_bench(kernel, quantiles=quantiles, warmup=1, rep=1)
+
+        @triton.autotune(configs=[triton.Config(kwargs={'BLOCK_SIZE': 32})], key=['N'], do_bench=do_bench)
+        @triton.heuristics({'EVEN_N': lambda nargs: nargs['N'] + 10})  # test kwargs
+        @triton.heuristics({'EVEN_src': lambda nargs: nargs['src'].data_ptr() % 2 == 0}) # test args
+        @triton.jit
+        def _kernel(dst, src, N, BLOCK_SIZE: tl.constexpr, EVEN_N: tl.constexpr, EVEN_src: tl.constexpr):
+            # sets dst[0] == N + 10 when EVEN_N is evaluated
+            tl.store(dst, EVEN_N)
+            # sets dst[1] == 1 when EVEN_src is evaluated
+            # the result of .data_ptr() % 2 will always be 0, so this returns True (1)
+            tl.store(dst + 1, EVEN_src)
+
+        grid = lambda META: (triton.cdiv(N, META['BLOCK_SIZE']), )
+
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            _kernel[grid](dst, src, N=N)
+
+        self.assertEqual(dst[0].item(), N + 10)
+        self.assertEqual(dst[1].item(), 1.0)
+        self.assertEqual(_kernel.base_fn.__name__, "_kernel")
+
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
 
