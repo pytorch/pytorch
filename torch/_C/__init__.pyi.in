@@ -1128,6 +1128,7 @@ def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorTyp
 def _set_default_dtype(d: _dtype) -> None: ...  # THPModule_setDefaultDtype
 def _infer_size(arg1: Size, arg2: Size) -> Size: ...  # THPModule_inferSize
 def _crash_if_csrc_asan() -> _int: ...  # THPModule_crashIfCsrcASAN
+def _crash_if_csrc_lsan() -> _int: ...  # THPModule_crashIfCsrcLSAN
 def _crash_if_csrc_ubsan() -> _int: ...  # THPModule_crashIfCsrcUBSAN
 def _crash_if_aten_asan() -> _int: ...  # THPModule_crashIfATenASAN
 def _show_config() -> str: ...  # THPModule_showConfig

@@ -279,11 +279,8 @@ PyObject* THPVariable_Wrap(const at::TensorBase& var) {
         // object "live" again on Python side, let's flip back the ownership
         // (Python owns C++) as it would now be unsound to deallocate the C++
         // object if all C++ references go to zero
-        var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
         reinterpret_cast<THPVariable*>(obj)->cdata =
             MaybeOwned<Variable>::owned(Variable(var));
-        // NB: incref is not necessary, because we are "stealing" the previous
-        // ownership from the Variable to return it here for the wrap
         return obj;
       }
       Py_INCREF(obj);
