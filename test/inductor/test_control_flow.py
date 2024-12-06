@@ -715,6 +715,54 @@ class WhileLoopModels:
                 cond_fn, body_fn, (it, pytree_input)
             )
 
+    class DataDependentOpInSubgraph(torch.nn.Module):
+        def forward(self, c, a, b):
+            def cond_fn(c, reduced_carry):
+                return c > 0
+
+            def body_fn(c, reduced_carry):
+                k = torch.masked_select(a, b)
+                d = torch.concat([k, k * 2])
+                return c - 1, torch.min(d).unsqueeze(0) + reduced_carry
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, torch.zeros([1], dtype=torch.int64, device=c.device)],
+            )
+
+    class DataDependentInOut(torch.nn.Module):
+        def forward(self, c, a, b):
+            inp = torch.zeros(
+                a.sum().to(torch.int64).item(), 3, device=a.device, dtype=torch.int64
+            )
+
+            def cond_fn(c, inp):
+                return c > 0
+
+            def body_fn(c, inp):
+                return c - 1, (inp.sin() + 1).to(torch.int64)
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, inp],
+            )
+
+    class DataDependentInOutMismatch(torch.nn.Module):
+        def forward(self, c, a, b):
+            def cond_fn(c, a, b):
+                return c > 0
+
+            def body_fn(c, a, b):
+                return c - 1, a.nonzero(), b.nonzero()
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a, b],
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -866,6 +914,72 @@ class WhileLoopTests(TestCase):
             device=device,
             dynamic=dynamic,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_data_dependent_ops(self, device, dynamic):
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentOpInSubgraph(),
+                inputs=(
+                    torch.tensor([1, 2, 3, 4, 5]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_data_dependent_in_out(self, device, dynamic):
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+                "capture_scalar_outputs": True,
+            }
+        ):
+            self._run_test(
+                model=WhileLoopModels.DataDependentInOut(),
+                inputs=(
+                    torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
+                    torch.tensor(
+                        [True, True, True, True, True],
+                    ),
+                ),
+                device=device,
+                dynamic=dynamic,
+            )
+
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"while_loop doesn't work unless it is captured completely with torch.compile",
+        ):
+            with torch._dynamo.config.patch(
+                {
+                    "capture_dynamic_output_shape_ops": True,
+                }
+            ):
+                self._run_test(
+                    model=WhileLoopModels.DataDependentInOutMismatch(),
+                    inputs=(
+                        torch.tensor([[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]),
+                        torch.tensor(
+                            [True, True, True, True, True],
+                        ),
+                    ),
+                    device="cpu",
+                    dynamic=dynamic,
+                )
 
 
 class AssociativeScanTests(TestCase):
