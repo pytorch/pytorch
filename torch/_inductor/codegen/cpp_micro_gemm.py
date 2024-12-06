@@ -544,6 +544,23 @@ class CppMicroGemmAMX(CppMicroGemm):
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+{%- if pack_vnni_B %}
+    const auto packed_buf_size = K * {{block_n}};
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{input2_t}}[]> heap_packed_b_buf_ptr(new {{input2_t}}[packed_buf_size]);
+    {{input2_t}}* packed_B_buf = heap_packed_b_buf_ptr.get();
+    {%- else %}
+    alignas(4096) {{input2_t}} packed_B_buf[packed_buf_size];
+    {%- endif %}
+    for (int indx_k = 0; indx_k < K; ++indx_k) {
+        for (int indx_n = 0; indx_n < N; indx_n += {{block_n}}) {
+            const int ind_packed_k = (indx_n % vnni_size) + k - (k % vnni_size);
+            const int ind_packed_n = (indx_n // vnni_size) + (N // vnni_size) * (indx_k % vnni_size);
+            packed_B_buf[indx_k * {{block_n}} + indx_n] = B[ind_packed_k * ldb + ind_packed_n];
+        }
+    }
+{%- endif %}
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
@@ -563,7 +580,11 @@ class CppMicroGemmAMX(CppMicroGemm):
 
     auto load_dequantized_B = [&](int base_idx) {
         // Load a tile of B & cache it in L1D.
+{%- if pack_vnni_B %}
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
+{%- else %}
+        {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(packed_B_buf) + base_idx;
+{%- endif %}
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
         {%- for vec_idx in range(0, block_n - 1, 32) %}
             auto b_int8 = at::vec::Vectorized<int8_t>::loadu(
@@ -588,7 +609,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
 // The ldb would not be block_n if N != block_n
-{%- if use_cached_dequantized_B %}
+{%- if use_cached_dequantized_B or pack_vnni_B %}
     const int64_t updated_ldb = {{block_n}};
 {%- else %}
     const int64_t updated_ldb = ldb;
@@ -612,6 +633,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -632,6 +655,8 @@ class CppMicroGemmAMX(CppMicroGemm):
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
                     dequantized_B_buf,
+{%- elif pack_vnni_B %}
+                    packed_B_buf,
 {%- else %}
                     B + n,
 {%- endif %}
