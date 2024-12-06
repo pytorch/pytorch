@@ -59,6 +59,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-focal-cuda12_1-py3_10-gcc9-no-ops-build:
@@ -73,6 +74,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   libtorch-linux-focal-cuda12_4-py3_7-gcc9-debug-build:
     name: libtorch-linux-focal-cuda12.4-py3.7-gcc9-debug
@@ -88,6 +90,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-focal-cuda12_4-py3_10-gcc9-no-ops-build:
@@ -102,6 +105,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
+    secrets: inherit
 
   macos-py3-arm64-build:
     if: github.repository_owner == 'pytorch'
@@ -120,6 +124,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
         ]}
+    secrets: inherit
 
   macos-py3-arm64-mps-test:
     name: macos-py3-arm64-mps
@@ -136,6 +141,7 @@ jobs:
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-13" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
         ]}
+    secrets: inherit
 
   macos-py3-arm64-test:
     name: macos-py3-arm64
@@ -148,6 +154,7 @@ jobs:
       # Same as the build job
       python-version: 3.9.12
       test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+    secrets: inherit
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
@@ -176,6 +183,7 @@ jobs:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
+    secrets: inherit
 
   win-vs2019-cuda12_1-py3-build:
     name: win-vs2019-cuda12.1-py3
@@ -185,6 +193,7 @@ jobs:
       build-environment: win-vs2019-cuda12.1-py3
       cuda-version: "12.1"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
@@ -217,6 +226,7 @@ jobs:
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
       tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor distributed/test_c10d_common distributed/test_c10d_nccl"
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build:
     if: false # See https://github.com/pytorch/pytorch/issues/138750
@@ -241,6 +251,7 @@ jobs:
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-test:
     name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build-test
@@ -252,3 +263,4 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
+    secrets: inherit
