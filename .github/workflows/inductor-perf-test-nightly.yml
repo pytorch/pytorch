@@ -101,8 +101,7 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.aws.a100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -116,8 +115,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -131,8 +129,7 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -146,5 +143,4 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

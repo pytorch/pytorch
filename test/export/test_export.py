@@ -304,6 +304,40 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
 
+    def test_export_strict_narrow_unbacked_expr(self):
+        # Tests that we are able to handle 0/1 specialization on sizes represented
+        # by unbacked int expressions by transforming them into an unbacked int.
+        #
+        # This test only works with strict=True, since it relies on dynamo tracing
+        # for transforming the expression into an unbacked SymInt.
+
+        def identity(x):
+            return x
+
+        class Module(torch.nn.Module):
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, x, p):
+                u0 = p.item()
+                torch._check(u0 + 5 <= x.shape[0])
+                torch._check(u0 >= 0)
+                # Create a tensor of size: (x.shape[0] - u0 - 5).
+                return x.narrow(0, u0 + 5, self.fn(x.shape[0] - u0 - 5))
+
+        inputs = (torch.arange(10), torch.tensor(2))
+
+        # Without transforming the unbacked int expression, we can't export.
+        with self.assertRaisesRegex(
+            RuntimeError, escape("Could not guard on data-dependent expression")
+        ):
+            export(Module(identity), inputs, strict=True)
+
+        # It works if we transform the whole unbacked int expression into
+        # an unbacked int.
+        export(Module(torch.sym_fresh_size), inputs, strict=True)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -865,6 +899,17 @@ graph():
                 return tensor.item()
 
         input = (torch.tensor([1], dtype=torch.bool),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symfloat_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([3.14], dtype=torch.float),)
 
         orig_res = M()(*input)
         ep_res = torch.export.export(M(), input).module()(*input)
@@ -6544,8 +6589,6 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
-    @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 

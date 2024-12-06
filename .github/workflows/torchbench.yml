@@ -47,8 +47,7 @@ jobs:
         { include: [
           { config: "torchbench_gcp_smoketest", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-torchbench-test-gcp:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -59,5 +58,4 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-torchbench-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

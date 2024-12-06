@@ -10,7 +10,7 @@ from typing import Any, List, Optional, Type, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu

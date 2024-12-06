@@ -994,7 +994,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             self.param_group_var.value._training_state = value
 
     def module_name(self):
-        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+        return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
     def fn_name(self):
         return "use_training_state"

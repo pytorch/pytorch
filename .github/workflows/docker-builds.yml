@@ -59,6 +59,7 @@ jobs:
           pytorch-linux-focal-py3.9-clang10,
           pytorch-linux-focal-py3.11-clang10,
           pytorch-linux-focal-py3.12-clang10,
+          pytorch-linux-focal-py3.13-clang10,
           pytorch-linux-focal-rocm-n-1-py3,
           pytorch-linux-focal-rocm-n-py3,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,

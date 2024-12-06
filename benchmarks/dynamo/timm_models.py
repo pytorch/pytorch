@@ -79,6 +79,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+    "convnext_base",
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {

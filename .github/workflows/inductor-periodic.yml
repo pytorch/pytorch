@@ -66,8 +66,7 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-test:
     name: cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
@@ -77,8 +76,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -95,8 +93,7 @@ jobs:
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-gcp:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -107,8 +104,7 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build:
     name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
@@ -132,8 +128,7 @@ jobs:
           { config: "cpu_inductor_freezing_avx2_timm", shard: 1, num_shards: 2, runner: "linux.10xlarge.avx2" },
           { config: "cpu_inductor_freezing_avx2_timm", shard: 2, num_shards: 2, runner: "linux.10xlarge.avx2" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-test:
     name: linux-jammy-cpu-py3.9-gcc11-periodic-dynamo-benchmarks
@@ -143,8 +138,7 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
@@ -206,8 +200,7 @@ jobs:
           { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-test:
     name: cuda12.4-py3.10-gcc9-sm86
@@ -218,8 +211,7 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
 
   linux-jammy-cpu-py3_9-gcc11-inductor-build:

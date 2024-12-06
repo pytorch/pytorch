@@ -6,12 +6,12 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed._tensor.api import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.distributed_c10d import broadcast_object_list
+from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
     manual_seed,

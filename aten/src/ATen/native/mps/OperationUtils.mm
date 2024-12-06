@@ -765,6 +765,15 @@ class MPSGraphCacheCallback : public IMpsAllocatorCallback {
 
 REGISTER_MPS_ALLOCATOR_CALLBACK("mps_graph_cache_callback", MPSGraphCacheCallback);
 
+// MetalShaderLibrary implementation
+MetalShaderLibrary::~MetalShaderLibrary() {
+  for (const auto& it : cplMap) {
+    auto [cpl, func] = it.second;
+    [cpl release];
+    [func release];
+  }
+}
+
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   if (C10_UNLIKELY(!library)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);

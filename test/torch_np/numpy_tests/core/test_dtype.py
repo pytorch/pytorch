@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfTorchDynamo,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -320,7 +320,7 @@ class TestMisc(TestCase):
         assert bool(np.dtype("f8"))
         assert bool(np.dtype("i8"))
 
-    @xpassIfTorchDynamo  # (reason="No keyword arg for dtype ctor.")
+    @xpassIfTorchDynamo_np  # (reason="No keyword arg for dtype ctor.")
     def test_keyword_argument(self):
         # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
         assert np.dtype(dtype=np.float64) == np.dtype(np.float64)

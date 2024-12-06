@@ -23,6 +23,7 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: inductor-unittest
     uses: ./.github/workflows/inductor-cu124-unittest.yml
+    secrets: inherit
 
   get-default-label-prefix:
     name: get-default-label-prefix
@@ -62,8 +63,7 @@ jobs:
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-test:
     name: cuda12.4-py3.10-gcc9-sm86
@@ -74,8 +74,7 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp:
     if: github.repository_owner == 'pytorch'
@@ -90,8 +89,7 @@ jobs:
         { include: [
           { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-a100-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-inductor-test-gcp:
     name: cuda12.4-py3.10-gcc9-sm80
@@ -102,5 +100,4 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

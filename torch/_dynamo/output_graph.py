@@ -11,7 +11,18 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -621,8 +632,11 @@ class OutputGraph:
         """
         Saves to out if it is provided. Else saves to the tracing context's global_state.
         """
-        global_state = (
-            out if out is not None else self.tracing_context.global_context.global_state
+        global_state = cast(
+            Dict[str, Tuple[Callable[..., Any], bool]],
+            out
+            if out is not None
+            else self.tracing_context.global_context.global_state,
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
@@ -645,11 +659,11 @@ class OutputGraph:
             functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
-        global_state["autocast_gpu_dtype"] = (
+        global_state["autocast_gpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cuda"),
             torch.get_autocast_dtype("cuda"),
         )
-        global_state["autocast_cpu_dtype"] = (
+        global_state["autocast_cpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cpu"),
             torch.get_autocast_dtype("cpu"),
         )

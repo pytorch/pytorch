@@ -1,8 +1,8 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <fstream>
 #include <memory>
-#include <c10/macros/Macros.h>
 
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"

@@ -286,6 +286,7 @@ class EntryState:
                 expected_ranks=self.expected_ranks,
                 collective_state=self.collective_state,
                 collective_frames=self.collective_frames,
+                missing_ranks=getattr(self, "missing_ranks", None),
             )
         else:
             assert idx_map is not None, "idx_map is None"
@@ -386,9 +387,11 @@ class Op:
         }, f"{type} is not a supported operation"
         self.type = type
         if type == "send":
+            assert isinstance(meta, str)
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
+            assert isinstance(meta, str)
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:

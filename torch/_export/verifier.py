@@ -12,6 +12,7 @@ from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
     SymIntArgument,
+    SymFloatArgument,
     SymBoolArgument,
     TensorArgument,
     TokenArgument,
@@ -310,7 +311,7 @@ def _verify_exported_program_signature(exported_program) -> None:
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
-        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument)):
             if input_spec.arg.name != node:
                 raise SpecViolationError(
                     f"Input spec name {input_spec.arg.name} does not match node name {node}"

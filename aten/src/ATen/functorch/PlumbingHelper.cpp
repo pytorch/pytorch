@@ -22,20 +22,20 @@ void vmap_check_escaped(const std::optional<DynamicLayer> &layer, const char* wh
   )
 }
 
-Tensor makeBatched(const Tensor& tensor, std::optional<int64_t> bdim, int64_t level) {
+Tensor makeBatched(Tensor tensor, std::optional<int64_t> bdim, int64_t level) {
   if (bdim.has_value()) {
     TORCH_INTERNAL_ASSERT(*bdim >= 0);
     TORCH_INTERNAL_ASSERT(*bdim < tensor.dim());
-    return makeBatched(tensor, bdim.value(), level);
+    return makeBatched(std::move(tensor), bdim.value(), level);
   }
   return tensor;
 }
 
-std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, std::optional<int64_t> bdim, int64_t level) {
+std::vector<Tensor> makeBatchedVector(std::vector<Tensor> tensors, std::optional<int64_t> bdim, int64_t level) {
   std::vector<Tensor> res;
   res.reserve(tensors.size());
-  for (const auto & tensor : tensors) {
-    res.emplace_back(makeBatched(tensor, bdim, level));
+  for (auto & tensor : tensors) {
+    res.emplace_back(makeBatched(std::move(tensor), bdim, level));
   }
   return res;
 }

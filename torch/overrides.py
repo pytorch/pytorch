@@ -230,6 +230,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sparse_bsc_tensor,
         torch.sym_constrain_range,
         torch.sym_constrain_range_for_size,
+        torch.sym_fresh_size,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,

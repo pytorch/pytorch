@@ -1653,7 +1653,7 @@ class TripletMarginLoss(_Loss):
     >>> output.backward()
 
     .. _Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "p", "eps", "swap", "reduction"]
     margin: float
@@ -1790,7 +1790,7 @@ class TripletMarginWithDistanceLoss(_Loss):
 
     Reference:
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
-        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+        https://bmva-archive.org.uk/bmvc/2016/papers/paper119/index.html
     """
     __constants__ = ["margin", "swap", "reduction"]
     margin: float

@@ -275,10 +275,10 @@ class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleF
 def _create_stateful_graph_module(
     plain_graph_module: torch.fx.GraphModule,
     range_constraints,
-    # TODO(suo) this should not be optional, but is since we still ahve
+    # TODO(suo) this should not be optional, but is since we still have
     # capture_pre_autograd_graph grr
     ep: Optional[ExportedProgram] = None,
-):
+) -> _StatefulGraphModule:
     stateful_gm = _StatefulGraphModule._create(
         plain_graph_module,
         plain_graph_module.graph,

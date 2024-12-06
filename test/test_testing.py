@@ -1822,9 +1822,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_device_dtype_specific(self, device, dtype):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_device_dtype_specific_{}_float32',
             '{}.test_device_dtype_specific_{}_float64',
@@ -1846,9 +1847,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_bar(self, device):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_bar_{}',
             '{}.test_foo_{}')
@@ -1874,7 +1876,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'An empty arg_values was passed'):
-            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
     def test_default_names(self, device):
         device = self.device_type
@@ -1889,9 +1892,10 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_default_names_x_0_{}',
             '{}.test_default_names_x_1_{}',
@@ -1917,9 +1921,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_two_things_default_names(self, device, x, y):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = sorted(name.format(device_cls.__name__, device) for name in (
             '{}.test_default_names_x_1_{}',
             '{}.test_default_names_x_0_5_{}',
@@ -1950,9 +1955,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_two_things_custom_names_alternate(self, device, x, y):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -1986,9 +1992,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_two_things_custom_names(self, device, x, y):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -2008,9 +2015,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_op_parametrized(self, device, dtype, op, flag):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
@@ -2030,9 +2038,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_module_parametrized(self, device, dtype, module_info, training, flag):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = []
         for module_info in module_db:
             for dtype in module_info.dtypes:
@@ -2090,8 +2099,9 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         device = self.device_type
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
@@ -2143,8 +2153,9 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         device = self.device_type
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
@@ -2166,8 +2177,9 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         device = self.device_type
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = ('test_param_x_1_y_True' in name)
@@ -2185,9 +2197,10 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_parametrized(self, x, dtype):
                 pass
 
-        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
-        device_cls = locals()[f'TestParametrized{device.upper()}']
+        device_cls = locals_dict[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_parametrized_x_0_{}_float32',
             '{}.test_parametrized_x_0_{}_float64',
@@ -2212,7 +2225,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
-            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
         # Verify proper error behavior with @ops + @dtypes, as both try to set dtype.
 
@@ -2223,7 +2237,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
-            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
     def test_multiple_handling_of_same_param_error(self, device):
         # Test that multiple decorators handling the same param errors out.
@@ -2236,7 +2251,8 @@ class TestTestParametrizationDeviceType(TestCase):
                 pass
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
-            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+            locals_dict = dict(locals())
+            instantiate_device_type_tests(TestParametrized, locals_dict, only_for=device)
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, device, x):

@@ -2265,6 +2265,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
             "-DXNN_ENABLE_ARM_I8MM=1",
             "-DXNN_ENABLE_ARM_FP16_VECTOR=1",
             "-DXNN_ENABLE_AVXVNNI=0",
+            "-DXNN_ENABLE_ARM_SME=0",
+            "-DXNN_ENABLE_ARM_SME2=0",
         ],
         srcs = XNNPACK_SRCS + LOGGING_SRCS + OPERATOR_SRCS + [
             "XNNPACK/src/init.c",

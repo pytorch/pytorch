@@ -388,7 +388,7 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
                 # allow the SampleInput to tell us how to canonicalize the dim kwargs
                 ndim = nt_inp._ndim if hasattr(nt_inp, "_ndim") else nt_inp.dim()
                 kwargs[argname] = _outer_to_inner_dim(
-                    ndim, kwargs[argname], canonicalize=True
+                    ndim, kwargs[argname], nt_inp._ragged_idx, canonicalize=True
                 )
 
         out_ref_component = op.op(inp, *args, **kwargs)
@@ -463,15 +463,15 @@ def reduction_reference(op, sample):
         ref_kwargs = dict(sample.kwargs)
         assert dimlist_argname is not None
         ref_kwargs[dimlist_argname] = _outer_to_inner_dim(
-            sample.input.dim(), dim, canonicalize=True
+            sample.input.dim(), dim, sample.input._ragged_idx, canonicalize=True
         )
         out = op.op(sample.input.values(), *sample.args, **ref_kwargs)
         if keepdim:
             if isinstance(out, (tuple, list)):
                 # some ops return multiple things; unsqueeze all of them
-                out = type(out)(o.unsqueeze(sample.input._ragged_idx) for o in out)
+                out = type(out)(o.unsqueeze(0) for o in out)
             else:
-                out = out.unsqueeze(sample.input._ragged_idx)
+                out = out.unsqueeze(0)
         return out
 
     if reduce_on_ragged and not reduce_on_batch:

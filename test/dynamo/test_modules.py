@@ -1252,7 +1252,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m = ModuleForwardHasGraphBreak()
         x = torch.rand([10, 10])
         ref = m(x)
-        opt_m = torch._dynamo.optimize("eager")(m)
+        opt_m = torch.compile(m, backend="eager")
         res = opt_m(x)
         self.assertTrue(torch.allclose(ref, res))
 
@@ -1260,7 +1260,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m = UnsupportedMethodCall()
         i = torch.randn(10)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt)(m)
+        opt_m = torch.compile(m, backend=cnt)
         r = opt_m(i)
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 5)
@@ -1269,7 +1269,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m = UnsupportedModuleCall()
         i = torch.randn(10)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt)(m)
+        opt_m = torch.compile(m, backend=cnt)
         r = opt_m(i)
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
@@ -1350,7 +1350,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
-            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
             out2 = opt_foo(x)
 
             self.assertEqual(cnt.op_count, 4)
@@ -1380,7 +1380,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 x = torch.randn(1)
                 cnt = torch._dynamo.testing.CompileCounter()
                 out1 = foo(x)
-                opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+                opt_foo = torch.compile(foo, backend=cnt, fullgraph=True)
                 out2 = opt_foo(x)
 
                 self.assertEqual(cnt.op_count, 4)
@@ -1411,7 +1411,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 x1 = one_break(x)
 
                 cnt = torch._dynamo.testing.CompileCounter()
-                opt_one_break = torch._dynamo.optimize(cnt)(one_break)
+                opt_one_break = torch.compile(one_break, backend=cnt)
                 x2 = opt_one_break(x)
 
                 self.assertTrue(torch._dynamo.testing.same(x1, x2))
@@ -1504,8 +1504,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             module(input)
 
         # test no graph break
-        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
-            test_static_module
+        opt_test_static_module = torch.compile(
+            test_static_module, backend=cnt, fullgraph=True
         )
         opt_test_static_module()
 
@@ -1524,7 +1524,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_unspecialized = torch._dynamo.optimize(cnt)(test_unspecialized)
+        opt_test_unspecialized = torch.compile(test_unspecialized, backend=cnt)
         opt_test_unspecialized()
 
         self.assertTrue(
@@ -1547,8 +1547,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             return module(input)  # fully materialized
 
         # test no graph break
-        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
-            test_torch_static
+        opt_test_torch_static = torch.compile(
+            test_torch_static, backend=cnt, fullgraph=True
         )
         opt_test_torch_static()
         out = opt_test_torch_static()
@@ -1567,7 +1567,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
         x = torch.rand([10, 10])
-        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
         # We should run compile mode firstly, otherwise the module
         # would be initialized when running eager mode.
         res = opt_m(x)
@@ -1580,7 +1580,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m = LazyMLP()
         x = torch.rand([10, 10])
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch.compile(m, backend=cnt, fullgraph=True)
         # first iteration
         res = opt_m(x)
         ref = m(x)
@@ -1598,7 +1598,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
         x = [torch.rand([5, 5])] * 3 + [None]
-        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
@@ -1609,7 +1609,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
         x = [torch.rand([5, 5])] * 3
-        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
@@ -1632,7 +1632,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
         x = torch.rand(2, 2)
-        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        opt_m = torch.compile(m, backend="eager", fullgraph=True)
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
@@ -1773,7 +1773,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_nn_module(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        opt_mod = torch.compile(mod, backend=cnt)
         self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
 
         x = torch.randn(10, 10)
@@ -1827,7 +1827,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_to(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        opt_mod = torch.compile(mod, backend=cnt)
         x = torch.randn(10, 10)
         self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
         self.assertEqual(cnt.frame_count, 1)
@@ -1876,7 +1876,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         ref = fn(torch.ones(1))
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(torch.ones(1))
 
         self.assertEqual(ref, res)
@@ -1914,7 +1914,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         ref = fn(torch.ones(1))
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(torch.ones(1))
 
         self.assertEqual(ref, res)
@@ -1958,7 +1958,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         ref = fn(torch.ones(1))
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(torch.ones(1))
 
         self.assertEqual(ref, res)
@@ -1982,7 +1982,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.r(torch.sin(x)) + self.buf0
 
         mod = MockModule()
-        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod = torch.compile(mod, backend="eager")
 
         # Check parameters and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
@@ -1994,7 +1994,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             parameters_and_buffers = itertools.chain(mod.parameters(), mod.buffers())
             return next(parameters_and_buffers).dtype
 
-        opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
+        opt_mod = torch.compile(get_parameter_dtype, backend="eager")
         out_dtype = opt_mod(mod)
         self.assertEqual(out_dtype, torch.float32)
 
@@ -2013,7 +2013,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = MockModule()
         mod_keys = dir(mod)
-        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod = torch.compile(mod, backend="eager")
         opt_mod_keys = dir(opt_mod)
 
         # Check user-defined attributes, parameters and buffers
@@ -2177,10 +2177,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_recursion(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        opt_mod = torch.compile(mod, backend=cnt)
 
         for _ in range(5):
-            opt_mod = torch._dynamo.optimize(cnt)(opt_mod)
+            opt_mod = torch.compile(opt_mod, backend=cnt)
         opt_mod(torch.randn(10, 10))
         self.assertEqual(cnt.frame_count, 1)
 
@@ -2205,7 +2205,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         outer_mod = OuterModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+        opt_outer_mod = torch.compile(outer_mod, backend=cnt)
 
         x = torch.randn(4)
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
@@ -2223,7 +2223,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         inner_mod = InnerModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_inner_mod = torch._dynamo.optimize(cnt)(inner_mod)
+        opt_inner_mod = torch.compile(inner_mod, backend=cnt)
 
         class OuterModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2234,7 +2234,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.mod(torch.cos(x))
 
         outer_mod = OuterModule()
-        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+        opt_outer_mod = torch.compile(outer_mod, backend=cnt)
 
         x = torch.randn(4)
         self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
@@ -2251,7 +2251,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(
             torch.allclose(
-                torch._dynamo.optimize("eager", nopython=True)(fn)(torch.ones(10)),
+                torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(10)),
                 torch.zeros(1),
             )
         )
@@ -2500,7 +2500,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             module.register_forward_hook(save_activations)
 
         cnt = torch._dynamo.testing.CompileCounter()
-        model = torch._dynamo.optimize(cnt, nopython=True)(model)
+        model = torch.compile(model, backend=cnt, fullgraph=True)
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
@@ -2540,7 +2540,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_eager = pred_eager.sum()
         eager_loss_bwd = loss_eager.backward()
 
-        model = torch._dynamo.optimize(cnt, nopython=True)(model)
+        model = torch.compile(model, backend=cnt, fullgraph=True)
         pred = model(x)
 
         loss = pred.sum()
@@ -2680,7 +2680,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         eager_res = MyModule()(torch.ones(10, 10))
 
         # Compile
-        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        optim_res = torch.compile(MyModule(), backend=cnt)(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
@@ -2702,7 +2702,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         eager_res = MyModule()(torch.ones(10, 10))
 
         # Compile
-        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        optim_res = torch.compile(MyModule(), backend=cnt)(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
@@ -2747,7 +2747,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         eager_res = MyModule()(torch.ones(10, 10))
 
         # Compile
-        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        optim_res = torch.compile(MyModule(), backend=cnt)(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
@@ -2758,7 +2758,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             models[0].training = False
             return models(x)
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         x = torch.randn(1, 3)
         ref = fn(x)
         res = opt_fn(x)
@@ -2810,7 +2810,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_unspec_non_inlinable_module(self):
         mod = UnspecNonInlinableModule()
-        opt_fn = torch._dynamo.optimize("eager")(mod)
+        opt_fn = torch.compile(mod, backend="eager")
         x = torch.randn(100)
         actual = opt_fn(x)
         expected = mod(x)
@@ -2851,7 +2851,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 return self.buf * x
 
-        @torch._dynamo.optimize(backend=debug_compiler)
+        @torch.compile(backend=debug_compiler)
         def fn(x, b, mod):
             z = b + 1
             return z * mod(x)
@@ -2897,7 +2897,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = TestModule()
 
-        @torch._dynamo.optimize(backend=debug_compiler)
+        @torch.compile(backend=debug_compiler)
         def fn(x):
             return x * mod(x)
 
@@ -2933,7 +2933,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 return self.buf * x
 
-        @torch._dynamo.optimize(backend=debug_compiler)
+        @torch.compile(backend=debug_compiler)
         def fn(x, mod):
             return mod(x)
 
@@ -3092,7 +3092,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return mod(x)
 
             cnt = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnt)(fn)
+            opt_fn = torch.compile(fn, backend=cnt)
             x = torch.randn(10)
 
             opt_fn(x)
@@ -3168,6 +3168,54 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @patch.object(
+        torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
+    )
+    def test_param_requires_grad(self):
+        def adjust_model(model):
+            to_freeze = model.num_iter % 2 == 0
+            if to_freeze:
+                for param in model.layer2.parameters():
+                    param.requires_grad = False
+            else:
+                for param in model.layer2.parameters():
+                    param.requires_grad = True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, output_size):
+                super().__init__()
+
+                self.layer1 = torch.nn.Linear(hidden_size, hidden_size)
+                self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
+
+                self.num_iter = 0
+
+            def forward(self, x):
+                x = self.layer2(x + self.layer1.bias)
+
+                self.num_iter += 1
+                return x
+
+        input_size = 1024
+        hidden_size = 1024
+        output_size = 1
+        num_samples = 2048
+        features = torch.randn(num_samples, input_size)
+
+        model = MyModule(input_size, hidden_size, output_size)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        for _ in range(3):
+            model.zero_grad(True)
+            adjust_model(model)
+            res = opt_model(features)
+            res.sum().backward()
+
+        # Check that we have recompiled twice, which leads to 3 frames
+        self.assertEqual(cnt.frame_count, 3)
 
 
 devices = ["cuda", "hpu"]

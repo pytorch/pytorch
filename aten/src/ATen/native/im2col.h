@@ -71,7 +71,7 @@ static void im2col(
             int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
             data_col[(c_col * height_col + h_col) * width_col + w_col] =
                 (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width)
-                ? data_im[(c_im * height + h_im) * width + w_im]
+                ? c10::load(&(data_im[(c_im * height + h_im) * width + w_im]))
                 : static_cast<T>(0);
           }
         }

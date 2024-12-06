@@ -258,11 +258,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
           TensorOptions().device(at::kCUDA).dtype(at::kInt));
       Nnz_q = output_batch_size * max_seqlen_batch_q;
     } else {
-      auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len_nnz(q_t);
-      cumulative_sequence_length_q =
-          std::get<0>(cumulative_and_max_q_and_nnz_q);
-      max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
-      Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
+      std::tie(cumulative_sequence_length_q, max_seqlen_batch_q, Nnz_q) = cumulative_and_max_seq_len_nnz(q_t);
     }
 
     int64_t max_seqlen_batch_kv = 0, Nnz_kv = 0;
@@ -277,13 +273,10 @@ int64_t get_nnz(const Tensor& nestedtensor) {
           TensorOptions().device(at::kCUDA).dtype(at::kInt));
       Nnz_kv = output_batch_size * max_seqlen_batch_kv;
     } else {
-      auto cumulative_and_max_kv_and_nnz_kv = k_batch_size_needs_broadcast
+      std::tie(cumulative_sequence_length_kv, max_seqlen_batch_kv, Nnz_kv) =
+      k_batch_size_needs_broadcast
           ? cumulative_and_max_seq_len_nnz(v_t)
           : cumulative_and_max_seq_len_nnz(k_t);
-      cumulative_sequence_length_kv =
-          std::get<0>(cumulative_and_max_kv_and_nnz_kv);
-      max_seqlen_batch_kv = std::get<1>(cumulative_and_max_kv_and_nnz_kv);
-      Nnz_kv = std::get<2>(cumulative_and_max_kv_and_nnz_kv);
     }
 
     bool q_num_heads_needs_broadcast = q_num_heads != output_num_heads;
@@ -369,14 +362,14 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     }
 
     return std::make_tuple(
-        query_buffer_reshaped,
-        key_buffer_reshaped,
-        value_buffer_reshaped,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_kv,
+        std::move(query_buffer_reshaped),
+        std::move(key_buffer_reshaped),
+        std::move(value_buffer_reshaped),
+        std::move(cumulative_sequence_length_q),
+        std::move(cumulative_sequence_length_kv),
         max_seqlen_batch_q,
         max_seqlen_batch_kv,
-        output_shape);
+        std::move(output_shape));
   }
 
 } // namespace

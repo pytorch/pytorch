@@ -38,6 +38,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
+    secrets: inherit
 
   linux-jammy-xpu-2025_0-py3_9-build:
     name: linux-jammy-xpu-2025.0-py3.9
@@ -55,6 +56,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
+    secrets: inherit
 
   linux-jammy-xpu-2025_0-py3_9-test:
     name: linux-jammy-xpu-2025.0-py3.9
@@ -67,6 +69,7 @@ jobs:
       build-environment: linux-jammy-xpu-2025.0-py3.9
       docker-image: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.test-matrix }}
+    secrets: inherit
 
   windows-xpu-build:
     if: github.repository_owner == 'pytorch'
@@ -77,6 +80,7 @@ jobs:
       cuda-version: cpu
       use-xpu: true
       vc-year: '2022'
+    secrets: inherit
 
   windows-xpu-2025_0-build:
     if: github.repository_owner == 'pytorch'
@@ -88,3 +92,4 @@ jobs:
       use-xpu: true
       xpu-version: '2025.0'
       vc-year: '2022'
+    secrets: inherit

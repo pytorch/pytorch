@@ -33,6 +33,10 @@ class TORCH_API AOTIModelContainerRunner {
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
+      std::unordered_map<std::string, at::Tensor>& tensor_map,
+      bool use_inactive,
+      bool validate_full_updates);
+  void update_constant_buffer(
       const TensorConstantMap& const_map,
       bool use_inactive,
       bool validate_full_updates);

@@ -72,6 +72,7 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-inductor-test:
     permissions:
@@ -84,3 +85,4 @@ jobs:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.test-matrix }}
+    secrets: inherit

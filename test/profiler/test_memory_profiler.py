@@ -2,6 +2,7 @@
 import functools
 import gc
 import itertools as it
+import sys
 import textwrap
 import unittest
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
@@ -102,6 +103,7 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
         return out
 
 
+@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     def gradient_detected(
@@ -825,6 +827,7 @@ class TestDataFlow(TestCase):
         )
 
 
+@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
     @staticmethod

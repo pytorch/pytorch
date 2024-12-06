@@ -23,6 +23,7 @@ from torch.export.exported_program import (
     InputKind,
     ModuleCallSignature,
     SymBoolArgument,
+    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
 )
@@ -996,7 +997,13 @@ class _ModuleFrame:
                         input_nodes.append(None)
                     else:
                         assert isinstance(
-                            input, (TensorArgument, SymIntArgument, SymBoolArgument)
+                            input,
+                            (
+                                TensorArgument,
+                                SymIntArgument,
+                                SymBoolArgument,
+                                SymFloatArgument,
+                            ),
                         )
                         input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
@@ -1104,7 +1111,8 @@ class _ModuleFrame:
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
                 if isinstance(
-                    output, (TensorArgument, SymIntArgument, SymBoolArgument)
+                    output,
+                    (TensorArgument, SymIntArgument, SymBoolArgument, SymFloatArgument),
                 ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])

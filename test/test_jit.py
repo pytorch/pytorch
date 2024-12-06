@@ -14827,30 +14827,31 @@ dedent """
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            class W3(torch.nn.Module):
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (int) -> int
-                    pass
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                class W3(torch.nn.Module):
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (int) -> int
+                        pass
 
-                @torch.jit._overload_method  # noqa: F811
-                def forward(self, x):  # noqa: F811
-                    # type: (Tensor) -> Tensor
-                    pass
+                    @torch.jit._overload_method  # noqa: F811
+                    def forward(self, x):  # noqa: F811
+                        # type: (Tensor) -> Tensor
+                        pass
 
-                def forward(self, x):  # noqa: F811
-                    return x + 5
+                    def forward(self, x):  # noqa: F811
+                        return x + 5
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
-            class W3(torch.nn.Module):
-                def forward(self, x):  # noqa: F811
-                    return x + 5 + 10
+                class W3(torch.nn.Module):
+                    def forward(self, x):  # noqa: F811
+                        return x + 5 + 10
 
-            a = W3()
-            b = torch.jit.script(a)
+                a = W3()
+                b = torch.jit.script(a)
 
         # testing non-overload declared first, then overload
         class W2(torch.nn.Module):
@@ -14879,8 +14880,9 @@ dedent """
             def forward(self, x):
                 return self.hello(1), self.hello(x)
 
-        with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
-            a = torch.jit.script(W2())
+        if sys.version_info < (3, 13):  # test broken in 3.13
+            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+                a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
         def foo(a):

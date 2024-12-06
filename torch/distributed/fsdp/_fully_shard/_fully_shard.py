@@ -34,6 +34,14 @@ from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
+__all__ = [
+    "fully_shard",
+    "FSDPModule",
+    "UnshardHandle",
+    "register_fsdp_forward_method",
+]
+
+
 cls_to_fsdp_cls: Dict[Type, Type] = {}
 
 
@@ -50,68 +58,80 @@ def fully_shard(
     offload_policy: OffloadPolicy = OffloadPolicy(),
 ):
     """
-    Shard module parameters across data parallel workers.
+    Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
+    shards module parameters, gradients, and optimizer states across data
+    parallel workers to save memory at the cost of communication.
 
-    This function applies fully sharded data parallelism (FSDP) or a variant to
-    ``module``, a technique for memory savings at the cost of communication.
-    Parameters are sharded across ``mesh``, and in turn, so are their gradients
-    and optimizer states.
+    At initialization, FSDP shards the module's parameters across the data
+    parallel workers given by ``mesh``. Before forward, FSDP all-gathers the
+    sharded parameters across the data-parallel workers to get the unsharded
+    parameters for forward computation. If ``reshard_after_forward`` is
+    ``True``, then FSDP frees the unsharded parameters after forward and
+    re-all-gathers them in backward before gradient computation. After gradient
+    computation, FSDP frees the unsharded parameters and reduce-scatters the
+    unsharded gradients across data-parallel workers.
 
-    The sharded parameters are all-gathered to construct the unsharded
-    parameters for forward or backward computation. The unsharded parameters
-    are freed after computation to save memory. The gradients are reduced
-    across the mesh and divided by the mesh size for data parallelism. The
-    optimizer step runs on the sharded parameters.
+    This implementation represents the sharded parameters as :class:`DTensor` s
+    sharded on dim-0, while the unsharded parameters will be like the original
+    parameters on ``module`` (e.g. :class:`torch.Tensor` if originally
+    :class:`torch.Tensor`). A module
+    `forward pre-hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook>`_
+    on ``module`` all-gathers the parameters, and a module
+    `forward hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook>`_
+    on ``module`` frees them (if needed). Similar backward hooks all-gather
+    parameters and later free parameters and reduce-scatter gradients.
 
-    Each call to ``fully_shard`` constructs one communication group that
+    Since grouping multiple tensors together for one collective is critical for
+    communication efficiency, this implementation makes this grouping first
+    class. Calling :meth:`fully_shard` on ``module`` constructs one group that
     includes the parameters in ``module.parameters()`` except those already
-    assigned to a group from a nested call. Each group's parameters and its
-    gradients are communicated together in one collective, respectively.
-    Constructing multiple groups across the model (e.g. "layer by layer")
-    allows for peak memory savings and communication/computation overlap.
-
-    Implementation-wise, the sharded parameters are represented as
-    :class:`DTensor` s, sharded on dim-0, and the unsharded parameters are
-    represented as :class:`Tensor` s. A module forward pre-hook all-gathers the
-    parameters, and a module forward hook frees them. Similar backward hooks
-    gather parameters and later free parameters/reduce gradients.
+    assigned to a group from an earlier call on a submodule. This means that
+    :meth:`fully_shard` should be called bottom-up on your model. Each group's
+    parameters are all-gathered in one collective, and its gradients are
+    reduce-scattered in one collective. Partitioning the model into multiple
+    groups ("layer by layer") allows for peak memory savings and communication/computation
+    overlap. Users generally should *not* call :meth:`fully_shard` only on the
+    topmost root module.
 
     Args:
         module (Union[nn.Module, List[nn.Module]): The module or modules to
             shard with FSDP and group together for communication.
         mesh (Optional[DeviceMesh]): This data parallel mesh defines the
             sharding and device. If 1D, then parameters are fully sharded
-            across the 1D mesh (FSDP). If 2D, then parameters are sharded
-            across the 0th dim and replicated across the 1st dim (HSDP). The
-            mesh's device type gives the device type used for communication;
-            if a CUDA or CUDA-like device type, then we use the current device.
+            across the 1D mesh (FSDP) with ``(Shard(0),)`` placement. If 2D,
+            then parameters are sharded across the 1st dim and replicated
+            across the 0th dim (HSDP) with ``(Replicate(), Shard(0))``
+            placement. The mesh's device type gives the device type used for
+            communication; if a CUDA or CUDA-like device type, then we use the
+            current device.
         reshard_after_forward (Union[bool, int]): This controls the parameter
             behavior after forward and can trade off memory and communication:
+
             - If ``True``, then this reshards parameters after forward and
-            all-gathers in backward.
+              re-all-gathers in backward.
             - If ``False``, then this keeps the unsharded parameters in memory
-            after forward and avoids the all-gather in backward.
+              after forward and avoids the all-gather in backward.
             - If an ``int``, then this represents the world size to reshard to
-            after forward. It should be a non-trivial divisor of the ``mesh``
-            shard dim size (i.e. excluding 1 and the dim size itself). A choice
-            may be the intra-node size (e.g. ``torch.cuda.device_count()``).
-            This allows the all-gather in backward to be over a smaller world
-            size at the cost of higher memory usage than setting to ``True``.
+              after forward. It should be a non-trivial divisor of the ``mesh``
+              shard dim size (i.e. excluding 1 and the dim size itself). A
+              choice may be the intra-node size (e.g. ``torch.cuda.device_count()``).
+              This allows the all-gather in backward to be over a smaller world
+              size at the cost of higher memory usage than setting to ``True``.
             - The root FSDP state has its value specially set to ``False`` as a
-            heuristic since its parameters would typically be immediately
-            all-gathered for backward.
+              heuristic since its parameters would typically be immediately
+              all-gathered for backward.
             - After forward, the parameters registered to the module depend on
-            to this: The registered parameters are the sharded parameters if
-            ``True``; unsharded parameters if ``False``; and the paramters
-            resharded to the smaller mesh otherwise. To modify the parameters
-            between forward and backward, the registered parameters must be the
-            sharded parameters. For ``False`` or an ``int``, this can be done
-            by manually resharding via :meth:`reshard`.
+              to this: The registered parameters are the sharded parameters if
+              ``True``; unsharded parameters if ``False``; and the paramters
+              resharded to the smaller mesh otherwise. To modify the parameters
+              between forward and backward, the registered parameters must be
+              the sharded parameters. For ``False`` or an ``int``, this can be
+              done by manually resharding via :meth:`reshard`.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard]]]):
             This callable can be used to override the sharding placement for a
             parameter to shard a parameter on a dimension other than dim-0. If
-            this callable returns a ``Shard`` placement (not ``None``), then
-            FSDP will shard according to that placement (e.g. ``Shard(1)``).
+            this callable returns a :class:`Shard` placement (not ``None``),
+            then FSDP will shard according to that placement (e.g. ``Shard(1)``).
             If sharding on a nonzero dim, we currently require even sharding,
             i.e. the tensor dim size on that dim must be divisible by the FSDP
             shard mesh size.
@@ -174,14 +194,14 @@ def fully_shard(
         cls = module.__class__
         new_cls = cls_to_fsdp_cls.get(cls, None)
         if not new_cls:
-            dct = {"__deepcopy__": unimplemented_deepcopy}
+            dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
             cls_to_fsdp_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
@@ -202,9 +222,9 @@ class FSDPModule:
 
     def reshard(self) -> None:
         """
-        Reshards the module's parameters, registering the sharded parameters
-        to the module and freeing the unsharded parameters if needed. This
-        method is *not* recursive.
+        Reshards the module's parameters, freeing the unsharded parameters if
+        they are allocated and registering the sharded parameters to the
+        module. This method is *not* recursive.
         """
         state = self._get_fsdp_state()
         if fsdp_param_group := state._fsdp_param_group:
@@ -213,7 +233,9 @@ class FSDPModule:
     def unshard(self, async_op: bool = False) -> Optional["UnshardHandle"]:
         """
         Unshards the module's parameters by allocating memory and all-gathering
-        the parameters. This method is *not* recursive.
+        the parameters. This method is *not* recursive. The unshard follows the
+        :class:`MixedPrecisionPolicy`, so it will all-gather following
+        ``param_dtype`` if set.
 
         Args:
             async_op (bool): If ``True``, then returns a :class:`UnshardHandle`
@@ -221,19 +243,17 @@ class FSDPModule:
                 ``False``, then returns ``None`` and waits on the handle inside
                 this function.
 
-        .. warning:: This method is experimental and subject to change.
-
-        .. note:: If ``async_op=True``, then the user does not have to call
-            :meth:`wait` on the returned handle if waiting on the unshard op
-            in the module's pre-forward is tolerable. FSDP will wait on the
-            pending unshard op in the pre-forward automatically.
+        .. note:: If ``async_op=True``, then FSDP will wait on the pending
+            unshard in the module's pre-forward for the user. The user only
+            needs to call :meth:`wait` explicitly if the wait should happen
+            before pre-forward.
         """
         state = self._get_fsdp_state()
         fsdp_param_group = state._fsdp_param_group
         if fsdp_param_group is not None:
             fsdp_param_group.lazy_init()
             fsdp_param_group.unshard(async_op=async_op)
-        handle = UnshardHandle(fsdp_param_group)
+        handle = _UnshardHandleImpl(fsdp_param_group)
         if async_op:
             return handle
         handle.wait()
@@ -241,9 +261,10 @@ class FSDPModule:
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
         """
-        Sets whether the next backward is the last one, meaning that FSDP
-        should wait for gradient reduction to finish and clear internal data
-        structures used for explicit prefetching.
+        Sets whether the next backward is the last one. On the last backward,
+        FSDP waits on pending gradient reduction and clears internal data
+        data structures for backward prefetching. This can be useful for
+        microbatching.
         """
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
@@ -253,13 +274,13 @@ class FSDPModule:
     ) -> None:
         """
         Sets if the module should sync gradients. This can be used to implement
-        gradient accumulation without communication. For HSDP, this controls
+        gradient accumulation *without communication*. For HSDP, this controls
         both reduce-scatter and all-reduce together.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
-            recurse (bool): Whether to set for all submodules or just the
+            recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
         self_module = cast(nn.Module, self)
@@ -293,12 +314,13 @@ class FSDPModule:
         """
         Sets if the module should reshard parameters after backward. This can
         be used during gradient accumulation to trade off higher memory for
-        reduced communication.
+        reduced communication since the unsharded parameters do not need to be
+        re-all-gathered before the next forward.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
                 backward.
-            recurse (bool): Whether to set for all submodules or just the
+            recurse (bool): Whether to set for all FSDP submodules or just the
                 passed-in module.
         """
         self_module = cast(nn.Module, self)
@@ -435,24 +457,22 @@ class FSDPModule:
 
 class UnshardHandle:
     """
-    A handle to wait on the unshard op.
-
-    Args:
-        fsdp_param_group (FSDPParamGroup, optional): FSDP parameter group to
-            unshard. This should be ``None`` iff the FSDP module does not
-            manage any parameters, meaning the unshard is a no-op.
+    A handle to wait on a :meth:`FSDPModule.unshard` op.
     """
 
+    def wait(self) -> None:
+        """
+        Waits on the unshard op. This ensures that the current stream can use
+        the unsharded parameters, which are now registered to the module.
+        """
+        return
+
+
+class _UnshardHandleImpl(UnshardHandle):
     def __init__(self, fsdp_param_group: Optional[FSDPParamGroup]):
         self._fsdp_param_group = fsdp_param_group
 
     def wait(self):
-        """
-        Waits on the unshard op.
-
-        This ensures that the current stream can use the unsharded parameters,
-        which are now registered to the module.
-        """
         if self._fsdp_param_group is not None:
             self._fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
@@ -461,13 +481,15 @@ class UnshardHandle:
 
 def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
     """
-    Registers a method on ``module`` to be a forward method for FSDP.
+    Registers a method on ``module`` to be considered a forward method for
+    FSDP.
 
-    FSDP only knows to run its pre-forward and post-forward hooks on the
-    default :meth:`nn.Module.forward` method. This function patches a user
-    specified method to run the pre/post-forward hooks before/after the method,
-    respectively. If ``module`` is not an :class:`FSDPModule`, then this is a
-    no-op.
+    FSDP all-gathers parameters pre-forward and optionally frees parameters
+    post-forward (depending on ``reshard_after_forward``). FSDP only knows to
+    do this for :meth:`nn.Module.forward` by default. This function patches a
+    user-specified method to run the pre/post-forward hooks before/after the
+    method, respectively. If ``module`` is not an :class:`FSDPModule`, then
+    this is a no-op.
 
     Args:
         module (nn.Module): Module to register the forward method on.

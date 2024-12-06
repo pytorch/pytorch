@@ -25,6 +25,7 @@ from torch.distributed.pipelining.schedules import (
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
+    _validate_schedule,
     B,
     F,
     get_schedule_class,
@@ -861,6 +862,39 @@ class TestScheduleLowering(TestCase):
                     raise
 
         torch.distributed.destroy_process_group()
+
+
+class TestValidateSchedule(TestCase):
+    def test_valid_schedule(self):
+        actions = {
+            0: [_Action(0, F, 0), _Action(0, B, 0)],
+            1: [_Action(1, F, 0), _Action(1, B, 0)],
+        }
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+
+    def test_invalid_schedule_missing_rank(self):
+        actions = {
+            0: [_Action(0, F, 0), _Action(0, B, 0)],
+        }
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        with self.assertRaises(AssertionError):
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+
+    def test_invalid_schedule_missing_action(self):
+        actions = {
+            0: [_Action(0, F, 0)],
+            1: [_Action(1, F, 0)],
+        }
+        pp_group_size = 2
+        num_stages = 2
+        num_microbatches = 1
+        with self.assertRaises(AssertionError):
+            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)

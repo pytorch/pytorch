@@ -244,6 +244,7 @@ jobs:
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
+            -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e USE_SPLIT_BUILD \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \

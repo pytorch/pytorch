@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -200,7 +200,7 @@ class TestIndexing(TestCase):
         b[(Ellipsis,)] = 2
         assert_equal(b, 2)
 
-    @xpassIfTorchDynamo  # 'torch_.np.array() does not have base attribute.
+    @xpassIfTorchDynamo_np  # 'torch_.np.array() does not have base attribute.
     def test_ellipsis_index_2(self):
         a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         assert_(a[...] is not a)
@@ -421,7 +421,7 @@ class TestIndexing(TestCase):
         # Unlike the non nd-index:
         assert_(arr[index,].shape != (1,))
 
-    @xpassIfTorchDynamo  # (reason="XXX: low-prio behaviour to support")
+    @xpassIfTorchDynamo_np  # (reason="XXX: low-prio behaviour to support")
     def test_broken_sequence_not_nd_index(self):
         # See https://github.com/numpy/numpy/issues/5063
         # If we have an object which claims to be a sequence, but fails
@@ -588,7 +588,7 @@ class TestBroadcastedAssignments(TestCase):
 
 
 class TestFancyIndexingCast(TestCase):
-    @xpassIfTorchDynamo  # (
+    @xpassIfTorchDynamo_np  # (
     #    reason="XXX: low-prio to support assigning complex values on floating arrays"
     # )
     def test_boolean_index_cast_assign(self):

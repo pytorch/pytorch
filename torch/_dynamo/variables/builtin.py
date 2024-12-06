@@ -1375,7 +1375,9 @@ class BuiltinVariable(VariableTracker):
                     arg, user_cls, mutation_type=ValueMutationNew()
                 )
             elif isinstance(arg, variables.ConstDictVariable):
-                return arg.clone(user_cls=user_cls, mutation_type=ValueMutationNew())
+                return arg.clone(
+                    user_cls=user_cls, source=None, mutation_type=ValueMutationNew()
+                )
             elif isinstance(
                 arg,
                 (

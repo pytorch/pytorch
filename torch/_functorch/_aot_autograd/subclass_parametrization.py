@@ -39,7 +39,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return plain_tensors
 
 
-def unwrap_tensor_subclass_parameters(model: torch.nn.Module) -> torch.nn.Module:
+def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Module:
     """
     Model transformation that replaces all the parameters that are subclasses to plain tensors.
     This reduces runtime overhead of flattening/unflattening the parameters.
@@ -51,10 +51,16 @@ def unwrap_tensor_subclass_parameters(model: torch.nn.Module) -> torch.nn.Module
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: List[Tuple[str, torch.nn.Parameter]] = list(model.named_parameters())
+    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
+        module.named_parameters(recurse=False)
+    )
     for name, param in name_param:
         if is_traceable_wrapper_subclass(param):
             torch.nn.utils.parametrize.register_parametrization(
-                model, name, UnwrapTensorSubclass()
+                module, name, UnwrapTensorSubclass()
             )
-    return model
+
+    for name, child in module.named_children():
+        unwrap_tensor_subclass_parameters(child)
+
+    return module

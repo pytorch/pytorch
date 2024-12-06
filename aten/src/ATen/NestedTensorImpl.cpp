@@ -177,7 +177,9 @@ NestedTensorImpl::NestedTensorImpl(
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
-      "in the near future.");
+      "in the near future. We recommend specifying layout=torch.jagged when constructing "
+      "a nested tensor, as this layout receives active development, has better operator "
+      "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
       storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),

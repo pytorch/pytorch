@@ -40,7 +40,7 @@ from .constant import ConstantVariable
 
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
 
@@ -316,7 +316,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
-                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
             if FSDPState is not None and self.fn in [

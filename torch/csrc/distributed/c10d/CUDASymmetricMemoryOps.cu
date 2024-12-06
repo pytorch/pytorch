@@ -154,7 +154,7 @@ at::Tensor multimem_all_reduce_(
       reduce_op == "sum",
       "multimem_all_reduce_: only sum is supported for now.");
 
-  auto symm_mem = c10d::symmetric_memory::rendezvous(input);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
       "multimem_all_reduce_: input must be allocated with empty_strided_p2p().");
@@ -240,7 +240,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
       reduce_op == "sum",
       "multimem_one_shot_all_reduce: only sum is supported for now.");
 
-  auto symm_mem = c10d::symmetric_memory::rendezvous(input);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
       "multimem_one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
@@ -343,7 +343,7 @@ at::Tensor one_shot_all_reduce_out(
       reduce_op == "sum",
       "one_shot_all_reduce: only sum is supported for now.");
 
-  auto symm_mem = c10d::symmetric_memory::rendezvous(input);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
       "one_shot_all_reduce: input must be allocated with empty_strided_p2p().");
@@ -453,7 +453,7 @@ at::Tensor two_shot_all_reduce_(
       reduce_op == "sum",
       "two_shot_all_reduce: only sum is supported for now.");
 
-  auto symm_mem = c10d::symmetric_memory::rendezvous(input);
+  auto symm_mem = c10d::symmetric_memory::rendezvous(input, group_name);
   TORCH_CHECK(
       symm_mem != nullptr,
       "two_shot_all_reduce: input must be allocated with empty_strided_p2p().");

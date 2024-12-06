@@ -528,7 +528,7 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
-        self._replace_hook = None
+        self._replace_hooks: List[Callable] = []
         self._create_node_hooks: List[Callable] = []
         self._erase_node_hooks: List[Callable] = []
 
@@ -885,7 +885,7 @@ class {module_name}(torch.nn.Module):
             "_state_dict_hooks",
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
-            "_replace_hook",
+            "_replace_hooks",
             "_create_node_hooks",
             "_erase_node_hooks",
         ]
@@ -946,11 +946,29 @@ class {module_name}(torch.nn.Module):
         user node which consumes the old node to be replaced.
         """
         assert callable(f), "Replace hook must be a callable."
-        prev, self._replace_hook = self._replace_hook, f
+        self._register_replace_node_hook(f)
         try:
             yield
         finally:
-            self._replace_hook = prev
+            self._unregister_replace_node_hook(f)
+
+    def _register_replace_node_hook(self, f):
+        """
+        Takes a callable which will be called everytime when we replace a node
+        to a new node, or change the node's name. Callable takes three arguments:
+        the old node we're changing, and NAME of the new node, followed by the
+        user node which consumes the old node to be replaced.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._replace_hooks.append(f)
+
+    def _unregister_replace_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called everytime when we replace a node.
+        This function will unregister that callable so it is no longer invoked on node replacement.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._replace_hooks.remove(f)
 
     def _register_create_node_hook(self, f):
         """

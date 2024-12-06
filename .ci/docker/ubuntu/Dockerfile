@@ -36,7 +36,8 @@ ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc

@@ -14,7 +14,7 @@ filelock
 networkx
 jinja2
 fsspec
-lintrunner ; platform_system != "Windows"
+lintrunner
 ninja
 packaging
 optree>=0.13.0

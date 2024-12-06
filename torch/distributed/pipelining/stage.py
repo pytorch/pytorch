@@ -10,7 +10,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.distributed._composable.fsdp.fully_shard import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils._pytree import tree_map_only

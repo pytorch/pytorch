@@ -487,13 +487,36 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
       auto layer_cx = cx[index];
       auto reverse = (direction > 0);
       // bias won't be packed
-      auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
-                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options().layout(at::Layout::Strided)),
-          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options().layout(at::Layout::Strided)), layer_hx,
-          layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
-      layer_output[direction] = std::move(std::get<0>(outputs));
-      layer_hy[index] = std::move(std::get<1>(outputs));
-      layer_cy[index] = std::move(std::get<2>(outputs));
+      std::tie(
+          layer_output[direction],
+          layer_hy[index],
+          layer_cy[index],
+          std::ignore) =
+          at::mkldnn_rnn_layer(
+              layer_input,
+              layer_weights[0],
+              layer_weights[1],
+              has_biases
+                  ? layer_weights[2]
+                  : at::zeros(
+                        layer_weights[0].sizes(),
+                        layer_weights[0].options().layout(at::Layout::Strided)),
+              has_biases
+                  ? layer_weights[3]
+                  : at::zeros(
+                        layer_weights[1].sizes(),
+                        layer_weights[1].options().layout(at::Layout::Strided)),
+              layer_hx,
+              layer_cx,
+              reverse,
+              batch_sizes,
+              mode,
+              hidden_size,
+              num_layers,
+              has_biases,
+              bidirectional,
+              batch_first,
+              train);
     }
     layer_input = num_directions == 1 ? layer_output[0]
                                       : at::cat(layer_output, /*output_channels*/-1);

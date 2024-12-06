@@ -1089,6 +1089,7 @@ def _compile(
                     "inject_BUILD_SET_unimplemented_TESTING_ONLY",
                     "_autograd_backward_strict_mode_banned_ops",
                     "reorderable_logging_functions",
+                    "ignore_logger_methods",
                     "traceable_tensor_subclasses",
                     "_custom_ops_profile",
                 }

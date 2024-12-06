@@ -49,7 +49,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     @classmethod
     def from_observed(cls, other):
-        assert type(other) == cls._FLOAT_MODULE  # type: ignore[has-type]
+        assert isinstance(other, cls._FLOAT_MODULE)
         converted = torch.ao.quantization.convert(
             other, inplace=False, remove_qconfig=True
         )

@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import unittest
 from typing import Any, Dict, List, Type
 
 import sympy
@@ -11,6 +12,7 @@ from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -60,6 +62,9 @@ class CooperativeReductionTests(TestCase):
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     def test_reduction_fns(self, name, dtype):
+        if IS_SM89 and dtype == torch.float64 and name in ["std", "var_mean"]:
+            raise unittest.SkipTest("Timeouts on SM89")
+
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
