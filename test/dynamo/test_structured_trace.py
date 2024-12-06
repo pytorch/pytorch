@@ -840,7 +840,10 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt(x)
         # Should print twice, including inductor_output_code
         self.assertParses()
-        chromium_event = '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}'
+        chromium_event = (
+            '{"chromium_event": {}, "compiled_autograd_id": null, "frame_id": 0, "frame_compile_id": 0, '
+            '"attempt": 0, "has_payload": "HASH"}'
+        )
         self.assertTrue(chromium_event in self.buffer.getvalue())
 
 
