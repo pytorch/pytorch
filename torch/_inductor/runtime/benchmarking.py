@@ -2,7 +2,7 @@ from random import randint
 import time
 from functools import cached_property, wraps
 from itertools import chain
-from statistics import median
+from statistics import mean, median
 from typing import Any, Callable, Dict, List, Tuple, Union
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
