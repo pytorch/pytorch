@@ -3744,6 +3744,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 #endif
 }
 
+template <bool IsBarrier>
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
     const AllreduceOptions& opts) {
@@ -3767,7 +3768,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "nccl:all_reduce");
+      IsBarrier ? "nccl:all_reduce_barrier" : "nccl:all_reduce");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
@@ -4524,7 +4525,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
-  auto work = allreduce_impl(barrierTensor);
+  auto work = allreduce_impl<true>(barrierTensor);
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());
