@@ -8488,20 +8488,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         in_f, fullgraph=True, backend="aot_eager_decomp_partition"
                     )
 
-                    if sample.input.is_contiguous():
-                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
-                        if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                            self.assertEqualIgnoringNestedInts(sample.input, out_ref)
-                        else:
-                            self.assertEqual(sample.input, out_ref)
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
                     else:
-                        # see https://github.com/pytorch/pytorch/issues/106456
-                        with self.assertRaisesRegex(
-                            RuntimeError,
-                            "Mutations on non-contiguous inputs are currently not "
-                            "allowed on tensor subclasses",
-                        ):
-                            compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                        self.assertEqual(sample.input, out_ref)
 
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -8557,6 +8548,55 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfTorchDynamo(
+        "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
+    )
+    def test_nested_tensor_non_contiguous_mutation(self):
+        def fn(x, x0):
+            x[0, 0, 0] = 2
+            return x
+
+        def _inp():
+            base = torch.zeros(32, 3)
+            v = base.t()
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ), torch.ones(2, 32)
+
+        ref_x, ref_x0 = _inp()
+        ref_y = fn(ref_x, ref_x0)
+
+        self.assertEqual(ref_y[0][0][0].item(), 2)
+
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
+        self.assertEqual(y[0][0][0], 2)
+
+    def test_nested_tensor_input_mutation_backward(self):
+        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+        # This test checks that AOTD correctly guess NJT tangent as NJT.
+        def fn(x):
+            x.mul_(2)
+            return x + 1
+
+        def _inp():
+            v = torch.zeros(32, 3, requires_grad=True)
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ).clone()
+
+        ref_x = _inp()
+        ref_y = fn(ref_x)
+        ref_y.sum().backward()
+
+        x = _inp()
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+        y.sum().backward()
 
 
 from torch.nested._internal.nested_int import NestedIntNode

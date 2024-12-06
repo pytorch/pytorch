@@ -3884,7 +3884,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
@@ -6494,6 +6494,12 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
+        log.debug(
+            "Extern kernel node added for node %s with target %s.",
+            self.get_name(),
+            self.op_overload,
+        )
+
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
