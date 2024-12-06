@@ -40,7 +40,7 @@ __global__ void write_indices(
     index_t n,
     int64_t * total = nullptr,
     int64_t fill_value = -1) {
-  auto index = threadIdx.x + blockIdx.x * blockDim.x;
+  auto index = threadIdx.x + (int64_t)blockIdx.x * blockDim.x;
   bool cond = (total == nullptr || index < (uint)*total);
   if (index < n && cond) {
     index_t div = 1;
@@ -65,7 +65,7 @@ __global__ void write_fill_value(int64_t * inp, int64_t * total, int64_t fill_va
   int64_t total_val = *total;
   // not aiming for vectorized stores
 
-  for (int64_t idx = total_val + blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
+  for (int64_t idx = total_val + (int64_t)blockIdx.x * blockDim.x + threadIdx.x; idx < n; idx += blockDim.x * gridDim.x) {
       inp[idx] = fill_value;
   }
 }
