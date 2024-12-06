@@ -38,9 +38,8 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, IS_WINDOWS
 from torch.utils._triton import has_triton
-
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(
@@ -121,10 +120,14 @@ else:
     import subprocess
     compiler_version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
     LONG_COMPILATION_ON_CPU = False
-    if "g++" in compiler_version_string or "gcc" in compiler_version_string:
+    if IS_WINDOWS:
+        LONG_COMPILATION_ON_CPU = True
+    elif "g++" in compiler_version_string or "gcc" in compiler_version_string or "c++" in compiler_version_string or "cc" in compiler_version_string :
         # if the compiler is gcc with lower major version than 7, skip UT for CPU due to long compilation time found in CI
         major_version = subprocess.check_output([get_cpp_compiler(), "-dumpversion"]).decode("utf8")
-        LONG_COMPILATION_ON_CPU = int(major_version) < 7
+        LONG_COMPILATION_ON_CPU = int(major_version) < 9
+    elif is_clang() or "clang" in get_cpp_compiler():
+        LONG_COMPILATION_ON_CPU = True
 
     test_dtypes = (
         [torch.float32, torch.bfloat16]
@@ -1151,6 +1154,7 @@ class TestFlexAttention(InductorTestCase):
     ):
         self.run_dynamic_test(score_mask_mod, dtype)
 
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     def test_builtin_score_mods_automatic_dynamic(
@@ -1226,6 +1230,7 @@ class TestFlexAttention(InductorTestCase):
             block_mask,
         )
 
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
