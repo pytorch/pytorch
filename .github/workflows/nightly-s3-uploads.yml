@@ -8,6 +8,7 @@ on:
     paths:
       - 'tools/stats/upload_external_contrib_stats.py'
       - '.github/workflows/nightly-s3-uploads.yml'
+  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -18,7 +19,6 @@ jobs:
   upload-stats-to-s3:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
-    environment: upload-stats
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -34,12 +34,16 @@ jobs:
       - run: |
           pip3 install requests==2.32.2 boto3==1.35.42
 
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_upload_external_contrib_stats
+          aws-region: us-east-1
+
       - name: Upload external contribution stats
         uses: nick-fields/retry@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         with:
           timeout_minutes: 10
           max_attempts: 10
