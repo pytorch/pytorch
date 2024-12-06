@@ -301,7 +301,10 @@ class FakeDDP(nn.Module):
             DDP._active_ddp_module = None
 
     def forward(self, *inputs, **kwargs):
-        with self._inside_ddp_forward():
+        if not DDP._active_ddp_module:
+            with self._inside_ddp_forward():
+                return self.module.forward(*inputs, **kwargs)
+        else:
             return self.module.forward(*inputs, **kwargs)
 
 
@@ -371,6 +374,43 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512))
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_ddp_optimizer_inductor_strides_dont_specialize(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc_0 = nn.Linear(768, 768)
+                self.fc_1 = nn.Linear(768, 768)
+
+            def forward(self, x):
+                x = self.fc_0(x)
+                x = self.fc_1(x)
+                return x
+
+        model = Model()
+        model = FakeDDP(model)
+
+        inp = torch.randn((16, 18, 768))
+        inp2 = torch.randn((16, 20, 768))
+
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp2, 1)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        torch._dynamo.reset()
+        try:
+            DDP._active_ddp_module = model
+            opt_model = torch.compile(model)
+            self.assertEqual(0, len(torch._dynamo.utils.get_compilation_metrics()))
+            opt_model(inp)
+            compile_count_before = len(torch._dynamo.utils.get_compilation_metrics())
+            opt_model(inp2)
+            compile_count_after = len(torch._dynamo.utils.get_compilation_metrics())
+            # no recompiles
+            self.assertEqual(compile_count_before, compile_count_after)
+        finally:
+            DDP._active_ddp_module = None
 
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_direct(self):
