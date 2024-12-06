@@ -216,16 +216,23 @@ class CppWrapperGpu(CppWrapperCpu):
         # as non-Python deployment for its best performance, so implicitly copying misaligned inputs
         # to aligned buffers is going to bring a surprising performance hit. Instead, we check input
         # alignment and throw an error if any input is misaligned.
-        if V.graph.aot_mode:
-            for name, value in V.graph.graph_inputs.items():
-                if isinstance(value, TensorBox):
-                    self.prefix.splice(
-                        f"""
-                    if ((long({name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
-                        throw std::runtime_error("{name} is not aligned to {GPU_ALIGN_BYTES} bytes");
+        if V.graph.aot_mode and V.graph.inputs_to_check:
+            for idx in V.graph.inputs_to_check:
+                input_name = V.graph.graph_input_names[idx]
+                assert (
+                    input_name in V.graph.graph_inputs
+                ), f"{input_name} not found in graph inputs"
+                value = V.graph.graph_inputs[input_name]
+                assert isinstance(
+                    value, TensorBox
+                ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                self.prefix.splice(
+                    f"""
+                    if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
+                        throw std::runtime_error("{input_name} is not aligned to {GPU_ALIGN_BYTES} bytes");
                     }}
                     """
-                    )
+                )
 
         super().codegen_inputs()
 
