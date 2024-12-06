@@ -122,6 +122,18 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::allowTF32OneDNN() const {
+  return allow_tf32_onednn;
+}
+
+void Context::setAllowTF32OneDNN(bool b){
+#ifdef USE_XPU
+  allow_tf32_onednn = b;
+#else
+  TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
+#endif
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
