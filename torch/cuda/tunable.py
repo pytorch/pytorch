@@ -488,7 +488,7 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     checks = []  # empty list to hold futures
     futures = []  # empty list to hold futures
-    flush_results = [] # empty list to hold futures
+    flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
