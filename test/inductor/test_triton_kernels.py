@@ -3566,6 +3566,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             records["run_early_config_prune"] = True
             if "N" in kwargs and kwargs["N"] == 1024:
                 records["capture_kwargs"] = True
+            elif "N" in kwargs:
+                breakpoint()
             if "dst" in named_args and "src" in named_args and len(named_args) == 2:
                 records["capture_named_args"] = True
             return [configs[0]]
