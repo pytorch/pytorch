@@ -591,10 +591,21 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
     LinearParams& params = get_cache().get_param();
     ideep::matmul_forward::compute(params, x, w, b, y, src_scales, src_zero_point);
   } else {
-    ideep::matmul_forward::compute(x, w, b, y,
-                                   src_scales, weights_scales, ideep::scale_t(),
-                                   src_zero_point, ideep::zero_point_t(),
-                                   1.0f, 1.0f, op_attr);
+    ideep::matmul_forward::compute(
+        x,
+        w,
+        b,
+        y,
+        src_scales,
+        weights_scales,
+        ideep::scale_t(),
+        src_zero_point,
+        ideep::zero_point_t(),
+        1.0f,
+        1.0f,
+        op_attr,
+        ideep::tensor::data_type::undef,
+        std::is_signed_v<input_qtype> ? ideep::s8s8 : ideep::u8s8);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = w.get_dim(1);
