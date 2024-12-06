@@ -16,12 +16,20 @@ from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import (
     handle_observed_exception,
+    ObservedException,
     ObservedUserStopIteration,
+    SkipFrame,
     unimplemented,
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    LocalSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -394,7 +402,7 @@ class GeneratorObjectVariable(VariableTracker):
         self.inline_tracer = inline_tracer
         # TODO: find out why generator.gi_frame is not kept in sync with the interpreter
         # This prevents us from using inspect.getgeneratorstate
-        self.generatorstate = "GEN_CREATED"
+        # self.generatorstate = "GEN_CREATED"
 
     def get_code(self):
         return self.gen.gi_code
@@ -419,15 +427,26 @@ class GeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    def reconstruct(self, codegen):
-        if self.generatorstate != "GEN_CREATED":
-            unimplemented(f"Cannot reconstruct advanced generator {self.get_name()}")
+    # def reconstruct(self, codegen):
+    #     unimplemented(f"reconstruct {self.__class__.__name__}")
 
-        codegen.append_output(codegen.create_load_deref(self.get_name()))
-        f_locals = self.gen.gi_frame.f_locals
-        for vt in f_locals.values():
-            codegen(vt)
-        codegen.extend_output(create_call_function(len(f_locals), False))
+    # if self.generatorstate != "GEN_CREATED":
+    #     unimplemented(f"Cannot reconstruct advanced generator {self.get_name()}")
+
+    # codegen.append_output(codegen.create_load_deref(self.get_name()))
+    # f_locals = self.gen.gi_frame.f_locals
+
+    # for var_name, vt in f_locals.items():
+    #     if not isinstance(vt, VariableTracker):
+    #         unimplemented(
+    #             f"Cannot reconstruct generator {self.get_name()} due to local "
+    #             f"variable {var_name}"
+    #         )
+
+    # for vt in f_locals.values():
+    #     if vt:
+    #         codegen(vt)
+    # codegen.extend_output(create_call_function(len(f_locals), False))
 
     def bind_args(self, tx, args, kwargs):
         return {}
@@ -454,11 +473,18 @@ class GeneratorObjectVariable(VariableTracker):
             #     self.inline_tracer.symbolic_locals[name] = var
         return self.inline_tracer
 
+    def _raise_if_generator_is_argument(self, tx):
+        if isinstance(self.source, LocalSource) and self.source.is_input:
+            if tx.inline_depth == 0:
+                # skip current frame
+                raise SkipFrame
+            unimplemented("Generator as graph argument is not supported")
+
     def next_variable(self, tx):
-        from torch._dynamo import exc
+        self._raise_if_generator_is_argument(tx)
 
         tracer = self._get_inline_tracer(tx)
-        self.generatorstate = "GEN_RUNNING"
+        # self.generatorstate = "GEN_RUNNING"
 
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
@@ -466,19 +492,15 @@ class GeneratorObjectVariable(VariableTracker):
             # for Dynamo to behave correctly
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_()
-        except exc.ObservedException as e:
+        except ObservedException as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
             # if "graph_break" not in e.msg:
             #     raise e
 
-            # fallback to eager
-            from torch._C._dynamo.eval_frame import skip_code
-
-            code = self.get_code()
-            skip_code(code)
-            raise exc.SkipFrame from e
+            # skip_code(self.get_code())
+            raise SkipFrame from e
 
     def has_unpack_var_sequence(self, tx):
         return False
@@ -507,6 +529,10 @@ class GeneratorObjectVariable(VariableTracker):
         if name == "__iter__":
             return self
         elif name == "__next__":
+            return self.next_variable(tx)
+        elif name == "send":
+            tracer = self._get_inline_tracer(tx)
+            tracer.push_many(args)
             return self.next_variable(tx)
         super().call_method(tx, name, args, kwargs)
 

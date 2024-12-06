@@ -919,8 +919,6 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        # TODO: figure it out why dynamo produces the wrong result when fn is
-        # a UserMethodVariable
         if config.enable_yield_on_generator and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
@@ -3053,6 +3051,14 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
+    def replace_tos_if_return_is_generator(self):
+        tos = self.stack[-1]
+        if isinstance(tos, GeneratorObjectVariable):
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
+            )
+
     def _return(self, inst):
         if (
             self.output.count_calls() == 0
@@ -3061,6 +3067,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.export
         ):
             raise exc.SkipFrame("because no content in function call")
+
+        self.replace_tos_if_return_is_generator()
+
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
@@ -3082,17 +3091,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         raise ReturnValueOp
 
     def RETURN_VALUE(self, inst):
-        tos = self.stack[-1]
-        if isinstance(tos, GeneratorObjectVariable):
-            # If we are inside, this means the user is trying to return a generator
-            # from a compiled function. Before GeneratorObjectVariable, dynamo
-            # would create an iterator for the remaining of the variables not consumed
-            # from the List. We still try to do the same thing here, exhaust the
-            # generator and pass it to a ListIteratorVariable
-            self.stack[-1] = ListIteratorVariable(
-                tos.force_unpack_var_sequence(self),
-                mutation_type=ValueMutationNew(),
-            )
         self._return(inst)
 
     def RETURN_CONST(self, inst):

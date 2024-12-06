@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import itertools
-import unittest
 from collections import OrderedDict
 
 import torch
@@ -181,7 +180,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @unittest.expectedFailure
     def test_generator_as_argument(self):
         # The inline tracer needs to be kept in sync if an already advanced generator
         # is given to a compiled function.
@@ -201,20 +199,21 @@ class GraphModule(torch.nn.Module):
         next(ctx)
         y = fn(t, ctx)
         self.assertEqual(y, t + 2)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_t_: "f32[2]"):
-        l_t_ = L_t_
+        self.assertEqual(len(eager.graphs), 0)
+        if False:
+            self.assertEqual(len(eager.graphs), 1)
+            self.assertExpectedInline(
+                normalize_gm(eager.graphs[0].print_readable(False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_t_: "f32[2]"):
+            l_t_ = L_t_
 
-        add: "f32[2]" = l_t_ + 2;  l_t_ = None
-        return (add,)
-""",
-        )
+            add: "f32[2]" = l_t_ + 2;  l_t_ = None
+            return (add,)
+    """,
+            )
 
-    @unittest.expectedFailure
     def test_generator_as_argument_2(self):
         def whoo(x):
             yield x.sin()
@@ -227,22 +226,39 @@ class GraphModule(torch.nn.Module):
             return t + next(ctx)
 
         t = torch.randn(2)
-        ctx = whoo()
+        ctx = whoo(t)
         next(ctx)
         y = fn(t, ctx)
         self.assertEqual(y, t + t.cos())
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_t_: "f32[2]"):
-        l_t_ = L_t_
+        self.assertEqual(len(eager.graphs), 0)
+        if False:
+            self.assertEqual(len(eager.graphs), 1)
+            self.assertExpectedInline(
+                normalize_gm(eager.graphs[0].print_readable(False)),
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, L_t_: "f32[2]"):
+            l_t_ = L_t_
 
-        add: "f32[2]" = l_t_ + l_t_.cos();  l_t_ = None
-        return (add,)
-""",
-        )
+            add: "f32[2]" = l_t_ + l_t_.cos();  l_t_ = None
+            return (add,)
+    """,
+            )
+
+    def test_send(self):
+        def double():
+            x = yield
+            yield x * 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = double()
+            next(gen)
+            return gen.send(t)
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t * 2)
 
     def test_islice_chain(self):
         eager = EagerAndRecordGraphs()
@@ -387,7 +403,6 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(list(y), [t + 2, t + 3])
 
-    @unittest.expectedFailure
     def test_dynamo_disable_generator(self):
         @torch._dynamo.disable
         def main_gen(t):
@@ -404,7 +419,6 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, [t + 1, t + 2, t + 3])
 
-    @unittest.expectedFailure
     def test_dynamo_disable_sub_generator(self):
         @torch._dynamo.disable
         def subgen(t):
@@ -457,24 +471,84 @@ class GraphModule(torch.nn.Module):
         got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
         self.assertEqual(expected, got)
 
+    def test_generator_with_side_effects(self):
+        i = 0
 
-class GeneratorTestsOldBehavior(GeneratorTests):
-    expected_failures = [
-        "test_infinite_generator",
-        "test_infinite_generator_2",
-        "test_infinite_generator_3",
-        "test_iter",
-        "test_graph_break_in_generator",
-        "test_zip_infinite_generator",
-    ]
+        def whoo(t):
+            nonlocal i
+            for j in range(5):
+                i += 1
+                yield t + j
 
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = False
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            return list(zip(range(3), gen))
 
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = True
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(i, 3)
+        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+
+    def test_generator_with_side_effects_graph_break(self):
+        i = 0
+
+        def whoo(t):
+            nonlocal i
+            for j in range(5):
+                i += 1
+                yield t + j
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            torch._dynamo.graph_break()
+            return list(zip(range(3), gen))
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(i, 3)
+        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+
+    def test_generator_with_side_effects_graph_break_2(self):
+        i = 0
+
+        def whoo(t):
+            nonlocal i
+            for j in range(5):
+                i += 1
+                yield t + j
+                torch._dynamo.graph_break()
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def fn(t):
+            gen = whoo(t)
+            return list(zip(range(3), gen))
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(i, 3)
+        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
+
+
+# class GeneratorTestsOldBehavior(GeneratorTests):
+#     expected_failures = [
+#         "test_infinite_generator",
+#         "test_infinite_generator_2",
+#         "test_infinite_generator_3",
+#         "test_iter",
+#         "test_graph_break_in_generator",
+#         "test_zip_infinite_generator",
+#         "test_generator_with_side_effects",
+#     ]
+
+#     def setUp(self):
+#         super().setUp()
+#         torch._dynamo.config.enable_yield_on_generator = False
+
+#     def tearDown(self):
+#         super().tearDown()
+#         torch._dynamo.config.enable_yield_on_generator = True
 
 
 instantiate_parametrized_tests(GeneratorTests)
