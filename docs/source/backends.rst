@@ -234,4 +234,4 @@ torch.backends.opt_einsum
 torch.backends.xeon
 ^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xeon
-.. py:module:: torch.backends.xeon.run_cpu
+.. automodule:: torch.backends.xeon.run_cpu
