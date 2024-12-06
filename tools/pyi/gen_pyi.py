@@ -5,23 +5,32 @@ import collections
 import importlib
 import sys
 from pprint import pformat
-from typing import Sequence
+from typing import Callable, Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
 
 from tools.autograd.gen_python_functions import (
     group_overloads,
+    is_py_nn_function,
     load_signatures,
     should_generate_py_binding,
 )
 
 from torchgen.api.python import (
+    PythonSignature,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
+    returns_str_pyi,
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.model import (
+    _TorchDispatchModeKey,
+    BaseType,
+    DispatchKey,
+    NativeFunction,
+    Variant,
+)
 from torchgen.utils import FileManager
 
 
@@ -341,6 +350,9 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
 
 
 def gen_nn_functional(fm: FileManager) -> None:
+    """
+    Currently unused and has been replaced by gen_nn_module_stubs
+    """
     INPUT = "input: Tensor"
     KERNEL_SIZE = "kernel_size: Union[_int, _size]"
     STRIDE_PADDING = ", ".join(
@@ -845,6 +857,33 @@ def gen_nn_functional(fm: FileManager) -> None:
         lambda: {
             "c_nn_function_hints": c_nn_function_hints,
         },
+    )
+
+
+def gen_nn_module_stubs(
+    out: str,
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    deprecated_yaml_path: str,
+    template_path: str,
+    *,
+    symint: bool = True,
+) -> None:
+    """
+    This function generates the type stubs for the torch._C._nn module.
+    """
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
+
+    methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
+    gen_module_stubs(
+        fm,
+        methods,
+        is_py_nn_function,
+        "_nn.pyi",
     )
 
 
@@ -1713,7 +1752,117 @@ def gen_pyi(
         "torch/_C/return_types.pyi.in",
         lambda: env,
     )
-    gen_nn_functional(fm)
+
+    gen_nn_module_stubs(
+        out="torch/_C",
+        native_yaml_path=native_yaml_path,
+        tags_yaml_path=tags_yaml_path,
+        deprecated_yaml_path=deprecated_yaml_path,
+        template_path="torch/_C",
+    )
+
+
+# If input_tensor is true, inserts "input: Tensor" instead of self
+def signature_str_pyi_stubs(
+    signature: PythonSignature, input_tensor: bool = True, *, skip_outputs: bool = False
+) -> str:
+    args = signature.arguments(skip_outputs=skip_outputs)
+    schema_formals: list[str] = [
+        a.argument_str_pyi(method=signature.method) for a in args
+    ]
+    positional_argc = len(signature.input_args)
+    if len(schema_formals) > positional_argc:
+        schema_formals.insert(positional_argc, "*")
+
+    # only pyi signatures include returns
+    returns_str = returns_str_pyi(signature)
+    # pyi also includes self (with no typing/defaults) for methods
+    if signature.method and input_tensor:
+        schema_formals.insert(0, "input: Tensor")
+    return f'def {signature.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+
+
+def meth_stub(pair: PythonSignatureGroup) -> str:
+    signature = pair.signature
+    self_arg = pair.base.func.arguments.self_arg
+    # add_input determins if there is a self argument of type Tensor
+    add_input = (
+        self_arg is not None
+        and self_arg.argument.name == "self"
+        and isinstance(self_arg.argument.type, BaseType)
+        and self_arg.argument.type.name.name == "Tensor"
+    )
+
+    stub = signature_str_pyi_stubs(signature, input_tensor=add_input)
+
+    return stub
+
+
+def filter_functions(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+) -> list[PythonSignatureNativeFunctionPair]:
+    filtered: list[PythonSignatureNativeFunctionPair] = []
+    for pair in pairs:
+        if pred(pair.function):
+            filtered.append(pair)
+    return filtered
+
+
+def gen_module_stubs(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    filename: str,
+) -> None:
+    function_hints: list[str] = []
+    unsorted_nn_function_hints: dict[str, list[str]] = collections.defaultdict(list)
+    structseqs: dict[str, str] = {}
+
+    filtered = filter_functions(pairs, pred)
+    sig_groups = group_overloads(filtered)
+
+    for group in sorted(sig_groups, key=lambda g: g.signature.name):
+        name = group.signature.name
+        unsorted_nn_function_hints[name] += [meth_stub(group)]
+
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
+            else:
+                structseqs[tuple_name] = tuple_def
+
+    def replace_special_case(hint: str) -> str:
+        # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
+        hint = hint.replace("at::Reduction::Mean", "1")
+        hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
+        # Match both:
+        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
+        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
+        hint = hint.replace(
+            "Tuple[Tensor, ...], List[Tensor]] = None",
+            "Tuple[Tensor, ...], List[Tensor], None] = None",
+        )
+        return hint
+
+    for name, hints in sorted(unsorted_nn_function_hints.items()):
+        hints = [replace_special_case(h) for h in hints]
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        function_hints += hints
+
+    fm.write_with_template(
+        filename,
+        filename + ".in",
+        lambda: {
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
+            "stubs": function_hints,
+        },
+    )
 
 
 def main() -> None:
