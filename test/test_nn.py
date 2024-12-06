@@ -9931,7 +9931,7 @@ class TestNNDeviceType(NNTestCase):
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @onlyCUDA
-    @dtypes(torch.half)
+    @dtypes(torch.half, torch.bfloat16)
     @largeTensorTest('40GB')
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
@@ -9939,6 +9939,10 @@ class TestNNDeviceType(NNTestCase):
         out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
         del x
         self.assertTrue(torch.allclose(out, out_ref))
+
+        x = torch.ones((17, 256, 512, 512), dtype=dtype).cuda().to(memory_format=torch.channels_last)
+        out = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        self.assertEqual(out[0], out[-1])
 
     @onlyCUDA
     @dtypes(torch.half)
