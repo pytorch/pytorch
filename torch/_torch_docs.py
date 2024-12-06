@@ -2293,13 +2293,17 @@ and :func:`torch.chunk`.
     :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
-    tensors (sequence of Tensors): any python sequence of tensors of the same type.
-        Non-empty tensors provided must have the same shape, except in the
-        cat dimension.
+    tensors (sequence of Tensors): Non-empty tensors provided must have the same shape,
+        except in the cat dimension.
+
     dim (int, optional): the dimension over which the tensors are concatenated
 
 Keyword args:
     {out}
+
+.. note:: It is recommended to keep all `tensors` in the same dtype to avoid unintended type promotion.
+          For example, mixing `torch.int32` and `torch.int64` may result in the output being automatically
+          promoted to `torch.int64`.
 
 Example::
 
