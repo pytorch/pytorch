@@ -14,7 +14,7 @@ from .graph_region_tracker import Node, Region
 log = logging.getLogger(__name__)
 
 
-def apply_graph_deduplication(output_graph) -> None:  # type: ignore[no-untyped-def]
+def apply_graph_deduplication(output_graph) -> Dict[Node, Node]:  # type: ignore[no-untyped-def]
     """
     This is the main entry point for applying the graph deduplication pass. \
 Deduplication occurs in two phases:
@@ -37,11 +37,19 @@ getitem node. Finally, all original nodes are erased (there should be no uses of
 left in the graph).
 
 The deduplication mutates the output_graph argument in place.
+
+Returns a mapping of nodes to their subgraph output replacement node to remap outputs
+when they are created in output_graph.
     """
     duplicated_region_groups = output_graph.region_tracker.get_identical_regions(
         output_graph.graph
     )
 
+    # Used to track which nodes were replaced with subgraph outputs
+    # today, we have to register the new subgraph submodules before the
+    # graph outputs have been created, so we pass the replacement mapping
+    # back to output graph to do the replacements at the site of output creation
+    output_replacements: Dict[Node, Node] = {}
     for region_group in duplicated_region_groups:
         inds_with_external_users = _get_all_output_indices(region_group)
         region = region_group[0]
@@ -65,12 +73,15 @@ The deduplication mutates the output_graph argument in place.
                     inds_with_external_users,
                     sub_gm,
                     subgraph_name,
+                    output_replacements,
                 )
             except Unsupported:
                 log.debug(
                     "Failed to substitute region %s due to input alias or mutation",
                     region,
                 )
+
+    return output_replacements
 
 
 def _replace_region_with_subgraph(
@@ -81,6 +92,7 @@ def _replace_region_with_subgraph(
     inds_with_external_users: List[int],
     sub_gm: torch.fx.GraphModule,
     subgraph_name: str,
+    output_replacements: Dict[Node, Node],
 ) -> None:
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
@@ -94,17 +106,19 @@ def _replace_region_with_subgraph(
     if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
         unimplemented("NYI: replacing subgraph with input alias or mutation")
 
-    earliest_region_node = region[0]
-    with graph.inserting_before(earliest_region_node):
+    latest_region_node = region[-1]
+    with graph.inserting_after(latest_region_node):
         invoke_subgraph_node = graph.create_node(
             "call_function", torch.ops.higher_order.invoke_subgraph, invoke_args, {}
         )
-        for ind, external_user_ind in enumerate(inds_with_external_users):
-            node = region[external_user_ind]
-            subgraph_output = graph.create_node(
-                "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
-            )
-            node.replace_all_uses_with(subgraph_output)
+        with graph.inserting_after(invoke_subgraph_node):
+            for ind, external_user_ind in enumerate(inds_with_external_users):
+                node = region[external_user_ind]
+                subgraph_output = graph.create_node(
+                    "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
+                )
+                output_replacements[node] = subgraph_output
+                node.replace_all_uses_with(subgraph_output, propagate_meta=True)
 
         # Erase in reverse topological order
         for node in reversed(region):
