@@ -138,6 +138,15 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.fft2",
@@ -169,6 +178,13 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.complex32],
                 active_if=TEST_WITH_ROCM,
             ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
         ),
     ),
     SpectralFuncInfo(
@@ -192,6 +208,15 @@ op_db: List[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.hfft",
@@ -221,6 +246,20 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
+            ),
+            # FIXME[MPS]: test_out_warning_fft_hfft_mps crashes with `Invalid KernelDAG`
+            DecorateInfo(
+                unittest.skip("Skipped on MPS due to hard crash"),
+                'TestCommon',
+                'test_out_warning',
+                device_type='mps'
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
             ),
         ),
     ),
@@ -266,6 +305,13 @@ op_db: List[OpInfo] = [
                 "test_complex_half_reference_testing",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
         ),
     ),
     SpectralFuncInfo(
@@ -302,6 +348,13 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
             ),
         ),
     ),
@@ -392,6 +445,15 @@ op_db: List[OpInfo] = [
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -420,6 +482,15 @@ op_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.ifftn",
@@ -448,6 +519,15 @@ op_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values',
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.ihfft",
@@ -553,6 +633,15 @@ op_db: List[OpInfo] = [
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         check_batched_gradgrad=False,
+        skips=(
+            # FIXME[MPS]: test_out_warning_fft_irfft_mps crashes with `Invalid KernelDAG`
+            DecorateInfo(
+                unittest.skip("Skipped on MPS due to hard crash"),
+                'TestCommon',
+                'test_out_warning',
+                device_type='mps',
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.irfft2",
@@ -582,6 +671,15 @@ op_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            # FIXME[MPS]: test_out_warning_fft_irfft2_mps crashes with `Invalid KernelDAG`
+            DecorateInfo(
+                unittest.skip("Skipped on MPS due to hard crash"),
+                'TestCommon',
+                'test_out_warning',
+                device_type='mps',
+            ),
+        )
     ),
     SpectralFuncInfo(
         "fft.irfftn",
