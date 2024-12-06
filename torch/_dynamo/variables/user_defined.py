@@ -56,7 +56,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -830,15 +830,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
-            if (
-                method in (object.__ne__, object.__eq__)
-                and len(args) == 1
-                and not kwargs
-                and hasattr(args[0], "value")
-            ):
-                return ConstantVariable(
-                    (self.value is args[0].value) is (method is object.__eq__)
-                )
+            if len(args) == 1 and not kwargs:
+                if method is object.__eq__:
+                    func_var = VariableTracker.build(tx, polyfills.object_eq)
+                    return func_var.call_function(tx, [self, *args], kwargs)
+
+                if method is object.__ne__:
+                    func_var = VariableTracker.build(tx, polyfills.object_ne)
+                    return func_var.call_function(tx, [self, *args], kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -1454,6 +1453,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
+        self.mutation_type = AttributeMutationExisting()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to

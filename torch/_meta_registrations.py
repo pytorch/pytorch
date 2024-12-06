@@ -3734,6 +3734,28 @@ def meta__add_relu(self, other, alpha=1) -> Tensor:
     )
 
 
+@register_meta([aten.rrelu_with_noise])
+@out_wrapper()
+def meta_rrelu_with_noise(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self)
+
+
+@register_meta([aten.rrelu_with_noise_functional])
+def meta_rrelu_with_noise_functional(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self), torch.empty_like(noise)
+
+
+@register_meta([aten.rrelu_with_noise_])
+def meta_rrelu_with_noise_(
+    self, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return self
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
@@ -4785,6 +4807,8 @@ def zeros_like(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     ndim = self.dim()
     torch._check_index(
         ndim != 0,
@@ -4795,7 +4819,9 @@ def meta_select(self, dim, index):
     size = self.size(dim)
 
     torch._check_index(
-        not (-index > size or index >= size),
+        not (
+            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
+        ),
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
     )
