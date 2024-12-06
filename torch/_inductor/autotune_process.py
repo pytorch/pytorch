@@ -599,7 +599,7 @@ class GPUDeviceBenchmarkMixin:
             device_idx = torch.cuda.current_device()
 
         with torch.cuda.device(device_idx):
-            out = benchmarker.benchmark_gpu(fn)
+            out = benchmarker.benchmark_gpu(fn, pruning=True)
             torch.cuda.synchronize()  # shake out any CUDA errors
 
         return out
