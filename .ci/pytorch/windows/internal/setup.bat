@@ -8,8 +8,7 @@ if NOT "%CC%"==""   echo CC=%CC%
 if NOT "%CXX%"==""  echo CXX=%CXX%
 if NOT "%DISTUTILS_USE_SDK%"==""  echo DISTUTILS_USE_SDK=%DISTUTILS_USE_SDK%
 
-set SRC_DIR=%~dp0\..
-if exist "%NIGHTLIES_PYTORCH_ROOT%" if "%CUDA_VERSION%" == "xpu" set SRC_DIR=%NIGHTLIES_PYTORCH_ROOT%
+set SRC_DIR=%NIGHTLIES_PYTORCH_ROOT%
 
 IF "%VSDEVCMD_ARGS%" == "" (
     call "%VS15VCVARSALL%" x64
