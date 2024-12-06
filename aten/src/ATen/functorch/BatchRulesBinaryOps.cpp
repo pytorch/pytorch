@@ -218,43 +218,47 @@ static std::tuple<Tensor, std::optional<int64_t>> masked_select_backward_batch_r
 
 static std::tuple<Tensor, std::optional<int64_t>> cdist_backward_batch_rule(
     const Tensor& grad, std::optional<int64_t> grad_bdim,
-    Tensor x1, std::optional<int64_t> x1_bdim,
-    Tensor x2, std::optional<int64_t> x2_bdim,
+    const Tensor& x1, std::optional<int64_t> x1_bdim,
+    const Tensor& x2, std::optional<int64_t> x2_bdim,
     const double p,
     const Tensor& cdist, std::optional<int64_t> cdist_bdim) {
 
+  auto x1_ = x1;
   if (cdist_bdim && !x1_bdim) {
     // We need to make sure that x1 has batch dim if cdist has one
     // otherwise, we get
     // RuntimeError: Function CdistBackward0 returned an invalid gradient at index 1 - got [5]
     // but expected shape compatible with [4, 5]
     auto bs = cdist.size(*cdist_bdim);
-    x1 = ensure_has_bdim(x1, false, bs).contiguous();
+    x1_ = ensure_has_bdim(x1, false, bs);
+    x1_ = x1_.contiguous();
     x1_bdim = 0;
   }
 
   // We need to apply the same preprocessing on x1 and x2 as in the forward pass
   // _binary_pointwise_batch_rule
-  std::tie(x1, x2)= _binary_pointwise_helper(x1, x1_bdim, x2, x2_bdim);
+  auto x12 = _binary_pointwise_helper(x1_, x1_bdim, x2, x2_bdim);
+  x1_ = std::move(std::get<0>(x12));
+  auto& x2_ = std::get<1>(x12);
 
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
   if ((x1_bdim || x2_bdim) && !grad_bdim) {
     // We need to make sure that grad has batch dim if x1 or x2 have one
     // Probably, there is an assumption on the strides.
     // Otherwise grad input contains thrash values, e.g. -7.0816e+29, 7.0816e+29
-    auto bs = get_bdim_size2(x1, 0, x2, 0);
+    auto bs = get_bdim_size2(x1_, 0, x2_, 0);
     grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), bs);
     grad_ = grad_.contiguous();
   }
 
-  auto out = at::_cdist_backward(grad_, x1, x2, p, cdist);
+  auto out = at::_cdist_backward(grad_, x1_, x2_, p, cdist);
 
   std::optional<int64_t> out_bdim = std::nullopt;
   if (x1_bdim || x2_bdim) {
     out_bdim = 0;
   }
 
-  return std::make_tuple(std::move(out), out_bdim);
+  return std::make_tuple(out, out_bdim);
 }
 
 static void fill__Tensor_batch_rule(
