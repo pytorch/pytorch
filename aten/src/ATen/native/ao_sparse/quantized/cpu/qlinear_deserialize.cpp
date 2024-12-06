@@ -55,7 +55,9 @@ void unpack_bcsr(
       memset(dst + i * C, zero_points[i], C * sizeof(int8_t));
     }
   }
-  const auto& [weight_values, row_indices, col_indices] = bcsr;
+  const std::vector<int8_t>& weight_values = std::get<0>(bcsr);
+  const std::vector<int32_t>& row_indices = std::get<1>(bcsr);
+  const std::vector<int32_t>& col_indices = std::get<2>(bcsr);
   int64_t rowBlocks = (R + RB - 1) / RB;
   for (int64_t i = 0; i < rowBlocks; ++i) {
     // For the current tile, rowBPtr starts from currentTileIdx
@@ -314,4 +316,4 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 }
 #endif // USE_PYTORCH_QNNPACK
 
-} // namespace ao::sparse
+} // namespace ao
