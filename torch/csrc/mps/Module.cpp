@@ -286,6 +286,57 @@ PyMethodDef* python_functions() {
 }
 
 #ifdef USE_MPS
+namespace {
+template <typename T = uint64_t>
+std::optional<std::vector<T>> fetch_optional_vec_from_kwargs(
+    const py::kwargs& kwargs,
+    const char* name) {
+  if (!kwargs.contains(name)) {
+    return std::nullopt;
+  }
+  auto py_value = kwargs[name];
+  if (py::isinstance<py::int_>(py_value)) {
+    return std::vector({py_value.cast<T>()});
+  }
+  auto vec = py_value.cast<std::vector<T>>();
+  TORCH_CHECK(vec.size() > 0 && vec.size() < 3);
+  return vec;
+}
+struct OptionalArgCaster {
+ public:
+  OptionalArgCaster(const py::object& arg) : cast_arg(arg) {}
+  void setValue(
+      ::at::native::mps::MetalKernelFunction& f,
+      unsigned idx,
+      const py::object& arg) {
+    if (py::isinstance<py::tuple>(arg) || py::isinstance<py::list>(arg)) {
+      auto len = arg.attr("__len__")().cast<uint64_t>();
+      TORCH_CHECK(
+          len > 0, "Empty list/tuple can not be an argument to metal kernel")
+      auto element = arg.attr("__getitem__")(0);
+      if (py::isinstance<py::int_>(element)) {
+        auto values = arg.cast<std::vector<int64_t>>();
+        f.setArg(idx, values);
+      } else if (py::isinstance<py::float_>(element)) {
+        auto values = arg.cast<std::vector<float>>();
+        f.setArg(idx, values);
+      } else {
+        TORCH_CHECK(false, "Unexpected argument types");
+      }
+    } else if (py::isinstance<py::float_>(arg)) {
+      auto value = arg.cast<float>();
+      f.setArg(idx, value);
+    } else {
+      TORCH_CHECK(false, "Unsupported argument type");
+    }
+  }
+
+ private:
+  const py::object cast_arg;
+};
+
+} // namespace
+
 void initModule(PyObject* module) {
   using namespace at::native::mps;
   auto m = py::handle(module).cast<py::module>();
@@ -306,17 +357,11 @@ void initModule(PyObject* module) {
           [](MetalKernelFunction& self,
              const py::args& args,
              const py::kwargs& kwargs) {
-            std::optional<std::vector<uint64_t>> threads;
-            std::optional<std::vector<unsigned>> group_size;
-            if (kwargs.contains("threads")) {
-              auto py_threads = kwargs["threads"];
-              if (py::isinstance<py::int_>(py_threads)) {
-                threads = {py_threads.cast<uint64_t>()};
-              } else {
-                threads = py_threads.cast<std::vector<uint64_t>>();
-              }
-              TORCH_CHECK(threads->size() > 0 && threads->size() < 3);
-            }
+            auto threads = fetch_optional_vec_from_kwargs(kwargs, "threads");
+            auto group_size =
+                fetch_optional_vec_from_kwargs(kwargs, "group_size");
+            OptionalArgCaster caster(
+                kwargs.contains("casts") ? kwargs["casts"] : py::none());
             self.runCommandBlock([&] {
               self.startEncoding();
               for (auto idx : c10::irange(args.size())) {
@@ -326,10 +371,22 @@ void initModule(PyObject* module) {
                   if (!threads) {
                     threads = {static_cast<uint64_t>(t.numel())};
                   }
+                  continue;
                 }
+                caster.setValue(self, idx, args[idx]);
               }
-              TORCH_CHECK(threads.has_value() && threads->size() < 3);
-              self.dispatch(threads->at(0));
+              TORCH_CHECK(
+                  threads.has_value() && threads->size() < 3,
+                  "Number of threads is undefined");
+              TORCH_CHECK(
+                  !group_size.has_value() ||
+                  threads->size() == group_size->size());
+              if (threads->size() == 1) {
+                self.dispatch(threads->at(0));
+              } else if (threads->size() == 2) {
+                self.dispatch({threads->at(0), threads->at(1)});
+              } else {
+              }
             });
           })
       .def_property_readonly(

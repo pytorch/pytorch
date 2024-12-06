@@ -12482,10 +12482,24 @@ class TestCommon(TestCase):
 
 class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange(self):
-       x = torch.empty(12, device="mps", dtype=torch.half)
-       lib = torch.mps._compile_shader("kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) { x[idx] = idx; }")
-       lib.arange(x)
-       self.assertEqual(x, torch.arange(12.0, device='mps', dtype=torch.half))
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) {
+              x[idx] = idx;
+            }
+        """)
+        lib.arange(x)
+        self.assertEqual(x, torch.arange(12.0, device='mps', dtype=torch.half))
+
+    def test_metal_arange_with_arg(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device half* x, constant float& start, constant float& step, uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
+        """)
+        lib.arange(x, 3.14, .5)
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=torch.half))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
