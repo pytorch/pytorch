@@ -180,6 +180,7 @@ def exceeds_cache_size_limit(
     # e.g. due to guarded objects being freed. This technically makes the
     # will_compilation_exceed_accumulated_limit check unnecessary, but we will keep the
     # check in case we have a better fix in the future.
+    assert compile_id.frame_compile_id is not None
     if compile_id.frame_compile_id >= config.accumulated_cache_size_limit:
         return True, "accumulated_cache_size_limit"
     return False, ""
