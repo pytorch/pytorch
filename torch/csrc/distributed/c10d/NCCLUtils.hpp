@@ -39,6 +39,10 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 #define NCCL_REMOTE_ERROR
 #endif
 
+static_assert(
+    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
+    "NCCL version must be 2.7 or later");
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -323,6 +327,11 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+  // Wait for the communicator to be ready. This is a blocking function.
+  // Useful in nonblocking mode: NCCL requires the communicator to be ready
+  // before issuing a second command.
+  void waitReady();
+
   std::optional<std::string> getNcclCommFailureReason() const {
     LockType lock(mutex_);
     return commFailureReason_;
@@ -376,6 +385,14 @@ class NCCLComm {
     return;
 #endif
   }
+
+  // Finalize a communicator -- asking it to flush its operations. When the
+  // communicator is marked as nonblocking, this is a nonblocking function;
+  // otherwise, it will block till all operations complete.
+  void finalize();
+
+  // Destroy a communicator. This is a blocking function.
+  void destroy();
 
   bool isInitialized() const {
     LockType lock(mutex_);
