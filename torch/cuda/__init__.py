@@ -646,8 +646,24 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
     if torch.version.hip:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+        rocr_devices = os.getenv("ROCR_VISIBLE_DEVICES")
+
+        if rocr_devices is not None:
+            # Mostly required for ROCm to make sure ROCr visible devices
+            # is respected, this ensures we do not return a list of devices
+            # that exceeds the total available supplied via ROCR_VISIBLE_DEVICES
+            var = rocr_devices
+
         if hip_devices is not None:
-            var = hip_devices
+            # If ROCr devices have been set, the hip visible devices would
+            # be a subset of those. HIP_VISIBLE_DEVICES can only contain
+            # integer indices so we can use the ROCr visible devices as a key
+            if rocr_devices is not None:
+                hip_device_list = [int(dev) for dev in hip_devices.split(",")]
+                rocr_device_list = rocr_devices.split(",")
+                var = ",".join(rocr_device_list[dev] for dev in hip_device_list)
+            else:
+                var = hip_devices
 
     if var is None:
         return list(range(64))
@@ -1646,6 +1662,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_sync_debug_mode",
