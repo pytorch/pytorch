@@ -36,7 +36,6 @@ from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
     AOTAutogradCacheEntry,
-    autograd_cache_enabled,
     CompiledBackward,
     CompiledForward,
     should_use_remote_autograd_cache,
@@ -149,14 +148,13 @@ def aot_dispatch_base(
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
-
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
     # Save the forward_graph_str right after aot_dispatch_base_graph,
     # to save in the cache
     aot_forward_graph_str = None
-    if autograd_cache_enabled():
+    if aot_config.cache_info is not None:
         aot_forward_graph_str = fw_module.print_readable(
             print_output=False, include_stride=True, include_device=True
         )
@@ -218,7 +216,7 @@ def aot_dispatch_base(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
     cache_info = aot_config.cache_info
-    if autograd_cache_enabled() and cache_info:
+    if cache_info is not None:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
             time_taken_ns = time.time_ns() - cache_info.start_time_ns
             entry = AOTAutogradCacheEntry(
@@ -824,13 +822,12 @@ def aot_dispatch_autograd(
 
     try_save_cache_entry: Optional[Callable] = None
 
-    if autograd_cache_enabled():
-        cache_info = aot_config.cache_info
-        if cache_info is not None:
-            forward_time_taken_ns = time.time_ns() - cache_info.start_time_ns
-        else:
-            forward_time_taken_ns = None
+    if aot_config.cache_info is not None:
+        forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
 
+        # NB: aot_config here is technically not needed as an argument: we could just
+        # close over aot_config.cache_info, since aot_config never changes.
+        # But closing over random variables is confusing IMO, so I'm leaving it.
         def try_save_cache_entry(  # noqa: F811
             compiled_bw_func, _fw_metadata, aot_config
         ):
