@@ -9,7 +9,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -168,6 +168,16 @@ def _detect_input_alias(gm):
             def check_alias(out):
                 if (
                     out is not None
+                    # we could have integer outputs for cond_fn of while_loop
+                    # where the cond_fn looks like:
+                    # def cond_fn(idx):
+                    #   return idx < 0
+                    # while_loop(cond_fn, body_fn, (0,))
+                    # and we trace the cond_fn with (0, )
+                    # We could create an symint for the constant inputs so the otuput
+                    # is still an fx.Node but it doesn't matter if a symint is aliasing the input or not
+                    # and will need special treatment for the storage logic anyway.
+                    and isinstance(out, torch.fx.Node)
                     and "val" in out.meta
                     and isinstance(out.meta["val"], torch.Tensor)
                 ):
@@ -480,6 +490,39 @@ def get_dummy_aot_autograd_config():
 # Slices off the first element of a given dimension
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
+
+
+def diff_meta_pairs(
+    lhs_list: List[torch.Tensor | torch.SymInt | int],
+    rhs_list: List[torch.Tensor | torch.SymInt | int],
+) -> List[str]:
+    assert len(lhs_list) == len(rhs_list)
+    all_diffs = []
+    for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
+        if diff := diff_meta(lhs, rhs):
+            all_diffs.append(
+                f"pair[{i}] differ in {diff}, where lhs is {lhs} and rhs is {rhs}"
+            )
+    return all_diffs
+
+
+def diff_meta(
+    lhs: torch.Tensor | torch.SymInt | int, rhs: torch.Tensor | torch.SymInt | int
+) -> str:
+    if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
+        # We have vmap x cond tests and querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format is not yet implemented.
+        # And it seems the remaining metas are good enough for now.
+        return ", ".join(
+            diff_tensor_meta(
+                _extract_tensor_metadata(lhs, include_contiguity=False),
+                _extract_tensor_metadata(rhs, include_contiguity=False),
+            )
+        )
+    elif type(lhs) != type(rhs):
+        return f"dtype: {lhs} vs {rhs}"
+    else:
+        return ""
 
 
 # Reports the difference between meta of two tensors in a string
