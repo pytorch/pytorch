@@ -11,7 +11,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 from types import ModuleType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     DefaultDict,
@@ -23,6 +22,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -32,7 +32,7 @@ from sympy import Expr
 import torch
 import torch._logging
 import torch.fx
-from torch import Tensor, device
+from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
@@ -42,13 +42,13 @@ from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
+    free_unbacked_symbols,
+    has_free_symbols,
+    resolve_unbacked_bindings,
     RuntimeAssert,
     ShapeEnv,
     SympyBoolean,
     SymTypes,
-    free_unbacked_symbols,
-    has_free_symbols,
-    resolve_unbacked_bindings,
 )
 from torch.fx.graph import Graph
 from torch.fx.node import Node
@@ -76,13 +76,13 @@ from .ir import (
     Constant,
     DonatedBuffer,
     FixedLayout,
+    get_device_type,
     InputBuffer,
     Pointwise,
     Reduction,
     StorageBox,
     TensorBox,
     TorchBindObject,
-    get_device_type,
 )
 from .lowering import (
     constrain_to_fx_strides,
