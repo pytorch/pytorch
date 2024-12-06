@@ -4037,14 +4037,12 @@ class AOTInductorTestsTemplate:
         example_inputs = (arg,)
         model = Model()
         expected = model(*example_inputs)
-
         so_path = AOTIRunnerUtil.compile(model, example_inputs)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
 
         misaligned_arg = torch.zeros(N + 1, device=self.device)
-        m_misaligned_argarg = misaligned_arg[1:]
+        misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
-
         # If the model is compiled with aligned inputs, the generated
         # code will check inputs alignment at runtime, and throws an
         # error if any alignment assumption is violated.
@@ -4068,7 +4066,7 @@ class AOTInductorTestsTemplate:
         misaligned_arg.copy_(arg)
         example_inputs = (misaligned_arg,)
         # If the model is already compiled with a misaligned input, the
-        # generated code should not contain an alignment check for that input.
+        # generated code should NOT contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
 
 
