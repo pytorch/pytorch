@@ -4067,8 +4067,8 @@ class AOTInductorTestsTemplate:
         misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
         example_inputs = (misaligned_arg,)
-        # If the model is compiled with a misaligned input, the generated
-        # code should not contain a misalignment check for that input.
+        # If the model is already compiled with a misaligned input, the
+        # generated code should not contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
 
 
