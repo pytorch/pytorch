@@ -33,7 +33,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
@@ -1309,6 +1309,7 @@ class TestPatternMatcher(TestCase):
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
     @skipIfXpu
+    @xfailIfSM89
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",
