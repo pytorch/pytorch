@@ -1126,7 +1126,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     # Arbitrarily skipping the older models
     if torch.version.hip:
         assert prop.major is not None
-        if prop.major <= 10:
+        if prop.major < 9 or prop.major == 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
         return True
