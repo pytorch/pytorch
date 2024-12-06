@@ -1502,11 +1502,11 @@ class TritonKernel(SIMDKernel):
                 rn_bases = self._get_reduction_symbols(
                     "base", integer=True, nonnegative=True
                 )
-                rbase = self._flatten_reduction_inds(rn_bases)
+                rbase = self._flatten_reduction_indices(rn_bases)
                 self.body.splice(f"rbase = {self.index_to_str(rbase)}")
             else:
                 # For looped reductions, indexing is deferred to the innermost loop.
-                self.codegen_reduction_inds(self.body)
+                self.codegen_reduction_indices(self.body)
 
     def need_numel_args(self):
         r"""
@@ -2756,7 +2756,7 @@ class TritonKernel(SIMDKernel):
             with self.body.indent():
                 # last range tree is always reduction
                 self.iteration_ranges_codegen_header(self.range_trees[-1], self.body)
-                self.codegen_reduction_inds(self.body)
+                self.codegen_reduction_indices(self.body)
                 self.body.splice(self.indexing_code)
                 self.body.splice(self.loads)
                 self.body.splice(self.compute)
@@ -3432,14 +3432,14 @@ class TritonKernel(SIMDKernel):
             sympy_product(rn_numels[idx + 1 :]) for idx in range(len(rn_prefixes) - 1)
         ] + [sympy.Integer(1)]
 
-    def _flatten_reduction_inds(self, multi_inds: List[sympy.Expr]) -> sympy.Expr:
+    def _flatten_reduction_indices(self, multi_inds: List[sympy.Expr]) -> sympy.Expr:
         """
         Compute linear reduction indices from N dimensional ones.
         """
         coeffs = self._get_reduction_index_coeffs()
         return sympy_dot(coeffs, multi_inds)
 
-    def codegen_reduction_inds(self, buffer) -> None:
+    def codegen_reduction_indices(self, buffer) -> None:
         """
         Generates code that converts ND reduction indices into linear indices.
         """
@@ -3450,9 +3450,9 @@ class TritonKernel(SIMDKernel):
         rn_inds = self._get_reduction_symbols("index", integer=True, nonnegative=True)
 
         # Compute roffset and rindex.
-        roffset = self._flatten_reduction_inds(rn_offsets)
+        roffset = self._flatten_reduction_indices(rn_offsets)
         buffer.splice(f"roffset = {self.index_to_str(roffset)}")
-        rindex = self._flatten_reduction_inds(rn_inds)
+        rindex = self._flatten_reduction_indices(rn_inds)
         buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
     def iteration_ranges_codegen_header(self, entry, code):
