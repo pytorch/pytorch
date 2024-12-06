@@ -407,7 +407,7 @@ class SIMDKernel(Kernel):
         active_prefixes = OrderedSet(
             prefix for prefix in all_prefixes if prefix in self.numels
         )
-        no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
+        no_r_dim = not self.inside_reduction or not self.features.is_reduction()
 
         def filtered_index_map(seq, mask) -> Dict[Any, int]:
             return {
@@ -545,7 +545,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.features.reduction_numel == 1:
+            if not self.features.is_reduction():
                 assert not self.inside_reduction
                 yield
                 return
