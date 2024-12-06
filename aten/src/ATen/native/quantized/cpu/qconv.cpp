@@ -981,8 +981,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
       output_zero_point,
       channels_last);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  pytorch_qnnp_status run_status;
+  pytorch_qnnp_status run_status{};
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(
         convolution_op.get(),

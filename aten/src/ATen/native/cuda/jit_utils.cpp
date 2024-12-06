@@ -923,7 +923,6 @@ void codegenOutputQuery(
 // TODO: try making the CUcontext thread local to see if that improves performance - why is this slow?
 void initializeCudaContext() {
   // lazily construct context if non-existing yet;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -1549,7 +1548,6 @@ NvrtcFunction jit_pwise_function(
   const std::string compute = std::string("--gpu-architecture=") +
       (compile_to_sass ? "sm_" : "compute_") + std::to_string(cuda_major) +
       std::to_string(cuda_minor);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++17", compute.c_str(), "-default-device"};
 #endif

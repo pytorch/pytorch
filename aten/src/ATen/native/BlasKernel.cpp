@@ -658,11 +658,9 @@ scalar_t dot_naive(
     scalar_t* y,
     int64_t incy,
     Functor op) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t i;
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t sum = 0;
-  for (i = 0; i < n; i++) {
+  for (int64_t i = 0; i < n; i++) {
     sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
   return static_cast<scalar_t>(sum);

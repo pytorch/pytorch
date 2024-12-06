@@ -71,8 +71,7 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
 void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t BLOCK_SZ;
+  int64_t BLOCK_SZ = 0;
   if (self.scalar_type() == kByte) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 120;
