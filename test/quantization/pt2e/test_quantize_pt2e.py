@@ -2035,22 +2035,24 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m.recompile = _fake_recompile
 
-        # Train idempotent
+        # First train after export should always recompile
         m.train()
-        self.assertEqual(m._recompile_count, 0)
-        m.train()
-        self.assertEqual(m._recompile_count, 0)
-
-        # Train -> eval should update the recompile count
-        m.eval()
         self.assertNotEqual(m._recompile_count, 0)
-        new_count = m._recompile_count
+        count1 = m._recompile_count
 
-        # Eval idempotent
+        # Train -> train should not recompile
+        m.train()
+        self.assertEqual(m._recompile_count, count1)
+
+        # Train -> eval should recompile
         m.eval()
-        self.assertEqual(m._recompile_count, new_count)
+        self.assertNotEqual(m._recompile_count, count1)
+        count2 = m._recompile_count
+
+        # Eval -> eval should not recompile
         m.eval()
-        self.assertEqual(m._recompile_count, new_count)
+        self.assertEqual(m._recompile_count, count2)
+
 
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
