@@ -405,8 +405,7 @@ std::array<scalar_t, nrows> multi_row_sum(
     }
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<scalar_t, nrows> ret;
+  std::array<scalar_t, nrows> ret{};
   for (const auto k : c10::irange(nrows)) {
     ret[k] = acc[0][k];
   }
@@ -504,7 +503,6 @@ void vectorized_outer_sum(
     const vacc_t sums = row_sum<vacc_t, VecLoadPolicy>(
         row_in, inner_stride, size0);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     store<StorePolicy>(data[0], out_stride, j, sums);
   }
 

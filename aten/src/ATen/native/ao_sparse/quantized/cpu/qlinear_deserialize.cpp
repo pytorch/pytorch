@@ -191,7 +191,6 @@ struct UnsignedIndicesTypeTrait<int8_t> {
   using t = uint8_t;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const BCSRSerializationType& serialized)
     : LinearPackedParamsBase(
@@ -316,4 +315,4 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 }
 #endif // USE_PYTORCH_QNNPACK
 
-} // namespace ao
+} // namespace ao::sparse
