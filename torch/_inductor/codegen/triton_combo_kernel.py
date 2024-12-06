@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+import sympy
 from sympy import Integer, Symbol
 
 from .. import config, metrics
@@ -102,7 +103,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not kernel_map[n].inside_reduction
             and len(kernel_map[n].numels) == 2
-            and V.graph.sizevars.size_hint(kernel_map[n].numels[0]) > LARGE_NUMELS
+            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -216,7 +217,7 @@ class ComboKernel(Kernel):
             ndim = len(tiled_groups)
             assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
             if not mixed_sizes and ndim == 3:
-                y_elem = tiled_groups[0]
+                y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
                     partition_state, read_write_count, node_info
@@ -463,7 +464,7 @@ class ComboKernel(Kernel):
 
     @staticmethod
     def create_triton_kernel(
-        *groups: Any,
+        tiling: Dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
@@ -472,7 +473,7 @@ class ComboKernel(Kernel):
         2) numels except x dimension are the same for each sub kernel.
         """
         return TritonKernel(
-            *groups,
+            tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
@@ -509,13 +510,13 @@ class ComboKernel(Kernel):
                 assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
 
-            if tree.prefix != "r":
+            if not tree.is_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     grid.append(int(simplified_tree_numel))
                 else:
                     grid.append(f"{tree.prefix}numel_{num}")
 
-            if tree.prefix == "r" and sub_kernel.persistent_reduction:
+            if tree.is_reduction and sub_kernel.persistent_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     val = int(simplified_tree_numel)
                 else:
@@ -564,7 +565,7 @@ class ComboKernel(Kernel):
     def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels
+            for numel in sub_kernel.numels.values()
         ]
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
@@ -741,7 +742,7 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
-                if tree.prefix == "r" and (
+                if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                 ):
                     continue
@@ -779,7 +780,7 @@ class ComboKernel(Kernel):
                     expr = V.graph.wrapper_code.generate_numel_expr(
                         name, tree, suffix=str(num)
                     )
-                if tree.prefix != "r":
+                if not tree.is_reduction:
                     assert isinstance(
                         grid[i][num], str
                     ), f"Grid {grid[i][num]} should be a dynamic shape."
@@ -789,7 +790,7 @@ class ComboKernel(Kernel):
                     ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
-                if tree.prefix != "r" or sub_kernel.inside_reduction:
+                if not tree.is_reduction or sub_kernel.inside_reduction:
                     call_args.append(expr)
                     arg_types.append(type(expr))
 
@@ -802,7 +803,7 @@ class ComboKernel(Kernel):
                 if numel_name not in self.dynamic_shape_args:
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
-                if tree.prefix != "r":
+                if not tree.is_reduction:
                     assert isinstance(
                         grid[i][num], str
                     ), f"Grid {grid[i][num]} should be a dynamic shape."
@@ -811,7 +812,7 @@ class ComboKernel(Kernel):
                         grid[i][num] == numel_sign + numel_name
                     ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
-                if tree.prefix != "r" or sub_kernel.inside_reduction:
+                if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
