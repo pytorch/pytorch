@@ -21,7 +21,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     return false;
   }
 
-  virtual std::string showConfig() const {
+  std::string showConfig() const override {
     TORCH_CHECK(
         false,
         "Cannot query detailed XPU version without ATen_xpu library.");
@@ -54,7 +54,7 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
 
-  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
+  void deviceSynchronize(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
   }
 
