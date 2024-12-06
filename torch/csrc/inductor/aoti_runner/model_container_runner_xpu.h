@@ -17,7 +17,7 @@ class TORCH_API AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
       const std::string& device_str = "xpu",
       const std::string& kernel_bin_dir = "");
 
-  ~AOTIModelContainerRunnerXpu();
+  ~AOTIModelContainerRunnerXpu() override;
 
   std::vector<at::Tensor> run(
       const std::vector<at::Tensor>& inputs,
