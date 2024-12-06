@@ -1061,7 +1061,7 @@ class Reduction(Loops):
         num_sm = props.multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
-        threads_per_sm = 2048  # props.max_threads_per_multi_processor
+        threads_per_sm = 2048
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
