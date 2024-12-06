@@ -49,6 +49,22 @@ def _extract_carry_and_out(flat_out: List[Any], num_carry: int):
     return flat_out[:num_carry], flat_out[num_carry:]
 
 
+# An custom op that's used for lowering scan in inductor.
+# Compared with aten.select, the lowering rule for this is more specialized
+# to the scan operator. For example, we skips a bunch of checks that we're
+# certain is true for scan.
+@torch.library.custom_op("_scan_helper::unsafe_select", mutates_args=())  # type: ignore[misc]
+def _unsafe_select(t: torch.Tensor, dim: int, idx: int) -> torch.Tensor:
+    return torch.select(t, dim, idx)
+
+
+# Note: we always select 0, becuase idx is an unbacked symint in scan,
+# and we're certain that t.size()[dim] > 0.
+@torch.library.register_fake("_scan_helper::unsafe_select")  # type: ignore[misc]
+def _(t: torch.Tensor, dim: int, idx: int):
+    return t.select(dim, 0)
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], Tuple[pytree.PyTree, pytree.PyTree]
@@ -172,11 +188,10 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
     # There are no pytree restrictions on the second output of the operator
     out_leaves, tree_out = pytree.tree_flatten(out[1])
 
-    # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
-    # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
     # TODO: Unify the list inputs of control flow ops to tuple.
+    # TODO: Support aot_compatible mode
 
     combine_fn = functools.partial(
         wrap_combine_fn_flat,
