@@ -77,7 +77,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
@@ -216,7 +216,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
       }
     }
 
-    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
     auto dv = at::empty_like(value);
@@ -419,7 +419,7 @@ _efficient_attention_backward(
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
                 " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   bool is_causal;
   if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
     is_causal = true;
@@ -538,7 +538,7 @@ _efficient_attention_backward(
     p.num_batches = cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     p.num_heads = nH;
     p.custom_mask_type = custom_mask_type;
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
     if (cu_seqlens_q.has_value()) {
       p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
       p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();
