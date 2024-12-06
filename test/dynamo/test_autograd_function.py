@@ -229,7 +229,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             for i in range(1, 5):
                 torch._dynamo.reset()
                 model = globals()[f"Module{i}"]()
-                opt_model = torch._dynamo.optimize("eager")(model)
+                opt_model = torch.compile(model, backend="eager")
                 self.assertTrue(
                     torch.allclose(
                         opt_model(torch.ones(2, 3, requires_grad=grad)),
@@ -243,7 +243,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             for model in [Module5(), Module6()]:
                 torch._dynamo.reset()
                 cnts = torch._dynamo.testing.CompileCounter()
-                opt_model = torch._dynamo.optimize(cnts)(model)
+                opt_model = torch.compile(model, backend=cnts)
                 for _ in range(3):
                     ref = model(x)
                     res = opt_model(x)
@@ -252,7 +252,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
         eager_result = model(input, weight)
@@ -261,7 +261,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_materialize_grad(self):
         model = MaterializingGradModule()
-        opt_model = torch._dynamo.optimize("eager")(model)
+        opt_model = torch.compile(model, backend="eager")
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         optim_result = opt_model(x)
         eager_result = model(x)
@@ -269,7 +269,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_print_in_bwd(self):
         model = CustomFuncBwdPrintModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: print"):
             opt_model(x)
@@ -323,7 +323,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(model, backend="eager", fullgraph=True)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
@@ -402,7 +402,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -412,7 +412,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -547,9 +547,13 @@ class GraphModule(torch.nn.Module):
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", z: "f32[]", l_weird_b: "f32[]", l_weird_c: "f32[]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
             mul: "f32[]" = l_weird_b * l_weird_c
             clone: "f32[]" = x.clone();  x = None
             mul_1: "f32[]" = mul * clone;  mul = clone = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return (mul_1, [l_weird_b, l_weird_c])
 
     class bwd_body_0(torch.nn.Module):
@@ -691,7 +695,7 @@ class GraphModule(torch.nn.Module):
         args, kwargs = ([torch.rand([4, 128, 32, 32])], {})
         before = mod(*args, **kwargs)
 
-        compiled_model = torch._dynamo.optimize("eager")(mod)
+        compiled_model = torch.compile(mod, backend="eager")
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
@@ -859,7 +863,7 @@ class GraphModule(torch.nn.Module):
             foo = MyFn3.apply(base, False)
 
         test()
-        opt_test = torch._dynamo.optimize("eager")(test)
+        opt_test = torch.compile(test, backend="eager")
         opt_test()
 
     def test_tensor_subclass_intermediary_input(self):
@@ -1018,8 +1022,8 @@ class GraphModule(torch.nn.Module):
 
         x_ref = torch.randn(2, requires_grad=True)
         y_ref = torch.randn(2, requires_grad=True)
-        x_test = x_ref.clone().detach().requires_grad_()
-        y_test = y_ref.clone().detach().requires_grad_()
+        x_test = x_ref.detach().clone().requires_grad_()
+        y_test = y_ref.detach().clone().requires_grad_()
 
         out_ref = foo(x_ref, y_ref)
         out_ref.sum().backward()
@@ -1113,9 +1117,13 @@ class GraphModule(torch.nn.Module):
 
     class fwd_body_0(torch.nn.Module):
         def forward(self, ctx : torch.autograd.function.Function, x: "f32[]", y: "f32[]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
             out1: "f32[]" = x.sin();  x = None
 
             out2: "f32[]" = y * 2;  y = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
             return ((out1, out2), [])
 
     class bwd_body_0(torch.nn.Module):
@@ -1186,6 +1194,62 @@ class GraphModule(torch.nn.Module):
         # Make sure guards for default values do not crash
         foo(torch.randn(2))
         foo(torch.randn(2, requires_grad=True))
+
+    def test_fwd_no_grad(self):
+        # autograd.Function.forward should be traced and called under no_grad mode.
+        # torch.exp with out=... arguments don't support automatic differentiation,
+        # so can't be traced/called under grad mode (throwing RuntimeError),
+        # therefore this unit test ensures fwd is under no_grad mode.
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inputs):
+                torch.exp(inputs, out=inputs)
+                return inputs
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return Foo.apply(x)
+
+        x1 = torch.randn(2, 3, requires_grad=True)
+        x2 = x1.clone()
+        self.assertEqual(f(x1), Foo.apply(x2))
+
+    # https://github.com/pytorch/pytorch/issues/129963
+    def test_fwd_propogation_correctness(self):
+        class MyCube(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                result = x**3
+                dx = 3 * x**2
+                ctx.save_for_backward(x, dx)
+                return result, dx
+
+            @staticmethod
+            def backward(ctx, grad_output, grad_dx):
+                x, dx = ctx.saved_tensors
+                result = grad_output * dx + grad_dx * 6 * x
+                # Intentionally return a wrong value to test if the backward is triggered twice.
+                # Since if the first MyCube.apply returns values w/o requires_grad=True,
+                # this backward would be only triggered once (the first MyCube.appy call),
+                # as the second MyCube.apply is inlined by Dynamo and the corresponding backward
+                # would be generated by autograd engine.
+                return result * 0.5
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            x, _ = MyCube.apply(x)
+            x, _ = MyCube.apply(x)
+            return x
+
+        inp = torch.ones(2, requires_grad=True)
+        out = fn(inp)
+        out.sum().backward()
+        self.assertEqual(out, inp**3)
+        self.assertEqual(inp.grad, torch.tensor([2.25, 2.25]))
 
     def test_tuple_arg(self):
         cnt = torch._dynamo.testing.CompileCounter()

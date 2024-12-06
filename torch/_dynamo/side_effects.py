@@ -5,6 +5,7 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
+from types import CellType
 from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
@@ -18,7 +19,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
-from .source import GlobalSource, LocalSource, Source
+from .source import GlobalSource, LocalCellSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -146,21 +147,28 @@ class SideEffects:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
+    def load_attr(self, item, name, deleted_ok=False, check=False):
+        if check:
+            assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
-        assert isinstance(cellvar, variables.NewCellVariable)
+        if cellvar.is_immutable():
+            unimplemented("Dynamo currently doesn't support writing to such cell")
+        assert isinstance(cellvar, variables.CellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
-        assert isinstance(cellvar, variables.NewCellVariable)
-        return self.load_attr(cellvar, "cell_contents")
+        assert isinstance(cellvar, variables.CellVariable)
+        if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
+            return self.load_attr(cellvar, "cell_contents", check=False)
+        if cellvar.pre_existing_contents:
+            return cellvar.pre_existing_contents
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -192,6 +200,8 @@ class SideEffects:
         ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
+        if item.is_immutable():
+            return False
         if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
@@ -291,20 +301,25 @@ class SideEffects:
         self,
     ):
         obj = object()
-        variable = variables.NewCellVariable(
+        variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(self, source: Source, item: Any):
-        variable = variables.NewCellVariable(
-            mutation_type=AttributeMutationExisting(),
+    def track_cell_existing(
+        self, source: Optional[Source], cell: CellType, contents: VariableTracker
+    ):
+        variable = variables.CellVariable(
+            # We don't support mutation to cell without source because we need
+            # source to properly codegen the mutations.
+            mutation_type=None if source is None else AttributeMutationExisting(),
+            pre_existing_contents=contents,
             source=source,
         )
-        self.id_to_variable[id(item)] = variable
-        self.keepalive.append(item)
+        self.id_to_variable[id(cell)] = variable
+        self.keepalive.append(cell)
         return variable
 
     def track_global_existing(self, source: Source, item: Any):
@@ -333,11 +348,9 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
+        # Avoid VT cycles from e.g., recursive function.
+        visited: Set[VariableTracker] = set()
         live_new_objects: Set[VariableTracker] = set()
-
-        # use this to avoid cycles in mutation_type (though I'm not sure if that
-        # can actually happen).
-        visited: Set[VariableTracker] = set({})
 
         def visit(var: VariableTracker):
             if var in visited:
@@ -368,7 +381,17 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
+        VariableTracker.visit(
+            visit,
+            # TODO track from all possible sources.
+            (
+                tx.stack,
+                tx.symbolic_locals,
+                pre_existing_vars,
+                tx.output.backward_state,
+                self.tensor_hooks,
+            ),
+        )
         # Manually release the self-referential function, which indirectly
         # captures certain `VariableTracker` and affects parts of PT test/logic
         # that are sensitive to when certain objects get released.
@@ -400,14 +423,21 @@ class SideEffects:
         # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                var, variables.NewCellVariable
+                var, variables.CellVariable
             ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "make_cell")
-                )
-                cg.extend_output(create_call_function(0, False))
-                cg.add_cache(var)
-                var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                # Cells created in the root frame are created either by
+                # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
+                # `make_cell` for the non-root-frame cells here.
+                # TODO generalize this so we never need to call `make_cell`.
+                if var.local_name is None:
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "make_cell")
+                    )
+                    cg.extend_output(create_call_function(0, False))
+                    cg.add_cache(var)
+                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                elif var.source is None:
+                    var.source = LocalCellSource(var.local_name)
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -532,6 +562,36 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.lists.DequeVariable):
+                # For limited maxlen, the order of operations matter for side
+                # effect, but we currently don't track the order, so no support.
+                if not (
+                    isinstance(var.maxlen, variables.ConstantVariable)
+                    and var.maxlen.value is None
+                ):
+                    unimplemented("side effect on existing deque with limited maxlen")
+
+                # old.extend(new), this runs last
+                cg(var.source)
+                cg.load_method("extend")
+                cg(var, allow_cache=False)  # Don't codegen via source
+                suffixes.append(
+                    [
+                        *create_call_method(1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
+                # old.clear(), this runs first
+                cg(var.source)
+                cg.load_method("clear")
+                suffixes.append(
+                    [
+                        *create_call_method(0),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
             elif isinstance(var, variables.CustomizedDictVariable):
                 # need to update the dict manually since update method may be invalid
                 varname_map = {}
@@ -567,34 +627,38 @@ class SideEffects:
 
             elif isinstance(var, variables.ConstDictVariable):
                 # Reconstruct works as follow:
-                # (1) codegen(...) each pair of key/value
-                # (2) create a new dictionary with the pairs of key/values above
-                # (3) clear the original dictionary
+                # (1) Skip codegen if there are no new items
+                # (2) codegen(...) each pair of key/value
+                # (3) create a new dictionary with the pairs of key/values above
+                # (4) clear the original dictionary
                 #   + only if a key was removed from the input dict
-                # (4) update the original dictionary with the dict created in (2)
+                # (5) update the original dictionary with the dict created in (2)
 
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("update")
-                cg(var, allow_cache=False)  # Don't codegen via source
-
-                if var.should_reconstruct_all:
+                if var.has_new_items():
                     cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("clear")
+                    cg.load_method("update")
+                    cg(var, allow_cache=False)  # Don't codegen via source
 
-                suffixes.append(
-                    [
-                        *create_call_method(1),  # update
-                        create_instruction("POP_TOP"),
-                    ]
-                )
+                    if var.should_reconstruct_all:
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg.load_method("clear")
 
-                if var.should_reconstruct_all:
                     suffixes.append(
                         [
-                            *create_call_method(0),  # clear
+                            *create_call_method(1),  # update
                             create_instruction("POP_TOP"),
                         ]
                     )
+
+                    if var.should_reconstruct_all:
+                        # clear will appear before "update" as the suffixes are
+                        # applied in reverse order.
+                        suffixes.append(
+                            [
+                                *create_call_method(0),  # clear
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
 
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
@@ -621,6 +685,15 @@ class SideEffects:
                 )
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
+
+            elif isinstance(var, variables.CellVariable) and var.local_name is not None:
+                # Emit more readable and performant bytecode.
+                # TODO generalize this for cells created during inlining.
+                if var in self.store_attr_mutations:
+                    contents_var = self.load_cell(var)
+                    cg(contents_var)
+                    suffixes.append([cg.create_store_deref(var.local_name)])
+
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -675,7 +748,7 @@ class SideEffects:
                         cg(value)
                         cg(var.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-            elif isinstance(var, variables.TupleIteratorVariable):
+            elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "iter_next")

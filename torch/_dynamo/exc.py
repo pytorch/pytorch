@@ -58,6 +58,10 @@ class CompileCollectiveRestartAnalysis(RestartAnalysis):
     pass
 
 
+class TensorifyScalarRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 

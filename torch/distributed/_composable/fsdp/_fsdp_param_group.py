@@ -51,8 +51,6 @@ class FSDPCommContext:
 
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
-        if device.type not in ["cuda", "hpu"]:
-            raise RuntimeError("FSDP requires streams support")
         # Setting the all-gather/reduce-scatter streams to be higher priority
         # can help avoid some issues where their copies in/out are delayed and
         # block computation (this is different from high-pri NCCL streams)
@@ -103,6 +101,11 @@ class AllGatherState(NamedTuple):
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
     event: torch.Event  # reduce-scatter event
+
+
+class AllReduceState(NamedTuple):
+    all_reduce_input: torch.Tensor
+    event: torch.Event  # all-reduce event
 
 
 class FSDPParamGroup:
@@ -194,6 +197,11 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: Optional[torch.Tensor] = None
+        # Holds the all-reduce input and all-reduce event to keep it alive
+        # until the end of backward (critical when doing bf16 reduction with
+        # fp32 parameters since the all-reduce input is allocated in the RS
+        # stream and will have no refs to it after being upcast to fp32)
+        self._all_reduce_state: Optional[AllReduceState] = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -407,6 +415,8 @@ class FSDPParamGroup:
                 reduce_scatter_input,
                 reduce_scatter_event,
                 self._post_reduce_event,
+                all_reduce_input,
+                all_reduce_event,
                 self._partial_reduce_output,
             ) = foreach_reduce(
                 fsdp_params_with_grad,
@@ -425,6 +435,11 @@ class FSDPParamGroup:
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(
                 reduce_scatter_input, reduce_scatter_event
             )
+            if all_reduce_input is not None:
+                assert all_reduce_event is not None
+                self._all_reduce_state = AllReduceState(
+                    all_reduce_input, all_reduce_event
+                )
 
     def finalize_backward(self):
         self._wait_for_post_backward()
@@ -447,6 +462,9 @@ class FSDPParamGroup:
         if self._post_reduce_event is not None:
             self.device_handle.current_stream().wait_event(self._post_reduce_event)
             self._post_reduce_event = None
+        if self._all_reduce_state is not None:
+            self.device_handle.current_stream().wait_event(self._all_reduce_state.event)
+            self._all_reduce_state = None
 
     def _backward_prefetch(self) -> None:
         if self._training_state == TrainingState.PRE_BACKWARD:
