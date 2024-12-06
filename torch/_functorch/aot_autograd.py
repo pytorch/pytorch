@@ -55,7 +55,6 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     to_fun,
 )
 from ._aot_autograd.input_output_analysis import (  # noqa: F401
-    _tensors_definitely_do_not_overlap,
     compute_overlapping_inputs,
     create_graph_signature,
     create_synthetic_base_metadata,
