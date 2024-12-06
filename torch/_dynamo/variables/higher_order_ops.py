@@ -90,8 +90,15 @@ def diff_meta(tensor_vars1, tensor_vars2) -> str:
     assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
     all_diffs = []
     for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-        meta1 = _extract_tensor_metadata(var1.proxy.node.meta["example_value"])
-        meta2 = _extract_tensor_metadata(var2.proxy.node.meta["example_value"])
+        # We have vmap x cond tests and querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format is not yet implemented.
+        # And it seems the remaining metas are good enough for now.
+        meta1 = _extract_tensor_metadata(
+            var1.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        meta2 = _extract_tensor_metadata(
+            var2.proxy.node.meta["example_value"], include_contiguity=False
+        )
         # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
         pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
 
