@@ -2410,6 +2410,30 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
 
+    def test_preserve_nn_module_stack(self):
+        """Test we can preserve nn_module_stack on replaced pattern's nodes"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
+        )
+
+        def check_nn_module(node):
+            self.assertTrue("nn_module_stack" in node.meta)
+            self.assertTrue(
+                "ConvWithBNRelu" in node.meta["nn_module_stack"]["L__self__"][1]
+            )
+
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.op not in ["placeholder", "output", "get_attr"]:
+                check_nn_module(node)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.name == "mul":
+                check_nn_module(node)
+
 
 instantiate_parametrized_tests(TestQuantizePT2E)
 

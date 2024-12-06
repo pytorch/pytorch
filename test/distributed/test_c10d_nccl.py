@@ -2913,6 +2913,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # nccl error happening before rank 0 timeouts
             time.sleep(4)
 
+        # Mimicing all ranks sensing the timeout, abort
+        process_group.abort()
+
         if prev_nccl_async_error_handling is not None:
             os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
