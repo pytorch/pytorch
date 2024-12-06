@@ -11,6 +11,7 @@
 #include <ATen/ops/_foreach_add_native.h>
 #include <ATen/ops/_foreach_div_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
+#include <ATen/ops/_foreach_where_native.h>
 
 #include <ATen/ops/empty_like_native.h>
 #endif
@@ -184,6 +185,47 @@ void all_types_complex_bool_half_bfloat16_(
       tensors[0].scalar_type(),
       "foreach_binary_op_scalar_cuda_",
       [&]() { foreach_binary_op_<scalar_t, Op>(tensors, scalar, alpha); });
+}
+
+template <typename T>
+struct WhereFunctor {
+  inline C10_DEVICE T operator()(const T condition, const T self, const T other) {
+    return condition ? self : other;
+  }
+};
+
+std::vector<Tensor> foreach_tensor_where_tensor_kernel_cuda(
+    TensorList conditions,
+    TensorList tensors,
+    const at::Scalar& other) {
+
+  std::vector<at::Tensor> vec_res;
+  vec_res.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    vec_res.emplace_back(at::native::empty_like(t));
+  }
+  std::vector<std::vector<at::Tensor>> tensor_lists{
+    conditions.vec(), tensors.vec(), vec_res};
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      tensors[0].scalar_type(),
+      "foreach_tensor_where_scalarlist_cuda",
+      [&]() {
+        using opmath_t = typename at::opmath_type<scalar_t>;
+        multi_tensor_apply<3>(
+            tensor_lists,
+            TernaryOpScalarFunctor<
+                scalar_t,
+                /* depth */ 3,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 2>(),
+            WhereFunctor<opmath_t>(),
+            other.to<opmath_t>());
+      });
+
+  return tensor_lists[2];
 }
 
 FOREACH_BINARY_OP_SCALAR_TENSOR_ALPHA(

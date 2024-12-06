@@ -54,6 +54,7 @@
 #include <ATen/ops/_foreach_tan_native.h>
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
+#include <ATen/ops/_foreach_where_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
@@ -61,6 +62,7 @@
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/pow.h>
+#include <ATen/ops/where.h>
 #endif
 
 namespace at::native {
@@ -492,6 +494,19 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   result.reserve(exponent.size());
   for (const auto& t : exponent) {
     result.emplace_back(at::pow(self, t));
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_where_tensor_kernel_slow(
+    TensorList conditions,
+    TensorList tensors,
+    const at::Scalar& other) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (int64_t i = 0; i < tensors.size(); i++) {
+    result.emplace_back(at::where(conditions[i], tensors[i], other));
   }
   return result;
 }
