@@ -346,7 +346,7 @@ class BlockPtrOptions:
         if (
             not V.kernel.inside_reduction
             and len(params.strides) == len(V.kernel.numels) - 1
-            and V.kernel.features.reduction_numel != 1
+            and V.kernel.features.is_reduction()
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
             final_shape.append(sympy.S.One)
