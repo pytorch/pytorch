@@ -1174,8 +1174,7 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
-        # Rune prune_configs_by to filter the configs
-        # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/triton/runtime/autotuner.py#L187
+        # Run prune_configs_by to filter the configs
         if isinstance(variable.kernel, Autotuner):
             variable.kernel.nargs = dict(zip(variable.kernel.arg_names, args))
             variable.kernel.prune_configs(kwargs)
@@ -1185,9 +1184,10 @@ class TritonHOPifier:
             variable.kernel.early_config_prune = None
 
         # run @heuristics to populate kwargs
-        # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/triton/runtime/autotuner.py#L365
         for v, heuristic_fn in variable.kernel.values.items():
-            kwargs[v] = heuristic_fn({**dict(zip(variable.kernel.arg_names, args)), **kwargs})
+            kwargs[v] = heuristic_fn(
+                {**dict(zip(variable.kernel.arg_names, args)), **kwargs}
+            )
 
         # set values to be empty, we don't want to run the heuristics twice
         variable.kernel.values = []
