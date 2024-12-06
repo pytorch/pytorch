@@ -37,7 +37,7 @@ importlib.import_module("filelock")
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
     requires_gpu,
 )
 
@@ -970,7 +970,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_TRITON_GPU and not TEST_WITH_ASAN:
 
     class FreezingGpuTests(TestCase):
         common = check_model_gpu
@@ -985,5 +985,5 @@ del OptimizeForInferenceTemplate
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU, HAS_XPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_CUDA, HAS_TRITON_GPU, HAS_TRITON_XPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 # Defines all the kernels for tests
@@ -32,12 +32,12 @@ from torch.testing._internal.triton_utils import *  # noqa: F403
 from torch.utils._triton import has_triton_package, has_triton_tma
 
 
-if HAS_GPU:
+if HAS_TRITON_GPU:
     import triton
     from triton import language as tl
 
     if not TEST_WITH_ROCM:
-        if HAS_CUDA:
+        if HAS_TRITON_CUDA:
             try:
                 from triton.language.extra.libdevice import (  # @manual
                     fast_dividef,
@@ -48,7 +48,7 @@ if HAS_GPU:
                     fast_dividef,
                     fast_dividef as my_fast_dividef,
                 )
-        elif HAS_XPU:
+        elif HAS_TRITON_XPU:
             from triton.language.extra.intel.libdevice import (  # @manual
                 fast_dividef,
                 fast_dividef as my_fast_dividef,
@@ -2227,7 +2227,7 @@ def make_mutation_test(fn):
 
 # Triton codegen suffers from scoping issues.
 # Define helpers here
-if HAS_GPU:
+if HAS_TRITON_GPU:
 
     @triton.jit
     def helper_id(p):
@@ -2899,7 +2899,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
 
-if HAS_GPU:
+if HAS_TRITON_GPU:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [

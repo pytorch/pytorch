@@ -11,7 +11,7 @@ from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
 )
 
 
@@ -414,7 +414,7 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_TRITON_GPU and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
@@ -440,5 +440,5 @@ if HAS_GPU and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

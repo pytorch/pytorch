@@ -105,7 +105,10 @@ try:
     has_pytest = True
 except ImportError:
     has_pytest = False
-
+from torch._utils import (
+    GPU_TYPES,
+    get_gpu_type,
+)
 
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
 
@@ -5550,3 +5553,17 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
+
+
+HAS_CUDA = torch.cuda.is_available()
+
+HAS_XPU = torch.xpu.is_available()
+
+HAS_GPU = HAS_CUDA or HAS_XPU
+
+GPU_TYPE = get_gpu_type()
+
+HAS_MULTIGPU = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPU_TYPES
+)

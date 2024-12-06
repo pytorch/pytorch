@@ -8,7 +8,7 @@ import torch
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 try:
@@ -114,5 +114,5 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_TRITON_GPU:
         run_tests()

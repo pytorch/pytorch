@@ -8,7 +8,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 class TestTritonWrapper(TestCase):
@@ -56,5 +56,5 @@ class TestTritonWrapper(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

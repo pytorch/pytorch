@@ -8,7 +8,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 class Foo(torch.nn.Module):
@@ -227,5 +227,5 @@ class TestOperatorReorderForPeakMemory(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

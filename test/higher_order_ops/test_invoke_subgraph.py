@@ -17,10 +17,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_TRITON_CUDA, "requires cuda")
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")

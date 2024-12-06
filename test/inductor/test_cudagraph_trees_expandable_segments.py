@@ -8,13 +8,13 @@ import sys
 import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_TRITON_CUDA and not TEST_WITH_ASAN:
     try:
         from .test_cudagraph_trees import CudaGraphTreeTests
     except ImportError:
@@ -36,7 +36,7 @@ if __name__ == "__main__":
         torch.cuda.is_available()
         and not IS_JETSON
         and not IS_WINDOWS
-        and HAS_CUDA
+        and HAS_TRITON_CUDA
         and not TEST_WITH_ASAN
     ):
         get_disabled_tests(".")

@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 try:
@@ -180,5 +180,5 @@ class TestTritonHeuristics(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_TRITON_GPU:
         run_tests()

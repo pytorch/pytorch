@@ -115,7 +115,7 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
     HAS_MULTIGPU,
     requires_gpu,
     skipCPUIf,
@@ -3609,7 +3609,7 @@ class CommonTemplate:
             ).eval()
             test_memory_format = [torch.contiguous_format]
             # TODO: GPU path doesn't support channels_last now.
-            if not HAS_GPU and dim > 1:
+            if not HAS_TRITON_GPU and dim > 1:
                 channels_last = (
                     torch.channels_last if dim == 2 else torch.channels_last_3d
                 )
@@ -11898,7 +11898,7 @@ if HAS_CPU:
 
     copy_tests(CommonTemplate, CpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_TRITON_GPU and not TEST_WITH_ASAN:
 
     class SweepInputsGPUTest(SweepInputs2, TestCase):
         gen = InputGen(10, GPU_TYPE)
@@ -12951,5 +12951,5 @@ if HAS_CPU:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

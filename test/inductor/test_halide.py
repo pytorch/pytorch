@@ -238,7 +238,7 @@ if test_torchinductor.HAS_CPU and HAS_HALIDE:
     CpuHalideTests = make_halide(test_torchinductor.CpuTests)
 
 if (
-    test_torchinductor.HAS_GPU
+    test_torchinductor.HAS_TRITON_GPU
     and HAS_HALIDE
     and os.environ.get("TEST_HALIDE_GPU") == "1"
 ):

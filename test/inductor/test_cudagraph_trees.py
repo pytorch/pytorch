@@ -46,11 +46,11 @@ if IS_WINDOWS and IS_CI:
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_CUDA
 
 
 aten = torch.ops.aten
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_TRITON_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
@@ -115,7 +115,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_TRITON_CUDA and not TEST_WITH_ASAN:
 
     def get_all_cudagraph_segments():
         segments = torch.cuda.memory_snapshot()
@@ -2523,5 +2523,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_TRITON_CUDA:
         run_tests(needs="filelock")

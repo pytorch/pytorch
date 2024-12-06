@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 from torch._inductor import config, test_operators
 from torch._inductor.utils import fresh_inductor_cache
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 try:
@@ -229,7 +229,7 @@ op2.node.kernel = extern_kernels.mm""",
             example_inputs,
         )
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires GPU")
     def test_debug_multi_tempalte(self):
         class ToyModel(torch.nn.Module):
             def __init__(self) -> None:

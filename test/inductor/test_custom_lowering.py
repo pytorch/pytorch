@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
     requires_gpu,
 )
 
@@ -218,5 +218,5 @@ class TestCustomLowering(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

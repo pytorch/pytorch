@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_GPU
 from torch.testing._internal.triton_utils import requires_gpu
 
 
@@ -980,5 +980,5 @@ instantiate_parametrized_tests(AssociativeScanTests)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

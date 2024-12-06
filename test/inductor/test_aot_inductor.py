@@ -43,12 +43,12 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+from torch.testing._internal.triton_utils import HAS_TRITON_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
 from torch.utils._triton import has_triton_tma
 
 
-if HAS_CUDA:
+if HAS_TRITON_CUDA:
     import triton  # @manual
     from triton import language as tl
 
@@ -3956,5 +3956,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_TRITON_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")

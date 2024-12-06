@@ -12,7 +12,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
-from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import HAS_TRITON_CUDA
 
 
 def compile(
@@ -334,5 +334,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_TRITON_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")

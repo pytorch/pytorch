@@ -8,10 +8,10 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
-from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+from torch.testing._internal.triton_utils import HAS_TRITON_CUDA, requires_cuda
 
 
-if HAS_CUDA:
+if HAS_TRITON_CUDA:
     import triton
 
     from torch.testing._internal.triton_utils import add_kernel

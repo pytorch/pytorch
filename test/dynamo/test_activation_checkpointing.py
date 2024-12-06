@@ -23,7 +23,7 @@ from torch.testing._internal.common_cuda import (
     SM90OrLater,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import (
     checkpoint,
@@ -32,7 +32,7 @@ from torch.utils.checkpoint import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_TRITON_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

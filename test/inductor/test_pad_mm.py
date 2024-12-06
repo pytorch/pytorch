@@ -16,7 +16,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 
 
 class PadMMTest(TestCase):
@@ -522,5 +522,5 @@ class PadMMTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_TRITON_CUDA:
         run_tests()

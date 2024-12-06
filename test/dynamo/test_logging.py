@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     munge_exc,
     skipIfTorchDynamo,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
@@ -26,7 +26,7 @@ from torch.testing._internal.logging_utils import (
 )
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_TRITON_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )

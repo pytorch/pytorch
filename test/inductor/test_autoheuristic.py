@@ -11,7 +11,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_gpu_shared_memory
 from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_A100, IS_H100
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU, IS_A100, IS_H100
 
 
 @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
@@ -169,5 +169,5 @@ class AutoHeuristicTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

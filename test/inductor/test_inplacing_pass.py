@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     subtest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -49,7 +49,7 @@ def sin_cos(x: torch.Tensor, out_sin: torch.Tensor, out_cos: torch.Tensor) -> No
     out_cos.copy_(x.cos())
 
 
-if HAS_GPU:
+if HAS_TRITON_GPU:
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -458,5 +458,5 @@ instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX and HAS_TRITON_GPU:
         run_tests(needs="filelock")

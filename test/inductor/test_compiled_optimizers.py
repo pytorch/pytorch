@@ -57,7 +57,7 @@ from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
     has_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda, requires_gpu
@@ -915,5 +915,5 @@ instantiate_device_type_tests(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

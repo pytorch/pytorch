@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -830,5 +830,5 @@ class ForeachTests(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_TRITON_CUDA:
         run_tests(needs="filelock")

@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 
 
 torch.set_float32_matmul_precision("high")
@@ -712,5 +712,5 @@ class TestFP8Lowering(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_TRITON_CUDA:
         run_tests()

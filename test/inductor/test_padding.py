@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     serialTest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU, requires_gpu
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -95,7 +95,7 @@ def forward_and_backward_pass(m, inputs):
 class TestCaseBase(TestCase):
     @classmethod
     def setUpClass(cls):
-        if HAS_GPU:
+        if HAS_TRITON_GPU:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
             torch.set_float32_matmul_precision("high")
@@ -103,7 +103,7 @@ class TestCaseBase(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if HAS_GPU:
+        if HAS_TRITON_GPU:
             torch.set_float32_matmul_precision(cls.prior_float32_matmul_precision)
             torch.set_default_device(cls.prior_default_device)
 
@@ -711,5 +711,5 @@ class PaddingTest(TestCaseBase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

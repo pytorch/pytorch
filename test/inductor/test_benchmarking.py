@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_GPU
 
 
 ALL_BENCHMARKER_CLASSES = (
@@ -39,7 +39,7 @@ class TestBenchmarker(TestCase):
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         return (fn, fn_args, fn_kwargs), _callable
 
-    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
+    @unittest.skipIf(not HAS_CPU or not HAS_TRITON_GPU, "requires CPU and GPU")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker
@@ -69,7 +69,7 @@ class TestBenchmarker(TestCase):
         self.assertGreater(timing, 0)
         self.assertEqual(self.get_counter_value(benchmarker_cls, "benchmark_cpu"), 1)
 
-    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires GPU")
     @decorateIf(
         unittest.expectedFailure,
         lambda params: params["benchmarker_cls"] is Benchmarker,
@@ -86,7 +86,7 @@ class TestBenchmarker(TestCase):
                 self.get_counter_value(benchmarker_cls, "triton_do_bench"), 1
             )
 
-    @unittest.skipIf(not HAS_CPU and not HAS_GPU, "requires CPU or GPU")
+    @unittest.skipIf(not HAS_CPU and not HAS_TRITON_GPU, "requires CPU or GPU")
     @unittest.expectedFailure
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
     def test_benchmark_safely_infers_device_no_devices(
@@ -96,7 +96,7 @@ class TestBenchmarker(TestCase):
         (fn, _, _), _ = self.make_params(device)
         benchmarker.benchmark(fn, (), {})
 
-    @unittest.skipIf(not HAS_CPU or not HAS_GPU, "requires CPU and GPU")
+    @unittest.skipIf(not HAS_CPU or not HAS_TRITON_GPU, "requires CPU and GPU")
     @unittest.expectedFailure
     @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
     def test_benchmark_safely_infers_device_many_devices(self, benchmarker_cls):

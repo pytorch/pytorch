@@ -8,7 +8,7 @@ from torch._inductor.ir import Buffer, FixedLayout, Pointwise
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_GPU
 
 
 class TestDependencies(InductorTestCase):
@@ -172,5 +172,5 @@ class TestDependencies(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU and HAS_GPU:
+    if HAS_CPU and HAS_TRITON_GPU:
         run_tests("sympy")

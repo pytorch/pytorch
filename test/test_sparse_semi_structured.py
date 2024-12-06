@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON_GPU
 
 import pytest
 
@@ -981,7 +981,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
             torch.backends.cuda.matmul.allow_tf32 = orig
 
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_TRITON_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions(self, device, dtype):
 
@@ -1009,7 +1009,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         for r, c in shapes:
             run_test(r, c, device, dtype)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_TRITON_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @inference_dtypes
     def test_conversions_all_patterns(self, device, dtype):
         r, c = 32, 128

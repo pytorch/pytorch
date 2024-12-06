@@ -20,16 +20,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
     IS_CI,
     IS_WINDOWS,
-)
-
-from torch._utils import (
-    GPU_TYPES,
     GPU_TYPE,
     HAS_CUDA,
     HAS_XPU,
-    HAS_GPU,
-    HAS_MULTIGPU,
+    HAS_MULTIGPU
 )
+
+from torch._utils import GPU_TYPES, get_gpu_type
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -49,11 +46,11 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-HAS_CUDA = HAS_CUDA and HAS_TRITON
+HAS_TRITON_CUDA = HAS_CUDA and HAS_TRITON
 
-HAS_XPU = HAS_XPU and HAS_TRITON
+HAS_TRITON_XPU = HAS_XPU and HAS_TRITON
 
-HAS_GPU = HAS_CUDA or HAS_XPU
+HAS_TRITON_GPU = HAS_TRITON_CUDA or HAS_TRITON_XPU
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -104,7 +101,7 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+requires_gpu = functools.partial(unittest.skipIf, not HAS_TRITON_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
@@ -112,13 +109,13 @@ skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
 IS_A100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_TRITON_CUDA
     and get_gpu_shared_memory() == 166912
 )
 
 IS_H100 = LazyVal(
-    lambda: HAS_CUDA
+    lambda: HAS_TRITON_CUDA
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))
+IS_BIG_GPU = LazyVal(lambda: HAS_TRITON_CUDA and is_big_gpu(0))

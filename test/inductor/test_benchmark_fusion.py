@@ -10,7 +10,7 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import fresh_inductor_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_CUDA
 
 
 # Make the helper files in test/ importable
@@ -181,7 +181,7 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (x,))
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_TRITON_CUDA and not TEST_WITH_ASAN:
 
     class BenchmarkFusionCudaTest(TestCase):
         common = check_model_cuda
@@ -338,5 +338,5 @@ if HAS_CPU and not torch.backends.mps.is_available():
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_TRITON_CUDA:
         run_tests()

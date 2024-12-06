@@ -17,7 +17,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     ModularIndexing,
@@ -220,7 +220,7 @@ class TestIndexingSimplification(InductorTestCase):
         expected = FloorDiv(x * 15 + y, 3)
         self.assertEqual(expected, FloorDiv(actual, denominator))
 
-    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    @unittest.skipUnless(HAS_TRITON_GPU, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
         def f(x):
@@ -382,5 +382,5 @@ instantiate_parametrized_tests(ExprPrinterTests)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests("sympy")

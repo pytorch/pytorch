@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfWindows,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 
 
@@ -326,7 +326,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         This test in particular tests the behavior of a single entry cache. If we ever make AOTAutogradCache
         support multiple entries under the same key, this test should be updated.
         """
-        if device == GPU_TYPE and not HAS_GPU:
+        if device == GPU_TYPE and not HAS_TRITON_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires CUDA SM80 or later")
@@ -433,7 +433,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         for tensor sizes < int32.
         See test_codecache::TestFxGraphCache::test_cache_load_with_guards_int32_bounds.
         """
-        if device == GPU_TYPE and not HAS_GPU:
+        if device == GPU_TYPE and not HAS_TRITON_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires CUDA SM80 or later")

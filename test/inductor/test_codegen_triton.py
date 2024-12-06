@@ -10,7 +10,7 @@ from torch._inductor.codegen.common import SizeArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_GPU
 
 
 class TestCodegenTriton(InductorTestCase):
@@ -83,5 +83,5 @@ class TestCodegenTriton(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests("sympy")

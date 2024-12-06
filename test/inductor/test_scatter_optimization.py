@@ -10,7 +10,7 @@ from torch._dynamo.utils import counters, same
 from torch._inductor import metrics
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -196,11 +196,11 @@ class TestScatterOpt(TestCase):
             print(f"{ms=:.3f}, {peak_mem=:.3f} GB")
 
 
-if HAS_GPU:
+if HAS_TRITON_GPU:
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

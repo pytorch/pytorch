@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     xfailIfS390X,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_CUDA, HAS_TRITON_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -1214,7 +1214,7 @@ main()
 
         self.check_output_and_recompiles(fn, count=1)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires gpu")
     def test_issue106555(self):
         DEVICE = torch.device(GPU_TYPE, 0)
         NUM_FEATURES = 256
@@ -1480,7 +1480,7 @@ main()
 
         self.check_output_and_recompiles(fn, count=2)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires gpu")
     def test_logging_tensor_flaky(self) -> None:
         # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
         # resulting in:
@@ -1526,7 +1526,7 @@ main()
 
         compiled_fn(inputs)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires gpu")
     def test_custom_fn_output_metadata(self):
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
@@ -2522,7 +2522,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.check_output_and_recompiles(fn, 3)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires gpu")
     def test_free_activation_memory(self):
         script = """
 import torch
@@ -2568,7 +2568,7 @@ main()
         """
         self.run_as_subprocess(script)
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not HAS_TRITON_GPU, "requires gpu")
     def test_free_activation_memory_subclass(self):
         # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
 
@@ -2657,7 +2657,7 @@ main()
                 b = MyFunc.apply(a)
                 b.sum().backward()
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_TRITON_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
@@ -2691,7 +2691,7 @@ main()
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_TRITON_CUDA, "requires cuda")
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
             32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
@@ -2709,7 +2709,7 @@ main()
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_TRITON_CUDA, "requires cuda")
     def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
         class MyFn(torch.autograd.Function):
             @staticmethod
@@ -2739,7 +2739,7 @@ main()
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     @scoped_load_inline
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_TRITON_CUDA, "requires cuda")
     def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -3518,7 +3518,7 @@ known_failing_tests = {
     # Uncategorized
 }
 
-if not HAS_CUDA:
+if not HAS_TRITON_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 

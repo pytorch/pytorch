@@ -10,7 +10,7 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
 
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -342,5 +342,5 @@ class TestLayoutOptim(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

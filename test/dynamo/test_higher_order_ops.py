@@ -31,11 +31,11 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_TRITON_CUDA, "requires cuda")
 
 
 def count_ops(gm, args, freq, op):

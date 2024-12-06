@@ -63,7 +63,7 @@ class XpuBasicTests(TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_XPU
+    from torch.testing._internal.inductor_utils import HAS_TRITON_XPU
 
-    if HAS_XPU:
+    if HAS_TRITON_XPU:
         run_tests(needs="filelock")

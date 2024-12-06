@@ -16,14 +16,14 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import IS_LINUX, parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA,
-    HAS_GPU,
+    HAS_TRITON_CUDA,
+    HAS_TRITON_GPU,
     requires_gpu,
 )
 
 
 class TestUnbackedSymints(InductorTestCase):
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -44,7 +44,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
@@ -55,7 +55,7 @@ class TestUnbackedSymints(InductorTestCase):
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
         actual = torch.compile(fn, fullgraph=True)(x)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
@@ -69,7 +69,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -93,7 +93,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -109,7 +109,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
@@ -149,7 +149,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipGPUIf(not HAS_TRITON_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_nonzero_in_inference_mode(self, device):
         def fn(x):
@@ -300,5 +300,5 @@ instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu(0)):
+    if IS_LINUX and HAS_TRITON_GPU and (not HAS_TRITON_CUDA or is_big_gpu(0)):
         run_tests()

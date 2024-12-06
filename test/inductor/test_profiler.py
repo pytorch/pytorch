@@ -12,7 +12,7 @@ from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_TRITON_CUDA
 from torch.utils._triton import has_triton
 
 
@@ -280,5 +280,5 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_TRITON_CUDA:
         run_tests()

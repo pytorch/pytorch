@@ -14,7 +14,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON_GPU
 
 
 if not dist.is_available():
@@ -571,7 +571,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_TRITON_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
     def test_tracing(self, device):
@@ -581,7 +581,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_TRITON_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_tracing_with_fakepg(self, device=DEVICE):
         exit_if_lt_x_accelerators(self.world_size)
 
@@ -598,7 +598,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
         dist.destroy_process_group()
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_TRITON_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
     def test_tracing_with_dce_code(self, device):

@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_CUDA
 
 
 try:
@@ -26,7 +26,7 @@ except ImportError:
 
 
 torch.set_float32_matmul_precision("high")
-if HAS_CUDA:
+if HAS_TRITON_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 log = logging.getLogger(__name__)
@@ -414,5 +414,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_TRITON_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()

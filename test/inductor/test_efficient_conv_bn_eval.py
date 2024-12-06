@@ -18,7 +18,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_TRITON_GPU
 
 
 importlib.import_module("functorch")
@@ -211,7 +211,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
 
     copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_TRITON_GPU and not TEST_WITH_ASAN:
 
     class EfficientConvBNEvalGpuTests(TestCase):
         device = GPU_TYPE
@@ -223,5 +223,5 @@ del EfficientConvBNEvalTemplate
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if HAS_CPU or HAS_TRITON_GPU:
         run_tests(needs="filelock")

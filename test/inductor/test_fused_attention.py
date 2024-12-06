@@ -15,7 +15,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON_CUDA
 
 
 def checkpoint_wrapper(fn):
@@ -954,7 +954,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         )
 
 
-if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
+if HAS_TRITON_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
     class SDPAPatternRewriterCudaTests(TestSDPAPatternRewriterTemplate):
         device = "cuda"

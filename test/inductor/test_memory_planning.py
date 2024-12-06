@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU, requires_gpu
 
 
 if IS_WINDOWS and IS_CI:
@@ -127,5 +127,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests()

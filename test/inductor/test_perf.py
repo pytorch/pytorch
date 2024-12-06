@@ -29,10 +29,10 @@ from torch._inductor.utils import run_and_get_code
 # performance for that setting.
 #
 # Defines all the kernels for tests
-from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
+from torch.testing._internal.triton_utils import HAS_TRITON_CUDA, requires_cuda
 
 
-if HAS_CUDA:
+if HAS_TRITON_CUDA:
     import triton  # @manual
     import triton.language as tl  # @manual
 
@@ -1295,5 +1295,5 @@ class WouldBeNiceIfItWorked:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA:
+    if HAS_TRITON_CUDA:
         run_tests(needs="filelock")
