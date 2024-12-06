@@ -2053,7 +2053,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.eval()
         self.assertEqual(m._recompile_count, count2)
 
-
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
