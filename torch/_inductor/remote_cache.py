@@ -15,7 +15,6 @@ from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
-from torch.compiler import config as cconfig
 from torch.monitor import _WaitCounter
 
 
@@ -339,7 +338,6 @@ def create_cache(
     fb_cache_cls: str,
     oss_cache_cls: str,
 ) -> Optional[RemoteCache[JsonDataTy]]:
-    key = f"{cconfig.remote_cache_key_prefix}{key}"
     try:
         if is_fbcode:
             import torch._inductor.fb.remote_cache

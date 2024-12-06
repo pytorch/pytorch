@@ -55,12 +55,10 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
-remote_cache_key_prefix: str = os.environ.get(
-    "TORCH_COMPILE_REMOTE_CACHE_KEY_PREFIX", ""
-)
+cache_key_tag: str = os.environ.get("TORCH_COMPILE_CACHE_KEY_TAG", "")
 """
-Key to be prepended in front of remote cache key for all remote torch compile
-caching
+Tag to be included in the cache key generation for all torch compile caching.
+A common use case for such a tag is to break caches.
 """
 
 from torch.utils._config_module import install_config_module
