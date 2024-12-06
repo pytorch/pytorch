@@ -27,6 +27,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
 from torch.utils._sympy.symbol import (
@@ -339,7 +340,7 @@ class SIMDKernel(Kernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         pid_cache=None,
         override_persistent_reduction=None,
@@ -352,7 +353,9 @@ class SIMDKernel(Kernel):
         self.mutations = features.get_mutations()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
-        self.numels = [V.graph.sizevars.simplify(s) for s in groups]
+        self.numels = {
+            prefix: V.graph.sizevars.simplify(val) for prefix, val in tiling.items()
+        }
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
@@ -432,7 +435,7 @@ class SIMDKernel(Kernel):
             self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
-                    self.numels[i],
+                    self.numels[prefix],
                     prefix,
                     index,
                     self,
@@ -704,7 +707,7 @@ class SIMDKernel(Kernel):
         simplify = V.graph.sizevars.simplify
         return any(
             simplify(idx_range) != simplify(iter_range)  # type: ignore[arg-type]
-            for idx_range, iter_range in zip(index_numels, self.numels)
+            for idx_range, iter_range in zip(index_numels, self.numels.values())
         )
 
     def index_to_str(self, index: sympy.Expr) -> str:
@@ -871,7 +874,7 @@ class SIMDKernel(Kernel):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels))
+        out_numel = V.graph.sizevars.size_hint(sympy_product(self.numels.values()))
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
             # should be estimated based on the reinterpreted layout.
@@ -1097,8 +1100,8 @@ class SIMDScheduling(BaseScheduling):
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    is_reduction_tiling_valid = self.select_tiling(
-                        node1.get_nodes(), numel1
+                    is_reduction_tiling_valid = tuple(
+                        self.select_tiling(node1.get_nodes(), numel1).values()
                     ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
@@ -1262,11 +1265,11 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         node_schedule = kernel_features.node_schedule
-        tiled_groups = self.select_tiling(
+        tiling = self.select_tiling(
             node_schedule, kernel_features.numel, kernel_features.reduction_numel
         )
         kernels = self.create_kernel_choices(
-            kernel_features, tiled_groups, {"features": kernel_features}
+            kernel_features, [tiling], {"features": kernel_features}
         )
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
@@ -1442,10 +1445,10 @@ class SIMDScheduling(BaseScheduling):
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
-            node_schedule_map[pn] = node_schedule, tiled_groups, numel, rnumel
+            tiling = self.select_tiling(node_schedule, numel, rnumel)
+            node_schedule_map[pn] = node_schedule, tiling, numel, rnumel
             subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                *tiled_groups,
+                tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
             )
@@ -1602,6 +1605,7 @@ class SIMDScheduling(BaseScheduling):
             `(tile1, tile2, reduction_numel)` s.t. `tile1 * tile2 == numel`
 
         """
+        default_tiling = cls.create_tiling([numel], [reduction_numel])
         if reduction_numel != 1 or config.triton.max_tiles <= 1:
             # TODO(jansel): should we tile reductions?
             # do perf hint here if stride-1 dim is not being reduced
@@ -1610,7 +1614,7 @@ class SIMDScheduling(BaseScheduling):
                     if len(cls.candidate_tilings(node)) > 0:
                         perf_hint_log.info("reduction over non-contiguous dims")
                         break
-            return (numel, reduction_numel)
+            return default_tiling
 
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[Any] = collections.Counter()
@@ -1678,9 +1682,9 @@ class SIMDScheduling(BaseScheduling):
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ):
-                return new_groups
+                return cls.create_tiling(tiled_groups, [reduction_numel])
 
-        return (numel, reduction_numel)
+        return default_tiling
 
     def flush(self):
         pass
@@ -1692,9 +1696,9 @@ class SIMDScheduling(BaseScheduling):
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
-            tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+            tiling = self.select_tiling(node_schedule, numel, rnumel)
             kernel = self.kernel_type(
-                *tiled_groups,
+                tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
