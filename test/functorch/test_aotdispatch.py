@@ -6291,6 +6291,16 @@ metadata incorrectly.
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
     def test_subclass_parameters(self):
+        class _M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + self.p
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -6298,9 +6308,10 @@ metadata incorrectly.
                 self.p2 = torch.nn.Parameter(
                     TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
+                self._m = _M()
 
             def forward(self, x):
-                return x + 2 * self.p1 + self.p2
+                return self._m(x) + x + 2 * self.p1 + self.p2
 
         m = M()
         ref_x = torch.randn(3, 4)
@@ -6747,6 +6758,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         def run(f):
             base = torch.ones(10)
             inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
+
+    def test_inputs_overlapping_with_mutation_guard_base(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base[1:], base[1:]]
             return f(*inputs)
 
         optf = torch.compile(backend="aot_eager", dynamic=True)(f)
