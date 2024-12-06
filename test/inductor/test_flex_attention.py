@@ -117,13 +117,18 @@ if TEST_ON_CUDA:
     test_dtypes_fast = [torch.float16]
 else:
     test_device = "cpu"
-    from torch._inductor.cpp_builder import is_clang
+    from torch._inductor.cpp_builder import is_clang, get_cpp_compiler
+    import subprocess
+    compiler_version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
+    LONG_COMPILATION_ON_CPU = False
+    if "g++" in compiler_version_string or "gcc" in compiler_version_string:
+        # if the compiler is gcc with lower major version than 7, skip UT for CPU due to long compilation time found in CI
+        major_version = subprocess.check_output([get_cpp_compiler(), "-dumpversion"]).decode("utf8")
+        LONG_COMPILATION_ON_CPU = int(major_version) < 7
 
-    # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
-    LONG_COMPILATION_ON_CPU = is_clang()
     test_dtypes = (
         [torch.float32, torch.bfloat16]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+    if torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
     )
     test_dtypes_fast = [torch.float32]
