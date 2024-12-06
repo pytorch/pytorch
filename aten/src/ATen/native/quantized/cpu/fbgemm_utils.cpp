@@ -441,10 +441,10 @@ TORCH_API int register_linear_params() {
               [](SerializationType state)
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
-                const auto& weight = std::get<0>(state);
 #ifdef USE_FBGEMM
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
                     at::globalContext().qEngine() == at::QEngine::X86) {
+                  const auto& weight = std::get<0>(state);
                   if (weight.scalar_type() == at::kQInt8) {
                     return std::apply(PackedLinearWeight::prepack, std::move(state));
                   } else if (weight.scalar_type() == at::kFloat) {
@@ -461,6 +461,7 @@ TORCH_API int register_linear_params() {
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
                 if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+                  const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
                       "QNNPACK only supports INT8 bit width currently. Got ",
@@ -470,6 +471,7 @@ TORCH_API int register_linear_params() {
 #endif // USE_PYTORCH_QNNPACK
 #if AT_MKLDNN_ENABLED()
                 if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
+                  const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
                       "ONEDNN only supports INT8 bit width currently. Got ",
