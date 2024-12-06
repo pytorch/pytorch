@@ -7,6 +7,9 @@ on:
         description: workflow_id of the run
         required: true
 
+permissions:
+  id-token: write
+
 jobs:
   intermediate_upload_test_stats:
     name: Intermediate upload test stats for ${{ inputs.workflow_id }}

@@ -14,8 +14,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-jobs:
+permissions:
+  id-token: write
 
+jobs:
   upload-stats-to-s3:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
