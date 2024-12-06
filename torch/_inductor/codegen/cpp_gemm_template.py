@@ -1032,7 +1032,7 @@ class CppGemmTemplate(CppTemplate):
     def block_weight(cls, W, new_size, padding):
         # These are separated into two methods to allow subclasses to override them separately
         if isinstance(W, ir.IRNode):
-            if W.get_name() in V.graph.constants or W.get_name() + "_BMatrixCompens" in V.graph.constants:
+            if W.get_name() in V.graph.constants:
                 # Create a new buffer, representing the constant blocked tensor
                 blocked_w = ir.Buffer(
                     name=W.get_name(),  # Borrow the registered buffer name

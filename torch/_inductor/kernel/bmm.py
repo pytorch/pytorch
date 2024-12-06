@@ -13,8 +13,8 @@ from ..select_algorithm import (
 from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
-    use_cpp_bmm_template,
     use_ck_template,
+    use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
 )
