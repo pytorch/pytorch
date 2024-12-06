@@ -49,12 +49,6 @@ from typing import (
 )
 
 import torch
-
-# WARNING: Do not directly import has_frozen_params, it is monkeypatched in
-# python test/inductor/test_codecache.py
-# TestFxGraphCache.test_constant_handling_device_cpu
-# TODO: Why are we monkeypatching it......
-import torch._inductor.output_code as output_code
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
@@ -70,6 +64,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
@@ -85,7 +80,7 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
 
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
-    from .output_code import OutputCode
+    from .output_code import CompiledFxGraphConstants, OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
     from .utils import InputType
 
@@ -893,7 +888,7 @@ def compiled_fx_graph_hash(
     # To support caching when the graph has frozen params, we ignore the tensor values
     # of non-inlined constants since they won't be included in the cache entry. Without
     # freezing, we want to include the values of any constant attribute.
-    include_non_inlined = not output_code.has_frozen_params(gm)
+    include_non_inlined = not has_frozen_params(gm)
 
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     has_user_defined_triton_kernels = len(details.user_defined_triton_source) != 0
@@ -1005,7 +1000,7 @@ class FxGraphCache:
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-        gm: Optional[torch.fx.GraphModule],
+        constants: CompiledFxGraphConstants,
     ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1076,25 +1071,6 @@ class FxGraphCache:
         if graph is None:
             return None, cache_info
 
-        # See _save_graph(); we don't store the callable in the cache entry so
-        # recreate it here from the PyCodeCache disk cache.
-        artifact_path = get_path(graph.cache_key, "py")[2]
-        code = graph.source_code
-        if not os.path.exists(artifact_path):
-            counters["inductor"]["fxgraph_lookup_write_file"] += 1
-            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            cpp_pp = cpp_prefix_path()
-            if os.path.basename(cpp_pp) in code:
-                if cpp_pp in code:
-                    # Great the name is correct
-                    pass
-                else:
-                    # Old dir name is included, replace it
-                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
-                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
-
-            write_atomic(artifact_path, code, make_dirs=True)
-
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
@@ -1108,24 +1084,16 @@ class FxGraphCache:
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
-        inductor_meta = autotune_cache.inductor_meta_from_config()
-        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
-
         try:
-            with dynamo_timed(
-                "PyCodeCache.load_by_key_path", log_pt2_compile_event=True
-            ):
-                graph.current_callable = PyCodeCache.load_by_key_path(
-                    graph.cache_key,
-                    artifact_path,
-                    graph.cache_linemap,
-                    graph.get_constants(gm),
-                ).call
+            artifact_path = graph.after_deserialization(constants)
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", artifact_path)
             return None, cache_info
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        code = graph.source_code
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1143,9 +1111,6 @@ class FxGraphCache:
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
-        from .graph import GraphLowering
-
-        GraphLowering.save_output_code(code)
         output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
@@ -1173,11 +1138,7 @@ class FxGraphCache:
             compiled_graph, CompiledFxGraph
         ), f"serialization for {type(compiled_graph)} NYI"
         disk_compiled_graph = copy(compiled_graph)
-        # We can't really serialize callables that may be C++/Triton/etc.,
-        # so we serialize their PyCodeCache disk cache location instead.
-        # TODO: This could be better if we're ever able to serialize compiled
-        # models to disk.
-        disk_compiled_graph.current_callable = None
+        disk_compiled_graph.prepare_for_serialization()
 
         # Before serializing, compute the guard expression that will be used to
         # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
@@ -1237,9 +1198,7 @@ class FxGraphCache:
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
 
         # Freezing can embed constants that wouldn't be static across runs.
-        if output_code.has_frozen_params(
-            gm
-        ) and not torch._utils_internal.justknobs_check(
+        if has_frozen_params(gm) and not torch._utils_internal.justknobs_check(
             "pytorch/inductor:allow_freezing_with_caching"
         ):
             raise BypassFxGraphCache("Skipping graph with frozen constants")
@@ -1337,7 +1296,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
-        gm: Optional[torch.fx.GraphModule] = None,
+        constants: CompiledFxGraphConstants,
     ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup the graph with the given key, and return results and metadata.
@@ -1345,7 +1304,7 @@ class FxGraphCache:
         differently from FXGraphCache.
         """
         compiled_graph, cache_info = FxGraphCache._lookup_graph(
-            key, example_inputs, local, remote_cache, gm
+            key, example_inputs, local, remote_cache, constants
         )
         cache_info = {
             **cache_info,
@@ -1678,11 +1637,15 @@ class AotCodeCompiler:
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
+            if config.aot_inductor.package_constants_in_so:
+                serialized_weights = b"".join(
+                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                    for name in graph.constants.keys()
+                    if name not in graph.folded_constants
+                )
+            else:
+                serialized_weights = b""
+
             consts_size = len(serialized_weights)
 
             # TODO: Fix mmap weights with cuda
@@ -1752,6 +1715,7 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+
             so_builder = CppBuilder(
                 name=output_name,
                 sources=[output_o, consts_o, kernels_o],
@@ -1952,7 +1916,16 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         func = getattr(func, s)
 
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
-    result = func(*converted_args)
+
+    # convert any kwarg-only arguments to kwargs
+    kwargs = dict()
+    for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
+        if func_arg.kwarg_only:
+            kwargs[func_arg.name] = conv_arg
+    if kwargs:
+        del converted_args[-len(kwargs) :]
+
+    result = func(*converted_args, **kwargs)
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
@@ -2335,13 +2308,16 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             std::vector<AtenTensorHandle> output_handles(%s);
             try {
                 inductor_entry_impl(input_handles.data(), output_handles.data());
+                if (PyErr_Occurred()) {
+                    return nullptr;
+                }
                 return pack_tensor_handle_list(output_handles);
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
-                return {};
+                return nullptr;
             } catch(...) {
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
-                return {};
+                return nullptr;
             }
         }
         """
