@@ -389,8 +389,6 @@ class TestFlexAttention(InductorTestCase):
             KV_S = Q_S
         if V_D is None:
             V_D = Q_D
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -565,9 +563,6 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
-
         assert Q_H % KV_H == 0
 
         q = torch.randn(
