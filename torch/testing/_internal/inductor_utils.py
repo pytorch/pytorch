@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 
-from torch.testing._internal.common_utils import (
+from torch._utils import (
     GPU_TYPES,
     GPU_TYPE,
     HAS_CUDA,

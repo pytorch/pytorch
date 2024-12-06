@@ -67,7 +67,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config
 from .runtime.runtime_utils import ceildiv as runtime_ceildiv
-from torch.testing._internal.common_utils import GPU_TYPES
+from torch._utils import GPU_TYPES, get_gpu_type
 
 _IS_WINDOWS = sys.platform == "win32"
 
