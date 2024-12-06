@@ -1180,7 +1180,7 @@ def _transform_cuda_paths(lpaths: List[str]) -> None:
 
             lpaths[i] = str(lib_dir)
             stub_dir = lib_dir / "stubs"
-            if stub_dir.exists:
+            if stub_dir.exists():
                 lpaths.append(str(stub_dir))
 
 
