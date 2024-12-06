@@ -59,6 +59,7 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.output_code import (
     CompiledAOTI,
     CompiledFxGraph,
+    CompiledFxGraphConstantsWithGm,
     get_expanded_dims,
     index_expanded_dims,
     OutputCode,
@@ -636,7 +637,7 @@ def _compile_fx_inner(
         key_info = None
         cache_info = None
         remote_cache = None
-
+        constants = CompiledFxGraphConstantsWithGm(gm)
         # TODO: this time will be slightly inconsistent with the one computed
         # in prepare_key/load_with_key, dump those settings of "cache_event_time"
         start_time = time.time_ns()
@@ -658,7 +659,7 @@ def _compile_fx_inner(
                     local,
                     remote_cache,
                     is_backward=graph_kwargs.get("is_backward", False),
-                    gm=gm,
+                    constants=constants,
                 )
 
         # CACHE BYPASS: Compile the graph, don't save it to the cache
@@ -757,7 +758,7 @@ def _compile_fx_inner(
                 payload_fn=lambda: json.dumps(cache_info),
             )
 
-        compiled_graph.post_compile(example_inputs, cudagraphs, gm)
+        compiled_graph.post_compile(example_inputs, cudagraphs, constants)
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
