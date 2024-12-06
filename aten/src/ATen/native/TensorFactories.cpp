@@ -907,11 +907,22 @@ Tensor rand_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::rand_like(self, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor rand_like(
+    const Tensor& self,
+    std::optional<Generator> generator,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, std::nullopt);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -995,11 +1006,19 @@ Tensor randint_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  return native::randint_like(self, 0, high, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory, optional_memory_format);
+}
 
-  auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(0, high, std::nullopt);
+Tensor randint_like(
+    const Tensor& self,
+    int64_t high,
+    std::optional<Generator> generator,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(self, 0, high, std::move(generator), dtype, layout, device, pin_memory, optional_memory_format);
 }
 
 Tensor randint_like(
@@ -1011,11 +1030,24 @@ Tensor randint_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(self, low, high, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor randint_like(
+    const Tensor& self,
+    int64_t low,
+    int64_t high,
+    std::optional<Generator> generator,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.random_(low, high, std::nullopt);
+  return result.random_(low, high, std::move(generator));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1075,11 +1107,22 @@ Tensor randn_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randn_like(self, static_cast<std::optional<Generator>>(std::nullopt), dtype, layout, device, pin_memory, optional_memory_format);
+}
+
+Tensor randn_like(
+    const Tensor& self,
+    std::optional<Generator> generator,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty_like(self, options, optional_memory_format);
-  return result.normal_(0, 1, std::nullopt);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

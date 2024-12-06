@@ -4699,6 +4699,14 @@
     CompositeExplicitAutograd: rand_like
   autogen: rand_like.out
 
+- func: rand_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: rand_like
+  autogen: rand_like.generator_out
+
 - func: randint(SymInt high, SymInt[] size, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4747,6 +4755,14 @@
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.out
 
+- func: randint_like.generator(Tensor self, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.generator_out
+
 - func: randint_like.low_dtype(Tensor self, SymInt low, SymInt high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   tags: nondeterministic_seeded
   dispatch:
@@ -4754,6 +4770,14 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: randint_like
   autogen: randint_like.low_dtype_out
+
+- func: randint_like.generator_with_low_dtype(Tensor self, SymInt low, SymInt high, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd: randint_like
+  autogen: randint_like.generator_with_low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
@@ -4794,6 +4818,14 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
+
+- func: randn_like.generator(Tensor self, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  tags: nondeterministic_seeded
+  dispatch:
+    # NB: Although this composite mutates on the inside, it is
+    # non-differentiable so NonFunctional doesn't apply
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
+  autogen: randn_like.generator_out
 
 - func: randperm(SymInt n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: [core, nondeterministic_seeded]
