@@ -186,7 +186,7 @@ jobs:
           zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .additional_ci_files
 
       - name: Store PyTorch Build Artifacts on GHA
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -195,7 +195,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats to GHA
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         # Only if sccache is installed, see above
         if: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && steps.build.outcome != 'skipped' }}
         with:

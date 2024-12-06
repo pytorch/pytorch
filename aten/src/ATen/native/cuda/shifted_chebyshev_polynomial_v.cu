@@ -28,5 +28,5 @@ void shifted_chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase& iterator) {
 
 } // namespace (anonymous)
 
-REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda)
 } // namespace at::native

@@ -20,6 +20,7 @@
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
 #include <ATen/native/hip/ck_gemm.h>
+#include <ATen/native/hip/ck_bgemm.h>
 #define PYTORCH_ROCBLAS_VERSION_DECIMAL (ROCBLAS_VERSION_MAJOR * 100 + ROCBLAS_VERSION_MINOR)
 #define USE_GEMM_FLAGS_FP16_ALT_IMPL (PYTORCH_ROCBLAS_VERSION_DECIMAL >= 242)
 // needed to work around calling rocblas API instead of hipblas API
@@ -188,8 +189,11 @@ static size_t _parseChosenWorkspaceSize() {
     // accept either env var
     val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
-#endif
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
@@ -279,6 +283,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
   }
   template <typename T>
   inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    // NOLINTNEXTLINE(bugprone-sizeof-expression)
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
@@ -667,6 +672,11 @@ void bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16))
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
     bgemm_internal_cublaslt<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
+#ifdef USE_ROCM
+  else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
+    at::native::bgemm_internal_ck<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  }
+#endif
   else {
     bgemm_internal_cublas<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
@@ -1747,6 +1757,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
       handle,
@@ -1765,6 +1776,7 @@ void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
   TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
       handle,
@@ -1784,6 +1796,7 @@ void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
 
 template <>
 void trsmBatched<c10::complex<float>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
       handle,
@@ -1803,6 +1816,7 @@ void trsmBatched<c10::complex<float>>(
 
 template <>
 void trsmBatched<c10::complex<double>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
   TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
       handle,

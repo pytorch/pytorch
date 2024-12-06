@@ -25,7 +25,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
   for (const auto dim : c10::irange(public_dims)) {
-    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+    auto actual_dim = actualDim(static_cast<int64_t>(dim), /*wrap_dim=*/false);
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
@@ -37,7 +37,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
     const auto ndim = sizes_and_strides_.size();
-    dim = maybe_wrap_dim(dim, ndim);
+    dim = maybe_wrap_dim(dim, static_cast<int64_t>(ndim));
   }
   auto is_bdim = createBatchDimBitset(bdims_);
 
