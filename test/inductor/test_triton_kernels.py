@@ -3586,17 +3586,21 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         @triton.autotune(configs=configs, key=["N"], prune_configs_by=prune_configs_by)
         @triton.jit
-        def _kernel(dst, src, N, BLOCK_SIZE: tl.constexpr):
+        def prune_by_kernel(dst, src, N, BLOCK_SIZE: tl.constexpr):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
             tl.store(dst + offsets, x, mask=offsets < N)
 
         grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
 
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(dst, src, N):
+            prune_by_kernel[grid](dst, src, N=N)
+
         with torch._inductor.config.patch(
             {"triton.autotune_at_compile_time": autotune_at_compile_time}
         ):
-            _kernel[grid](dst, src, N=N)
+            f(dst, src, N)
 
         self.assertEqual(src, dst)
 
