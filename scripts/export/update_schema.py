@@ -72,6 +72,10 @@ if __name__ == "__main__":
 
     yaml_content = yaml_header + "\n" + yaml_payload
 
+    thrift_schema = "// " + first_line
+    thrift_schema += "\n// " + checksum
+    thrift_schema += "\n" + commit.thrift_schema
+
     if args.dry_run:
         print(yaml_content)
         print("\nWill write the above schema to" + args.prefix + commit.yaml_path)
@@ -80,3 +84,5 @@ if __name__ == "__main__":
             f.write(yaml_content)
         with open(args.prefix + commit.cpp_header_path, "w") as f:
             f.write(cpp_header)
+        with open(args.prefix + commit.thrift_schema_path, "w") as f:
+            f.write(thrift_schema)

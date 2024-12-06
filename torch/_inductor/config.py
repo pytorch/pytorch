@@ -298,6 +298,9 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# Modifies the number of autotuning choices displayed, set to None for all
+autotune_num_choices_displayed = 10
+
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -540,33 +543,8 @@ optimize_scatter_upon_const_tensor = (
     os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
 )
 
-
-# The multiprocessing start method to use for inductor workers in the codecache.
-# Can be "subprocess" or "fork".
-def decide_worker_start_method() -> str:
-    # TODO: For internal rollout, we use a killswitch to disable the "subprocess"
-    # start method. The justknob check should not be performed at import, however,
-    # so for fbcode, we assign worker_start_method to None below and call this method
-    # lazily in async_compile.py. Remove this after "subprocess" rollout completes.
-    if "TORCHINDUCTOR_WORKER_START" in os.environ:
-        start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
-    elif is_fbcode() and not torch._utils_internal.justknobs_check(
-        "pytorch/inductor:subprocess_parallel_compile"
-    ):
-        start_method = "fork"
-    else:
-        start_method = "subprocess"
-    assert start_method in (
-        "subprocess",
-        "fork",
-    ), f"Invalid start method: {start_method}"
-    return start_method
-
-
-# TODO: Set start method directly after internal rollout of "subprocess".
-worker_start_method: Optional[str] = (
-    None if is_fbcode() else decide_worker_start_method()
-)
+# Deprecated. This setting does nothing.
+worker_start_method: Optional[str] = None
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -763,21 +741,6 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
-# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
-# should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = False
-
-# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
-# to maximize performance for use cases that it can accommodate at the expense of
-# generality. In brief:
-# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
-#   tensor must be contiguous)
-# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
-#
-# When the DSO is generated in this mode, the usual interface will also be supported,
-# but performance for that interface may be degraded.
-use_minimal_arrayref_interface: bool = False
-
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
@@ -797,6 +760,9 @@ unsafe_ignore_unsupported_triton_autotune_args: bool = False
 # ensures that a cProfile trace to this frame will be a straight line without
 # any cycles.
 check_stack_no_cycles_TESTING_ONLY: bool = False
+
+# When True, complex_memory_overlap always reports True
+always_complex_memory_overlap_TESTING_ONLY: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -960,6 +926,10 @@ class triton:
     dense_indexing = False
 
     # limit tiling dimensions
+    #   - max_tiles=1 disables tiling
+    #   - max_tiles=2 is the default
+    #   - max_tiles=3 is experimental and may have bugs
+    # higher values are unsupported
     max_tiles = 2
 
     # Prefer higher dimensional tilings. This simplifies indexing expressions, making
@@ -1108,6 +1078,24 @@ class aot_inductor:
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
 
+    # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+    # should be run with this flag both on and off to make sure we have coverage.
+    allow_stack_allocation: bool = False
+
+    # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+    # to maximize performance for use cases that it can accommodate at the expense of
+    # generality. In brief:
+    # - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+    #   tensor must be contiguous)
+    # - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+    #
+    # When the DSO is generated in this mode, the usual interface will also be supported,
+    # but performance for that interface may be degraded.
+    use_minimal_arrayref_interface: bool = False
+
+    # Experimental. Flag to control whether to include weight in .so
+    package_constants_in_so: bool = True
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1163,7 +1151,7 @@ class cuda:
     # enable generation of inline standalone runner in CUDA CPP generated code
     # which allows to compile the generated code into a standalone executable.
     generate_test_runner: bool = (
-        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
     )
 
     # Keep only Cutlass op configs which contain this regular expression pattern
@@ -1344,6 +1332,8 @@ _cache_config_ignore_prefix = [
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
+    # tests assume that changes here don't invalidate cache
+    "always_complex_memory_overlap_TESTING_ONLY",
 ]
 
 # External callable for matmul tuning candidates
@@ -1352,6 +1342,8 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 class test_configs:
     force_extern_kernel_in_multi_template = False
+
+    runtime_triton_dtype_assert = False
 
 
 if TYPE_CHECKING:
