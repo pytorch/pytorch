@@ -617,57 +617,33 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   }
 }
 
-namespace {
+// Early definition as dot and vdot call each other.
+void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result);
 
-inline void dot_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(
-      self.dim() == 1 && other.dim() == 1,
-      "1D tensors expected, but got ",
-      self.dim(),
-      "D and ",
-      other.dim(),
-      "D tensors");
-  TORCH_CHECK(
-      self.scalar_type() == other.scalar_type(),
-      "dot : expected both vectors to have same dtype, but found ",
-      self.scalar_type(),
-      " and ",
-      other.scalar_type());
-  TORCH_CHECK(
-      self.numel() == other.numel(),
-      "inconsistent tensor size, expected tensor [",
-      self.numel(),
-      "] and src [",
-      other.numel(),
-      "] to have the same number of elements, but got ",
-      self.numel(),
-      " and ",
-      other.numel(),
-      " elements respectively");
-  TORCH_CHECK(
-      (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
-          (other.stride(0) <= INT_MAX),
-      "dot only supports n, incx, incy with the bound [val] <= %d",
-      INT_MAX);
-}
 
-} // anonymous namespace
-
-Tensor dot_cuda(const Tensor& self, const Tensor& other) {
+void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return (dot_cuda(self.conj(), other.conj())).conj();
-       } else {
-         return vdot_cuda(self.conj(), other);
-       }
+        Tensor temp_result = at::empty({}, result.options());
+        dot_out_cuda_impl(self.conj(), other.conj(), temp_result);
+        result.fill_(temp_result.conj());
+      } else {
+        vdot_out_cuda_impl(self.conj(), other, result);
+      }
+      return;
     } else if (other.is_conj()) {
-      return vdot_cuda(other.conj(), self);
+      vdot_out_cuda_impl(other.conj(), self, result);
+      return;
     }
   }
 
-  at::NoNamesGuard guard;
-  dot_check(self, other);
+  // Most checks are performed in the META_FUNC, this is CUDA specific
+  TORCH_CHECK(
+    (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
+        (other.stride(0) <= INT_MAX),
+    "dot only supports n, incx, incy with the bound [val] <= %d",
+    INT_MAX);
 
   const int n = static_cast<int>(self.numel());
   int incx = static_cast<int>(self.stride(0));
@@ -677,16 +653,15 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-if (self._is_zerotensor() || other._is_zerotensor()) {
-  return at::_efficientzerotensor({}, self.options());
-}
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    result.fill_(0);
+    return;
+  }
 
-return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {
-        Tensor result = at::empty({}, self.options());
-
         auto handle = at::cuda::getCurrentCUDABlasHandle();
         at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
         at::cuda::blas::dot<scalar_t>(
@@ -697,31 +672,45 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
             other.const_data_ptr<scalar_t>(),
             incy,
             result.mutable_data_ptr<scalar_t>());
-
-        return result;
       });
 }
 
-Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
+TORCH_IMPL_FUNC(dot_out_cuda)(const Tensor& self, const Tensor& other, const Tensor& result) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  dot_out_cuda_impl(self, other, result);
+}
+
+void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& result) {
   if (!self.is_complex()) {
-    return dot_cuda(self, other);
+    dot_out_cuda_impl(self, other, result);
+    return;
   }
 
   if (self.is_conj()) {
     if (other.is_conj()) {
-      return vdot_cuda(other.conj(), self.conj());
+      vdot_out_cuda_impl(other.conj(), self.conj(), result);
     } else {
-      return dot_cuda(self.conj(), other);
+      dot_out_cuda_impl(self.conj(), other, result);
     }
+    return;
   } else if (other.is_conj()) {
-    return (dot_cuda(self, other.conj())).conj();
+    Tensor temp_result = at::empty({}, self.options());
+    dot_out_cuda_impl(self, other.conj(), temp_result);
+    result.fill_(temp_result.conj());
+    return;
   }
 
-  at::NoNamesGuard guard;
-  dot_check(self, other);
+  // Most checks are performed in the META_FUNC, this is CUDA specific
+  TORCH_CHECK(
+    (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
+        (other.stride(0) <= INT_MAX),
+    "vdot only supports n, incx, incy with the bound [val] <= %d",
+    INT_MAX);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
-    return at::_efficientzerotensor({}, self.options());
+    result.fill_(0);
+    return;
   }
 
   const int n = static_cast<int>(self.numel());
@@ -731,10 +720,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     incx = 1;
     incy = 1;
   }
-
-  return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
-    Tensor result = at::empty({}, self.options());
-
+  AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     auto handle = at::cuda::getCurrentCUDABlasHandle();
     at::cuda::blas::PointerModeGuard pointerModeGuard(
         handle, CUBLAS_POINTER_MODE_DEVICE);
@@ -746,9 +732,13 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
         other.const_data_ptr<scalar_t>(),
         incy,
         result.mutable_data_ptr<scalar_t>());
-
-    return result;
   });
+}
+
+TORCH_IMPL_FUNC(vdot_out_cuda)(const Tensor& self, const Tensor& other, const Tensor& result) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  vdot_out_cuda_impl(self, other, result);
 }
 
 TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_, const Tensor& result) {

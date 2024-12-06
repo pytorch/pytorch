@@ -141,19 +141,19 @@ def main() -> None:
         "-s",
         "--source-path",
         help="path to source directory for ATen",
-        default="caffe2/aten/src/ATen",
+        default="aten/src/ATen",
     )
     parser.add_argument(
         "-p",
         "--generated-ops-cpp-path",
         help="path to directory to generate op dispatcher .cpp file",
-        default="caffe2/torch/csrc/jit/runtime/static/generated_ops.cpp",
+        default="torch/csrc/jit/runtime/static/generated_ops.cpp",
     )
     parser.add_argument(
         "-t",
         "--generated-ops-test-cpp-path",
         help="path to directory to generate op dispatcher .cpp file",
-        default="caffe2/benchmarks/static_runtime/test_generated_ops.cc",
+        default="benchmarks/static_runtime/test_generated_ops.cc",
     )
     options = parser.parse_args()
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
