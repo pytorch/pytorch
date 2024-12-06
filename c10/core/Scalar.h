@@ -80,8 +80,9 @@ class C10_API Scalar {
   static_assert(
       sizeof(void*) != 8 || std::is_same_v<long, int64_t>,
       "int64_t is the same as long on 64 bit Linux");
-  template<typename = std::enable_if_t<sizeof(void *) == 8>>
+#if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
+#endif  
 #endif
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
