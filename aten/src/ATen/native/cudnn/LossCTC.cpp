@@ -94,13 +94,15 @@ bool _use_cudnn_ctc_loss(
     int64_t BLANK) {
   auto& ctx = at::globalContext();
 
-  bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
+  bool use_cudnn =
+      (log_probs.device().type() == at::kCUDA) && (ctx.userForceCuDNN() ||
+      (ctx.userEnabledCuDNN() && ((BLANK == 0) &&
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
       (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
-      (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
+      (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3))));
 
-  if (use_cudnn) {
+  if (use_cudnn && !ctx.userForceCuDNN()) {
     // we don't know that input_lengths and target_lengths have the same size
     // (they should, but we didn't check yet)
     int64_t max_input_length = log_probs.size(0);

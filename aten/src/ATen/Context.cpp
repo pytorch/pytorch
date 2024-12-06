@@ -41,6 +41,17 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
+// NB: This method forces cuDNN to be used if it is enabled, even if the
+// requested operation will error out (useful for functionality and performance
+// testing)
+bool Context::userForceCuDNN() const {
+  return force_cudnn;
+}
+
+void Context::setUserForceCuDNN(bool f) {
+  force_cudnn = f;
+}
+
 bool Context::userEnabledMkldnn() const {
   return enabled_mkldnn;
 }

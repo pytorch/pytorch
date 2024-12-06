@@ -187,6 +187,11 @@ class TORCH_API Context {
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
+  // NB: This method forces cuDNN to be used if it is enabled, even if the
+  // requested operation will error out (useful for functionality and
+  // performance testing)
+  bool userForceCuDNN() const;
+  void setUserForceCuDNN(bool f);
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
@@ -383,6 +388,7 @@ class TORCH_API Context {
   static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
+  bool force_cudnn = false;
   bool deterministic_cudnn = false;
   bool deterministic_mkldnn = false;
   bool _deterministic_algorithms = false;
