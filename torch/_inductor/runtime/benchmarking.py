@@ -165,6 +165,13 @@ class Benchmarker:
     @count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+    
+    @maybe_time
+    @count
+    def benchmark_many_cpu(self: Self, callables: List[Callable[[], Any]], *args: Any, **kwargs: Any) -> List[float]:
+        return [
+            self.benchmark_cpu(_callable, *args, **kwargs) for _callable in callables
+        ]
 
     @maybe_time
     @count
