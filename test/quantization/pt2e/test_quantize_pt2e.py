@@ -2029,8 +2029,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         # Mock m.recompile() to count how many times it's been called
         m._recompile_count = 0
+
         def _fake_recompile():
             m._recompile_count += 1
+
         m.recompile = _fake_recompile
 
         # Train idempotent
