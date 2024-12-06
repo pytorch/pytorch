@@ -15,11 +15,7 @@ from torch.testing._internal.common_utils import (
 
 class GeneratorTests(torch._dynamo.test_case.TestCase):
     expected_failures = [
-        "test_infinite_generator",
-        "test_infinite_generator_2",
-        "test_iter",
-        "test_graph_break_in_generator",
-        "test_zip_infinite_generator",
+        "test_infinite_generator_3",
     ]
 
     def run(self, result=None):
@@ -38,11 +34,11 @@ class GeneratorTests(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = False
+        torch._dynamo.config.enable_yield_on_generator = True
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = True
+        torch._dynamo.config.enable_yield_on_generator = False
 
     def test_generator_simple(self):
         def whoo():
@@ -82,9 +78,24 @@ class GeneratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t + 3)
 
     def test_infinite_generator_2(self):
-        def whoo(x):
+        def whoo(t):
+            i = 0
             while True:
-                yield x
+                yield t + i
+                i += 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return list(zip(range(3), whoo(t)))
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, list(zip(range(3), whoo(t))))
+
+    def test_infinite_generator_3(self):
+        def whoo(i):
+            while True:
+                yield i
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -430,17 +441,40 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, (t + 1) + (t + 2))
 
+    def test_graph_break_before_calling_generator(self):
+        def whoo(t):
+            for perm in itertools.product(itertools.permutations((0, 1, 2)), repeat=1):
+                yield sum(perm[0])
 
-class GeneratorTestsNewBehavior(GeneratorTests):
-    expected_failures = []
+        def fn(t):
+            s = 0
+            for b, p in itertools.product(whoo(t), itertools.permutations((4, 5))):
+                s += b
+            return s
+
+        t = torch.randn(2)
+        expected = fn(t)
+        got = torch.compile(backend="eager", fullgraph=False)(fn)(t)
+        self.assertEqual(expected, got)
+
+
+class GeneratorTestsOldBehavior(GeneratorTests):
+    expected_failures = [
+        "test_infinite_generator",
+        "test_infinite_generator_2",
+        "test_infinite_generator_3",
+        "test_iter",
+        "test_graph_break_in_generator",
+        "test_zip_infinite_generator",
+    ]
 
     def setUp(self):
         super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = True
+        torch._dynamo.config.enable_yield_on_generator = False
 
     def tearDown(self):
         super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = False
+        torch._dynamo.config.enable_yield_on_generator = True
 
 
 instantiate_parametrized_tests(GeneratorTests)

@@ -395,17 +395,20 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
 class GeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
-        value: types.GeneratorType,
+        gen: types.GeneratorType,
         inline_tracer: Optional["InstructionTranslator"],
         **kwargs,
     ):
         super().__init__(**kwargs)
-        assert isinstance(value, types.GeneratorType)
-        self.value = value
+        assert isinstance(gen, types.GeneratorType)
+        self.gen = gen
         self.inline_tracer = inline_tracer
+        # TODO: find out why generator.gi_frame is not kept in sync with the interpreter
+        # This prevents us from using inspect.getgeneratorstate
+        self.generatorstate = "GEN_CREATED"
 
     def get_code(self):
-        return self.value.gi_code
+        return self.gen.gi_code
 
     def get_filename(self):
         return self.get_code().co_filename
@@ -414,7 +417,7 @@ class GeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self):
-        return self.value
+        return self.gen
 
     def has_self(self):
         return False
@@ -422,11 +425,26 @@ class GeneratorObjectVariable(VariableTracker):
     def __name__(self):
         return self.get_name()
 
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.get_name()})"
+
+    __repr__ = __str__
+
+    def reconstruct(self, codegen):
+        if self.generatorstate != "GEN_CREATED":
+            unimplemented(f"Cannot reconstruct advanced generator {self.get_name()}")
+
+        codegen.append_output(codegen.create_load_deref(self.get_name()))
+        f_locals = self.gen.gi_frame.f_locals
+        for vt in f_locals.values():
+            codegen(vt)
+        codegen.extend_output(create_call_function(len(f_locals), False))
+
     def bind_args(self, tx, args, kwargs):
         return {}
 
     def get_globals(self):
-        return self.value.gi_frame.f_globals
+        return self.gen.gi_frame.f_globals
 
     def python_type(self):
         return types.GeneratorType
@@ -451,6 +469,7 @@ class GeneratorObjectVariable(VariableTracker):
         from torch._dynamo import exc
 
         tracer = self._get_inline_tracer(tx)
+        self.generatorstate = "GEN_RUNNING"
 
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
@@ -462,8 +481,8 @@ class GeneratorObjectVariable(VariableTracker):
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
-            if "graph_break" not in e.msg:
-                raise e
+            # if "graph_break" not in e.msg:
+            #     raise e
 
             # fallback to eager
             from torch._C._dynamo.eval_frame import skip_code
