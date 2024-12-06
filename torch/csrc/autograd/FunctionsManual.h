@@ -447,6 +447,12 @@ at::Tensor split_backward(
     int64_t dim,
     c10::SymIntArrayRef sizes,
     const at::TensorOptions& options);
+at::Tensor _nested_narrow_backward(
+    const at::Tensor& grad,
+    const at::Tensor& self,
+    int64_t dim,
+    const c10::SymInt& start,
+    const c10::SymInt& length);
 at::Tensor max_pool_double_backward(
     const at::Tensor& grad,
     const at::Tensor& indices,
