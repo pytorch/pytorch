@@ -70,9 +70,8 @@ specialize_float = False
 # legacy config, does nothing now!
 dynamic_shapes = True
 
-use_lazy_graph_module = (
-    os.environ.get("TORCH_COMPILE_USE_LAZY_GRAPH_MODULE", "1") == "1"
-)
+# legacy config, does nothing now!
+use_lazy_graph_module = True
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
