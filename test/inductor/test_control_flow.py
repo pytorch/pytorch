@@ -853,7 +853,7 @@ class WhileLoopTests(TestCase):
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
     # dynamic=True doesn't work due to we haven't handle lifted symbols
-    @parametrize("dynamic", [False])
+    @parametrize("dynamic", [True, False])
     def test_while_loop_with_pytree_inputs(self, device, dynamic):
         self._run_test(
             model=WhileLoopModels.PytreeCarry(),
