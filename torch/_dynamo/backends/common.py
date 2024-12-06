@@ -9,7 +9,10 @@ import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.utils import counters, defake, flatten_graph_inputs
-from torch._functorch.aot_autograd import aot_module_simplified, AOTDispatchCompiler
+from torch._functorch.aot_autograd import (
+    aot_module_simplified,
+    AOTDispatchCompilerWithOutput,
+)
 from torch.utils._python_dispatch import _disable_current_modes
 
 
@@ -54,7 +57,7 @@ class AotAutograd:
 
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
 
-        if isinstance(bw_compiler, AOTDispatchCompiler):
+        if isinstance(bw_compiler, AOTDispatchCompilerWithOutput):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
