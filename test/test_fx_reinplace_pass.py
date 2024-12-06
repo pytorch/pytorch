@@ -157,10 +157,7 @@ def forward(self, a__1):
     view_4 = torch.ops.aten.view.default(view_2, []);  view_2 = view_4 = None
     view_5 = torch.ops.aten.view.default(view_3, [4]);  view_3 = None
     view_6 = torch.ops.aten.view.default(view_5, [-1])
-    select_2 = torch.ops.aten.select.int(view_6, 0, 0);  view_6 = None
-    view_7 = torch.ops.aten.view.default(select_2, [-1]);  select_2 = view_7 = None
-    view_8 = torch.ops.aten.view.default(view_5, [-1])
-    add_1 = torch.ops.aten.add_.Tensor(view_5, view_8);  view_8 = add_1 = None
+    add_1 = torch.ops.aten.add_.Tensor(view_5, view_6);  view_6 = add_1 = None
     return view_5
     """)
 
