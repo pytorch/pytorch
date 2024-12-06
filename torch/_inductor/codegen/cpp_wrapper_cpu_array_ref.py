@@ -12,7 +12,7 @@ import torch._ops
 from .. import config, ir
 from ..utils import sympy_product
 from ..virtualized import V
-from .cpp_utils import cexpr, DTYPE_TO_CPP
+from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
@@ -46,16 +46,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         if not hasattr(self, "device"):
             self.device = "cpu"
         super().__init__()
-        self.declare = "auto "
-        self.declare_maybe_reference = "decltype(auto) "
-        self.ending = ";"
-        self.open_bracket = "{"
-        self.closed_bracket = "}"
-        self.comment = "//"
-        self.namespace = "at::"
-        self.none_str = "nullptr"
-        self.size = "sizes()"
-        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -73,7 +63,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
-        self.expr_printer = cexpr
         self.allow_stack_allocation: Optional[
             bool
         ] = config.aot_inductor.allow_stack_allocation
@@ -419,7 +408,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
-            if output == self.none_str:
+            if output == "nullptr":
                 continue
 
             is_constant_buffer = output in cst_names
@@ -656,10 +645,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return (
-            f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}"
-            f"  {self.comment} reuse"
-        )
+        return f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}  // reuse"
 
     def _assert_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
         # Borrowing arguments to shim functions is only safe because we know
@@ -724,11 +710,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         inputs_wrapped = [
-            (
-                f"borrow_arrayref_tensor_as_tensor({x})"
-                if isinstance(x, str)
-                else str(x)
-            )
+            (f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x))
             for x in inputs
         ]
         line = f"{cpp_kernel_name}(borrow_arrayref_tensor_as_tensor({output}), {','.join(inputs_wrapped)}"
