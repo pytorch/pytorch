@@ -2242,6 +2242,7 @@ def forward(self, primals_1, primals_2):
             )
 
     # https://github.com/pytorch/pytorch/issues/106456
+    @skipIfTorchDynamo()
     def test_input_mutation_noncontiguous(self):
         def f(a):
             a.mul_(2)
@@ -2260,26 +2261,18 @@ def forward(self, primals_1, primals_2):
         self.verify_aot_autograd(
             f, partial(inp_callable, req_grad=True), test_mutation=True
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=False),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=True),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=False),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=True),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
 
     def test_backward_mutation_data(self):
         class BwMutation(torch.autograd.Function):
@@ -2497,20 +2490,12 @@ def forward(self, primals_1, primals_2):
             test_mutation=True,
             make_inputs_subclasses=True,
         )
-        # Input mutations on subclasses with training graphs fail backward guards today.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            """
-During the backward, we encountered a tensor subclass where we guessed its
-metadata incorrectly.
-""",  # noqa: F541
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable1, req_grad=True),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable1, req_grad=True),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
 
         # Important characteristic: the graph takes in 2 inputs!
         # That shows that we didn't try to run our complicated synthetic base logic,
@@ -5504,6 +5489,11 @@ metadata incorrectly.
         self.assertEqual(b_ref.grad.a, b_test.grad.a)
         self.assertEqual(b_ref.grad.b, b_test.grad.b)
 
+    @torch._functorch.config.patch(
+        {
+            "disable_guess_zero_tangent_for_mutated_input_subclass": True,
+        }
+    )
     def test_aot_dispatch_input_mutation(self):
         def f(a, b):
             a.mul_(2)
@@ -5657,6 +5647,11 @@ metadata incorrectly.
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    @torch._functorch.config.patch(
+        {
+            "disable_guess_zero_tangent_for_mutated_input_subclass": True,
+        }
+    )
     def test_aot_dispatch_input_mutation_and_output_alias(self):
         def f(a, b):
             a.mul_(2)
