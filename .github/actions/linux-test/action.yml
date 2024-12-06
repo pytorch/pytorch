@@ -120,6 +120,16 @@ runs:
         nvidia-smi
       if: ${{ contains(matrix.runner, 'a100') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
+    - name: Start monitoring script
+      id: monitor-script
+      if: ${{ !inputs.disable-monitor }}
+      shell: bash
+      continue-on-error: true
+      run: |
+        python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+        python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+        echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+        
     - name: Download build artifacts
       uses: ./.github/actions/download-build-artifacts
       with:
@@ -153,15 +163,6 @@ runs:
         test-matrix: ${{ inputs.test-matrix }}
         job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-    - name: Start monitoring script
-      id: monitor-script
-      if: ${{ !inputs.disable-monitor }}
-      shell: bash
-      continue-on-error: true
-      run: |
-        python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
-        python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-        echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
     - name: Test
       id: test

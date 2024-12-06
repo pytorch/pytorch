@@ -117,6 +117,16 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        if: ${{ !inputs.disable-monitor }}
+        continue-on-error: true
+        run: |
+          # Windows conda doesn't have python3 binary, only python, but it's python3
+          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
@@ -138,16 +148,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
-
-      - name: Start monitoring script
-        id: monitor-script
-        shell: bash
-        if: ${{ !inputs.disable-monitor }}
-        continue-on-error: true
-        run: |
-          # Windows conda doesn't have python3 binary, only python, but it's python3
-          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Set Test step time
         id: test-timeout
