@@ -24,6 +24,10 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
+#ifdef __ARM_FEATURE_SVE
+#include <arm_sve.h>
+#endif
+
 int register_embedding_params();
 
 namespace {
@@ -189,6 +193,235 @@ at::Tensor& embedding_lookup_fallback_impl(
   } // for each m
   return output;
 }
+
+#ifdef __ARM_FEATURE_SVE
+static inline void embedding_sve_kernel(
+    const uint8_t* weight_ptr,
+    const float scale,
+    svfloat32_t& output,
+    const svbool_t p) {
+  auto wei_u32 = svld1ub_u32(p, weight_ptr);
+  auto quantized = svcvt_f32_u32_x(p, wei_u32);
+  output = svmla_n_f32_z(p, output, quantized, scale);
+  return;
+}
+
+template <
+    typename IndexType,
+    typename OffsetType>
+at::Tensor& embedding_lookup_byte_sve_impl(
+    const at::Tensor& weight,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    at::Tensor& output,
+    const int64_t block_size,
+    const int64_t output_size,
+    bool include_last_offset) {
+  auto* output_data = output.data_ptr<float>();
+  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto indices_data = indices.data_ptr<IndexType>();
+  const auto weight_sizes = weight.sizes();
+  const int64_t weight_size = weight_sizes[1];
+  const int index_size = indices.numel();
+
+  auto accessor = offsets.accessor<OffsetType, 1>();
+  std::vector<OffsetType> lengths_data;
+
+  int64_t lower = accessor[0];
+  for (const auto i : c10::irange(1, offsets.numel())) {
+    lengths_data.push_back(accessor[i] - lower);
+    lower = accessor[i];
+  }
+  if (!include_last_offset) {
+    lengths_data.push_back(indices.numel() - lower);
+  }
+
+  int64_t current = 0;
+
+  uint32_t lanes = svcntw();
+  auto p_32 = svptrue_b32();
+  for (const auto m : c10::irange(output_size)) {
+    memset(output_data, 0, block_size * sizeof(float));
+    TORCH_CHECK(
+        current + lengths_data[m] <= index_size,
+        "Expect the lengths data to be less than indices size");
+
+    int i = 0;
+    while (i + 7 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current  ] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current+1] * weight_size;
+      auto wei_ptr3 = weight_data + indices_data[current+2] * weight_size;
+      auto wei_ptr4 = weight_data + indices_data[current+3] * weight_size;
+      auto wei_ptr5 = weight_data + indices_data[current+4] * weight_size;
+      auto wei_ptr6 = weight_data + indices_data[current+5] * weight_size;
+      auto wei_ptr7 = weight_data + indices_data[current+6] * weight_size;
+      auto wei_ptr8 = weight_data + indices_data[current+7] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float scale_3 = *(float*)(wei_ptr3 + weight_size - 2 * sizeof(float));
+      float scale_4 = *(float*)(wei_ptr4 + weight_size - 2 * sizeof(float));
+      float scale_5 = *(float*)(wei_ptr5 + weight_size - 2 * sizeof(float));
+      float scale_6 = *(float*)(wei_ptr6 + weight_size - 2 * sizeof(float));
+      float scale_7 = *(float*)(wei_ptr7 + weight_size - 2 * sizeof(float));
+      float scale_8 = *(float*)(wei_ptr8 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr3 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr4 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr5 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr6 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr7 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr8 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+        auto output = svld1_f32(p_32, &output_data[j]);
+	output = svadd_n_f32_x(p_32, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32);
+	embedding_sve_kernel(wei_ptr3 + j, scale_3, output, p_32);
+	embedding_sve_kernel(wei_ptr4 + j, scale_4, output, p_32);
+	embedding_sve_kernel(wei_ptr5 + j, scale_5, output, p_32);
+	embedding_sve_kernel(wei_ptr6 + j, scale_6, output, p_32);
+	embedding_sve_kernel(wei_ptr7 + j, scale_7, output, p_32);
+	embedding_sve_kernel(wei_ptr8 + j, scale_8, output, p_32);
+
+	svst1_f32(p_32, &output_data[j], output);
+	j += lanes;
+      }
+
+      if (j < block_size) {
+	auto p_32_n = svwhilelt_b32_u32(j, block_size);
+	auto output = svld1_f32(p_32_n, &output_data[j]);
+	output = svadd_n_f32_x(p_32_n, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32_n);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32_n);
+	embedding_sve_kernel(wei_ptr3 + j, scale_3, output, p_32_n);
+	embedding_sve_kernel(wei_ptr4 + j, scale_4, output, p_32_n);
+	embedding_sve_kernel(wei_ptr5 + j, scale_5, output, p_32_n);
+	embedding_sve_kernel(wei_ptr6 + j, scale_6, output, p_32_n);
+	embedding_sve_kernel(wei_ptr7 + j, scale_7, output, p_32_n);
+	embedding_sve_kernel(wei_ptr8 + j, scale_8, output, p_32_n);
+
+	svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i+=8;
+      current+=8;
+    }
+
+    while (i + 3 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current  ] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current+1] * weight_size;
+      auto wei_ptr3 = weight_data + indices_data[current+2] * weight_size;
+      auto wei_ptr4 = weight_data + indices_data[current+3] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float scale_3 = *(float*)(wei_ptr3 + weight_size - 2 * sizeof(float));
+      float scale_4 = *(float*)(wei_ptr4 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr3 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr4 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+	auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32);
+	embedding_sve_kernel(wei_ptr3 + j, scale_3, output, p_32);
+	embedding_sve_kernel(wei_ptr4 + j, scale_4, output, p_32);
+
+	svst1_f32(p_32, &output_data[j], output);
+	j += lanes;
+      }
+
+      if (j < block_size) {
+	auto p_32_n = svwhilelt_b32_u32(j, block_size);
+	auto output = svld1_f32(p_32_n, &output_data[j]);
+	output = svadd_n_f32_x(p_32_n, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32_n);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32_n);
+	embedding_sve_kernel(wei_ptr3 + j, scale_3, output, p_32_n);
+	embedding_sve_kernel(wei_ptr4 + j, scale_4, output, p_32_n);
+
+	svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i+=4;
+      current+=4;
+    }
+
+    while (i + 1 < lengths_data[m]) {
+      auto wei_ptr1 = weight_data + indices_data[current  ] * weight_size;
+      auto wei_ptr2 = weight_data + indices_data[current+1] * weight_size;
+      float scale_1 = *(float*)(wei_ptr1 + weight_size - 2 * sizeof(float));
+      float scale_2 = *(float*)(wei_ptr2 + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr1 + weight_size - sizeof(float));
+      bias      += *(float*)(wei_ptr2 + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+	auto output = svld1_f32(p_32, &output_data[j]);
+        output = svadd_n_f32_x(p_32, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32);
+
+	svst1_f32(p_32, &output_data[j], output);
+	j += lanes;
+      }
+
+      if (j < block_size) {
+	auto p_32_n = svwhilelt_b32_u32(j, block_size);
+	auto output = svld1_f32(p_32_n, &output_data[j]);
+	output = svadd_n_f32_x(p_32_n, output, bias);
+
+	embedding_sve_kernel(wei_ptr1 + j, scale_1, output, p_32_n);
+	embedding_sve_kernel(wei_ptr2 + j, scale_2, output, p_32_n);
+
+	svst1_f32(p_32_n, &output_data[j], output);
+      }
+      i+=2;
+      current+=2;
+    }
+
+    while (i < lengths_data[m]) {
+      auto wei_ptr = weight_data + indices_data[current] * weight_size;
+      float scale = *(float*)(wei_ptr + weight_size - 2 * sizeof(float));
+      float bias = *(float*)(wei_ptr + weight_size - sizeof(float));
+
+      uint32_t j = 0;
+      while (j + lanes <= block_size) {
+	auto output = svld1_f32(p_32, &output_data[j]);
+	output = svadd_n_f32_x(p_32, output, bias);
+
+	embedding_sve_kernel(wei_ptr + j, scale, output, p_32);
+
+	svst1_f32(p_32, &output_data[j], output);
+	j += lanes;
+      }
+
+      if (j < block_size) {
+	auto p_32_n = svwhilelt_b32_u32(j, block_size);
+	auto output = svld1_f32(p_32_n, &output_data[j]);
+	output = svadd_n_f32_x(p_32_n, output, bias);
+
+	embedding_sve_kernel(wei_ptr + j, scale, output, p_32_n);
+
+	svst1_f32(p_32_n, &output_data[j], output);
+      }
+      ++i;
+      ++current;
+    }
+    output_data += block_size;
+  } // for each m
+  return output;
+}
+#endif
 
 namespace {
 template <typename IndexType, typename OffsetType>
@@ -540,6 +773,18 @@ at::Tensor& embedding_bag_byte_impl(
   }
   return output;
 #else
+#if defined(__ARM_FEATURE_SVE) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+  if (!(pruned_weights && !fallback_to_no_sparse) && !per_sample_weights_.has_value()) {
+    return embedding_lookup_byte_sve_impl<IndexType, OffsetType>(
+      weight,
+      indices,
+      offsets,
+      output,
+      D,
+      output_size,
+      include_last_offset);
+  }
+#endif
   return embedding_lookup_fallback_impl<IndexType, OffsetType, 8, 1>(
       weight,
       indices,
