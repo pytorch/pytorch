@@ -1,4 +1,4 @@
-@echo off
+:: @echo off
 
 :: The conda and wheels jobs are separated on Windows, so we don't need to clone again.
 if not exist "%NIGHTLIES_PYTORCH_ROOT%" goto clone_pytorch
