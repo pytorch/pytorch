@@ -21,6 +21,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_operations,
     pad_mm_precondition,
 )
+from torch._inductor.runtime.benchmarking import benchmarker
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -389,10 +390,6 @@ def should_pad_bench(*args, **kwargs):
 def _should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
-    do_bench = functools.partial(
-        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
-        warmup=5,
-    )
     m_padded_length = 0
     n_padded_length = 0
     batchsize = 1
@@ -580,7 +577,6 @@ def _should_pad_bench(
                 m_padded_length,
                 k_padded_length,
                 n_padded_length,
-                do_bench,
                 mat1_pre_padded,
                 mat2_pre_padded,
                 ori_time,
@@ -591,10 +587,13 @@ def _should_pad_bench(
                 return ah_should_pad
 
         if ori_time is None:
-            ori_time = do_bench(orig_bench_fn)
+            ori_time, pad_time = benchmarker.benchmark_many_gpu(
+                [orig_bench_fn, pad_bench_fn], warmup=5
+            )
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+        else:
+            pad_time = benchmarker.benchmark_gpu(pad_bench_fn, warmup=5)
 
-        pad_time = do_bench(pad_bench_fn)
         return should_pad(key, ori_time, pad_time)
 
 
@@ -641,7 +640,6 @@ def run_autoheuristic(
     m_padded_length: int,
     k_padded_length: int,
     n_padded_length: int,
-    do_bench,
     mat1_pre_padded: bool,
     mat2_pre_padded: bool,
     ori_time,
@@ -650,9 +648,9 @@ def run_autoheuristic(
 ) -> Optional[bool]:
     def feedback_fn(choice: str):
         if choice == orig_choice:
-            return do_bench(orig_bench_fn)
+            return benchmarker.benchmark_gpu(orig_bench_fn, warmup=5)
         elif choice == pad_choice:
-            return do_bench(pad_bench_fn)
+            return benchmarker.benchmark_gpu(pad_bench_fn, warmup=5)
         return None
 
     def fallback() -> str:
