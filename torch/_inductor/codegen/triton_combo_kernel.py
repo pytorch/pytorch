@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+import sympy
 from sympy import Integer, Symbol
 
 from .. import config, metrics
@@ -102,7 +103,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not kernel_map[n].inside_reduction
             and len(kernel_map[n].numels) == 2
-            and V.graph.sizevars.size_hint(kernel_map[n].numels[0]) > LARGE_NUMELS
+            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -216,7 +217,7 @@ class ComboKernel(Kernel):
             ndim = len(tiled_groups)
             assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
             if not mixed_sizes and ndim == 3:
-                y_elem = tiled_groups[0]
+                y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
                     partition_state, read_write_count, node_info
@@ -463,7 +464,7 @@ class ComboKernel(Kernel):
 
     @staticmethod
     def create_triton_kernel(
-        *groups: Any,
+        tiling: Dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
@@ -472,7 +473,7 @@ class ComboKernel(Kernel):
         2) numels except x dimension are the same for each sub kernel.
         """
         return TritonKernel(
-            *groups,
+            tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
@@ -564,7 +565,7 @@ class ComboKernel(Kernel):
     def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels
+            for numel in sub_kernel.numels.values()
         ]
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
