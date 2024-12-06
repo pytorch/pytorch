@@ -82,7 +82,7 @@ class C10_API Scalar {
       "int64_t is the same as long on 64 bit Linux");
 #if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
-#endif  
+#endif /* not 32-bit system */
 #endif
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}
