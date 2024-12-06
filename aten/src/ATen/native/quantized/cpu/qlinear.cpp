@@ -797,14 +797,20 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   TORCH_CHECK(
       dim != 0,
       "qlinear (ONEDNN): input dim should be at least 1, but got 0");
-  TORCH_CHECK(input.scalar_type() == c10::ScalarType::QUInt8,
-      "qlinear (ONEDNN): data type of input should be QUint8.");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::QUInt8 || input.scalar_type() == c10::ScalarType::QInt8,
+      "qlinear (ONEDNN): data type of input should be QUInt8 or QInt8.");
+
+#ifdef __aarch64__
+  using qtype = int8_t;
+#else
+  using qtype = uint8_t;
+#endif
 
   auto input_contig = input.expect_contiguous();
   auto& w = *(weight_.get());
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
-  auto input_data_type = dnnl::memory::data_type::u8;
+  auto input_data_type = std::is_signed_v<qtype> ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
   ideep::attr_t op_attr = ideep::attr_t();
   if (post_op == Relu) {
@@ -814,7 +820,11 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   } else if (post_op == Tanh) {
     op_attr = ideep::attr_t::fuse_tanh();
   }
+#ifdef __aarch64__
+  ideep::tensor x(input_desc, input_contig->data_ptr<c10::qint8>());
+#else
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
+#endif
   auto dst_dims = {M, N};
   double input_scale = input.q_scale();
   int64_t input_zero_point = input.q_zero_point();
@@ -828,13 +838,17 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   // Allocate output Tensor
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
+#ifdef __aarch64__
+      at::device(c10::kCPU).dtype(c10::kQInt8),
+#else
       at::device(c10::kCPU).dtype(c10::kQUInt8),
+#endif
       output_scale,
       output_zero_point);
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8,
+  ideep::tensor y({dst_dims, std::is_signed_v<qtype> ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -856,7 +870,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
           params, x, w, b, y,
           src_scales, weights_scales, dst_scales,
-          src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
+          src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
+          std::is_signed_v<qtype> ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
+          std::is_signed_v<qtype> ? ideep::s8s8 : ideep::u8s8);
       get_cache() = LinearPrimitiveCache(cache_key, params);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
@@ -866,7 +882,9 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   } else {
     ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
                                    dst_scales, src_zero_point, dst_zero_point,
-                                   1.0f, 1.0f, op_attr);
+                                   1.0f, 1.0f, op_attr,
+                                   std::is_signed_v<qtype> ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8,
+                                   std::is_signed_v<qtype> ? ideep::s8s8 : ideep::u8s8);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;
