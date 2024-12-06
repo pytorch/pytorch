@@ -63,10 +63,13 @@ class CompileId(NamedTuple):
     # TODO: consider also tracking the recompilation count
 
     def __str__(self):
-        return f"{self.compiled_autograd_id}/{self.frame_id}/{self.frame_compile_id}".replace(
+        ca_str = ""
+        if self.compiled_autograd_id is not None:
+            ca_str += self.compiled_autograd_id + "/"
+
+        return f"{ca_str}{self.frame_id}/{self.frame_compile_id}".replace(
             "None", "-"
         )
-
 
 class TraceId(NamedTuple):
     compile_id: CompileId
