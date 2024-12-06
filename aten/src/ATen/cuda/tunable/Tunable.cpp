@@ -433,8 +433,13 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
+<<<<<<< HEAD
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
   if (env != nullptr && strcmp(env, "1") == 0) {
+=======
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
+  if (eval) {
+>>>>>>> 72c632c4a32 (Fix TunableOp environment variables due to recent breakage after switch to c10::utils::get_env.)
     return true;
   }
   return enable_;
@@ -460,16 +465,26 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
+<<<<<<< HEAD
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
+=======
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
+  if (eval) {
+>>>>>>> 72c632c4a32 (Fix TunableOp environment variables due to recent breakage after switch to c10::utils::get_env.)
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
+<<<<<<< HEAD
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
   if (env != nullptr && strcmp(env, "1") == 0) {
+=======
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
+  if (eval) {
+>>>>>>> 72c632c4a32 (Fix TunableOp environment variables due to recent breakage after switch to c10::utils::get_env.)
     return true;
   }
   return record_untuned_enable_;
