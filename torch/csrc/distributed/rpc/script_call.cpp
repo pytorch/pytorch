@@ -27,7 +27,7 @@ bool ScriptCall::hasOp() const {
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
-  return *op_;
+  return op_.value();
 }
 
 bool ScriptCall::hasQualifiedName() const {

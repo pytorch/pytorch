@@ -27,6 +27,7 @@ namespace {
 // TODO: clean this up when https://github.com/pytorch/pytorch/issues/60306 is
 // improved
 void record_stream_any_impl(Variable& var, c10::Stream& stream) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto guard = c10::impl::VirtualGuardImpl(device_of(var).value().type());
 
   if (C10_UNLIKELY(at::isBatchedTensor(var))) {

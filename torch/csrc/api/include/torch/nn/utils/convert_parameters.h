@@ -18,9 +18,9 @@ inline std::optional<int64_t> _check_param_device(
   } else {
     bool warn = false;
     if (param.is_cuda()) { // Check if in same GPU
-      warn = (param.get_device() != old_param_device.value());
+      warn = (param.get_device() != old_param_device);
     } else { // Check if in CPU
-      warn = (old_param_device.value() != -1);
+      warn = (old_param_device != -1);
     }
     if (warn) {
       TORCH_CHECK(
