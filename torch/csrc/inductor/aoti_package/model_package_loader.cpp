@@ -407,10 +407,6 @@ std::vector<at::Tensor> AOTIModelPackageLoader::steal_inputs_and_run(
   return runner_->steal_inputs_and_run(inputs, stream_handle);
 }
 
-std::vector<at::Tensor> run_with_stealing_inputs(std::vector<at::Tensor>& inputs) {
-  return runner_->run_with_stealing_inputs(inputs);
-}
-
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     get_metadata() {
   return metadata_;
