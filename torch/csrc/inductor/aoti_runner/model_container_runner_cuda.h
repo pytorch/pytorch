@@ -9,7 +9,7 @@ namespace torch::inductor {
 // NOTICE: Following APIs are subject to change due to active development
 // We provide NO BC guarantee for these APIs
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
-class TORCH_CUDA_CPP_API AOTIModelContainerRunnerCuda
+class AOTI_TORCH_EXPORT AOTIModelContainerRunnerCuda
     : public AOTIModelContainerRunner {
  public:
   // @param device_str: cuda device string, e.g. "cuda", "cuda:0"
