@@ -63,7 +63,9 @@ class CompileId(NamedTuple):
     # TODO: consider also tracking the recompilation count
 
     def __str__(self):
-        return f"{self.frame_id}/{self.frame_compile_id}"
+        return f"{self.compiled_autograd_id}/{self.frame_id}/{self.frame_compile_id}".replace(
+            "None", "-"
+        )
 
 
 class TraceId(NamedTuple):
