@@ -13,7 +13,7 @@ struct DynamicLibrary;
 namespace torch::inductor {
 using TensorConstantMap = std::unordered_map<std::string, at::Tensor*>;
 
-class TORCH_API AOTIModelContainerRunner {
+class C10_EXPORT AOTIModelContainerRunner {
  public:
   AOTIModelContainerRunner() = delete;
   AOTIModelContainerRunner(const AOTIModelContainerRunner& other) = delete;
@@ -94,13 +94,13 @@ using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
 
 // Return a global map "device name" -> "aoti model runner create function" for
 // all registered in AOTI external backends
-TORCH_API std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
+C10_EXPORT std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
 getAOTIModelRunnerRegistry();
 
 // To register a new external backend in AOTI one needs to create an instance of
 // this struct. It is not thread-safe. Becase it is expected to be called during
 // the initialization of the program.
-struct TORCH_API RegisterAOTIModelRunner {
+struct C10_EXPORT RegisterAOTIModelRunner {
   RegisterAOTIModelRunner(
       const std::string& name,
       CreateAOTIModelRunnerFunc create_aoti_model_runner_fn) {

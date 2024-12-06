@@ -14,7 +14,7 @@ AOTIModelContainerRunnerXpu::AOTIModelContainerRunnerXpu(
           device_str,
           kernel_bin_dir) {}
 
-AOTIModelContainerRunnerXpu::~AOTIModelContainerRunnerXpu(){};
+AOTIModelContainerRunnerXpu::~AOTIModelContainerRunnerXpu() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerXpu::run(
     const std::vector<at::Tensor>& inputs,
