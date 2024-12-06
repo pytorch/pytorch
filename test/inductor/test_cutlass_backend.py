@@ -643,6 +643,43 @@ class TestCutlassBackend(TestCase):
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    def test_force_cutlass_backend_aoti_dynamic(self):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x, w):
+                return x @ w
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "autotune_fallback_to_aten": False,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+            }
+        ):
+            model = MyModel()
+            M, N, K = 16, 32, 64
+            dynamic_shapes = {
+                "x": {0: M, 1: K},
+                "w": {0: K, 1: N},
+            }
+
+            x = torch.randn(M, K).cuda().half()
+            w = torch.randn(K, N).cuda().half()
+
+            actual = AOTIRunnerUtil.run(
+                "cuda",
+                model,
+                (x, w),
+                dynamic_shapes=dynamic_shapes,
+            )
+            expected = model(x, w)
+            torch.testing.assert_close(expected, actual)
+
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM80, "need sm_80 exactly")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
