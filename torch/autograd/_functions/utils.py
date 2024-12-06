@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
-import operator
-from functools import reduce
+import math
+
 
 
 def maybe_view(tensor, size, check_same_size=True):
@@ -40,8 +40,8 @@ def check_onnx_broadcast(dims1, dims2):
     supported = True
     len1 = len(dims1)
     len2 = len(dims2)
-    numel1 = reduce(operator.mul, dims1)
-    numel2 = reduce(operator.mul, dims2)
+    numel1 = math.prod(dims1)
+    numel2 = math.prod(dims2)
     if len1 < len2:
         broadcast = True
         if numel2 != 1:
