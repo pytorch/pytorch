@@ -1,12 +1,13 @@
 @echo off
 
 REM Check for necessary components
-
+echo "Checking dependencies"
 IF NOT "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
     echo You should use 64 bits Windows to build and run PyTorch
     exit /b 1
 )
 
+echo "Cmake check"
 IF "%BUILD_VISION%" == "" (
     where /q cmake.exe
 
