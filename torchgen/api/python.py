@@ -663,7 +663,7 @@ def argument_type_str(
         elif t.name == BaseTy.float:
             return "double"
         elif t.name == BaseTy.str:
-            return "c10::string_view"
+            return "std::string_view"
         elif t.name in [
             BaseTy.bool,
             BaseTy.QScheme,
