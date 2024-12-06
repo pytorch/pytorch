@@ -903,32 +903,41 @@ struct SavedState {
   std::vector<at::IValue> stack;
   int64_t idx = 0;
 
-  void enqueue(
-      const SavedVariable& sv,
-      const std::shared_ptr<Node>& saved_for) {
-    stack.emplace_back(sv.unpack(saved_for));
-  }
-  void dequeue(SavedVariable& sv) {
-    sv = SavedVariable(stack[idx++].toTensor(), /*is_output*/ true);
-  }
+  // template <class ivalue_t>
+  // void enqueue(const ivalue_t& t) {
+  //   stack.emplace_back(t);
+  // }
+  // template <class ivalue_t>
+  // void dequeue(ivalue_t& value) {
+  //   value = stack[idx++].to<ivalue_t>();
+  // }
 
-  void enqueue(
-      const std::vector<SavedVariable>& sv,
-      const std::shared_ptr<Node>& saved_for) {
-    enqueue(static_cast<int64_t>(sv.size()));
-    for (const auto& v : sv) {
-      enqueue(v, saved_for);
-    }
-  }
-  void dequeue(std::vector<SavedVariable>& sv) {
-    int64_t size = 0;
-    dequeue(size);
-    sv.clear();
-    for (int64_t idx = 0; idx < size; idx++) {
-      sv.emplace_back();
-      dequeue(sv.back());
-    }
-  }
+  // void enqueue(
+  //     const SavedVariable& sv,
+  //     const std::shared_ptr<Node>& saved_for) {
+  //   stack.emplace_back(sv.unpack(saved_for));
+  // }
+  // void dequeue(SavedVariable& sv) {
+  //   sv = SavedVariable(stack[idx++].toTensor(), /*is_output*/ true);
+  // }
+
+  // void enqueue(
+  //     const std::vector<SavedVariable>& sv,
+  //     const std::shared_ptr<Node>& saved_for) {
+  //   std::vector<at::Tensor> lst;
+  //   for (const auto& v : sv) {
+  //     lst.emplace_back(v.unpack(saved_for));
+  //   }
+  //   enqueue(lst);
+  // }
+  // void dequeue(std::vector<SavedVariable>& sv) {
+  //   std::vector<at::Tensor> lst;
+  //   dequeue(lst);
+  //   sv.clear();
+  //   for (const at::Tensor& v : lst) {
+  //     sv.emplace_back(v, /*is_output*/true);
+  //   }
+  // }
 
   /*
   void enqueue(const PyObject*& t) {
@@ -965,16 +974,11 @@ struct SavedState {
     t = static_cast<size_t>(tmp);
   }
 
-  // TODO: probably wildly inefficient
-  template <class T>
-  void enqueue(const c10::List<T> t) {
-    enqueue(t.vec());
+  void enqueue(const c10::List<at::optional<at::Tensor>> t) {
+    enqueue_ivalue<c10::List<at::optional<at::Tensor>>>(t);
   }
-  template <class T>
-  void dequeue(c10::List<T>& t) {
-    std::vector<T> tmp;
-    dequeue(tmp);
-    t = c10::List<T>(tmp);
+  void dequeue(c10::List<at::optional<at::Tensor>>& t) {
+    t = stack[idx++].toOptionalTensorList();
   }
 
   void enqueue(const TypeAndSize& value) {
@@ -1010,6 +1014,12 @@ struct SavedState {
     value = InputMetadata(options, sym_shape, is_tensor_subclass, false);
   }
 
+  void enqueue(const at::IValue& iv) {
+    stack.emplace_back(iv);
+  }
+  void dequeue(at::IValue& iv) {
+    iv = stack[idx++];
+  }
   void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
     std::vector<std::string> keys;
     std::vector<at::IValue> values;
@@ -1018,24 +1028,38 @@ struct SavedState {
       values.emplace_back(value);
     }
     enqueue(keys);
-    enqueue(values);
-  }
-  void enqueue(const at::IValue& iv) {
-    stack.emplace_back(iv);
-  }
-  void dequeue(at::IValue& iv) {
-    iv = stack[idx++];
+    for (const auto& value : values) {
+      enqueue(value);
+    }
   }
   void dequeue(ska::flat_hash_map<std::string, at::IValue>& dct) {
     std::vector<std::string> keys;
-    std::vector<at::IValue> values;
     dequeue(keys);
-    dequeue(values);
+    std::vector<at::IValue> values;
+    for (const auto i : c10::irange(keys.size())) {
+      values.emplace_back();
+      dequeue(values[i]);
+    }
     dct.clear();
     for (const auto i : c10::irange(keys.size())) {
       dct.insert({keys[i], values[i]});
     }
   }
+  // void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+  //   auto result = c10::impl::GenericDict(at::StringType::get(), at::AnyType::get());
+  //   for (const auto& [key, value] : dct) {
+  //     result.insert(key, value);
+  //   }
+  //   enqueue_ivalue(result);
+  // }
+  // void dequeue(ska::flat_hash_map<std::string, at::IValue>& dct) {
+  //   auto saved = stack[idx++].toGenericDict();
+  //   dct.clear();
+
+  //   for (const auto& entry : saved) {
+  //     dct.insert({entry.key().to<std::string>(), entry.value()});
+  //   }
+  // }
 
   void enqueue(const at::TensorOptions& value) {
     enqueue(value.requires_grad_opt());
@@ -1097,25 +1121,54 @@ struct SavedState {
   void dequeue(c10::OptionalArray<T>& t) {
     dequeue(t.list);
   }
-
-  template <typename T>
-  void enqueue(const std::optional<T>& t) {
-    enqueue(t.has_value());
+  void enqueue(const std::optional<caffe2::TypeMeta>& t) {
+    std::optional<at::ScalarType> new_t;
     if (t.has_value()) {
-      enqueue(*t);
+      new_t = at::typeMetaToScalarType(t.value());
+      enqueue_ivalue(new_t);
+    } else {
+      enqueue(at::IValue());
     }
   }
-  template <typename T>
-  void dequeue(c10::optional<T>& value) {
+  void dequeue(c10::optional<caffe2::TypeMeta>& value) {
+    auto opt_scalar_type = stack[idx++].toOptional<at::ScalarType>();
+    if (opt_scalar_type.has_value()) {
+      value = caffe2::TypeMeta::fromScalarType(opt_scalar_type.value());
+    } else {
+      value = at::nullopt;
+    }
+  }
+
+  // TODO: is vector<optional<inputmetadata> the only problem?
+  void enqueue(const std::optional<InputMetadata>& t) {
+    enqueue(t.has_value());
+    if (t.has_value()) {
+      enqueue(t.value());
+    }
+  }
+  void dequeue(c10::optional<InputMetadata>& value) {
     bool has_value = false;
     dequeue(has_value);
     if (has_value) {
-      T tmp;
+      InputMetadata tmp;
       dequeue(tmp);
       value = tmp;
     } else {
       value = c10::nullopt;
     }
+  }
+
+  template <typename T>
+  void enqueue(const std::optional<T>& t) {
+    if (t.has_value()) {
+      enqueue_ivalue<T>(t.value());
+    } else {
+      stack.emplace_back();
+    }
+  }
+  template <typename T>
+  void dequeue(c10::optional<T>& value) {
+    value = stack[idx++].toOptional<T>();
   }
 
   void enqueue(const at::TensorGeometry& t) {
@@ -1135,13 +1188,45 @@ struct SavedState {
 
   template <typename T>
   void enqueue(const std::vector<T>& t) {
-    enqueue(static_cast<int64_t>(t.size()));
-    for (const T& i : t) {
-      enqueue(i);
+    c10::List<T> lst;
+    for (const auto& elt : t) {
+      lst.emplace_back(elt);
     }
+    enqueue_ivalue(t);
   }
   template <typename T>
   void dequeue(std::vector<T>& t) {
+    const auto& lst = stack[idx++].toList();
+    t.clear();
+    for (const at::IValue& elt : lst) {
+      t.emplace_back(elt.to<T>());
+    }
+  }
+
+  // todo: vector<optional<inputmetadata>>
+  void enqueue(const std::vector<std::optional<InputMetadata>>& t) {
+    enqueue(static_cast<int64_t>(t.size()));
+    for (const auto& i : t) {
+      enqueue(i);
+    }
+  }
+  void dequeue(std::vector<std::optional<InputMetadata>>& t) {
+    int64_t size = 0;
+    dequeue(size);
+    t.clear();
+    for (int64_t idx = 0; idx < size; idx++) {
+      t.emplace_back();
+      dequeue(t.back());
+    }
+  }
+
+  void enqueue(const std::vector<VariableInfo>& t) {
+    enqueue(static_cast<int64_t>(t.size()));
+    for (const auto& i : t) {
+      enqueue(i);
+    }
+  }
+  void dequeue(std::vector<VariableInfo>& t) {
     int64_t size = 0;
     dequeue(size);
     t.clear();

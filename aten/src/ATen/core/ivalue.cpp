@@ -88,9 +88,7 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       case Tag::None:
         return NoneType::get();
       case Tag::Tensor:
-        return TensorType::get();
-        // TODO(rzou): following errors
-        // return TensorType::create(v.toTensor());
+        return TensorType::create(v.toTensor());
       case Tag::Storage:
         return StorageType::get();
       case Tag::Double:

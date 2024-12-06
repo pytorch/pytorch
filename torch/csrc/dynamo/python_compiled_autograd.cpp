@@ -71,7 +71,12 @@ static variable_list call_function(
   std::vector<at::TypePtr> schema;
   schema.reserve(saved_state.size());
   for (const auto& ivalue : saved_state) {
-    schema.emplace_back(ivalue.type());
+    if (ivalue.isTensor()) {
+      // special case: ivalue.type() for an undefined tensor doesn't work.
+      schema.emplace_back(at::TensorType::get());
+    } else {
+      schema.emplace_back(ivalue.type());
+    }
   }
 
   // We are going to bind the following function to Python

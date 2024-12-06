@@ -406,37 +406,38 @@ variable_list PyNode::apply_with_saved(
 }
 
 ivalue_list PyNode::retrieve_saved(SwapSavedVariables& saved) {
-  auto f = (THPFunction*)obj;
-  saved.before(f->compiled_autograd_symints);
-  saved.before(f->saved_variables);
-  saved.before(f->needs_input_grad);
-  saved.before(f->materialize_non_diff_grads);
-  saved.before(f->output_info);
-  saved.before(f->input_info);
-
-  SavedState state;
-  state.enqueue(f->compiled_autograd_symints);
-  state.enqueue(f->saved_variables, shared_from_this());
-  // state.enqueue(f->needs_input_grad);
-  // state.enqueue(f->materialize_non_diff_grads);
-  // state.enqueue(f->output_info);
-  // state.enqueue(f->input_info);
-
-  saved.after(f->compiled_autograd_symints);
-  saved.after(f->saved_variables);
-  saved.after(f->needs_input_grad);
-  saved.after(f->materialize_non_diff_grads);
-  saved.after(f->output_info);
-  saved.after(f->input_info);
-
-  state.enqueue(f->compiled_autograd_symints);
-  state.enqueue(f->saved_variables, shared_from_this());
-  // state.enqueue(f->needs_input_grad);
-  // state.enqueue(f->materialize_non_diff_grads);
-  // state.enqueue(f->output_info);
-  // state.enqueue(f->input_info);
-
-  return state.stack;
+  TORCH_INTERNAL_ASSERT(false);
+//   auto f = (THPFunction*)obj;
+//   saved.before(f->compiled_autograd_symints);
+//   saved.before(f->saved_variables);
+//   saved.before(f->needs_input_grad);
+//   saved.before(f->materialize_non_diff_grads);
+//   saved.before(f->output_info);
+//   saved.before(f->input_info);
+//
+//   SavedState state;
+//   state.enqueue(f->compiled_autograd_symints);
+//   state.enqueue(f->saved_variables, shared_from_this());
+//   // state.enqueue(f->needs_input_grad);
+//   // state.enqueue(f->materialize_non_diff_grads);
+//   // state.enqueue(f->output_info);
+//   // state.enqueue(f->input_info);
+//
+//   saved.after(f->compiled_autograd_symints);
+//   saved.after(f->saved_variables);
+//   saved.after(f->needs_input_grad);
+//   saved.after(f->materialize_non_diff_grads);
+//   saved.after(f->output_info);
+//   saved.after(f->input_info);
+//
+//   state.enqueue(f->compiled_autograd_symints);
+//   state.enqueue(f->saved_variables, shared_from_this());
+//   // state.enqueue(f->needs_input_grad);
+//   // state.enqueue(f->materialize_non_diff_grads);
+//   // state.enqueue(f->output_info);
+//   // state.enqueue(f->input_info);
+//
+//   return state.stack;
 }
 
 // TODO(rzou): compiled autograd needs special handling of the following.
