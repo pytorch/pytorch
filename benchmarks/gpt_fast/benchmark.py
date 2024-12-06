@@ -6,9 +6,9 @@ import os
 
 from generate import (
     get_arch_name,
+    run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
-    run_llama2_7b_autoquant,
     run_mixtral_8x7b_int8,
 )
 
