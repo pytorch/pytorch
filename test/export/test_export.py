@@ -7360,9 +7360,9 @@ graph():
             N0(),
             inp,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
             ),
         )
         epm = ep.module()
@@ -7425,9 +7425,9 @@ graph():
             N0(),
             inp,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
             ),
         )
         epm = ep.module()
@@ -7489,9 +7489,9 @@ graph():
             N0(),
             inp,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
             ),
         )
         epm = ep.module()
@@ -7571,10 +7571,10 @@ graph():
             N0(),
             inp,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
-                'n1.n2.n3.n4',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
             ),
         )
         epm = ep.module()
@@ -7697,12 +7697,12 @@ graph():
             N0(),
             inp,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
-                'n1.n2.n3.n4',
-                'n1.n2.n3.n4.n5',
-                'n1.n2.n3.n4.n5.n6',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
+                "n1.n2.n3.n4.n5",
+                "n1.n2.n3.n4.n5.n6",
             ),
         )
         epm = ep.module()
@@ -7886,15 +7886,15 @@ graph():
             inp,
             strict=False,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
-                'n1.n2.n3',
-                'n1.n2.n3.n4',
-                'n1.n2.n3.n4.n5',
-                'n1.n2.n3.n4.n5.n6',
-                'n1.n2.n3.n4.n5.n6.n7',
-                'n1.n2.n3.n4.n5.n6.n7.n8',
-                'n1.n2.n3.n4.n5.n6.n7.n8.n9',
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
+                "n1.n2.n3.n4.n5",
+                "n1.n2.n3.n4.n5.n6",
+                "n1.n2.n3.n4.n5.n6.n7",
+                "n1.n2.n3.n4.n5.n6.n7.n8",
+                "n1.n2.n3.n4.n5.n6.n7.n8.n9",
             ),
         )
         epm = ep.module()
@@ -7941,8 +7941,8 @@ graph():
             inp,
             strict=False,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
+                "n1",
+                "n1.n2",
             ),
         )
         epm = ep.module()
@@ -7989,8 +7989,8 @@ graph():
             inp,
             strict=False,
             preserve_module_call_signature=(
-                'n1',
-                'n1.n2',
+                "n1",
+                "n1.n2",
             ),
         )
         epm = ep.module()

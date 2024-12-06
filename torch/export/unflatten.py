@@ -620,8 +620,8 @@ class UnflattenedModule(torch.nn.Module):
                 attrs_map[""].add(target)
 
         # replace multiple call modules with a single dispatcher module
-        for orig_fqn, call_modules in called_modules.items():
-            call_modules = [mod for _, mod in sorted(call_modules)]
+        for orig_fqn, indexed_call_modules in called_modules.items():
+            call_modules = [mod for _, mod in sorted(indexed_call_modules)]
             if len(call_modules) > 1:
                 for i, call_module in enumerate(call_modules):
                     fqn = _call_name(orig_fqn, i + 1)
