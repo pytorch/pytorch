@@ -42,7 +42,6 @@
 #include <ATen/native/Math.h>
 #endif
 
-#include <ATen/native/cpu/utils.h>
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
@@ -58,103 +57,6 @@ struct Welford {
   T weight = T(0);
   uint64_t index = 0;
 };
-
-// 1) out = exp(a - val)
-// 2) val = sum(out)
-template <typename T1, typename T2>
-inline void _exp_reduce_sum_fusion_kernel(
-    T1* a,
-    const int& size,
-    T2* out,
-    T1& val) {
-  auto vec_size = at::vec::Vectorized<T1>::size();
-  auto vec_max = at::vec::Vectorized<T1>(val);
-  T1 tmp_sum = 0;
-  auto vec_tmp_sum = at::vec::Vectorized<T1>(tmp_sum);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
-    auto tmp1 = tmp0 - vec_max;
-    auto tmp2 = tmp1.exp_u20();
-    vec_tmp_sum += tmp2;
-    at::native::_store(out + i, tmp2);
-  }
-  tmp_sum = at::vec::vec_reduce_all<T1>(
-      [](at::vec::Vectorized<T1>& x, at::vec::Vectorized<T1>& y) {
-        return x + y;
-      },
-      vec_tmp_sum);
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = tmp0 - val;
-    auto tmp2 = exp(tmp1);
-    tmp_sum += tmp2;
-    out[i] = tmp2;
-  }
-  val = tmp_sum;
-}
-
-// 1) out = a * scale
-// 2) max = max(out)
-template <typename scalar_t>
-inline void _mul_reduce_max_fusion_kernel(
-    const scalar_t* a,
-    const scalar_t& scale,
-    const int& size,
-    scalar_t* out,
-    scalar_t& max) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  auto vec_scale = at::vec::Vectorized<scalar_t>(scale);
-  scalar_t tmp_max = -std::numeric_limits<scalar_t>::infinity();
-  auto vec_tmp_max = at::vec::Vectorized<scalar_t>(tmp_max);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<scalar_t>::loadu(a + i);
-    auto tmp1 = tmp0 * vec_scale;
-    vec_tmp_max = at::vec::maximum(vec_tmp_max, tmp1);
-    at::native::_store(out + i, tmp1);
-  }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
-    auto tmp0 = a[i];
-    auto tmp1 = tmp0 * scale;
-    tmp_max = std::max(tmp_max, tmp1);
-    out[i] = tmp1;
-  }
-  max = std::max(
-      tmp_max,
-      at::vec::vec_reduce_all<scalar_t>(
-          [](at::vec::Vectorized<scalar_t>& x, at::vec::Vectorized<scalar_t>& y) {
-            return at::vec::maximum(x, y);
-          },
-          vec_tmp_max));
-}
-
-template <typename scalar_t>
-static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
-  TORCH_CHECK(ptr2 == nullptr);
-  return ptr;
-}
-
-template <typename scalar_t,
-          typename std::enable_if_t<std::is_reduced_floating_point_v<scalar_t>, int> = 0>
-static inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
-  return ptr2;
-}
-
-template <typename scalar_t>
-inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
-  using Vec = at::vec::Vectorized<scalar_t>;
-  Vec data_vec = Vec(val);
-  int64_t d = 0;
-  for (; d < size - (size % Vec::size()); d += Vec::size()) {
-    data_vec.store(data + d);
-  }
-  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-  # pragma unroll
-  #endif
-  for (; d < size; d++) {
-    data[d] = val;
-  }
-}
-
 
 template <typename T>
 struct IsVecType: std::false_type {};
@@ -1043,3 +945,152 @@ class AMXState {
     tile_release();
   }
 };
+
+
+template <typename scalar_t>
+inline void copy_value_with_pad(
+    const scalar_t* value_ptr,
+    scalar_t* dst_ptr,
+    int64_t rows,
+    int64_t cols,
+    int64_t prows,
+    int64_t pcols,
+    int64_t ldi) {
+  auto vec_size = at::vec::Vectorized<scalar_t>::size();
+  int64_t i = 0;
+  for (; i < rows; i++) {
+    int64_t j = 0;
+    for (; j < cols - (cols % vec_size); j += vec_size) {
+      auto vec_v =
+          at::vec::Vectorized<scalar_t>::loadu(value_ptr + i * ldi + j);
+      vec_v.store(dst_ptr + i * pcols + j);
+    }
+
+    if (j < cols) {
+      auto vec_v = at::vec::Vectorized<scalar_t>::loadu(
+          value_ptr + i * ldi + j, cols - j);
+      vec_v.store(dst_ptr + i * pcols + j, cols - j);
+    }
+
+    // col padding
+    auto psize = pcols - cols;
+    if (psize > 0) {
+      auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+      int64_t pj = 0;
+      for (; pj < psize - (psize % vec_size); pj += vec_size) {
+        zero_vec.store(dst_ptr + i * pcols + cols + pj);
+      }
+      if (pj < psize) {
+        zero_vec.store(dst_ptr + i * pcols + cols + pj, psize - pj);
+      }
+    }
+  }
+  // row padding
+  for (; i < prows; i++) {
+    auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+    int64_t j = 0;
+    for (; j < pcols - (pcols % vec_size); j += vec_size) {
+      zero_vec.store(dst_ptr + i * pcols + j);
+    }
+    if (j < pcols) {
+      zero_vec.store(dst_ptr + i * pcols + j, pcols - j);
+    }
+
+  }
+}
+// Transpose a [2, 32] matrix to [32, 2]
+// Note: the output leading dimension should be 2,
+// that is, the output must be contiguous
+static inline void transpose_pad_2x32_block(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int krem = 2,
+    int nrem = 32) {
+#if defined(CPU_CAPABILITY_AVX512)
+  __m512i r0, r1;
+  __m512i d0, d1;
+  // load
+  if (nrem < 32) {
+    __mmask32 mask_krem_v = (1LL << nrem) - 1;
+    r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
+    // if krem is not 2, pad with zeros
+    if (krem == 2) {
+      r1 = _mm512_maskz_loadu_epi16(mask_krem_v, src + ld_src);
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  } else {
+    r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
+    if (krem == 2) {
+      r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  }
+  // transpose
+  d0 = _mm512_unpacklo_epi16(r0, r1);
+  d1 = _mm512_unpackhi_epi16(r0, r1);
+  r0 = _mm512_shuffle_i32x4(d0, d1, 0x88);
+  r1 = _mm512_shuffle_i32x4(d0, d1, 0xdd);
+  d0 = _mm512_shuffle_i32x4(r0, r1, 0x88);
+  d1 = _mm512_shuffle_i32x4(r0, r1, 0xdd);
+
+  // store
+  if (nrem < 16) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
+    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
+  } else if (nrem == 16) {
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+  } else if (nrem < 32) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_mask_storeu_epi16(
+        reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
+  } else {
+    // normal store
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
+  }
+#else
+TORCH_CHECK(false, "transpose_pad_2x32_block is only supported when avx512 is supported")
+#endif
+}
+
+// To use AMX to accelerate GEMM,
+// reorder the memory format [K, N] -> [K/2, N, 2]
+// Note: If K % 2 != 0, pad K implicitly
+static inline void pack_vnni2(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int64_t K,
+    int64_t N) {
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t bk = 0;
+  int64_t _K = K / 2 * 2;
+  int64_t _N = N / 32 * 32;
+  for (; bk < _K; bk += 2) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 2, nrem);
+    }
+  }
+  if (K % 2 == 1) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1, nrem);
+    }
+  }
+#else
+TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
+#endif
+}
