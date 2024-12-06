@@ -58,8 +58,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
-    GPU_TYPES,
 )
+from torch._utils import GPU_TYPES
 
 
 try:
