@@ -12,22 +12,32 @@ from torch.nn.utils import parametrize
 __all__ = ["orthogonal", "spectral_norm", "weight_norm"]
 
 
-def _is_orthogonal(Q, eps=None):
-    n, k = Q.size(-2), Q.size(-1)
-    Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
-    # A reasonable eps, but not too large
-    eps = 10.0 * n * torch.finfo(Q.dtype).eps
-    return torch.allclose(Q.mH @ Q, Id, atol=eps)
+def _ensure_tall_square_orthogonal(A):
+    """Ensure/convert the given tall matrix (n x k with n >= k) to be square and orthogonal/unitary."""
+    n, k = A.size(-2), A.size(-1)
 
+    # Check condition for a tall matrix to be orthogonal: A^H A = Identity
+    is_orthogonal = torch.allclose(
+        A.mH @ A,
+        torch.eye(k, dtype=A.dtype, device=A.device),
+        atol=10.0 * n * torch.finfo(A.dtype).eps,
+    )
 
-def _make_orthogonal(A):
-    """Assume that A is a tall matrix.
+    # If square and is orthogonal, return clone.
+    if n == k and is_orthogonal:
+        return A.clone()
 
-    Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative.
-    """
+    # If non-square, make square.
+    if n != k:
+        # Complete into a full n x n orthogonal matrix
+        N = torch.randn(*(A.size()[:-2] + (n, n - k)), dtype=A.dtype, device=A.device)
+        A = torch.cat([A, N], dim=-1)
+
+    # Make orthogonal, and return.
+    # Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative.
     X, tau = torch.geqrf(A)
     Q = torch.linalg.householder_product(X, tau)
-    # The diagonal of X is the diagonal of R (which is always real) so we normalise by its signs
+    # The diagonal of X is the diagonal of R (which is always real) so we normalise by its signs.
     Q *= X.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
     return Q
 
@@ -125,10 +135,10 @@ class _Orthogonal(Module):
 
         Q_init = Q
         n, k = Q.size(-2), Q.size(-1)
+        # Ensure Q is tall (num rows >= num columns)
         transpose = n < k
         if transpose:
             Q = Q.mT
-            n, k = k, n
 
         # We always make sure to always copy Q in every path
         if not hasattr(self, "base"):
@@ -163,29 +173,16 @@ class _Orthogonal(Module):
             # to use a particular reflection
             A.diagonal(dim1=-2, dim2=-1)[tau == 0.0] *= -1
             return A.mT if transpose else A
-        else:
-            if n == k:
-                # We check whether Q is orthogonal
-                if not _is_orthogonal(Q):
-                    Q = _make_orthogonal(Q)
-                else:  # Is orthogonal
-                    Q = Q.clone()
-            else:
-                # Complete Q into a full n x n orthogonal matrix
-                N = torch.randn(
-                    *(Q.size()[:-2] + (n, n - k)), dtype=Q.dtype, device=Q.device
-                )
-                Q = torch.cat([Q, N], dim=-1)
-                Q = _make_orthogonal(Q)
-            self.base = Q
 
-            # It is necessary to return the -Id, as we use the diagonal for the
-            # Householder parametrization. Using -Id makes:
-            # householder(torch.zeros(m,n)) == torch.eye(m,n)
-            # Poor man's version of eye_like
-            neg_Id = torch.zeros_like(Q_init)
-            neg_Id.diagonal(dim1=-2, dim2=-1).fill_(-1.0)
-            return neg_Id
+        self.base = _ensure_tall_square_orthogonal(Q)
+
+        # It is necessary to return the -Id, as we use the diagonal for the
+        # Householder parametrization. Using -Id makes:
+        # householder(torch.zeros(m,n)) == torch.eye(m,n)
+        # Poor man's version of eye_like
+        neg_Id = torch.zeros_like(Q_init)
+        neg_Id.diagonal(dim1=-2, dim2=-1).fill_(-1.0)
+        return neg_Id
 
 
 def orthogonal(
