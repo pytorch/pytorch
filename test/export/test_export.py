@@ -7556,6 +7556,7 @@ graph():
                 super().__init__()
                 self.buf = torch.nn.Buffer(torch.ones(1))
                 self.n1 = N1()
+
             def forward(self, x):
                 x = x + self.n1.buf
                 x = x + self.n1.n2.buf
