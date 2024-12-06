@@ -3550,44 +3550,48 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(y + increment, x)
 
-    # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/test/unit/runtime/test_autotuner.py#L101
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
-    @common_utils.parametrize('with_perf_model', [False, True])
-    def test_triton_kernel_prune_configs_by(self, backend, autotune_at_compile_time, with_perf_model):
+    @common_utils.parametrize("with_perf_model", [False, True])
+    def test_triton_kernel_prune_configs_by(
+        self, backend, autotune_at_compile_time, with_perf_model
+    ):
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
         dst = torch.empty(N, device=GPU_TYPE)
         records = {}
 
         def early_config_prune(configs, named_args, **kwargs):
-            records['run_early_config_prune'] = True
+            records["run_early_config_prune"] = True
             if "N" in kwargs and kwargs["N"] == 1024:
-                records['capture_kwargs'] = True
+                records["capture_kwargs"] = True
             if "dst" in named_args and "src" in named_args and len(named_args) == 2:
-                records['capture_named_args'] = True
+                records["capture_named_args"] = True
             return [configs[0]]
 
         def perf_model(*args, **kwargs):
-            records['run_perf_model'] = True
-            return kwargs['BLOCK_SIZE']
+            records["run_perf_model"] = True
+            return kwargs["BLOCK_SIZE"]
 
-        configs = [triton.Config(kwargs={'BLOCK_SIZE': 32}), triton.Config(kwargs={'BLOCK_SIZE': 128})]
+        configs = [
+            triton.Config(kwargs={"BLOCK_SIZE": 32}),
+            triton.Config(kwargs={"BLOCK_SIZE": 128}),
+        ]
 
         if with_perf_model:
-            prune_configs_by = {'perf_model': perf_model, 'top_k': 1}
+            prune_configs_by = {"perf_model": perf_model, "top_k": 1}
         else:
-            prune_configs_by = {'early_config_prune': early_config_prune}
+            prune_configs_by = {"early_config_prune": early_config_prune}
 
-        @triton.autotune(configs=configs, key=['N'], prune_configs_by=prune_configs_by)
+        @triton.autotune(configs=configs, key=["N"], prune_configs_by=prune_configs_by)
         @triton.jit
         def _kernel(dst, src, N, BLOCK_SIZE: tl.constexpr):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
             tl.store(dst + offsets, x, mask=offsets < N)
 
-        grid = lambda META: (triton.cdiv(N, META['BLOCK_SIZE']), )
+        grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
 
         with torch._inductor.config.patch(
             {"triton.autotune_at_compile_time": autotune_at_compile_time}
@@ -3598,12 +3602,13 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         if with_perf_model:
             self.assertEqual(len(records), 1)
-            self.assertTrue(records['run_perf_model'] is not None)
+            self.assertTrue(records["run_perf_model"] is not None)
         else:
             self.assertEqual(len(records), 3)
-            self.assertTrue(records['run_early_config_prune'] is not None)
-            self.assertTrue(records['capture_kwargs'] is not None)
-            self.assertTrue(records['capture_named_args'] is not None)
+            self.assertTrue(records["run_early_config_prune"] is not None)
+            self.assertTrue(records["capture_kwargs"] is not None)
+            self.assertTrue(records["capture_named_args"] is not None)
+
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
