@@ -65,7 +65,7 @@ specialize_int = False
 # Whether or not to specialize on float inputs.  Dynamo will always promote
 # float inputs into Tensor inputs, but at the moment, backends inconsistently
 # support codegen on float (this is to be fixed).
-specialize_float = True if is_fbcode() else False
+specialize_float = False
 
 # legacy config, does nothing now!
 dynamic_shapes = True
@@ -331,6 +331,10 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
+# Considers a tensor immutable if it is one of the values of a dictionary, and
+# the dictionary tag is same across invocation calls.
+skip_tensor_guards_with_matching_dict_tags = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -446,6 +450,12 @@ log_compilation_metrics = True
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+
+# A set of methods that will be ignored while tracing,
+# to prevent graph breaks.
+# Add logging.Logger.<method> to ignore all calls for method,
+# or logger.<method> to ignore calls for method from this logger instance only.
+ignore_logger_methods: Set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
