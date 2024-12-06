@@ -17996,6 +17996,7 @@ op_db: List[OpInfo] = [
                        # Ref: https://github.com/pytorch/pytorch/issues/78413
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing', device_type='mps'),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
@@ -18518,7 +18519,9 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing', device_type='mps')
+            ),
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -18735,6 +18738,7 @@ op_db: List[OpInfo] = [
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing', device_type="mps"),
         )),
     UnaryUfuncInfo(
         'cfloat',
@@ -19467,7 +19471,8 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.skip("Segfaults on MPS"), 'TestCommon', 'test_out', device_type="mps"),
+               # https://github.com/pytorch/pytorch/issues/142203
+               DecorateInfo(unittest.skip("Segfaults on MPS - ISSUE#142203"), 'TestCommon', 'test_out', device_type="mps"),
            )),
     OpInfo('searchsorted',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
