@@ -26,12 +26,12 @@ def enable_persistent_matmul(value: bool):
         >>> with enable_persistent_matmul():
         ...     model(input)
     """
-    prev_value = torch._inductor.config.triton.enable_persistent_matmul
+    prev_value = torch._inductor.config.triton.enable_persistent_tma_matmul
     try:
-        torch._inductor.config.triton.enable_persistent_matmul = value
+        torch._inductor.config.triton.enable_persistent_tma_matmul = value
         yield
     finally:
-        torch._inductor.config.triton.enable_persistent_matmul = prev_value
+        torch._inductor.config.triton.enable_persistent_tma_matmul = prev_value
 
 
 torch.set_float32_matmul_precision("high")
