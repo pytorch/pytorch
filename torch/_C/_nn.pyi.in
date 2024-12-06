@@ -1,7 +1,6 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 
-from numbers import Number
 from typing import List, Literal, Optional, overload, Sequence, Tuple, Union
 
 from torch import memory_format, Tensor

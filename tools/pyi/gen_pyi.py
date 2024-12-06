@@ -493,8 +493,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "cross_entropy_loss": [
-                "def cross_entropy_loss({}) -> Tensor: ...".
-                format(
+                "def cross_entropy_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -507,9 +506,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "binary_cross_entropy" : [
-                "def binary_cross_entropy({}) -> Tensor: ...".
-                format(
+            "binary_cross_entropy": [
+                "def binary_cross_entropy({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -517,14 +515,13 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "weight: Optional[Tensor] = None",
                             "reduction: int = 1",
                             "*",
-                            "out: Optional[Tensor] = None"
+                            "out: Optional[Tensor] = None",
                         ]
                     )
                 )
             ],
-            "l1_loss" : [
-                "def l1_loss({}) -> Tensor: ...".
-                format(
+            "l1_loss": [
+                "def l1_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -534,9 +531,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "smooth_l1_loss" : [
-                "def smooth_l1_loss({}) -> Tensor: ...".
-                format(
+            "smooth_l1_loss": [
+                "def smooth_l1_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -549,9 +545,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "max_pool2d_with_indices" : [
-                "def max_pool2d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".
-                format(
+            "max_pool2d_with_indices": [
+                "def max_pool2d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -566,9 +561,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "max_pool3d_with_indices" : [
-                "def max_pool3d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".
-                format(
+            "max_pool3d_with_indices": [
+                "def max_pool3d_with_indices({}) -> Tuple[Tensor, Tensor]: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -583,9 +577,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "huber_loss" : [
-                "def huber_loss({}) -> Tensor: ...".
-                format(
+            "huber_loss": [
+                "def huber_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -598,9 +591,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "mse_loss" : [
-                "def mse_loss({}) -> Tensor: ...".
-                format(
+            "mse_loss": [
+                "def mse_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -612,9 +604,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "multilabel_margin_loss" : [
-                "def multilabel_margin_loss({}) -> Tensor: ...".
-                format(
+            "multilabel_margin_loss": [
+                "def multilabel_margin_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -626,9 +617,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "soft_margin_loss" : [
-                "def soft_margin_loss({}) -> Tensor: ...".
-                format(
+            "soft_margin_loss": [
+                "def soft_margin_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -640,9 +630,8 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "multi_margin_loss" : [
-                "def multi_margin_loss({}) -> Tensor: ...".
-                format(
+            "multi_margin_loss": [
+                "def multi_margin_loss({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
@@ -657,13 +646,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "upsample_nearest1d" : [
-                "def upsample_nearest1d({}) -> Tensor: ...".
-                format(
+            "upsample_nearest1d": [
+                "def upsample_nearest1d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales: Optional[float] = None",
                             "*",
                             "out: Optional[Tensor] = None",
@@ -671,13 +659,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "upsample_nearest2d" : [
-                "def upsample_nearest2d({}) -> Tensor: ...".
-                format(
+            "upsample_nearest2d": [
+                "def upsample_nearest2d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales_h: Optional[float] = None",
                             "scales_w: Optional[float] = None",
                             "*",
@@ -686,13 +673,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "upsample_nearest3d" : [
-                "def upsample_nearest3d({}) -> Tensor: ...".
-                format(
+            "upsample_nearest3d": [
+                "def upsample_nearest3d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales_d: Optional[float] = None",
                             "scales_h: Optional[float] = None",
                             "scales_w: Optional[float] = None",
@@ -702,13 +688,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "_upsample_nearest_exact1d" : [
-                "def _upsample_nearest_exact1d({}) -> Tensor: ...".
-                format(
+            "_upsample_nearest_exact1d": [
+                "def _upsample_nearest_exact1d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales: Optional[float] = None",
                             "*",
                             "out: Optional[Tensor] = None",
@@ -716,13 +701,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "_upsample_nearest_exact2d" : [
-                "def _upsample_nearest_exact2d({}) -> Tensor: ...".
-                format(
+            "_upsample_nearest_exact2d": [
+                "def _upsample_nearest_exact2d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales_h: Optional[float] = None",
                             "scales_w: Optional[float] = None",
                             "*",
@@ -731,13 +715,12 @@ def gen_nn_functional(fm: FileManager) -> None:
                     )
                 )
             ],
-            "_upsample_nearest_exact3d" : [
-                "def _upsample_nearest_exact3d({}) -> Tensor: ...".
-                format(
+            "_upsample_nearest_exact3d": [
+                "def _upsample_nearest_exact3d({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "input: Tensor",
-                            "output_size: Union[_int, _size] = None",
+                            "output_size: Optional[Union[_int, _size]] = None",
                             "scales_d: Optional[float] = None",
                             "scales_h: Optional[float] = None",
                             "scales_w: Optional[float] = None",
@@ -798,7 +781,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "linear",
         "pad",
         "one_hot",
-        "scaled_dot_product_attention"
+        "scaled_dot_product_attention",
     ]
     imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed
