@@ -380,11 +380,11 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_score_other = len_score_other
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
-        self.extra_sizevars = {
+        self.extra_sizevars = list({
             val
             for val in self.kernel_input_name_to_buffer.values()
             if isinstance(val, sympy.Symbol)
-        }
+        })
         self.other_buf_start_idx = 5
         self.score_mod_other_buffers = (
             self.input_nodes[

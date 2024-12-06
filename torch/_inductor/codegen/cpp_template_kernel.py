@@ -56,8 +56,12 @@ class CppTemplateKernel(CppKernel):
         inputs: Dict[str, ir.Buffer],
         outputs: Dict[str, ir.Buffer],
         aliases: Optional[Dict[str, str]] = None,
-        extra_sizevars: Optional[Set[sympy.Symbol]] = None,
+        function_name: str = "",
+        extra_sizevars: Optional[List[sympy.Expr]] = None,
+        placeholder: str = "<DEF_KERNEL>",
     ) -> str:
+        if len(function_name) == 0:
+            function_name = str(self.kernel_name)
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
@@ -80,13 +84,17 @@ class CppTemplateKernel(CppKernel):
         }
         unique_sizevars |= {
             s
+            for sym in extra_sizevars or []
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        }
+        unique_sizevars |= {
+            s
             for output in outputs.values()
             for sym in itertools.chain(output.get_size(), output.get_stride())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         }
-        if extra_sizevars is not None:
-            unique_sizevars |= extra_sizevars
         sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
             self.args.sizevars[sizevar] = f"k{sizevar}"
@@ -100,9 +108,8 @@ class CppTemplateKernel(CppKernel):
                     if alias in self.args.output_buffers:
                         self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
-            return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
+            return f"void {function_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
@@ -154,6 +161,15 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        return sliced.data
+
+    def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
+        # We avoid using L.select here because we need clamp=False so the dim after slicing
+        # is 1 instead of a sympy expression of symbol - dim_size.
+        node = wrap_with_tensorbox(node)
+        idx = ir.View.handle_negative_index(idx, node.get_size()[dim])
+        sliced = L.squeeze(L.slice_(node, dim, idx, idx + 1, clamp=False), dim)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
