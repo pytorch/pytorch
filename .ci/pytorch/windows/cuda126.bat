@@ -4,7 +4,7 @@ set MODULE_NAME=pytorch
 
 IF NOT EXIST "setup.py" IF NOT EXIST "%MODULE_NAME%" (
     call internal\clone.bat
-    cd ..
+    cd %~dp0
 ) ELSE (
     call internal\clean.bat
 )
@@ -51,8 +51,9 @@ set "PATH=%CUDA_PATH_V126%\bin;%PATH%"
 call internal\check_opts.bat
 IF ERRORLEVEL 1 goto :eof
 
-call internal\copy.bat
+if exist "%NIGHTLIES_PYTORCH_ROOT%" cd %NIGHTLIES_PYTORCH_ROOT%\..
+call  %~dp0\internal\copy.bat
 IF ERRORLEVEL 1 goto :eof
 
-call internal\setup.bat
+call  %~dp0\internal\setup.bat
 IF ERRORLEVEL 1 goto :eof
