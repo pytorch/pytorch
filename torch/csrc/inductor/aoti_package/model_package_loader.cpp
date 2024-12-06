@@ -196,7 +196,7 @@ bool recursive_mkdir(const std::string& dir) {
 bool recursive_rmdir(const std::string& path) {
 #ifdef _WIN32
   std::error_code ec;
-  return fs::remove_all(temp_dir_, ec) == static_cast<std::uintmax_t>(-1);
+  return fs::remove_all(temp_dir_, ec) != static_cast<std::uintmax_t>(-1);
 #else
   DIR* dir = opendir(path.c_str());
   if (!dir) {
