@@ -241,6 +241,12 @@ function checkout_install_torchbench() {
   popd
 }
 
+function install_torchao() {
+  local commit
+  commit=$(get_pinned_commit torchao)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/ao.git@${commit}"
+}
+
 function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
   sccache --show-stats
