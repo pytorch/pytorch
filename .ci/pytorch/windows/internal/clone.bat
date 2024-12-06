@@ -51,7 +51,9 @@ IF ERRORLEVEL 1 git checkout tags/%PYTORCH_BRANCH%
 
 :submodule
 
-echo "In submodule update"
+echo "In submodule update - status"
+git status
+echo "Doing submodule update"
 git submodule update --init --recursive
 echo "submodule update complete"
 IF ERRORLEVEL 1 exit /b 1
