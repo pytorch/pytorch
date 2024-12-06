@@ -616,7 +616,7 @@ def stft(
       :math:`\omega` in :math:`\left[0, 1, 2, \dots, \left\lfloor
       \frac{\text{n\_fft}}{2} \right\rfloor + 1\right]` are returned because
       the real-to-complex Fourier transform satisfies the conjugate symmetry,
-      i.e., :math:`X[m, \omega] = X[m, \text{n\_fft} - \omega]^*`.
+      i.e., :math:`X[\omega, m] = X[\text{n\_fft} - \omega, m]^*`.
       Note if the input or window tensors are complex, then :attr:`onesided`
       output is not possible.
 
