@@ -278,7 +278,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
         // create group mode kernel arguments
         if constexpr(FmhaKernel::kIsGroupMode)
         {
-            return FmhaKernel::MakeKargs(args.q_ptr,
+            return FmhaKernel::MakeKargsImpl(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
                                          args.bias_ptr,
@@ -317,7 +317,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
         }
         else
         { // create batch mode kernel arguments
-            return FmhaKernel::MakeKargs(args.q_ptr,
+            return FmhaKernel::MakeKargsImpl(args.q_ptr,
                                          args.k_ptr,
                                          args.v_ptr,
                                          args.bias_ptr,
@@ -374,7 +374,7 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
         // create group mode kernel arguments
         if constexpr(Kernel::kIsGroupMode)
         {
-            return Kernel::MakeKargs(args.q_ptr,
+            return Kernel::MakeKargsImpl(args.q_ptr,
                                      args.k_ptr,
                                      args.v_ptr,
                                      args.bias_ptr,
@@ -412,7 +412,7 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
         }
         else
         { // create batch mode kernel arguments
-            return Kernel::MakeKargs(args.q_ptr,
+            return Kernel::MakeKargsImpl(args.q_ptr,
                                      args.k_ptr,
                                      args.v_ptr,
                                      args.bias_ptr,
@@ -472,7 +472,7 @@ auto fmha_fwd_splitkv_combine_create_kargs_and_grids(fmha_fwd_splitkv_args args)
         // create group mode kernel argumentszs
         if constexpr(Kernel::kIsGroupMode)
         {
-            return Kernel::MakeKargs(args.lse_acc_ptr,
+            return Kernel::MakeKargsImpl(args.lse_acc_ptr,
                                      args.o_acc_ptr,
                                      args.lse_ptr,
                                      args.o_ptr,
@@ -492,7 +492,7 @@ auto fmha_fwd_splitkv_combine_create_kargs_and_grids(fmha_fwd_splitkv_args args)
         }
         else
         { // create batch mode kernel arguments
-            return Kernel::MakeKargs(args.lse_acc_ptr,
+            return Kernel::MakeKargsImpl(args.lse_acc_ptr,
                                      args.o_acc_ptr,
                                      args.lse_ptr,
                                      args.o_ptr,
@@ -525,7 +525,7 @@ template <typename Kernel>
 auto fmha_fwd_appendkv_create_kargs_and_grids(fmha_fwd_appendkv_args args)
 {
     assert(args.nhead_q % args.nhead_k == 0);
-    auto kargs = Kernel::MakeKargs(args.q_ptr,
+    auto kargs = Kernel::MakeKargsImpl(args.q_ptr,
                                    args.k_ptr,
                                    args.knew_ptr,
                                    args.v_ptr,
