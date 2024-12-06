@@ -641,18 +641,12 @@ class PythonWrapperCodegen(CodeGen):
         self.declare = ""
         self.declare_maybe_reference = ""
         self.ending = ""
-        self.open_bracket = "["
-        self.closed_bracket = "]"
         self.comment = "#"
-        self.namespace = ""
         self.none_str = "None"
-        self.size = "size()"
-        self.stride = "stride()"
         self.move_begin = "std::move(" if V.graph.cpp_wrapper else ""
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.computed_sizes: Set[sympy.Symbol] = set()
@@ -1085,7 +1079,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
-        indices_str = f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
+        indices_str = f"[{', '.join(indices)}]"
         args = [x, indices_str, values, accumulate]
         self.writeline(self.wrap_kernel_call(kernel, args))
 
@@ -1241,62 +1235,47 @@ class PythonWrapperCodegen(CodeGen):
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
-    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
+    def codegen_input_symbol_assignment(
+        self,
+        code: IndentedBuffer,
+        name: str,
+        value: ir.TensorBox,
+        bound_vars: Set[sympy.Symbol],
+    ):
+        @functools.lru_cache(None)
+        def sizeof(name):
+            code.writeline(f"{name}_size = {name}.size()")
+            return f"{name}_size"
 
-    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(
-            f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
-        )
+        @functools.lru_cache(None)
+        def strideof(name):
+            code.writeline(f"{name}_stride = {name}.stride()")
+            return f"{name}_stride"
+
+        if isinstance(value, sympy.Expr):
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+                return
+            code.writeline(f"{value} = {name}")
+            bound_vars.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim, size in enumerate(value.get_size()):
+                if isinstance(size, sympy.Symbol) and size not in bound_vars:
+                    code.writeline(f"{size} = {sizeof(name)}[{dim}]")
+                    bound_vars.add(size)
+            for dim, stride in enumerate(value.get_stride()):
+                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
+                    code.writeline(f"{stride} = {strideof(name)}[{dim}]")
+                    bound_vars.add(stride)
+        else:
+            raise AssertionError(f"Unknown value type: {type(value)}")
 
     def codegen_inputs(
         self, code: IndentedBuffer, graph_inputs: Dict[str, ir.TensorBox]
     ):
         """Assign all symbolic shapes to locals"""
-
-        @functools.lru_cache(None)
-        def sizeof(name):
-            self.codegen_input_size_var_decl(code, name)
-            return f"{name}_size"
-
-        @functools.lru_cache(None)
-        def strideof(name):
-            self.codegen_input_stride_var_decl(code, name)
-            return f"{name}_stride"
-
-        # Assign all symbolic shapes needed to local variables
         bound_vars: Set[sympy.Symbol] = set()
-
-        def is_expr(x):
-            return isinstance(x[1], sympy.Expr)
-
-        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
-        graph_inputs_tensors = list(
-            filter(lambda x: not is_expr(x), graph_inputs.items())
-        )
-
-        for name, shape in graph_inputs_expr:
-            if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
-                bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
-
-        for name, value in graph_inputs_tensors:
-            shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
-                    code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
-                    )
-                    bound_vars.add(shape)
+        for name, value in graph_inputs.items():
+            self.codegen_input_symbol_assignment(code, name, value, bound_vars)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -1304,9 +1283,7 @@ class PythonWrapperCodegen(CodeGen):
                 return
             self.computed_sizes.add(sym)
             expr = V.graph.sizevars.inv_precomputed_replacements[sym]
-            self.writeline(
-                f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
-            )
+            self.writeline(f"{sym} = {pexpr(expr)}")
 
     def finalize_prefix(self):
         pass
@@ -1684,14 +1661,7 @@ class PythonWrapperCodegen(CodeGen):
         expr = f"{kernel_name}_{tree.prefix}numel"
         if suffix is not None:
             expr += f"_{suffix}"
-        if (expr, V.graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
-            self.kernel_numel_expr.add((expr, V.graph))
-            self.writeline(
-                f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
-            )
-        else:
-            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
+        self.writeline(f"{expr} = {pexpr(tree.numel)}")
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -1796,12 +1766,12 @@ class PythonWrapperCodegen(CodeGen):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid: List[Any],
+        grid_args: List[Any],
         gpu: bool = True,
         grid_callable: Optional[Callable[..., Any]] = None,
         **grid_extra_kwags,
     ):
-        return grid
+        return grid_args
 
     def prepare_triton_kernel_call(self, device_index, call_args):
         def wrap_arg(arg):
@@ -1811,7 +1781,7 @@ class PythonWrapperCodegen(CodeGen):
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
             else:
-                return self.expr_printer(V.graph.sizevars.simplify(arg))
+                return pexpr(V.graph.sizevars.simplify(arg))
 
         call_args = [wrap_arg(arg) for arg in call_args]
 
