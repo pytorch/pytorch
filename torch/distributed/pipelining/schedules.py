@@ -1047,8 +1047,8 @@ def _validate_schedule(
                 stage_actions[s_id][I].add(mb_id)
             elif ctype == W:
                 assert (
-                    mb_id in stage_actions[s_id][B]
-                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                    mb_id in stage_actions[s_id][I]
+                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
                 stage_actions[s_id][W].add(mb_id)
 
     for s_id in stage_actions:
