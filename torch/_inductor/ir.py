@@ -1061,12 +1061,9 @@ class Reduction(Loops):
         num_sm = props.multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
-        threads_per_sm = props.max_threads_per_multi_processor or 2048
+        threads_per_sm = 2048  # props.max_threads_per_multi_processor
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
-        if torch.version.hip:
-            # TODO(jansel): we should remove this, it is legacy incorrect behavior but removing it breaks CI for ROCM
-            threads_per_sm = 2048
 
         def inner_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
             if not should_split:
