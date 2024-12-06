@@ -617,8 +617,11 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   qkv = Tensor(); // Not used any more, allow free
+  auto& q = std::get<0>(q_k_v);
+  const auto& k = std::get<1>(q_k_v);
+  const auto& v = std::get<2>(q_k_v);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
@@ -1410,7 +1413,7 @@ __global__ void rand_uniform_kernel(
   const int64_t head_id = blockIdx.y;
   const int64_t query_idx = threadIdx.x;
 
-  const auto [seed, offset] = at::cuda::philox::unpack(rng_engine_inputs);
+  const auto seeds = at::cuda::philox::unpack(rng_engine_inputs);
 
   const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
       head_id * (n_queries * n_keys);
@@ -1418,9 +1421,9 @@ __global__ void rand_uniform_kernel(
 
   curandStatePhilox4_32_10_t curand_state;
   curand_init(
-      seed,
+      std::get<0>(seeds),
       0,
-      offset + dropout_seq_start + query_start_idx,
+      std::get<1>(seeds) + dropout_seq_start + query_start_idx,
       &curand_state);
 
   for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
