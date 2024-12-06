@@ -1084,6 +1084,11 @@ class TritonHOPifier:
                         != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
                     )
                     or (
+                        "prune_configs_by" in defaults
+                        and defaults["prune_configs_by"].default
+                        != kernel.early_config_prune
+                    )
+                    or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
@@ -1173,15 +1178,6 @@ class TritonHOPifier:
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
-
-        # Run prune_configs_by to filter the configs
-        if isinstance(variable.kernel, Autotuner):
-            variable.kernel.nargs = dict(zip(variable.kernel.arg_names, args))
-            variable.kernel.prune_configs(kwargs)
-            # Reset Autotuner vars to the default so we don't run prune_configs again
-            variable.kernel.perf_model = None
-            variable.kernel.configs_top_k = 1.0
-            variable.kernel.early_config_prune = None
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
