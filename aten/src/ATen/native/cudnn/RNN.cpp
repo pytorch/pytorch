@@ -2358,8 +2358,7 @@ DropoutState& get_dropout_state(
   std::unique_lock<std::mutex> lock{state_cache_mut};
   auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0) {
-    const auto& gen =
-        at::detail::getCUDAHooks().getDefaultCUDAGenerator(device);
+    const auto& gen = at::detail::getCUDAHooks().getDefaultGenerator(device);
     auto gen_impl = gen.get<at::CUDAGeneratorImpl>();
     bool reset_rnn_state = gen_impl->reset_rnn_state();
     if (!state.buffer.defined() || reset_rnn_state) {
@@ -2710,8 +2709,7 @@ void lstm_cudnn(
       bidirectional,
       batch_first);
   output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  std::tie(hy, cy) = result.second;
 }
 
 void lstm_packed_cudnn(
@@ -2739,8 +2737,7 @@ void lstm_packed_cudnn(
       train,
       bidirectional);
   output = result.first;
-  hy = std::get<0>(result.second);
-  cy = std::get<1>(result.second);
+  std::tie(hy, cy) = result.second;
 }
 
 REGISTER_CUDA_DISPATCH(lstm_cudnn_stub, &lstm_cudnn)

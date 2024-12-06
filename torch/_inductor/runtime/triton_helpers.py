@@ -544,7 +544,7 @@ def _compare_and_swap_with_index(
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
     )
-    cond = cond ^ flip
+    cond = (cond ^ flip).to(tl.int1)
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
 

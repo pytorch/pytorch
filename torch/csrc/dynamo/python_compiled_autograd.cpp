@@ -153,7 +153,9 @@ struct VerboseLogger : public PythonLogger {
     std::string node_name =
         fn.name() + " (NodeCall " + std::to_string(node_idx) + ")";
 
-    cumulative_sizes_per_node[size_inputs_num] = node_name;
+    if (size_inputs_num > 0) {
+      cumulative_sizes_per_node[size_inputs_num] = node_name;
+    }
 
     if (!logged_node_miss && cached_keys.find(key) == cached_keys.end()) {
       _log_node_miss(typeid(fn), cached_keys, key, node_name);
@@ -369,6 +371,7 @@ struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
 };
 
 static PyObject* the_autograd_compiler = nullptr;
+static int default_dyn_type_int = 0;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
@@ -560,6 +563,11 @@ struct ClosingTHPObjectPtr : public THPObjectPtr {
   }
 };
 
+static SizeInput::DynType get_default_dyn_type() {
+  TORCH_INTERNAL_ASSERT(default_dyn_type_int >= 0 && default_dyn_type_int < 2);
+  return default_dyn_type_int == 0 ? SizeInput::STATIC : SizeInput::DYNAMIC;
+}
+
 // Only call this function while holding GIL
 CacheNode* _compiled_autograd_impl(
     const std::shared_ptr<Node>& graph_root,
@@ -572,7 +580,7 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_hooks) {
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(get_default_dyn_type());
 
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls
@@ -596,10 +604,10 @@ CacheNode* _compiled_autograd_impl(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
-      node_args.collect(call);
       if (vlogger.has_value()) {
         compiler_call.set_active_node_call_idx(i);
       }
+      node_args.collect(call);
       if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
@@ -846,11 +854,15 @@ variable_list compiled_autograd(
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
   PyObject* obj = nullptr;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
+  int b = 0;
+  if (!PyArg_ParseTuple(args, "Op", &obj, &b)) {
     return nullptr;
   }
 
-  PyObject* prior = the_autograd_compiler;
+  TORCH_INTERNAL_ASSERT(b >= 0 && b < 2);
+  PyObject* prior_compiler = the_autograd_compiler;
+  PyObject* prior_dynamic = default_dyn_type_int == 0 ? Py_False : Py_True;
+  default_dyn_type_int = b;
   if (obj == Py_None) { // disable
     the_autograd_compiler = nullptr; // decref not needed due to `prior`
     Engine::set_compiled_autograd(nullptr);
@@ -860,11 +872,13 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
     Engine::set_compiled_autograd(&compiled_autograd);
   }
 
-  if (prior == nullptr) {
-    Py_RETURN_NONE;
-  } else {
-    return prior;
+  if (prior_compiler == nullptr) {
+    prior_compiler = Py_None;
   }
+  PyObject* prior = PyTuple_New(2);
+  PyTuple_SET_ITEM(prior, 0, prior_compiler);
+  PyTuple_SET_ITEM(prior, 1, prior_dynamic);
+  return prior;
   END_HANDLE_TH_ERRORS;
 }
 
