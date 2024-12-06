@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 """A thin pytorch / numpy compat layer.
 

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 import dataclasses
 import inspect
 import sys

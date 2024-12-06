@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 from functools import wraps, partial
 from itertools import product, chain, islice

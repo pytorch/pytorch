@@ -11,7 +11,7 @@ Parser notes:
         - To set a label for the succeeding block, add `# @YOUR_LABEL` (Python)
           or `// @YOUR_LABEL` (C++).
 """
-# mypy: ignore-errors
+
 
 from core.api import GroupedModules, GroupedStmts, GroupedVariants
 from core.types import FlatIntermediateDefinition
