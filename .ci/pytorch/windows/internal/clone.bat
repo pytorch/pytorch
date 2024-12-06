@@ -2,12 +2,12 @@
 
 :: The conda and wheels jobs are separated on Windows, so we don't need to clone again.
 if not exist "%NIGHTLIES_PYTORCH_ROOT%" goto clone_pytorch
-:: XPU windows build can't work with long src path, use NIGHTLIES_PYTORCH_ROOT directly. 
+:: XPU windows build can't work with long src path, use NIGHTLIES_PYTORCH_ROOT directly.
 :: Refer https://github.com/pytorch/pytorch/issues/134956
-if "%CUDA_VERSION%" == "xpu" (
-  cd "%NIGHTLIES_PYTORCH_ROOT%"
-  goto submodule
-)
+:: if "%CUDA_VERSION%" == "xpu" (
+cd "%NIGHTLIES_PYTORCH_ROOT%"
+goto submodule
+:: )
 :: Attempt to fix infinite copy of ittapi recursive symlinks on non-ephemeral runners
 if exist pytorch rmdir /s /q pytorch
 :: https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy

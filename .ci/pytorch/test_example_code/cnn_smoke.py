@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+
 class SimpleCNN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -18,6 +19,7 @@ class SimpleCNN(nn.Module):
         output = self.pool(F.relu(self.conv(inputs)))
         output = output.view(1)
         return output
+
 
 # Mock one infer
 device = torch.device("cuda:0")
