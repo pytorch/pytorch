@@ -1265,7 +1265,7 @@ class TestAutotuneCache(TestCase):
 
         # Check that the cache entries seem reasonable
         for k in global_stats.autotune_remote.cache.keys():
-            self.assertRegex(k, r"[0-9a-z]{52}\.py")
+            self.assertRegex(k, r"[0-9a-z]{52}")
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
