@@ -72,8 +72,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  common.builder_repo
-          ref:  common.builder_branch
+          repository:  pytorch/builder
+          ref:  main
           path: "builder"
       - name: Bootstrap folders
         shell: cmd
@@ -165,8 +165,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  common.builder_repo
-          ref:  common.builder_branch
+          repository:  pytorch/builder
+          ref:  main
           path: "builder"
       - name: Bootstrap Git
         shell: cmd
