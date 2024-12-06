@@ -612,7 +612,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
-      check_head_dim_size_flash,
+      check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
       check_flash_causal_non_square_seqlens,
@@ -626,7 +626,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_nested,
-        check_head_dim_size_flash_nested,
+        check_head_dim_size_flash_nested<false /*caller_is_meff*/>,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
