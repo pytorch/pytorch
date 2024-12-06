@@ -9,10 +9,9 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
@@ -493,7 +492,10 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
-def diff_meta_pairs(lhs_list: List[ torch.Tensor | torch.SymInt | int], rhs_list: List[ torch.Tensor | torch.SymInt | int]) -> List[str]:
+def diff_meta_pairs(
+    lhs_list: List[torch.Tensor | torch.SymInt | int],
+    rhs_list: List[torch.Tensor | torch.SymInt | int],
+) -> List[str]:
     assert len(lhs_list) == len(rhs_list)
     all_diffs = []
     for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
@@ -503,13 +505,25 @@ def diff_meta_pairs(lhs_list: List[ torch.Tensor | torch.SymInt | int], rhs_list
             )
     return all_diffs
 
-def diff_meta(lhs: torch.Tensor | torch.SymInt | int, rhs: torch.Tensor | torch.SymInt | int) -> str:
+
+def diff_meta(
+    lhs: torch.Tensor | torch.SymInt | int, rhs: torch.Tensor | torch.SymInt | int
+) -> str:
     if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-        return ", ".join(diff_tensor_meta(_extract_tensor_metadata(lhs), _extract_tensor_metadata(rhs)))
+        # We have vmap x cond tests and querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format is not yet implemented.
+        # And it seems the remaining metas are good enough for now.
+        return ", ".join(
+            diff_tensor_meta(
+                _extract_tensor_metadata(lhs, include_contiguity=False),
+                _extract_tensor_metadata(rhs, include_contiguity=False),
+            )
+        )
     elif type(lhs) != type(rhs):
         return f"dtype: {lhs} vs {rhs}"
     else:
         return ""
+
 
 # Reports the difference between meta of two tensors in a string
 def diff_tensor_meta(
