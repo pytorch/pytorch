@@ -13,7 +13,7 @@ def random_dag(n):
     edges = {}
     for i in range(n):
         edges[i] = []
-        for j in range(i+1, n):
+        for j in range(i + 1, n):
             if random.choice([True, False]):
                 edges[i].append(j)
 
@@ -85,9 +85,9 @@ class NNModuleGenerator:
     def gen_nn_module(self, i):
         def gen_nn_module_body():
             code = Block()
-            code.new_line(f"def __init__(self):")
+            code.new_line("def __init__(self):")
             code.new_block(self.gen_init_body(i))
-            code.new_line(f"def forward(self, x):")
+            code.new_line("def forward(self, x):")
             code.new_block(self.gen_forward_body(i))
             return code
 
@@ -126,7 +126,7 @@ class Unflatten(TestGenerator):
                 code = Block()
                 for j in self.calls[i]:
                     code.new_line(f"x = self.{path(i, j)}(x + 1)")
-                code.new_line(f"return x + 1")
+                code.new_line("return x + 1")
                 return code
 
         return GenNNModule(self.n)
@@ -135,25 +135,25 @@ class Unflatten(TestGenerator):
         return f"{self.__class__.__name__}_{self.n}"
 
     def test_body(self):
-        nn_module_generator = self.nn_module_generator()
         def path(i, j):
             if i + 1 == j:
                 return f"n{j}"
             else:
                 return f"n{i + 1}.{path(i + 1, j)}"
-        fqns = ",".join(
-            f"'{path(0, j)}'"
-            for j in range(1, self.n)
-        )
 
+        nn_module_generator = self.nn_module_generator()
         for i in range(self.n):
             yield nn_module_generator.gen_nn_module(self.n - 1 - i)
+
+        fqns = "".join(f"'{path(0, j)},'" for j in range(1, self.n))
 
         def gen_main():
             code = Block()
             code.new_line("inp = (torch.ones(1),)")
             code.new_line("eager = N0()(*inp)")
-            code.new_line(f"ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=({fqns},))")
+            code.new_line(
+                f"ep = torch.export.export(N0(), inp, strict=False, preserve_module_call_signature=({fqns}))"
+            )
             code.new_line("epm = ep.module()")
             code.new_line("ufm = torch.export.unflatten(ep)")
             code.new_line("assert torch.allclose(epm(*inp), eager)")
@@ -175,7 +175,7 @@ class ConstantUnflatten(Unflatten):
             def gen_init_body(self, i):
                 code = Block()
                 code.new_line("super().__init__()")
-                code.new_line(f"self.const = torch.ones(1)")
+                code.new_line("self.const = torch.ones(1)")
                 if i < self.n - 1:
                     code.new_line(f"self.n{i+1} = N{i+1}()")
                 return code
@@ -192,7 +192,7 @@ class ConstantUnflatten(Unflatten):
                     code.new_line(f"x = x + self.{path(i, j)}.const")
                 for j in self.calls[i]:
                     code.new_line(f"x = self.{path(i, j)}(x + 1)")
-                code.new_line(f"return x + 1")
+                code.new_line("return x + 1")
                 return code
 
         return GenNNModule(self.n)
@@ -211,7 +211,7 @@ class BufferUnflatten(Unflatten):
             def gen_init_body(self, i):
                 code = Block()
                 code.new_line("super().__init__()")
-                code.new_line(f"self.buf = torch.nn.Buffer(torch.ones(1))")
+                code.new_line("self.buf = torch.nn.Buffer(torch.ones(1))")
                 if i < self.n - 1:
                     code.new_line(f"self.n{i+1} = N{i+1}()")
                 return code
@@ -230,7 +230,7 @@ class BufferUnflatten(Unflatten):
                     code.new_line(f"x = self.{path(i, j)}(x + 1)")
                 for j in self.mutations[i]:
                     code.new_line(f"self.{path(i, j)}.buf.add_(1)")
-                code.new_line(f"return x + 1")
+                code.new_line("return x + 1")
                 return code
 
         return GenNNModule(self.n)
