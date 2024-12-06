@@ -434,8 +434,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED");
-  if (env == "1") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
+  if (eval) {
     return true;
   }
   return enable_;
@@ -461,16 +461,16 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING");
-  if (env == "0") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
+  if (eval) {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env == "1") {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
+  if (eval) {
     return true;
   }
   return record_untuned_enable_;
