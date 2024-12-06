@@ -120,4 +120,4 @@ IS_H100 = LazyVal(
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())

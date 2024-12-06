@@ -47,6 +47,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
@@ -1113,13 +1114,19 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index) -> bool:
-    prop = torch.cuda.get_device_properties(index)
+def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if isinstance(index_or_device, torch.device):
+        device = index_or_device
+    else:
+        device = torch.device("cuda", index_or_device)
+
+    prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
     if torch.version.hip:
-        if prop.major < 9 or prop.major == 10:
+        assert prop.major is not None
+        if prop.major <= 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
         return True
@@ -1145,7 +1152,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
-        and is_big_gpu(layout.device.index or 0)
+        and is_big_gpu(layout.device)
     )
 
 
@@ -1639,23 +1646,23 @@ def get_device_tflops(dtype):
 
 
 @functools.lru_cache(None)
-def get_gpu_dram_gbps():
+def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
 
 
-def get_gpu_shared_memory():
+def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
-def is_welford_reduction(reduction_type):
+def is_welford_reduction(reduction_type: str) -> bool:
     return reduction_type.startswith("welford")
 
 
-def reduction_num_outputs(reduction_type):
+def reduction_num_outputs(reduction_type: str) -> int:
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
@@ -1663,15 +1670,15 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def is_windows():
+def is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def has_free_symbols(itr: Iterable[Any]):
+def has_free_symbols(itr: Iterable[Any]) -> bool:
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
-def is_dynamic(*args):
+def is_dynamic(*args) -> bool:
     from . import ir
 
     for t in args:
