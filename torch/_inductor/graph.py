@@ -1883,9 +1883,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
-                        materialize(x)
+                        materialize(x)  # type:ignore[arg-type]
                         for x in (
-                            self.example_inputs
+                            self.example_inputs  # type:ignore[union-attr]
                             if isinstance(V.real_inputs, NullHandler)
                             else V.real_inputs
                         )
@@ -2018,6 +2018,7 @@ class GraphLowering(torch.fx.Interpreter):
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
             key, path = PyCodeCache.write(code)
+            output_code_log.debug("Output code written to: %s", path)
         except Exception:
             trace_structured(
                 "inductor_output_code",
@@ -2057,42 +2058,6 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.output_code(mod.__file__)
         V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
-
-    def compile_to_fn(self) -> Any:
-        with dynamo_timed("GraphLowering.compile_to_fn", log_pt2_compile_event=True):
-            return self._compile_to_fn()
-
-    def _compile_to_fn(self) -> Any:
-        if self.aot_mode:
-            from .codecache import AotCodeCompiler
-
-            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
-            code, linemap = self.codegen_with_cpp_wrapper()
-            output_code_log.debug("Output code: \n%s", code)
-
-            serialized_extern_kernel_nodes = None
-            if self.extern_kernel_nodes:
-                serialized_extern_kernel_nodes = self.extern_node_serializer(
-                    self.extern_kernel_nodes
-                )
-                output_code_log.debug(
-                    "Serialized Extern Kernel Nodes: \n%s",
-                    serialized_extern_kernel_nodes,
-                )
-
-            additional_files = self.wrapper_code.additional_files
-
-            with dynamo_timed("AotCodeCompiler.compile", log_pt2_compile_event=True):
-                # Directly return the file path with the compiled code
-                return AotCodeCompiler.compile(
-                    self,
-                    code,
-                    serialized_extern_kernel_nodes,
-                    device_type=self.device_type,
-                    additional_files=additional_files,
-                )
-        else:
-            return self.compile_to_module().call
 
     def get_output_names(self) -> List[str]:
         return [

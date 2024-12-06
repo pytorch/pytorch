@@ -313,7 +313,9 @@ class ExprPrinterTests(InductorTestCase):
         expr = RoundToInt(sympy.Symbol("x", integer=True) / 2)
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
-        self.assertExpectedInline(texpr(expr), """libdevice.llrint((1/2)*x)""")
+        self.assertExpectedInline(
+            texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
+        )
 
     def test_print_mod(self):
         x = sympy.Symbol("x", integer=True)

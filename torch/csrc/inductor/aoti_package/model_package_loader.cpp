@@ -10,12 +10,14 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
 
+#ifndef _WIN32
+#include <dirent.h>
+#include <sys/stat.h>
+#else
 #include <filesystem>
 namespace fs = std::filesystem;
+#endif
 
 // TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
@@ -191,6 +193,62 @@ bool recursive_mkdir(const std::string& dir) {
   return ret == 0;
 }
 
+bool recursive_rmdir(const std::string& path) {
+#ifdef _WIN32
+  std::error_code ec;
+  return fs::remove_all(temp_dir_, ec) == static_cast<std::uintmax_t>(-1);
+#else
+  DIR* dir = opendir(path.c_str());
+  if (!dir) {
+    return false;
+  }
+
+  struct dirent* entry = nullptr;
+  struct stat statbuf {};
+  bool success = true;
+
+  // Iterate through directory entries
+  while ((entry = readdir(dir)) != nullptr) {
+    std::string name = entry->d_name;
+
+    // Skip "." and ".."
+    if (name == "." || name == "..") {
+      continue;
+    }
+
+    std::string full_path = path;
+    full_path.append("/").append(name);
+
+    // Get file status
+    if (stat(full_path.c_str(), &statbuf) != 0) {
+      success = false;
+      continue;
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+      // Recursively delete subdirectory
+      if (!recursive_rmdir(full_path)) {
+        success = false;
+      }
+    } else {
+      // Delete file
+      if (unlink(full_path.c_str()) != 0) {
+        success = false;
+      }
+    }
+  }
+
+  closedir(dir);
+
+  // Remove the directory itself
+  if (rmdir(path.c_str()) != 0) {
+    success = false;
+  }
+
+  return success;
+#endif
+}
+
 std::string compile_so(
     const std::string& cpp_filename,
     const std::string& consts_filename) {
@@ -202,19 +260,15 @@ std::string compile_so(
   std::string compile_flags_path = filename + "_compile_flags.json";
   const nlohmann::json compile_flags = load_json_file(compile_flags_path);
 
-  auto compile_result =
+  auto [compile_cmd, output_o] =
       get_cpp_compile_command(filename, {cpp_filename}, compile_flags);
-  std::string compile_cmd = std::get<0>(compile_result);
-  std::string output_o = std::get<1>(compile_result);
 
   std::string linker_flags_path =
       cpp_filename.substr(0, lastindex) + "_linker_flags.json";
   const nlohmann::json linker_flags = load_json_file(linker_flags_path);
 
-  auto link_result = get_cpp_compile_command(
+  auto [link_cmd, output_so] = get_cpp_compile_command(
       filename, {output_o, consts_filename}, linker_flags);
-  std::string link_cmd = std::get<0>(link_result);
-  std::string output_so = std::get<1>(link_result);
 
   // Run the commands to generate a .so file
   int status = system(compile_cmd.c_str());
@@ -353,7 +407,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     }
   }
 
-  // Close the zip archive as we have extracted all files to the temp directory
+  // Close the zip archive as we have extracted all files to the temp
+  // directory
   if (!mz_zip_reader_end(&zip_archive)) {
     throw std::runtime_error(
         std::string("Failed to close zip archive: {}") +
@@ -395,7 +450,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
   // Clean up the temporary directory
   if (!temp_dir_.empty()) {
-    fs::remove_all(temp_dir_);
+    recursive_rmdir(temp_dir_);
   }
 }
 

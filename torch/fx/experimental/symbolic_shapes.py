@@ -131,6 +131,7 @@ __all__ = [
     "create_contiguous",
     "ShapeEnv",
     "is_concrete_int",
+    "is_concrete_float",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -233,7 +234,9 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
-def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+def _nested_int_aware_sort(
+    tup: Tuple[Union[SymInt, int], int]
+) -> Tuple[int, Union[SymInt, int], int]:
     return (
         # Order nested ints by their coefficients.
         # 1 here to order nested ints after non-nested-ints.
@@ -363,6 +366,25 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
         return True
 
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
+
+def is_concrete_float(a: Union[float, SymFloat]) -> bool:
+    r"""Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or float): Object to test if it float
+    """
+    assert isinstance(a, (SymFloat, float))
+
+    if isinstance(a, float):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Float):
         return True
 
     return False
@@ -3193,6 +3215,9 @@ class ShapeEnv:
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
 
+        # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
+        self._resimplify_floor_div_axioms = True
+
         # Cache for FX nodes.
         # Maps an already built node a tuple of:
         #   1. node's target
@@ -3306,6 +3331,7 @@ class ShapeEnv:
             # source locations are OK to diverge
             "var_to_range_sloc",
             "replacements_slocs",
+            "_resimplify_floor_div_axioms",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -3639,7 +3665,7 @@ class ShapeEnv:
         """Context manager to ignore all guards generated inside"""
         return _suppress_guards(self)
 
-    def _get_key(self) -> object:
+    def _get_key(self) -> Tuple[int, int, int, int]:
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
@@ -3652,12 +3678,20 @@ class ShapeEnv:
         )
 
     def _update_version_counter(self) -> None:
+        # if the change to shape env effects self.divisible set
+        # _resimplify_floor_div_axioms.
+        # This is used to trigger a resimplication of FloorDiv to CleanDivs
+        # in implication inside the function resimplify_floor_div.
+        if len(self.divisible) != self._prev_cache_key[1]:
+            self._resimplify_floor_div_axioms = True
+
         # The shape environment is queried orders of magnitude more often than
         # it is changed, so we summarise the cache key into a linearly
         # increasing version counter which is cheaper to check in _lru_cache
 
         # Only update version counter if the state actually changed
         cur_key = self._get_key()
+
         if self._prev_cache_key != cur_key:
             self._prev_cache_key = cur_key
             self._version_counter += 1
@@ -5217,6 +5251,16 @@ class ShapeEnv:
         args = {str(e): val for e, val in self.var_to_val.items()}
         return eval(code, SYMPY_INTERP, args)
 
+    def deserialize_symexpr(self, code: str) -> Union[SymInt, SymFloat, SymBool]:
+        """
+        To be used by compile_fx to deserialize symexprs
+        """
+        args = {
+            str(e): SymInt(SymNode(e, self, int, int(val), fx_node=None))
+            for e, val in self.var_to_val.items()
+        }
+        return eval(code, SYMPY_INTERP, args)
+
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:
         """
         Expected to be used with produce_guards_expression(). Evaluates an expression
@@ -5434,7 +5478,6 @@ class ShapeEnv:
 
         # axioms with compute hint NYE
         assert not compute_hint or not axioms
-
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -5442,14 +5485,32 @@ class ShapeEnv:
 
         expr = canonicalize_bool_expr(expr)
 
+        def resimplify_floor_div(axioms: Dict[sympy.Expr, sympy.Expr]) -> None:
+            if not self._resimplify_floor_div_axioms:
+                return
+            self._resimplify_floor_div_axioms = False
+            new_items = {}
+            for k, v in axioms.items():
+                # A FloorDiv in implications could have became CleanDiv at this point, due to new facts
+                # to the shapeEnv. This handles such issue but its not ideal. This is the only expression
+                # simplification that depends on the global state of shape env.
+                # TODO try to get rid of CleanDiv since it breaks the invariant thats simplifications of sympy
+                # expressions only depend on the expression itself.
+                if k.has(FloorDiv):
+                    new_items.update({self.simplify(k): v})
+            axioms.update(new_items)
+
         # Pattern matching
         if axioms is None:
+            resimplify_floor_div(self.axioms)
             subst = self.axioms
         else:
             subst = {}
             for e in axioms:
                 if e.free_symbols.issubset(expr.free_symbols):
                     subst.update(dict(self.get_implications(self.simplify(e))))
+
+            resimplify_floor_div(subst)
 
         expr = expr.xreplace(subst)
         # TODO: compute hint might have gotten broken here
