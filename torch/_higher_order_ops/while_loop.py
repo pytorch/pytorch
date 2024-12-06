@@ -10,7 +10,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
-    diff_tensor_meta,
+    diff_meta_pairs,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -22,7 +22,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -134,7 +133,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     if torch.compiler.is_dynamo_compiling():
         return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
-    def _validate_input(cond_fn, body_fn, carried_inputs):
+    def _validate_input(cond_fn, body_fn, flat_inputs):
         from torch._higher_order_ops.utils import validate_subgraph_args_types
 
         if not callable(cond_fn) or not callable(body_fn):
@@ -142,13 +141,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         validate_subgraph_args_types(flat_inputs)
 
-        if not pytree.tree_all(lambda t: isinstance(t, torch.Tensor), carried_inputs):
-            raise RuntimeError(
-                "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
-                f"consists of tensor leaves, but got {carried_inputs}."
-            )
-
-    _validate_input(cond_fn, body_fn, carried_inputs)
+    _validate_input(cond_fn, body_fn, flat_inputs)
 
     # Dynamo is expecting a callable with "__code__" attribute.
     # We cannot directly pass cond_op to it. So we wrap it in a dummy function.
@@ -171,8 +164,8 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     carried_vals = carried_inputs
 
-    def _is_boolean_scalar_tensor(pred):
-        return (
+    def _is_valid_cond_fn_output(pred):
+        return isinstance(pred, bool) or (
             isinstance(pred, torch.Tensor)
             and pred.size() == torch.Size([])
             and pred.dtype == torch.bool
@@ -184,9 +177,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
-        if not _is_boolean_scalar_tensor(pred):
+        if not _is_valid_cond_fn_output(pred):
             raise RuntimeError(
-                f"cond_fn must return a boolean scalar tensor but got {pred}"
+                f"cond_fn must return a boolean scalar tensor or a bool but got {pred}"
             )
         out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(
@@ -204,13 +197,43 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
+def _unspecialize_int(fake_mode, t):
+    assert isinstance(t, int), t
+    unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
+    return unbacked_idx
+
+
+# We allocate unbacked symints for int inputs since their value
+# can be iteration dependent and we don't really know the value
+# of the integer thus unbacked.
+def unspecialize_ints_with_unbacked_symints(fake_mode, carried_inputs):
+    return tuple(
+        _unspecialize_int(fake_mode, arg) if isinstance(arg, int) else arg
+        for arg in carried_inputs
+    )
+
+
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
 def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
     def _trace_while_loop(
         proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):
-        cond_graph = reenter_make_fx(cond_fn)(*carried_inputs, *additional_inputs)
-        body_graph = reenter_make_fx(body_fn)(*carried_inputs, *additional_inputs)
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # It's possible that there is no active fake tenosr mode, if we're tracing with
+        # "real" mode. so we create a new one.
+        fake_mode = torch._guards.detect_fake_mode()
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        # We create temporary unbacked symints for int carries to trace subgraph.
+        with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+            tracing_carry = unspecialize_ints_with_unbacked_symints(
+                fake_mode, carried_inputs
+            )
+        cond_graph = reenter_make_fx(cond_fn)(*tracing_carry, *additional_inputs)
+        body_graph = reenter_make_fx(body_fn)(*tracing_carry, *additional_inputs)
 
         next_name = None
         i = 0
@@ -246,16 +269,11 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_outputs_carry_consistency(
-    outs: List[torch.Tensor], crys: List[torch.Tensor]
+    outs: List[torch.Tensor | torch.SymInt | int],
+    crys: List[torch.Tensor | torch.SymInt | int],
 ) -> None:
-    all_diffs_in_meta = []
-    for out, cry in zip(outs, crys):
-        if diff := diff_tensor_meta(
-            _extract_tensor_metadata(cry), _extract_tensor_metadata(out)
-        ):
-            all_diffs_in_meta.append(",".join(diff))
-    if all_diffs_in_meta:
-        diff_str = "\n".join(all_diffs_in_meta)
+    if all_diffs := diff_meta_pairs(outs, crys):
+        diff_str = "\n".join(all_diffs)
         raise RuntimeError(
             f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diff_str}"
         )
@@ -265,13 +283,19 @@ def check_outputs_carry_consistency(
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
 ):
+    # body_fn return output with the same pytree and tensor meta data as carried_inputs
+    # so we could just return the output after one iteration.
+    #
+    # We allocate unbacked symints for int outputs since their value
+    # can be iteration dependent and we don't really know the value
+    # of the integer thus unbacked.
     with mode:
         # NOTE: [Handling unback symints created in subgraph of while_loop]
         # The idea is that the scope of unbacked symints are limited to the subgraph.
         #
         # We're implementing the fake tensor mode of while_loop operator.
         # and we run body_fn once to get an fake output.
-        # Let's only consider tensor output for now:
+        # Let's consider the following cases:
         #
         # Case 1:
         # if the unbacked symints is local to the subgraph e.g.
@@ -302,7 +326,7 @@ def while_loop_fake_tensor_mode(
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
             check_outputs_carry_consistency(body_outs, carried_inputs)
-            return body_outs
+            return unspecialize_ints_with_unbacked_symints(mode, body_outs)
 
 
 @while_loop_op.py_functionalize_impl

@@ -4812,6 +4812,64 @@ class ExternKernel(InputsKernel):
     def codegen(self, wrapper):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
+    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
+        if not hasattr(self, "unbacked_bindings"):
+            return
+
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, self.unbacked_bindings
+        )
+
+        if not unbacked_bindings:
+            return
+
+        for s, keypath in unbacked_bindings.items():
+
+            def go(expr, keypath):  # type: ignore[no-untyped-def]
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    # TODO: this is invalid C++ codegen
+                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
+            def go_outer():  # type: ignore[no-untyped-def]
+                if V.graph.cpp_wrapper:
+                    # Special handling for the top level buffer access,
+                    # because self.get_name() is actually never bound; the
+                    # individual output arguments are bound by
+                    # generate_c_shim_fallback_kernel
+                    if len(self.outputs) == 1:
+                        return go(self.outputs[0].get_name(), keypath)
+                    else:
+                        assert isinstance(keypath[0], pytree.SequenceKey)
+                        return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
+                else:
+                    return go(self.get_name(), keypath)
+
+            wrapper.writeline(
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
+            )
+
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         self.cpp_kernel_name = cpp_kernel_name
         if not V.graph.cpp_wrapper or not isinstance(
@@ -6363,64 +6421,6 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        if not hasattr(self, "unbacked_bindings"):
-            return
-
-        unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env, self.unbacked_bindings
-        )
-
-        if not unbacked_bindings:
-            return
-
-        for s, keypath in unbacked_bindings.items():
-
-            def go(expr, keypath):  # type: ignore[no-untyped-def]
-                if keypath == ():
-                    return expr
-
-                if (
-                    len(keypath) >= 2
-                    and isinstance(keypath[0], CallMethodKey)
-                    and isinstance(keypath[1], pytree.SequenceKey)
-                ):
-                    return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-                    )
-                elif isinstance(keypath[0], CallMethodKey):
-                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
-                elif isinstance(keypath[0], pytree.SequenceKey):
-                    return (
-                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
-                        if V.graph.cpp_wrapper
-                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
-                    )
-                elif isinstance(keypath[0], DivideByKey):
-                    # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
-                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
-                else:
-                    raise AssertionError(f"unrecognized keypath {keypath}")
-
-            def go_outer():  # type: ignore[no-untyped-def]
-                if V.graph.cpp_wrapper:
-                    # Special handling for the top level buffer access,
-                    # because self.get_name() is actually never bound; the
-                    # individual output arguments are bound by
-                    # generate_c_shim_fallback_kernel
-                    if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
-                    else:
-                        assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
-                else:
-                    return go(self.get_name(), keypath)
-
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
-            )
-
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             resolved = resolve_unbacked_bindings(
@@ -7263,13 +7263,16 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
+WhileLoopInOutType = List[Union[TensorBox, ShapeAsConstantBuffer]]
+
+
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
-    carried_inputs: Optional[List[TensorBox]] = None
+    carried_inputs: Optional[WhileLoopInOutType] = None
     additional_inputs: Optional[List[TensorBox]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
-    outputs: Optional[List[MultiOutput]] = None
+    outputs: Optional[WhileLoopInOutType] = None
 
     def __init__(
         self,
@@ -7278,6 +7281,7 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        unbacked_bindings: [Dict[sympy.Symbol, pytree.KeyPath]],
     ) -> None:
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
@@ -7291,57 +7295,37 @@ class WhileLoop(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
+        self.unbacked_bindings = unbacked_bindings
         V.graph.register_operation(self)
 
-    @classmethod
-    def create(  # type: ignore[no-untyped-def]
-        cls,
-        cond_fn: Subgraph,
-        body_fn: Subgraph,
-        carried_inputs: List[TensorBox],
-        additional_inputs: List[TensorBox],
+    # check body_outputs matches carried_inputs
+    @staticmethod
+    def _check_carry_matches_body_outputs(
+        carried_inputs: WhileLoopInOutType, body_outputs: WhileLoopInOutType
     ):
-        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
-        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
-        all_inputs = carried_inputs + additional_inputs
-
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
-
-        for subgraph in (cond_fn, body_fn):
-            if subgraph.graph is None:
-                # create and lower subgraphs
-                subgraph.graph = V.graph.make_subgraph(
-                    gm=subgraph.graph_module,
-                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
-                    subgraph_name=subgraph.name,
-                )
-                with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_all_inputs)
-
-        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
-        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
-
         if _has_aliased_buffers(body_outputs):
             raise AssertionError(
                 "Output aliasing is currently not supported in compiled torch.while_loop. "
                 f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
             )
-
-        # make sure cond_fn returns a boolean scalar Tensor
-        assert len(cond_outputs) == 1, cond_outputs
-        assert cond_outputs[0].get_dtype() == torch.bool, cond_outputs
-        assert len(cond_outputs[0].get_size()) == 0, cond_outputs
-
-        assert (
-            len(all_inputs) > 0
-        ), "torch.while_loop is assumed to have at least one operand."
-
-        device = all_inputs[0].get_device()
-
         # make sure carried_inputs and body outputs are structurally equivalent
-        assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
+        assert len(carried_inputs) == len(body_outputs), (
+            carried_inputs,
+            body_outputs,
+        )
+        device = None
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
+            if isinstance(op, int):
+                assert isinstance(
+                    bo, ShapeAsConstantBuffer
+                ), "int carry must be turned into unbacked symint."
+                continue
+            if isinstance(op, ShapeAsConstantBuffer) and isinstance(
+                bo, ShapeAsConstantBuffer
+            ):
+                continue
+            if device is None:
+                device = op.get_device()
 
             def _guard_list_equals(
                 lhs_exprs: List[Union[int, sympy.expr]],
@@ -7358,6 +7342,64 @@ class WhileLoop(ExternKernel):
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
             assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
+    # check cond output
+    @staticmethod
+    def _check_valid_cond_output(cond_outputs):
+        # make sure cond_fn returns a boolean scalar Tensor
+        assert len(cond_outputs) == 1, cond_outputs
+        cond_out = cond_outputs[0]
+        if not isinstance(cond_out, ShapeAsConstantBuffer):
+            # For tensor outputs, we need to check it's boolean scalar tensor
+            assert cond_out.get_dtype() == torch.bool, cond_outputs
+            assert len(cond_out.get_size()) == 0, cond_outputs
+
+    @classmethod
+    def create(  # type: ignore[no-untyped-def]
+        cls,
+        cond_fn: Subgraph,
+        body_fn: Subgraph,
+        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: List[TensorBox],
+    ):
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = carried_inputs + additional_inputs
+
+        def find_device(all_inputs):
+            device = None
+            for inp in all_inputs:
+                if not isinstance(inp, ShapeAsConstantBuffer):
+                    device = inp.get_device()
+                    break
+            assert device is not None
+            return device
+
+        device = find_device(all_inputs)
+        assert (
+            len(all_inputs) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
+
+        for subgraph in (cond_fn, body_fn):
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph_meta_vals = [
+                    node.meta["val"]
+                    for node in subgraph.graph_module.graph.nodes
+                    if node.op == "placeholder"
+                ]
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=subgraph_meta_vals,  # type: ignore[arg-type]
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*subgraph_meta_vals)
+
+        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
+        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
+        WhileLoop._check_valid_cond_output(cond_outputs)
+        WhileLoop._check_carry_matches_body_outputs(carried_inputs, body_outputs)
+
         while_loop = WhileLoop(
             carried_inputs=carried_inputs,
             additional_inputs=additional_inputs,
@@ -7365,24 +7407,36 @@ class WhileLoop(ExternKernel):
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
             layout=MultiOutputLayout(device=device),
+            unbacked_bindings=V.graph.current_node.meta.get("unbacked_bindings", None),
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                while_loop,
-                [(list, i)],
-            )
-            for i, output in enumerate(body_outputs)
-        ]
+        outputs: List[Union[MultiOutput | ShapeAsConstantBuffer]] = []
+        for i, (example_out, output) in enumerate(
+            zip(V.graph.current_node.meta["val"], body_outputs)
+        ):
+            if isinstance(output, ShapeAsConstantBuffer):
+                assert isinstance(
+                    example_out, (torch.SymInt, torch.SymBool)
+                ), f"{type(example_out)} is not supported"
+                outputs.append(ShapeAsConstantBuffer(expr=example_out.node.expr))
+            else:
+                outputs.append(
+                    MultiOutput(
+                        FixedLayout(
+                            device=output.get_device(),
+                            dtype=output.get_dtype(),
+                            size=output.get_size(),
+                            stride=output.get_stride(),
+                            offset=output.get_layout().offset,
+                        ),
+                        while_loop,
+                        [(list, i)],
+                    )
+                )
 
         for inp, out in zip(carried_inputs, outputs):
+            if isinstance(inp, (int, ShapeAsConstantBuffer)):
+                continue
             if inp.get_name() in V.graph.graph_inputs:
                 # if a carried input of the while_loop is a graph input,
                 # it can be returned as is when the number of iterations
@@ -7394,8 +7448,19 @@ class WhileLoop(ExternKernel):
         while_loop.outputs = outputs
         return outputs
 
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            return resolved.keys()  # type: ignore[return-value]
+        else:
+            return OrderedSet()
+
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)
+        self.codegen_unbacked_symbol_defs(wrapper)
 
 
 class EffectfulKernel(FallbackKernel):

@@ -82,32 +82,25 @@ def discard_graph_changes(tx):
         ctx.__exit__(None, None, None)
 
 
-def diff_meta(tensor_vars1, tensor_vars2) -> str:
-    from torch._higher_order_ops.utils import diff_tensor_meta
+def diff_var_meta(vars1, vars2) -> str:
+    from torch._higher_order_ops.utils import diff_meta_pairs
 
     from . import TensorVariable
 
-    assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
-    all_diffs = []
-    for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-        # We have vmap x cond tests and querying is_contiguous inside of vmap for
-        # memory_format other than torch.contiguous_format is not yet implemented.
-        # And it seems the remaining metas are good enough for now.
-        meta1 = _extract_tensor_metadata(
-            var1.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        meta2 = _extract_tensor_metadata(
-            var2.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
-        pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
+    def _unwrap_var(var):
+        if isinstance(var, TensorVariable):
+            return var.proxy.node.meta["example_value"]
+        elif isinstance(var, SymNodeVariable):
+            return var.sym_num
+        elif isinstance(var, ConstantVariable):
+            return var.as_python_constant()
+        else:
+            unimplemented(f"Cannot unwrap var {var}")
 
-        if len(pair_diffs) > 0:
-            fmt_str = ", ".join(pair_diffs)
-            all_diffs.append(
-                f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
-            )
-    return "\n".join(all_diffs)
+    unwrapped1 = [_unwrap_var(var) for var in vars1]
+    unwrapped2 = [_unwrap_var(var) for var in vars2]
+
+    return "\n".join(diff_meta_pairs(unwrapped1, unwrapped2))
 
 
 @contextlib.contextmanager
@@ -338,6 +331,16 @@ def validate_args_and_maybe_create_graph_inputs(
                     tx=tx,
                     proxy=new_proxy,
                     example_value=example_value,
+                )
+            elif (
+                isinstance(a, variables.UserDefinedObjectVariable)
+                and a.python_type() is torch.SymInt
+            ):
+                new_proxy = tracer.create_graph_input(
+                    "symint", a.python_type(), a.value
+                )
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=type(a), tx=tx, proxy=new_proxy, example_value=a.value
                 )
             # If `a` cannot be put into a graph
             else:
@@ -583,9 +586,12 @@ def speculate_subgraph(
             else:
                 from . import TensorVariable
 
-                if not only_consist_of(output, TensorVariable, allow_none=True):
+                hop_allowed_output_types = (TensorVariable, SymNodeVariable)
+                if not only_consist_of(
+                    output, hop_allowed_output_types, allow_none=True
+                ):
                     unimplemented(
-                        "HigherOrderOperator body's output must consist of tensors only"
+                        f"HigherOrderOperator body's output must consist of {hop_allowed_output_types} only."
                     )
 
                 # The output proxies might not belong to this SubgraphTracer
@@ -916,7 +922,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        if diffs := diff_meta(
+        if diffs := diff_var_meta(
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
@@ -1009,6 +1015,28 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def _unspecialize_int_carry(self, tx, args: List[VariableTracker]):
+        def _to_unbacked_symint_var(arg):
+            if arg.python_type() is not int:
+                unimplemented(
+                    f"Cannot handle non int constant args in carry_inputs of while_loop got {arg.as_python_constant()}."
+                )
+
+            fake_mode = tx.fake_mode
+
+            # This unbacked symint is created purely for tracing the subgraph.
+            unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
+            # We remove unbacked_idx from pending_fresh_unbacked_symbols.
+            _ = torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
+                fake_mode.shape_env, unbacked_idx
+            )
+            return VariableTracker.build(tx, unbacked_idx)
+
+        return [
+            _to_unbacked_symint_var(arg) if isinstance(arg, ConstantVariable) else arg
+            for arg in args
+        ]
+
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
     )
@@ -1047,7 +1075,16 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         _check_supported_callable_arg(tx, body_fn, "body_fn")
 
         # operands input check
+        if mismatched_vars := find_mismatched_vars(
+            operands, (TensorVariable, SymNodeVariable, ConstantVariable)
+        ):
+            unimplemented(
+                f"Expect operands to be a tuple of pytrees that only consists "
+                f"of tensor, int or symint (e.g a dimension that's marked as dynamic) leaves. "
+                f"Got {[var.python_type() for var in mismatched_vars]}"
+            )
         operands_seq = operands.unpack_var_sequence(tx)
+        subgraph_carries = self._unspecialize_int_carry(tx, operands_seq)
 
         # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
@@ -1066,7 +1103,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             cond_fn,
-            operands_seq + additional_inputs_seq,
+            subgraph_carries + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1099,21 +1136,23 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
         cond_nn_modules = dict(tx.output.nn_modules)
-        if not isinstance(cond_r, TensorVariable):
+        if not isinstance(cond_r, (TensorVariable, SymNodeVariable)):
             unimplemented(
-                f"Expected cond_fn to return a tensor but got {cond_r.python_type()}",
+                f"Expected cond_fn to return a tensor or a symbol but got {cond_r.python_type()}",
             )
 
-        # cond output checks
-        cond_r_meta = _extract_tensor_metadata(
-            cond_r.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
-            []
-        ):
-            unimplemented(
-                f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+        # check output shape is if cond_r is a tensor other wise.
+        if isinstance(cond_r, TensorVariable):
+            cond_r_meta = _extract_tensor_metadata(
+                cond_r.proxy.node.meta["example_value"], include_contiguity=False
             )
+            if (
+                not cond_r_meta.dtype == torch.bool
+                or not cond_r_meta.shape == torch.Size([])
+            ):
+                unimplemented(
+                    f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+                )
 
         # create body subgraph
         (
@@ -1123,7 +1162,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             body_fn,
-            operands_seq + additional_inputs_seq,
+            subgraph_carries + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1131,7 +1170,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
-        if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
+        if diffs := diff_var_meta(operands_seq, body_r.unpack_var_sequence(tx)):
             unimplemented(
                 f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
             )

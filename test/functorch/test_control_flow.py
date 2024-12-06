@@ -7,6 +7,11 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -273,10 +278,55 @@ def _while_loop_tests():
 
             return while_loop(cond_fn, body_fn, (iter, x))
 
+    class IntCarry(torch.nn.Module):
+        def forward(self, x):
+            i = 0
+            s = x.shape[0]
+
+            def cond_fn(i, s, x):
+                return i < s
+
+            def body_fn(i, s, x):
+                return i + 1, s, x.sin() + i
+
+            return while_loop(cond_fn, body_fn, (i, s, x))
+
+    # TODO: add a test case for int carry dependent tensor output
+    # TODO: add much more tests for int carries
+    # 1. that uses the unbacked output to create tensors and tensor operations
+
+    class IntCarryNested(torch.nn.Module):
+        def forward(self, x):
+            # Basically implements this:
+            # for i in range(x.shape[0]):
+            #     for j in range(i):
+            #         x = x + 1
+            i = 0
+            j = 0
+
+            def cond_fn(i, x):
+                return i < x.shape[0]
+
+            def body_fn(i, x):
+                def inner_cond_fn(j, x):
+                    # i is a closure inner_cond_fn
+                    return j < i
+
+                def inner_body_fn(j, x):
+                    return j + 1, x + 1
+
+                # j is a closure of body_fn
+                _, new_x = while_loop(inner_cond_fn, inner_body_fn, (j, x))
+                return i + 1, new_x
+
+            return while_loop(cond_fn, body_fn, (i, x))
+
     nested2 = Nested()
     simple_with_linear = SimpleWithLinear()
     simple_with_pytree_carry = SimpleWithPytreeCarry()
     nested_with_linear = NestedWithLinear()
+    int_carry = IntCarry()
+    int_carry_nested = IntCarryNested()
 
     x = torch.zeros(1)
     y = torch.zeros(1)
@@ -304,6 +354,8 @@ def _while_loop_tests():
                 ([torch.randn(3, 3)], {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}),
             ),
         ),
+        "int_carry": (int_carry, (torch.randn(2, 2),)),
+        "int_carry_nested": (int_carry_nested, (torch.randn(2, 2),)),
     }
 
 
@@ -3432,23 +3484,42 @@ class TestControlFlowTraced(TestCase):
         torch._dynamo.reset()
         super().setUp()
 
-    def _check_tracing(self, fn, args, allow_non_fake_inputs=False):
+    def _check_tracing(self, fn, args, allow_non_fake_inputs=False, tracing_mode="all"):
         graphs = {}
         eager_res = fn(*args)
-        for tracing_mode in ["symbolic", "real", "fake"]:
+        tracing_modes = (
+            ["real", "fake", "symbolic"] if tracing_mode == "all" else [tracing_mode]
+        )
+        for mode in tracing_modes:
             graph = make_fx(
                 fn,
-                tracing_mode=tracing_mode,
+                tracing_mode=mode,
                 _allow_non_fake_inputs=allow_non_fake_inputs,
             )(*args)
-            graphs[tracing_mode] = graph
+            graphs[mode] = graph
             self.assertEqual(graph(*args), eager_res)
-        return graphs
+        return graphs if tracing_mode == "all" else graphs[tracing_mode]
 
     def _check_compile(self, fn, args, *, backend="eager"):
         eager_res = fn(*args)
         compiled_fn = torch.compile(fn, backend=backend)
         self.assertEqual(compiled_fn(*args), eager_res)
+
+    def _check_compile_and_graph(self, fn, args, backend_name: str) -> str:
+        if backend_name == "eager":
+            backend = EagerAndRecordGraphs()
+        elif backend_name == "aot_eager":
+            backend = AotEagerAndRecordGraphs()
+        else:
+            raise ValueError(f"cannot recognize {backend_name} backend.")
+
+        eager_res = fn(*args)
+        compiled_res = torch.compile(fn, backend=backend)(*args)
+        inductor_res = torch.compile(fn)(*args)
+        self.assertEqual(eager_res, compiled_res)
+        self.assertEqual(eager_res, inductor_res)
+        self.assertEqual(len(backend.graphs), 1)
+        return normalize_gm(backend.graphs[0].print_readable(print_output=False))
 
     def test_cond_traced_not_nested(self):
         def true_fn(x):
@@ -3765,18 +3836,41 @@ def forward(self, arg0_1):
             )
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
-    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    # int_carry and int_carry_nested doesn't work when tracing with real and symbolic:
+    # For "real", we auto unspecialize int with unbacked symints and it'll be dispatched to dense kernel
+    # causing an data dependent error.
+    # For "symbolic":
+    # To enable "symbolic", we need to add SymInt input support in dynamo. This is
+    # different from the case where we have int inputs and we turn it into symint but
+    # literally a torch.SymInt input to a compiled region.
+    # We've done similar things for SymBool input for cond but the ROI seems really low.
+    # We have test_int_carry_(nested)_tracing for checking  tracing int_carry_(nested) with fake
+    #
+    # simple_with_linear doesn't work becaue parameters and buffers
+    # are not inputs so they're not wrapped by functionalization and tracing.
+    @parametrize(
+        "while_loop_test",
+        list(
+            WHILE_LOOP_TESTS.keys()
+            - {
+                "int_carry",
+                "int_carry_nested",
+                "simple_with_linear",
+                "nested_with_linear",
+            }
+        ),
+    )
     def test_while_loop_functionalize(self, func_type, while_loop_test):
-        # simple_with_linear doesn't work becaue parameters and buffers
-        # are not inputs so they're not wrapped by functionalization and tracing.
-        if while_loop_test not in ("simple_with_linear", "nested_with_linear"):
-            fn, inp = WHILE_LOOP_TESTS[while_loop_test]
-            fn, mode = self._wrap_with_functionalize(fn, func_type)
-            mode = mode if mode is not None else contextlib.nullcontext()
-            with mode:
-                self._check_tracing(fn, inp)
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+        fn, mode = self._wrap_with_functionalize(fn, func_type)
+        mode = mode if mode is not None else contextlib.nullcontext()
+        with mode:
+            self._check_tracing(fn, inp)
 
-    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    @parametrize(
+        "while_loop_test",
+        list(WHILE_LOOP_TESTS.keys() - {"int_carry", "int_carry_nested"}),
+    )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
         allow_non_fake_inputs = (
@@ -3878,77 +3972,213 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
         inner_body = outer_body.while_loop_body_graph_0
         inner_cond = outer_body.while_loop_cond_graph_0
         self.assertExpectedInline(
-            gm.code.strip("\n"),
+            normalize_gm(gm.print_readable(print_output=False)),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    sym_size_int = torch.ops.aten.sym_size.int(arg2_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg2_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(arg3_1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(arg3_1, 1)
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    return (getitem, getitem_1, getitem_2, getitem_3)
-    """,  # noqa: B950
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]"):
+        sym_size_int: "Sym(s2)" = torch.ops.aten.sym_size.int(arg2_1, 0)
+        sym_size_int_1: "Sym(s2)" = torch.ops.aten.sym_size.int(arg2_1, 1)
+        sym_size_int_2: "Sym(s2)" = torch.ops.aten.sym_size.int(arg3_1, 0)
+        sym_size_int_3: "Sym(s2)" = torch.ops.aten.sym_size.int(arg3_1, 1)
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+        getitem: "i64[]" = while_loop[0]
+        getitem_1: "i64[]" = while_loop[1]
+        getitem_2: "f32[s2, s2]" = while_loop[2]
+        getitem_3: "f32[s2, s2]" = while_loop[3];  while_loop = None
+        return (getitem, getitem_1, getitem_2, getitem_3)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(arg0_1, 0);  arg0_1 = None
+            return gt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+            while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+            while_loop_body_graph_0 = self.while_loop_body_graph_0
+            while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
+            getitem: "i64[]" = while_loop[0]
+            getitem_1: "i64[]" = while_loop[1]
+            getitem_2: "f32[s2, s2]" = while_loop[2]
+            getitem_3: "f32[s2, s2]" = while_loop[3];  while_loop = None
+            sub: "i64[]" = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
+            clone: "i64[]" = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
+            mul: "f32[s2, s2]" = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
+            div: "f32[s2, s2]" = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
+            return (sub, clone, mul, div)
+
+        class while_loop_cond_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+                gt: "b8[]" = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
+                return gt
+
+        class while_loop_body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "i64[]", arg1_1: "i64[]", arg2_1: "f32[s2, s2]", arg3_1: "f32[s2, s2]", arg4_1: "Sym(s2)", arg5_1: "Sym(s2)", arg6_1: "Sym(s2)", arg7_1: "Sym(s2)"):
+                clone: "i64[]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+                sub: "i64[]" = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
+                add: "f32[s2, s2]" = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
+                sub_1: "f32[s2, s2]" = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
+                return (clone, sub, add, sub_1)
+""",  # noqa: B950
         )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_while_loop_int_carry_compile(self, backend):
+        fn, args = WHILE_LOOP_TESTS["int_carry"]
+        captured_graph: str = self._check_compile_and_graph(fn, args, backend)
+        if backend == "eager":
+            self.assertExpectedInline(
+                captured_graph,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 2]"):
+        l_x_ = L_x_
+
+        cond_fn_0 = self.cond_fn_0
+        body_fn_0 = self.body_fn_0
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, 2, l_x_), ());  cond_fn_0 = body_fn_0 = l_x_ = None
+        getitem: "Sym(u0 + 1)" = while_loop[0]
+        getitem_1: "Sym(u1)" = while_loop[1]
+        getitem_2: "f32[2, 2]" = while_loop[2];  while_loop = None
+        return (getitem, getitem_1, getitem_2)
+
+    class cond_fn_0(torch.nn.Module):
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", l_x_: "f32[2, 2]"):
+            lt: "Sym(u0 < u1)" = symint < symint_0;  symint = symint_0 = None
+            return lt
+
+    class body_fn_0(torch.nn.Module):
+        def forward(self, symint: "Sym(u0)", symint_0: "Sym(u1)", l_x_: "f32[2, 2]"):
+            add: "Sym(u0 + 1)" = symint + 1
+            sin: "f32[2, 2]" = l_x_.sin();  l_x_ = None
+            child: "f32[2, 2]" = sin + symint;  sin = symint = None
+            return (add, symint_0, child)
+""",  # noqa: B950
+            )
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_while_loop_int_carry_nested_compile(self, backend):
+        fn, args = WHILE_LOOP_TESTS["int_carry_nested"]
+        captured_graph: str = self._check_compile_and_graph(fn, args, backend)
+        if backend == "eager":
+            self.assertExpectedInline(
+                captured_graph,
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2, 2]"):
+        l_x_ = L_x_
+
+        cond_fn_1 = self.cond_fn_1
+        body_fn_1 = self.body_fn_1
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_1, body_fn_1, (0, l_x_), ());  cond_fn_1 = body_fn_1 = l_x_ = None
+        getitem: "Sym(u0 + 1)" = while_loop[0]
+        getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
+        return (getitem, getitem_1)
+
+    class cond_fn_1(torch.nn.Module):
+        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
+            lt: "Sym(u0 < 2)" = symint < 2;  symint = None
+            return lt
+
+    class body_fn_1(torch.nn.Module):
+        def forward(self, symint: "Sym(u0)", l_x_: "f32[2, 2]"):
+            cond_fn_0 = self.cond_fn_0
+            body_fn_0 = self.body_fn_0
+            while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (symint,));  cond_fn_0 = body_fn_0 = l_x_ = None
+            getitem: "Sym(u1 + 1)" = while_loop[0];  getitem = None
+            new_x: "f32[2, 2]" = while_loop[1];  while_loop = None
+
+            add: "Sym(u0 + 1)" = symint + 1;  symint = None
+            return (add, new_x)
+
+        class cond_fn_0(torch.nn.Module):
+            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
+                lt: "Sym(u1 < u0)" = symint < symint_cond_fn;  symint = symint_cond_fn = None
+                return lt
+
+        class body_fn_0(torch.nn.Module):
+            def forward(self, symint: "Sym(u1)", l_x_: "f32[2, 2]", symint_cond_fn):
+                add: "Sym(u1 + 1)" = symint + 1;  symint = None
+                child: "f32[2, 2]" = l_x_ + 1;  l_x_ = None
+                return (add, child)
+""",  # noqa: B950
+            )
+
+    def test_while_loop_int_carry_tracing(self):
+        fn, args = WHILE_LOOP_TESTS["int_carry"]
+        traced_graph = self._check_tracing(fn, args, tracing_mode="fake")
         self.assertExpectedInline(
-            outer_body.code.strip("\n"),
+            normalize_gm(traced_graph.print_readable(print_output=False)),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, 2, arg0_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
+        getitem: "Sym(u2)" = while_loop[0]
+        getitem_1: "Sym(u3)" = while_loop[1]
+        getitem_2: "f32[2, 2]" = while_loop[2];  while_loop = None
+        return (getitem, getitem_1, getitem_2)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u0)", arg1_1: "Sym(u1)", arg2_1: "f32[2, 2]"):
+            lt: "Sym(u0 < u1)" = arg0_1 < arg1_1;  arg0_1 = arg1_1 = None
+            return lt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u0)", arg1_1: "Sym(u1)", arg2_1: "f32[2, 2]"):
+            add: "Sym(u0 + 1)" = arg0_1 + 1
+            sin: "f32[2, 2]" = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
+            add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(sin, arg0_1);  sin = arg0_1 = None
+            return (add, arg1_1, add_1)
+""",  # noqa: B950
         )
+
+    def test_while_loop_int_carry_nested_tracing(self):
+        fn, args = WHILE_LOOP_TESTS["int_carry_nested"]
+        traced_graph = self._check_tracing(fn, args, tracing_mode="fake")
         self.assertExpectedInline(
-            outer_body.code.strip("\n"),
+            normalize_gm(traced_graph.print_readable(print_output=False)),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
-    while_loop_cond_graph_0 = self.while_loop_cond_graph_0
-    while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1]
-    getitem_2 = while_loop[2]
-    getitem_3 = while_loop[3];  while_loop = None
-    sub = torch.ops.aten.sub.Tensor(getitem, 1);  getitem = None
-    clone = torch.ops.aten.clone.default(getitem_1);  getitem_1 = None
-    mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
-    div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
-    return (sub, clone, mul, div)
-    """,  # noqa: B950
-        )
-        self.assertExpectedInline(
-            inner_body.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
-    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  arg3_1 = None
-    return (clone, sub, add, sub_1)
-    """,
-        )
-        self.assertExpectedInline(
-            inner_cond.code.strip("\n"),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
-    gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
-    return gt
-    """,
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, arg0_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
+        getitem: "Sym(u4)" = while_loop[0]
+        getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
+        return (getitem, getitem_1)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u0)", arg1_1: "f32[2, 2]"):
+            lt: "Sym(u0 < 2)" = arg0_1 < 2;  arg0_1 = None
+            return lt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u0)", arg1_1: "f32[2, 2]"):
+            while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+            while_loop_body_graph_0 = self.while_loop_body_graph_0
+            while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, arg1_1), (arg0_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg1_1 = None
+            getitem: "Sym(u2)" = while_loop[0];  getitem = None
+            getitem_1: "f32[2, 2]" = while_loop[1];  while_loop = None
+            add: "Sym(u0 + 1)" = arg0_1 + 1;  arg0_1 = None
+            return (add, getitem_1)
+
+        class while_loop_cond_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "Sym(u1)", arg1_1: "f32[2, 2]", arg2_1: "Sym(u0)"):
+                lt: "Sym(u1 < u0)" = arg0_1 < arg2_1;  arg0_1 = arg2_1 = None
+                return lt
+
+        class while_loop_body_graph_0(torch.nn.Module):
+            def forward(self, arg0_1: "Sym(u1)", arg1_1: "f32[2, 2]", arg2_1: "Sym(u0)"):
+                add: "Sym(u1 + 1)" = arg0_1 + 1;  arg0_1 = None
+                add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+                return (add, add_1)
+""",  # noqa: B950
         )
 
     def test_cond_nested_traced(self):
@@ -4101,9 +4331,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             z = torch.add(y, y)
             return z
 
-        symbolic_traced_graph = self._check_tracing(
-            f, (torch.ones(4), torch.Tensor([True]))
-        )["symbolic"]
+        symbolic_traced_graph = make_fx(f, tracing_mode="symbolic")(
+            torch.ones(4), torch.Tensor([True])
+        )
         graph_shape_env = symbolic_traced_graph.shape_env
 
         def _node_shape_env_iter(gm):
