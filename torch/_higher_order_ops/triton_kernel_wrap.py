@@ -1174,7 +1174,7 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
-        # Rune prune_configs_by to filter the configs
+        # Run prune_configs_by to filter the configs
         if isinstance(variable.kernel, Autotuner):
             variable.kernel.nargs = dict(zip(variable.kernel.arg_names, args))
             variable.kernel.prune_configs(kwargs)
