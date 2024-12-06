@@ -8,9 +8,9 @@
 #include <ck_tile/ops/epilogue.hpp>
 #include <ck_tile/ops/fmha.hpp>
 
-#include "bias.hpp"
-#include "mask.hpp"
-#include "rotary.hpp"
+#include <bias.hpp>
+#include <mask.hpp>
+#include <rotary.hpp>
 
 #include <type_traits>
 #include <utility>
