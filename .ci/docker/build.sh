@@ -184,7 +184,7 @@ case "$image" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.6.2
+    CUDA_VERSION=12.6.3
     CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=9
