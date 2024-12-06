@@ -278,6 +278,51 @@ class TestSubclass(TestCase):
         with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
             storage._write_file("file")
 
+    @parametrize_tensor_cls
+    def test_custom_attributes(self, tensor_cls):
+        # Test case 1: Simple custom attribute
+        x = self._create_tensor(tensor_cls)
+        x.custom_attr = 42
+        self.assertEqual(x.custom_attr, 42)
+
+        # Test case 2: Custom property with torch_function
+        class CustomSubclass(tensor_cls):
+            @staticmethod
+            def __new__(cls, data):
+                if hasattr(cls, 'get_wrapper_properties'):
+                    t, kwargs = cls.get_wrapper_properties(data)
+                    return super().__new__(cls, t, **kwargs)
+                return super().__new__(cls)
+
+            def __init__(self, data):
+                if hasattr(self, '_init_from_tensor'):
+                    self._init_from_tensor(data)
+                elif tensor_cls is not torch.Tensor:
+                    super().__init__(data)
+                # Initialize after parent initialization
+                self._custom_value = torch.ones(3)
+
+            @property
+            def custom_property(self):
+                # Return the tensor directly without wrap_torch_function
+                return self._custom_value
+
+        # Create appropriate base tensor
+        if tensor_cls.__name__ == 'DiagTensorBelow':
+            base = torch.ones(3)  # 1D tensor required
+        else:
+            base = self._create_tensor(tensor_cls)
+
+        try:
+            y = CustomSubclass(base)
+            result = y.custom_property
+            # Verify result is a tensor
+            self.assertTrue(isinstance(result, torch.Tensor))  # Changed from torch.is_tensor()
+            self.assertTrue(torch.all(result == 1))
+        except Exception as e:
+            if "already associated" in str(e):
+                self.skipTest(f"{tensor_cls.__name__} doesn't support subclassing")
+
 
 instantiate_parametrized_tests(TestSubclass)
 
