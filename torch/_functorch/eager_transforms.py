@@ -367,7 +367,7 @@ def _vjp_with_argnums(
                 primals_out, aux = primals_out
                 aux = _undo_create_differentiable(aux, level)
 
-            flat_primals_out = tree_leaves(primals_out)
+            flat_primals_out, primals_out_spec = tree_flatten(primals_out)
             assert_non_empty_tensor_output(flat_primals_out, "vjp(f, *primals)")
             flat_diff_primals, primals_spec = tree_flatten(diff_primals)
             results = _undo_create_differentiable(primals_out, level)
