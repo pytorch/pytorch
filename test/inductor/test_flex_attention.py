@@ -120,6 +120,7 @@ else:
     import subprocess
     compiler_version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
     LONG_COMPILATION_ON_CPU = False
+    torch_config_string = torch.__config__.show()
     if IS_WINDOWS:
         LONG_COMPILATION_ON_CPU = True
     elif "g++" in compiler_version_string or "gcc" in compiler_version_string or "c++" in compiler_version_string or "cc" in compiler_version_string :
@@ -127,6 +128,8 @@ else:
         major_version = subprocess.check_output([get_cpp_compiler(), "-dumpversion"]).decode("utf8")
         LONG_COMPILATION_ON_CPU = int(major_version) < 9
     elif is_clang() or "clang" in get_cpp_compiler():
+        LONG_COMPILATION_ON_CPU = True
+    elif "CLANG" in torch_config_string.upper():
         LONG_COMPILATION_ON_CPU = True
 
     test_dtypes = (
