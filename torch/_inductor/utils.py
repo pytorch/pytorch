@@ -47,6 +47,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
@@ -1113,12 +1114,18 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index) -> bool:
-    prop = torch.cuda.get_device_properties(index)
+def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if isinstance(index_or_device, torch.device):
+        device = index_or_device
+    else:
+        device = torch.device("cuda", index_or_device)
+
+    prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
     if torch.version.hip:
+        assert prop.major is not None
         if prop.major < 9 or prop.major == 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
@@ -1145,7 +1152,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
-        and is_big_gpu(layout.device.index or 0)
+        and is_big_gpu(layout.device)
     )
 
 
@@ -1310,7 +1317,16 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
+def use_cpp_bmm_template(layout, mat1, mat2):
+    return (
+        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
+        and mat1.layout.is_contiguous()
+    )
+
+
+def use_cpp_gemm_template(
+    layout, mat1, mat2, mat2_transposed=False, require_constant_mat2=True
+):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1358,7 +1374,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         and micro_gemm is not None
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
-        and mat2.is_module_buffer()
+        and (mat2.is_module_buffer() or not require_constant_mat2)
     )
 
 
@@ -1738,7 +1754,31 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    return (
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    ) or (
+        # TODO: this is a temporary solution to ensure that we can identify torchrec's
+        # communication ops. But in order to allow better communication and computation
+        # overlap, torchrec's communication ops should be not used.
+        type(node) == ir.FallbackKernel
+        and (
+            # NOTE: the `hasattr()` check is to bypass errors such as the following:
+            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
+            (
+                hasattr(torch.ops.torchrec, "all_to_all_single")
+                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
+                and node.op_overload
+                == torch.ops.torchrec.all_gather_into_tensor.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
+                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
+            )
+        )
+    )
 
 
 def is_wait(node):
