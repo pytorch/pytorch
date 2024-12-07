@@ -206,7 +206,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_cuda
     def test_schedule(self):
-        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertExpectedInline(
             self.buffer.getvalue(),
@@ -261,7 +261,7 @@ class StructuredTraceTest(TestCase):
         def fn(x, y):
             return torch.add(x, y)
 
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt = torch.compile(fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
         fn_opt(torch.ones(1000, 1000), 1)
 
@@ -308,7 +308,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_tlparse
     def test_example_fn(self):
-        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt = torch.compile(example_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000))
         self.assertExpectedInline(
             self.buffer.getvalue(),
@@ -334,7 +334,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_tlparse
     def test_example_training_fn(self):
-        fn_opt = torch._dynamo.optimize("inductor")(example_training_fn)
+        fn_opt = torch.compile(example_training_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, requires_grad=True))
         buffer = self.buffer.getvalue()
         buffer = replace_dynamic(buffer, "inductor_compile_time_s")
@@ -398,7 +398,7 @@ class StructuredTraceTest(TestCase):
     @requires_tlparse
     def test_dynamo_error(self):
         try:
-            fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
+            fn_opt = torch.compile(dynamo_error_fn, backend="inductor")
             fn_opt(*ARGS)
         except Exception:
             pass
@@ -431,7 +431,7 @@ class StructuredTraceTest(TestCase):
 
         with unittest.mock.patch.dict(torch._inductor.lowering.lowerings, dict_entries):
             try:
-                fn_opt = torch._dynamo.optimize("inductor")(inductor_error_fn)
+                fn_opt = torch.compile(inductor_error_fn, backend="inductor")
                 fn_opt(*ARGS)
             except Exception:
                 pass
@@ -476,9 +476,8 @@ class StructuredTraceTest(TestCase):
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        ddp_model = torch._dynamo.optimize("inductor")(
-            DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
-        )
+        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        ddp_model = torch.compile(model, backend="inductor")
 
         ddp_model(torch.randn(1024, 1024, device="cuda:0"))
 
@@ -591,7 +590,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_tlparse
     def test_graph_breaks(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x):
             torch._dynamo.graph_break()
             return x + 1
@@ -631,10 +630,10 @@ class StructuredTraceTest(TestCase):
         def fn(a, b):
             return a @ b
 
-        fn_opt = torch._dynamo.optimize("eager", dynamic=False)(fn)
+        fn_opt = torch.compile(fn, backend="eager", dynamic=False)
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
-        fn_opt2 = torch._dynamo.optimize("eager", dynamic=True)(fn)
+        fn_opt2 = torch.compile(fn, backend="eager", dynamic=True)
         fn_opt2(torch.randn(5, 10), torch.randn(10, 15))
 
         self.assertExpectedInline(
@@ -685,7 +684,7 @@ class StructuredTraceTest(TestCase):
         zs = [3.0]
         x = torch.tensor([1.0])
 
-        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt = torch.compile(fn, backend="eager")
         fn_opt(x, ys, zs)
         fn_opt(x, ys[:1], zs)
 
@@ -750,7 +749,7 @@ def forward(self, x, y):
             return a.sin()
 
         x = torch.tensor([1.0])
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt = torch.compile(fn, backend="inductor")
         fn_opt(x)
         torch._dynamo.reset()
         # Trigger a cache hit
@@ -833,7 +832,7 @@ def forward(self, x_1: "f32[2][1]cpu"):
             return a.sin()
 
         x = torch.tensor([1.0])
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt = torch.compile(fn, backend="inductor")
         fn_opt(x)
         torch._dynamo.reset()
         # Trigger a cache hit

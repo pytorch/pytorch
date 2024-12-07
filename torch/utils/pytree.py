@@ -90,7 +90,7 @@ class PyTreeImplementation:
 
 implementation = PyTreeImplementation(module=python, name="python")
 if PYTORCH_USE_CXX_PYTREE:
-    if not python._cxx_pytree_exists:
+    if not python._cxx_pytree_dynamo_traceable:
         raise ImportError(
             "Cannot import package `optree`. "
             "Please install `optree` via `python -m pip install --upgrade optree`."
