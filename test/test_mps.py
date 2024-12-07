@@ -9254,6 +9254,32 @@ class TestPad(TestCaseMPS):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_pad_limit(self):
+        def helper(elements):
+            inputCPU = torch.rand(
+                (1, 1, 1, 1, elements), device="cpu", dtype=torch.float
+            )
+            inputMPS = inputCPU.detach().clone().to("mps")
+            paddedCPU = F.pad(
+                inputCPU, pad=(0, 0, 0, 0, 1, 0), mode="constant", value=0.5
+            )
+            paddedMPS = F.pad(
+                inputMPS, pad=(0, 0, 0, 0, 1, 0), mode="constant", value=0.5
+            )
+            self.assertEqual(paddedCPU, paddedMPS)
+
+        mps_pad_size_limit = 1 << 16
+
+        # Under the limit
+        helper(mps_pad_size_limit - 1)
+
+        # On the limit
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Input elements >= 65536 causes broken tensor at the MPS device.",
+        ):
+            helper(mps_pad_size_limit)
+
 
 class TestLinalgMPS(TestCaseMPS):
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
