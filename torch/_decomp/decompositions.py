@@ -2533,6 +2533,8 @@ def max_unpool2d(
     self: TensorLike,
     indices: TensorLike,
     output_size: List[int],
+    stride: List[int],
+    padding: List[int],
 ):
     torch._check(
         indices.dtype == torch.int64,
@@ -2545,7 +2547,14 @@ def max_unpool2d(
             f"but got {len(output_size)} elements."
         ),
     )
-
+    torch._check(
+        len(stride) == 2,
+        lambda: f"There should be exactly two elements in stride, but got: {len(stride)} elements.",
+    )
+    torch._check(
+        len(padding) == 2,
+        lambda: f"There should be exactly two elements in padding, but got: {len(padding)} elements.",
+    )
     torch._check(
         self.ndim in (3, 4),
         lambda: (
@@ -2570,6 +2579,11 @@ def max_unpool2d(
                 f"but got {self.shape} with dimension {i} being empty."
             ),
         )
+
+    torch._check(
+        stride[0] > 0 and stride[1] > 0,
+        lambda: f"strides should be greater than zero, but got stride: {stride}",
+    )
 
     return _max_unpoolnd(self, indices, output_size, 2)
 
