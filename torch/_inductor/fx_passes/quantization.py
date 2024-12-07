@@ -2405,6 +2405,65 @@ def _generate_qlinear_weight_prepack_patterns(
         )
 
 
+def _generate_linear_dynamic_fp16_pattern(
+    _dequant_weight_pattern,
+    input_dim_exceeds_two=False,
+    input_contiguous=True,
+):
+    dtype = torch.float32
+    t_pattern = _generate_linear_t_pattern(_dequant_weight_pattern, dtype)
+
+    if input_dim_exceeds_two and not input_contiguous:
+        # pattern is
+        #                   x -> expand -> bmm (-> add)
+        # w -> dequant -> permute -> expand /
+        pattern_no_bias = CallFunction(
+            aten.bmm.default,
+            CallFunction(
+                aten.expand.default,
+                KeywordArg("x"),
+                KeywordArg("act_expand_size"),
+            ),
+            CallFunction(
+                aten.expand.default,
+                t_pattern,
+                KeywordArg("wgt_expand_size"),
+            ),
+        )
+        pattern_with_bias = CallFunction(
+            aten.add.Tensor,
+            pattern_no_bias,
+            KeywordArg("b"),
+        )
+        return pattern_with_bias, pattern_no_bias
+
+    x_pattern_with_reshape = _may_generate_pattern_with_reshape(
+        KeywordArg("x"),
+        KeywordArg("act_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_linear_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.addmm.default,
+            KeywordArg("b"),
+            x_pattern_with_reshape,
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_linear_no_bias_pattern = _may_generate_pattern_with_reshape(
+        CallFunction(
+            aten.mm.default,
+            x_pattern_with_reshape,
+            t_pattern,
+        ),
+        KeywordArg("output_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
+
+
 def _register_dequant_promotion():
     dequant_pattern_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False], [True, False]
@@ -2539,6 +2598,175 @@ def _register_qlinear_weight_prepack():
         )
 
 
+def _register_linear_dynamic_fp16_weight_prepack_pass(
+    pattern,
+    pass_number,
+    input_dim_exceeds_two=False,
+    input_contiguous=True,
+):
+    def _extra_check_fn(match: Match):
+        return match.kwargs["dtype_fp16"] == torch.float16
+
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_extra_check_fn,
+        pass_number=pass_number,
+    )
+    def linear_dynamic_fp16_weight_prepack(match: Match, *args, **kwargs):
+        """
+        Match the pattern:
+        fp32 activation
+          |
+        mm/addmm <- t <- to_fp32 <- to_fp16 <- weight
+          |
+        (reshape)
+
+        OR
+
+        fp32 activation
+          |
+        expand
+          |
+         bmm <- expand <- t <- to_fp32 <- to_fp16 <- weight
+          |
+        (add)
+
+        Insert weight prepack node and change the pattern to:
+        fp32 activation
+          |
+        onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- weight
+        """
+        (
+            linear_node,
+            output_reshape_node,
+        ) = _get_linear_node(match, input_dim_exceeds_two, input_contiguous)
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        weight_index = input_index + 1
+
+        act_reshape_node, expand_x_node, expand_w_node = None, None, None
+        t_node = None
+        if input_dim_exceeds_two:
+            if input_contiguous:
+                act_reshape_node = linear_node.args[input_index]
+                t_node = linear_node.args[weight_index]
+            else:
+                expand_x_node = linear_node.args[input_index]
+                expand_w_node = linear_node.args[weight_index]
+                t_node = expand_w_node.args[0]
+        else:
+            t_node = linear_node.args[weight_index]
+
+        w_to_fp32_node = t_node.args[0]
+        assert (
+            w_to_fp32_node.target is quantized_decomposed.convert_element_type.no_fuse
+        )
+        w_to_fp16_node = w_to_fp32_node.args[0]
+        assert (
+            w_to_fp16_node.target is quantized_decomposed.convert_element_type.no_fuse
+        )
+
+        x = kwargs["x"]
+        w = kwargs["w"]
+        bias = kwargs["b"] if "b" in kwargs else None
+
+        x_shape = x.meta.get("tensor_meta").shape
+        if has_free_symbols(x_shape):
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
+            x_shape = None
+        graph = match.graph
+        with graph.inserting_before(linear_node):
+            # Insert weight prepack node and the qlinear node
+            packed_weight_inputs = (
+                w,
+                x_shape,
+            )
+            packed_weight_op = torch.ops.onednn.linear_prepack_fp16
+            prepack_weight_node = graph.call_function(
+                packed_weight_op, args=packed_weight_inputs
+            )
+
+            new_args: Tuple[Any, ...] = (
+                x,
+                prepack_weight_node,
+                bias,
+            )
+            new_linear_node = graph.call_function(
+                torch.ops.onednn.linear_dynamic_fp16.default, args=new_args
+            )
+            output_add_node_for_bias = None
+            if input_dim_exceeds_two:
+                if input_contiguous:
+                    output_reshape_node.replace_all_uses_with(new_linear_node)
+                    new_linear_node.meta.update(output_reshape_node.meta)
+                else:
+                    if bias:
+                        output_add_node_for_bias = match.output_node()
+                        assert output_add_node_for_bias.target is aten.add.Tensor
+                        output_add_node_for_bias.replace_all_uses_with(new_linear_node)
+                        new_linear_node.meta.update(output_add_node_for_bias.meta)
+                    else:
+                        linear_node.replace_all_uses_with(new_linear_node)
+                        new_linear_node.meta.update(linear_node.meta)
+            else:
+                linear_node.replace_all_uses_with(new_linear_node)
+                new_linear_node.meta.update(linear_node.meta)
+
+            # Erase the original linear node
+            if input_dim_exceeds_two:
+                if input_contiguous:
+                    graph.erase_node(output_reshape_node)
+                elif not input_contiguous and bias:
+                    assert output_add_node_for_bias is not None
+                    graph.erase_node(output_add_node_for_bias)
+            graph.erase_node(linear_node)
+            if input_dim_exceeds_two:
+                if input_contiguous:
+                    assert act_reshape_node is not None
+                    graph.erase_node(act_reshape_node)
+                else:
+                    assert expand_x_node is not None and expand_w_node is not None
+                    graph.erase_node(expand_x_node)
+                    graph.erase_node(expand_w_node)
+            graph.erase_node(t_node)
+            graph.erase_node(w_to_fp32_node)
+            graph.erase_node(w_to_fp16_node)
+
+            counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
+
+
+def _register_linear_dynamic_fp16_weight_prepack():
+    to_dtype_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+    weight_pattern = CallFunction(
+        to_dtype_op,
+        CallFunction(
+            to_dtype_op,
+            KeywordArg("w"),
+            KeywordArg("dtype_fp16"),
+        ),
+        KeywordArg("dtype_fp32"),
+    )
+    cases = itertools.product(
+        [False, True],  # input_dim_exceeds_two
+        [True, False],  # input_contiguous
+    )
+    for input_dim_exceeds_two, input_contiguous in cases:
+        patterns = _generate_linear_dynamic_fp16_pattern(
+            weight_pattern,
+            input_dim_exceeds_two,
+            input_contiguous,
+        )
+        for pattern in patterns:
+            _register_linear_dynamic_fp16_weight_prepack_pass(
+                pattern,
+                pass_number=1,
+                input_dim_exceeds_two=input_dim_exceeds_two,
+                input_contiguous=input_contiguous,
+            )
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
@@ -2549,6 +2777,7 @@ def _register_quantization_weight_pack_pass():
 
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
+    _register_linear_dynamic_fp16_weight_prepack()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):
