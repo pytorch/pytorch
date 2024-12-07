@@ -7,7 +7,7 @@ import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
