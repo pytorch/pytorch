@@ -9,9 +9,9 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
 
-C10_DECLARE_bool(torch_jit_enable_new_executor);
+TORCH_DECLARE_bool(torch_jit_enable_new_executor);
 
-C10_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
+TORCH_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
 
 namespace torch::jit {
 struct GraphExecutorState;

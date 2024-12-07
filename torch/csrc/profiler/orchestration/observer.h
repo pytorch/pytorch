@@ -128,6 +128,10 @@ struct TORCH_API ProfilerConfig {
 // ----------------------------------------------------------------------------
 struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   explicit ProfilerStateBase(ProfilerConfig config);
+  ProfilerStateBase(const ProfilerStateBase&) = delete;
+  ProfilerStateBase(ProfilerStateBase&&) = delete;
+  ProfilerStateBase& operator=(const ProfilerStateBase&) = delete;
+  ProfilerStateBase& operator=(ProfilerStateBase&&) = delete;
   ~ProfilerStateBase() override;
 
   static ProfilerStateBase* get(bool global);

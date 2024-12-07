@@ -1,12 +1,13 @@
 import inspect
 import logging
-import sys
+import os
 from enum import IntEnum
-from functools import lru_cache
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._logging._internal
+import torch._logging.structured
+from torch._export.passes.insert_custom_op_guards import insert_custom_op_guards
 from torch.export import ExportedProgram
 from torch.export._trace import _export
 from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
@@ -19,35 +20,13 @@ class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
     CONSTRAINT_VIOLATION_ERROR = 3
+    MISMATCHED_FAKE_KERNEL = 4
 
     def __str__(self) -> str:
         return self.name
 
 
-@lru_cache
-def uninteresting_files() -> Set[str]:
-    import torch._inductor.sizevars
-    import torch._subclasses.fake_tensor
-    import torch._subclasses.meta_utils
-
-    mods = [
-        sys.modules[__name__],
-        torch.fx.experimental.recording,
-        torch.fx.experimental.sym_node,
-        torch.fx.experimental.symbolic_shapes,
-        torch.fx.interpreter,
-        torch,
-        torch._inductor.sizevars,
-        torch._logging._internal,
-        torch._subclasses.meta_utils,
-        torch._subclasses.fake_tensor,
-    ]
-    return {inspect.getfile(m) for m in mods}
-
-
-def prettify_stack(
-    stack: List[Dict["str", "str"]], str_to_filename: Dict[str, str]
-) -> str:
+def prettify_stack(stack: List[Dict[str, str]], str_to_filename: Dict[str, str]) -> str:
     res = ""
     for frame in stack:
         if frame["filename"] not in str_to_filename:
@@ -62,11 +41,17 @@ def filter_stack(
     stack: List[Dict[str, str]], str_to_filename: Dict[str, str]
 ) -> List[Dict[str, str]]:
     for i, s in enumerate(reversed(stack)):
+        s["filename"] = str(s["filename"])
         if s["filename"] not in str_to_filename:
             continue
-        if str_to_filename[s["filename"]] not in uninteresting_files():
+        torch_filepath = os.path.dirname(inspect.getfile(torch)) + os.path.sep
+        if torch_filepath not in str_to_filename[s["filename"]]:
             return stack[len(stack) - i - 3 : len(stack) - i]
     return stack[-3:]
+
+
+def hash_stack(stack: List[Dict[str, str]]) -> str:
+    return ";".join(f'line: {s["line"]} filename: {s["filename"]}' for s in stack)
 
 
 class FailureReport:
@@ -95,7 +80,9 @@ class FailureReport:
     The specified input dynamic_shapes spec was found to be incorrect during tracing.
     Specifically, this guard was added: {self.data["expr"]}, where {self.data["symbol_to_sources"]}.
     This occured at the following stacktrace: {prettify_stack(self.data["stack"], str_to_filename)}.
-    Because of this, we have modified the dynamic shapes structure to be the following:
+    Because of this, we have modified the dynamic shapes structure to be the
+    following. You can also use torch.export.Dim.AUTO instead to specify your
+    dynamic shapes, and we will automatically infer the dynamism for you.
     ```
     dynamic_shapes = {self.data["new_dynamic_shapes"]}
     ```
@@ -109,6 +96,16 @@ class FailureReport:
 
     Please add `torch._check(...)` to the original code to assert this data-dependent assumption.
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
+"""  # noqa: B950
+
+        elif self.failure_type == FailureType.MISMATCHED_FAKE_KERNEL:
+            op = self.data["op"]
+            reason = self.data["reason"]
+            return f"""Mismatched fake kernel.
+    torch.ops.{op} has a fake kernel implementation, but it has incorrect behavior, based on the real kernel.
+    The reason for the mismatch is: {reason}.
+
+    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a fake implementation.
 """  # noqa: B950
 
         else:
@@ -200,11 +197,17 @@ def draft_export(
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace(
-        ["str", "propagate_real_tensors", "guard_added", "generated_fake_kernel"]
+        [
+            "propagate_real_tensors",
+            "guard_added",
+            "missing_fake_kernel",
+            "mismatched_fake_kernel",
+        ]
     )
 
     with torch._functorch.config.patch(
-        fake_tensor_propagate_real_tensors=True
+        fake_tensor_propagate_real_tensors=True,
+        generate_fake_kernels_from_real_mismatches=True,
     ), capture_structured_log:
         try:
             new_shapes = None
@@ -231,24 +234,34 @@ def draft_export(
                 preserve_module_call_signature=preserve_module_call_signature,
             )
 
-        str_to_filename: Dict[str, str] = {}
+        str_to_filename: Dict[str, str] = {
+            str(v): k for (k, v) in torch._logging.structured.INTERN_TABLE.items()
+        }
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[str, Dict[str, Any]] = {}  # Dedup custom ops
+        custom_ops_logs: Dict[
+            Any, Tuple[Dict[str, Any], FailureType]
+        ] = {}  # Dedup custom ops
+        data_dependent_logs: Dict[
+            str, Dict[str, Any]
+        ] = {}  # Dedup data dependent errors based on stacktrace
 
         for log_name, log_contents in capture_structured_log.logs:
-            if log_name == "propagate_real_tensors":
-                failure_type = FailureType.DATA_DEPENDENT_ERROR
+            failure_type = None
 
+            if log_name == "propagate_real_tensors":
                 log_contents["stack"] = filter_stack(
                     log_contents["stack"], str_to_filename
                 )
-            elif log_name == "str":
-                filename, idx = log_contents
-                str_to_filename[str(idx)] = filename
-                continue
+                if hash_stack(log_contents["stack"]) in data_dependent_logs:
+                    continue
+
+                data_dependent_logs[hash_stack(log_contents["stack"])] = log_contents
+                failure_type = FailureType.DATA_DEPENDENT_ERROR
+
             elif log_name == "guard_added":
                 if new_shapes is None:
                     continue
+
                 failure_type = FailureType.CONSTRAINT_VIOLATION_ERROR
                 if len(log_contents["symbol_to_sources"]) == 0:
                     # We only want to include guards added that are relevant to
@@ -260,12 +273,23 @@ def draft_export(
                     log_contents["stack"], str_to_filename
                 )
                 log_contents["new_dynamic_shapes"] = new_shapes
-            elif log_name == "generated_fake_kernel":
-                custom_ops_logs[log_contents["op"]] = log_contents
-                continue
+            elif log_name == "missing_fake_kernel":
+                if log_contents["op"] in custom_ops_logs:
+                    continue
+                failure_type = FailureType.MISSING_FAKE_KERNEL
+                custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+            elif log_name == "mismatched_fake_kernel":
+                if (log_contents["op"], log_contents["reason"]) in custom_ops_logs:
+                    continue
+                failure_type = FailureType.MISMATCHED_FAKE_KERNEL
+                custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
+                    log_contents,
+                    failure_type,
+                )
             else:
                 raise RuntimeError(f"Unknown log name: {log_name}")
 
+            assert failure_type is not None
             failures.append(
                 FailureReport(
                     failure_type,
@@ -273,15 +297,10 @@ def draft_export(
                 )
             )
 
-        for custom_op_log in custom_ops_logs.values():
-            failures.append(
-                FailureReport(
-                    FailureType.MISSING_FAKE_KERNEL,
-                    custom_op_log,
-                )
-            )
-
         report = DraftExportReport(failures, str_to_filename)
+
+        # Add asserts around custom ops
+        insert_custom_op_guards(ep.graph_module, list(custom_ops_logs.keys()))
 
     ep._report = report
     if not report.successful():
