@@ -8,7 +8,7 @@ namespace torch::inductor {
 
 // NOTICE: Following APIs are subject to change due to active development
 // We provide NO BC guarantee for these APIs
-class AOTI_TORCH_EXPORT AOTIModelContainerRunnerXpu
+class TORCH_API AOTIModelContainerRunnerXpu
     : public AOTIModelContainerRunner {
  public:
   // @param device_str: xpu device string, e.g. "xpu", "xpu:0"
