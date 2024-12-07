@@ -12,6 +12,11 @@ from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyHPU,
+)
+from torch.testing._internal.common_utils import skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -99,46 +104,53 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, options=None):
+    def _check_backend_works(self, backend, device, options=None):
         model = Seq().eval()
-        input = torch.randn(2, 10)
+        model.to(device)
+        input = torch.randn(2, 10, device=device)
         r1 = model(input)
         r2 = torch.compile(model, backend=backend, options=options)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
-    def test_eager(self):
-        self._check_backend_works("eager")
+    def test_eager(self, device):
+        self._check_backend_works("eager", device)
 
-    def test_eager_noexcept(self):
-        self._check_backend_works("eager_noexcept")
+    def test_eager_noexcept(self, device):
+        self._check_backend_works("eager_noexcept", device)
 
+    @skipIfHpu
     @_force_skip_lazy_graph_module()
-    def test_torchscript(self):
-        self._check_backend_works("ts")
+    def test_torchscript(self, device):
+        self._check_backend_works("ts", device)
 
-    def test_aot_eager(self):
-        self._check_backend_works("aot_eager")
+    def test_aot_eager(self, device):
+        self._check_backend_works("aot_eager", device)
 
-    def test_aot_eager_decomp_partition(self):
-        self._check_backend_works("aot_eager_decomp_partition")
+    def test_aot_eager_decomp_partition(self, device):
+        self._check_backend_works("aot_eager_decomp_partition", device)
 
+    @skipIfHpu
     @_force_skip_lazy_graph_module()
-    def test_aot_ts(self):
-        self._check_backend_works("aot_ts")
+    def test_aot_ts(self, device):
+        self._check_backend_works("aot_ts", device)
 
     @requires_cuda
-    def test_aot_cudagraphs(self):
-        self._check_backend_works("cudagraphs")
+    def test_aot_cudagraphs(self, device):
+        self._check_backend_works("cudagraphs", device)
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_onnxrt(self):
-        self._check_backend_works("onnxrt")
+    def test_onnxrt(self, device):
+        self._check_backend_works("onnxrt", device)
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
-    def test_tvm(self):
-        self._check_backend_works("tvm")
-        self._check_backend_works("tvm", options={"scheduler": None})
-        self._check_backend_works("tvm", options={"opt_level": 0})
+    def test_tvm(self, device):
+        self._check_backend_works("tvm", device)
+        self._check_backend_works("tvm", device, options={"scheduler": None})
+        self._check_backend_works("tvm", device, options={"opt_level": 0})
+
+    @onlyHPU
+    def test_intel_gaudi_backend(self, device):
+        self._check_backend_works("hpu_backend", device)
 
     def test_list_backends(self):
         self.assertIn("inductor", torch._dynamo.list_backends())
@@ -346,6 +358,9 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             )
             opt_fn(input)
 
+
+devices = ["cpu", "cuda", "hpu"]
+instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
