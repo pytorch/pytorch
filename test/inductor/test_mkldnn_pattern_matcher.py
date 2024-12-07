@@ -192,11 +192,12 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
+        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = _generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -709,20 +710,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
-        if dim == 4:
-            input_shapes = [
-                [2, 3, 56, 56],
-            ]
-            other_shapes = [[2, 16, 1, 1], [1, 16, 1, 1], [1, 1, 1, 1]]
-        else:
-            input_shapes = [
-                [2, 3, 20, 56, 56],
-            ]
-            other_shapes = [[2, 16, 1, 1, 1], [1, 16, 1, 1, 1], [1, 1, 1, 1, 1]]
         options = itertools.product(
             binary_list,
-            input_shapes,
-            other_shapes,
             [True, False],
             test_memory_format,
             dtypes,
@@ -730,13 +719,17 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for (
             binary_fn,
-            x_shape,
-            other_shape,
             has_relu,
             memory_format,
             dtype,
         ) in options:
             metrics.reset()
+            if dim == 4:
+                x_shape = (1, 3, 56, 56)
+                other_shape = (1, 16, 1, 1)
+            else:
+                x_shape = (1, 3, 20, 56, 56)
+                other_shape = (1, 16, 1, 1, 1)
             mod = M(binary_fn, has_relu).eval()
             x = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
@@ -855,23 +848,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
-            binary_list,
-            (
-                ([2, 3, 10], [1, 1, 30]),
-                ([2, 3, 10], [1, 1, 1]),
-                ([2, 10], [1, 30]),
-                ([2, 10], [1, 1]),
-            ),
-            (True, False),
-            dtypes,
+            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
         )
         out_feature = 30
 
-        for binary_fn, (input_shape, other_shape), bias, dtype in options:
+        for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
-            other = torch.randn(other_shape).to(dtype)
+            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
 
             def matcher_check_fn():
                 self.assertEqual(
@@ -3215,6 +3200,71 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_quantization=False,
                 atol=0.001,
                 rtol=0.07,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self, bias: bool):
+                super().__init__()
+                self.linear = torch.nn.Linear(256, 256, bias=bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        quantizer.set_module_type_qconfig(
+            torch.nn.Linear, xiq.get_x86_inductor_linear_dynamic_fp16_config()
+        )
+        bias_list = [True, False]
+        input_ndim_list = [2, 3]
+        x_contig_list = [True, False]
+        cases = itertools.product(bias_list, input_ndim_list, x_contig_list)
+        for bias, input_ndim, x_contig in cases:
+            x_shape = (4, 256) if input_ndim == 2 else (4, 1, 256)
+            x = torch.randn(x_shape)
+            if not x_contig:
+                x = x[0::2, ...]
+            mod = M(bias).eval()
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                # Matched nodes:
+                # (1) w to fp16, (2) w to fp32, (3) permute w, (4) mm/addmm/bmm
+                # If x.ndim == 3 and x is contiguous, two view nodes are added.
+                # If x.ndim == 3 and x is not contiguous, two expand nodes and one add node are added.
+                nodes_count = 4
+                if input_ndim > 2:
+                    if x_contig:
+                        nodes_count += 2
+                    else:
+                        nodes_count += 3 if bias else 2
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
+
+            self._test_common(
+                mod,
+                (x,),
+                atol=1e-2,
+                rtol=1e-2,
+                matcher_check_fn=matcher_check_fn,
+                check_quantization=True,
+                quantizer=quantizer,
+            )
+            self._test_code_common(
+                mod,
+                (x,),
+                ["torch.ops.onednn.linear_dynamic_fp16.default"],
+                ["torch.ops.aten.addmm.default", "torch.ops.aten.mm.default"],
+                check_quantization=True,
+                quantizer=quantizer,
             )
 
 

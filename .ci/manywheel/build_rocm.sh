@@ -266,6 +266,20 @@ RCCL_SHARE_FILES=($(ls $RCCL_SHARE_SRC))
 DEPS_AUX_SRCLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_SRC/})
 DEPS_AUX_DSTLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_DST/})
 
+# PyTorch 2.6+ (AOTriton 0.8b+)
+# AKS = "AOTriton Kernel Storage", a file format to store GPU kernels compactly
+if (( $(echo "${PYTORCH_VERSION} 2.6" | awk '{print ($1 >= $2)}') )); then
+    LIBAOTRITON_DIR=$(find "$ROCM_HOME/lib/" -name "libaotriton_v2.so" -printf '%h\n')
+    if [[ -z ${LIBAOTRITON_DIR} ]]; then
+        LIBAOTRITON_DIR=$(find "$ROCM_HOME/" -name "libaotriton_v2.so" -printf '%h\n')
+    fi
+    AKS_FILES=($(find "${LIBAOTRITON_DIR}/aotriton.images" -type f -name '*.aks?' -printf '%P\n'))
+    AKS_SRC="${LIBAOTRITON_DIR}/aotriton.images"
+    AKS_DST="lib/aotriton.images"
+    DEPS_AUX_SRCLIST+=(${AKS_FILES[@]/#/${AKS_SRC}/})
+    DEPS_AUX_DSTLIST+=(${AKS_FILES[@]/#/${AKS_DST}/})
+fi
+
 echo "PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
 
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
