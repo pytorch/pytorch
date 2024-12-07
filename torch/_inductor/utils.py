@@ -1310,7 +1310,16 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
+def use_cpp_bmm_template(layout, mat1, mat2):
+    return (
+        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
+        and mat1.layout.is_contiguous()
+    )
+
+
+def use_cpp_gemm_template(
+    layout, mat1, mat2, mat2_transposed=False, require_constant_mat2=True
+):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1358,7 +1367,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         and micro_gemm is not None
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
-        and mat2.is_module_buffer()
+        and (mat2.is_module_buffer() or not require_constant_mat2)
     )
 
 
@@ -1738,7 +1747,31 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    return (
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    ) or (
+        # TODO: this is a temporary solution to ensure that we can identify torchrec's
+        # communication ops. But in order to allow better communication and computation
+        # overlap, torchrec's communication ops should be not used.
+        type(node) == ir.FallbackKernel
+        and (
+            # NOTE: the `hasattr()` check is to bypass errors such as the following:
+            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
+            (
+                hasattr(torch.ops.torchrec, "all_to_all_single")
+                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
+                and node.op_overload
+                == torch.ops.torchrec.all_gather_into_tensor.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
+                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
+            )
+        )
+    )
 
 
 def is_wait(node):
@@ -2150,16 +2183,18 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append(
-                    tuple(
-                        (
-                            shape_env.evaluate_symexpr(e)
-                            if shape_env is not None
-                            else int(e)
-                        )
-                        for e in exprs
-                    )
-                )
+                fakify_first_call = False
+                if ctx := torch._guards.TracingContext.try_get():
+                    fakify_first_call = ctx.fakify_first_call
+
+                def map_expr(e):
+                    if shape_env is None:
+                        return int(e)
+                    if fakify_first_call:
+                        return shape_env.deserialize_symexpr(e)
+                    return shape_env.evaluate_symexpr(e)
+
+                context.output_strides.append(tuple(map_expr(e) for e in exprs))
 
 
 def should_use_remote_fx_graph_cache():
@@ -2183,6 +2218,34 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
+
+
+_triton_type_re = re.compile(r"^.*[.]")
+
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_type_to_torch(dtype: str) -> torch.dtype:
+    adjusted_type = _torch_triton_mapping.get(dtype, dtype)
+    type_name = adjusted_type.replace("tl.", "")
+    out_dtype = getattr(torch, type_name)
+    assert isinstance(out_dtype, torch.dtype)
+    return out_dtype
 
 
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
