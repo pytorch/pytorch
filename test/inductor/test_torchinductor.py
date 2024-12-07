@@ -1846,9 +1846,9 @@ class CommonTemplate:
         from torch._inductor.runtime.runtime_utils import next_power_of_2
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        size_hints = [67108864, 8192]
+        size_hints = {"x": 67108864, "r": 8192}
         for i in range(4):
-            size_hints[0] = next_power_of_2(size_hints[0])
+            size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
@@ -2491,6 +2491,13 @@ class CommonTemplate:
     def test_linspace3(self):
         def fn(x):
             return torch.linspace(0, 2, 0, device=x.device)
+
+        self.common(fn, (torch.Tensor([]),))
+
+    @requires_multigpu()
+    def test_linspace4(self):
+        def fn(x):
+            return torch.linspace(0, 2, 0, device=f"{GPU_TYPE}:1")
 
         self.common(fn, (torch.Tensor([]),))
 
@@ -12490,6 +12497,37 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # we are asserting that when inductor allocates this tensor,
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
+
+        @requires_gpu()
+        @parametrize("upcast_to_fp32", [False, True])
+        @config.patch("triton.use_block_ptr", True)
+        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
+            @torch.compile
+            def func(a, b, c, d):
+                return a * b * c * d
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                fp32_cast_in_code = "to(tl.float32)" in code
+                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
+
+        @requires_gpu()
+        @parametrize("load_upcast_to_fp32", [False, True])
+        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+        @config.patch("triton.use_block_ptr", True)
+        def test_dtype_aware_codegen(self, load_upcast_to_fp32, input_dtype):
+            @torch.compile
+            def func(a, b, c, d):
+                return torch.sqrt(a * b * c * d)
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                libdevice_cast_in_code = "libdevice.sqrt(tmp3.to(tl.float32))" in code
+                self.assertNotEqual(libdevice_cast_in_code, load_upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
