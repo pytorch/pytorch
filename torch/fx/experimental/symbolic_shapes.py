@@ -322,11 +322,11 @@ def has_symbolic_sizes_strides(elem: torch.Tensor) -> bool:
 Int: TypeAlias = Union[torch.SymInt, int]
 
 
-def create_contiguous(shape: Sequence[Int]) -> List[Int]:
-    strides: List[Int] = [1]
-    for dim in reversed(shape[:-1]):
-        strides.append(dim * strides[-1])  # type: ignore[operator]
-    return list(reversed(strides))
+def create_contiguous(size: Sequence[Union[torch.SymInt, Int]]) -> List[Union[torch.SymInt, Int]]:
+    strides = [1] * len(size)
+    for i in range(len(size) - 2, -1, -1):
+        strides[i] = strides[i + 1] * size[i + 1]
+    return strides
 
 
 def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
@@ -3869,10 +3869,13 @@ class ShapeEnv:
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context
         )
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
+        if any(s is DimDynamic.SIZE_LIKE_UNBACKED for s in symbolic_context.dynamic_sizes):
+            stride = create_contiguous(size)
+        else:
+            stride: List[Optional[sympy.Expr]] = [None] * len(size)
+            for i, val in enumerate(ex_stride):
+                if val in (0, 1):
+                    stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]

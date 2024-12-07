@@ -2744,6 +2744,7 @@ def _automatic_dynamic(
 
         if marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            constraint_stride = RelaxedUnspecConstraint(warn_only=True)
         elif (
             constraint_size is not None
             or marked_dynamic
