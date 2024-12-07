@@ -48,13 +48,11 @@ void NCCLComm::waitReady(bool longInterval) {
   LockType lock(mutex_);
   if (aborted_)
     return;
-  ncclResult_t result = ncclInProgress;
-  ncclCommGetAsyncError(ncclComm_, &result);
   // If timeout is reached, throw an exception.
   if (longInterval) {
-    C10D_NCCL_CHECK_TIMEOUT_SLEEP(result, ncclComm_, std::nullopt);
+    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
   } else {
-    C10D_NCCL_CHECK_TIMEOUT(result, ncclComm_, std::nullopt);
+    C10D_NCCL_CHECK_TIMEOUT(ncclInProgress, ncclComm_, std::nullopt);
   }
 }
 
