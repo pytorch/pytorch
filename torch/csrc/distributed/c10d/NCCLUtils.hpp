@@ -224,9 +224,9 @@ class NCCLComm {
     LockType lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
       TORCH_WARN_ONCE(
-          "WARNING: NCCL communicator hasn't been destroyed. This may need to "
-          "memory leaks. To avoid risk, please call `destroy_process_group` in "
-          "normal exit or `_abort_process_group` when handling failures.")
+          "WARNING: NCCL communicator hasn't been destroyed. This may cause "
+          "memory leaks. To avoid the risk, you can call `destroy_process_group` "
+          "during normal exit or `_abort_process_group` when handling failures.")
     }
   }
 
