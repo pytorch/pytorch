@@ -10,8 +10,6 @@ from torch.types import _bool, _complex, _device, _dtype, _float, _int, _size, S
 ${stubs}
 
 # Manual additions
-# Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
-def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 
 # Defined at tools/autograd/templates/python_nn_functions.cpp
 @overload
