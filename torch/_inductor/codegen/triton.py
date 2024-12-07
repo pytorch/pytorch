@@ -2213,7 +2213,9 @@ class TritonKernel(SIMDKernel):
                 )
             else:
                 result_var = self.cse.generate(
-                    self.compute, final_reduction(masked_value), dtype=masked_value.dtype
+                    self.compute,
+                    final_reduction(masked_value),
+                    dtype=masked_value.dtype,
                 )
         else:
             accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)
