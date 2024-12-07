@@ -81,7 +81,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
+        if: ${{ !contains(matrix.runner, 'gcp.a100') && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -95,9 +95,10 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
       - name: configure aws credentials
-        if : ${{ inputs.aws-role-to-assume != '' }}
+        if : ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -107,11 +108,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -121,6 +124,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -166,6 +170,7 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
+          use-gha: ${{ inputs.use-gha }}
 
       - name: Download TD artifacts
         continue-on-error: true
@@ -253,9 +258,21 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            SHM_OPTS=
+            JENKINS_USER=
+
+            # since some steps are skipped on s390x, if they are necessary, run them here
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          else
+            SHM_OPTS="--shm-size=${SHM_SIZE}"
+            JENKINS_USER="--user jenkins"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
+          # Used for GPU_FLAG, SHM_OPTS and JENKINS_USER since that doesn't play nice
           # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
@@ -305,11 +322,11 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --ipc=host \
-            --shm-size="${SHM_SIZE}" \
+            ${SHM_OPTS} \
             --tty \
             --detach \
             --name="${container_name}" \
-            --user jenkins \
+            ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
@@ -317,6 +334,11 @@ jobs:
           # Propagate download.pytorch.org IP to container
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
+
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
+          fi
+
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
@@ -456,3 +478,12 @@ jobs:
             echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
             .github/scripts/stop_runner_service.sh
           fi
+
+      - name: Cleanup docker
+        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
