@@ -4,8 +4,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 
 namespace torch::inductor {
-class TORCH_API AOTIModelContainerRunnerCpu
-    : public AOTIModelContainerRunner {
+class TORCH_API AOTIModelContainerRunnerCpu : public AOTIModelContainerRunner {
  public:
   AOTIModelContainerRunnerCpu(
       const std::string& model_so_path,
