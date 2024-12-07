@@ -12,7 +12,9 @@ from typing import (
     Set,
     Tuple,
     TYPE_CHECKING,
+    TypeVar,
 )
+from typing_extensions import ParamSpec
 
 import torch
 import torch.nn as nn
@@ -44,6 +46,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 class FSDPStateContext:
     """This has state shared across FSDP states."""
@@ -64,9 +69,9 @@ class FSDPStateContext:
         self.post_optim_event: Optional[torch.Event] = None
 
 
-def disable_if_config_true(func):
+def disable_if_config_true(func: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(func)
-    def fsdp_hook_wrapper(*args, **kwargs):
+    def fsdp_hook_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if torch._dynamo.config.skip_fsdp_hooks:
             return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
         else:
@@ -354,7 +359,7 @@ def _register_group_forward_hooks(
     pre_hook: Callable,
     post_hook: Callable,
     modules_to_run: Set[nn.Module],
-):
+) -> _MultiHandle:
     """
     Registers group forward pre and post-hooks. The pre-hook runs upon the
     first module pre-forward, and the post-hook runs upon the last. If at least
@@ -364,7 +369,7 @@ def _register_group_forward_hooks(
 
     @disable_if_config_true
     @functools.wraps(pre_hook)
-    def wrapped_pre_hook(*args: Any, **kwargs: Any):
+    def wrapped_pre_hook(*args: _P.args, **kwargs: _P.kwargs):
         if len(modules_to_run) == 0:  # first to run
             modules_to_run.update(modules_set)
             return pre_hook(*args, **kwargs)
@@ -372,7 +377,7 @@ def _register_group_forward_hooks(
     @disable_if_config_true
     def get_wrapped_post_hook(module: nn.Module):
         @functools.wraps(post_hook)
-        def wrapped_post_hook(*args: Any, **kwargs: Any):
+        def wrapped_post_hook(*args: _P.args, **kwargs: _P.kwargs):
             modules_to_run.discard(module)
             if len(modules_to_run) == 0:
                 return post_hook(*args, **kwargs)

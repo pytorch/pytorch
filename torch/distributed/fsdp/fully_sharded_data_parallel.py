@@ -18,8 +18,8 @@ from typing import (
     List,
     Optional,
     Tuple,
-    TypeVar,
     Union,
+    TypeVar,
 )
 from typing_extensions import ParamSpec
 
@@ -125,10 +125,7 @@ class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
 
-
 _P = ParamSpec("_P")
-_R = TypeVar("_R")
-
 
 class FullyShardedDataParallel(nn.Module, _FSDPState):
     """A wrapper for sharding module parameters across data parallel workers.
@@ -845,7 +842,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prev_state_dict_settings.optim_state_dict_config,
         )
 
-    def forward(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def forward(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         """Run the forward pass for the wrapped module, inserting FSDP-specific pre- and post-forward sharding logic."""
         handle = self._handle
         with torch.autograd.profiler.record_function(
@@ -968,7 +965,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             for fsdp_module in traversal_utils._get_fsdp_states(self):
                 _register_orig_params(fsdp_module, fsdp_module)
 
-    def _apply(self, *args, **kwargs):
+    def _apply(self, *args :_P.args, **kwargs : _P.kwargs):
         """Deregister the original parameters and expose the :class:`FlatParameter` s before calling ``_apply()``."""
         # When using the original parameters: Since (1) the `FlatParameter`s
         # own the storage and (2) `_apply()` is the subroutine underlying the
@@ -986,8 +983,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_buffers(
         self,
-        *args: _P.args,
-        **kwargs: _P.kwargs,
+        *args : _P.args,
+        **kwargs : _P.kwargs,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """Return an iterator over module buffers, yielding both the name of the buffer and the buffer itself.
 
@@ -1004,8 +1001,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_parameters(
         self,
-        *args,
-        **kwargs,
+        *args : _P.args,
+        **kwargs : _P.kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """Return an iterator over module parameters, yielding both the name of the parameter and the parameter itself.
 
