@@ -24,7 +24,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-from torch.distributed.fsdp import FSDPModule, UnshardHandle
+from torch.distributed._composable.fsdp.fully_shard import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
@@ -1047,8 +1047,8 @@ def _validate_schedule(
                 stage_actions[s_id][I].add(mb_id)
             elif ctype == W:
                 assert (
-                    mb_id in stage_actions[s_id][B]
-                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward"
+                    mb_id in stage_actions[s_id][I]
+                ), f"Running Backward Weight for stage {s_id}, microbatch {mb_id} without first running Backward Input"
                 stage_actions[s_id][W].add(mb_id)
 
     for s_id in stage_actions:
