@@ -1,3 +1,7 @@
+#ifdef Q_SLOTS
+#undef slots
+#endif
+
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/class_type.h>
@@ -1241,3 +1245,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
 }
 
 } // namespace c10
+
+#ifdef Q_SLOTS
+#define slots Q_SLOTS
+#endif
