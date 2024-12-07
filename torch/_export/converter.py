@@ -4,6 +4,7 @@ import logging
 import operator
 import typing
 import warnings
+from collections import UserDict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
@@ -1313,7 +1314,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     also mocks some internal attributes (e.g., name_to_node).
     """
 
-    class _DictMock(dict):
+    class _DictMock(UserDict):
         def __init__(self, dict_data, mock_value):
             super().__init__(dict_data)
             self.mock_value = mock_value

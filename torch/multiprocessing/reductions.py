@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import threading
+from collections import UserDict
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 from typing import Union
@@ -58,7 +59,7 @@ class StorageWeakRef:
         return self.cdata == other.cdata
 
 
-class SharedCache(dict):
+class SharedCache(UserDict):
     """Dictionary from multiprocessing handles to StorageWeakRef."""
 
     def __init__(self) -> None:

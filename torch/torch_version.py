@@ -1,3 +1,4 @@
+from collections import UserString
 from typing import Any, Iterable
 
 from torch._vendor.packaging.version import InvalidVersion, Version
@@ -7,7 +8,7 @@ from torch.version import __version__ as internal_version
 __all__ = ["TorchVersion"]
 
 
-class TorchVersion(str):
+class TorchVersion(UserString):
     """A string with magic powers to compare to both Version and iterables!
     Prior to 1.10.0 torch.__version__ was stored as a str and so many did
     comparisons against torch.__version__ as if it were a str. In order to not
