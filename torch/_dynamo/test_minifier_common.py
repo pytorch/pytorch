@@ -32,6 +32,18 @@ class MinifierTestResult:
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
 
+    def get_exported_program_path(self):
+        # Extract the exported program file path from AOTI minifier's repro.py
+        # Regular expression pattern to match the file path
+        pattern = r'torch\.export\.load\(\s*["\'](.*?)["\']\s*\)'
+        # Search for the pattern in the text
+        match = re.search(pattern, self.repro_code)
+        # Extract and print the file path if a match is found
+        if match:
+            file_path = match.group(1)
+            return file_path
+        return None
+
     def minifier_module(self):
         return self._get_module(self.minifier_code)
 
@@ -197,12 +209,19 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # `patch_code` is the code to be patched in every generated file; usually
     # just use this to turn on bugs via the config
     def _gen_test_code(self, run_code, repro_after, repro_level):
+        repro_after_line = (
+            f"""\
+torch._dynamo.config.repro_after = "{repro_after}"
+"""
+            if repro_after
+            else ""
+        )
         return f"""\
 import torch
 import torch._dynamo
 {_as_posix_path(torch._dynamo.config.codegen_config())}
 {_as_posix_path(torch._inductor.config.codegen_config())}
-torch._dynamo.config.repro_after = "{repro_after}"
+{repro_after_line}
 torch._dynamo.config.repro_level = {repro_level}
 torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}

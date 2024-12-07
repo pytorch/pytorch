@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -14,16 +14,29 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+if TYPE_CHECKING:
 
-@deprecated(
-    "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-    category=FutureWarning,
-)
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
-    """
-    return torch.compiler.is_compiling()
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
+
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
+            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return torch.compiler.is_compiling()
 
 
 def wrap_inline(fn: Callable[..., Any]) -> Callable[..., Any]:

@@ -256,7 +256,7 @@ import setuptools.command.install
 import setuptools.command.sdist
 from setuptools import Extension, find_packages, setup
 from setuptools.dist import Distribution
-from tools.build_pytorch_libs import build_caffe2
+from tools.build_pytorch_libs import build_pytorch
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
@@ -339,7 +339,6 @@ else:
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
-caffe2_build_dir = os.path.join(cwd, "build")
 
 # CMAKE: full path to python library
 if IS_WINDOWS:
@@ -484,7 +483,7 @@ def build_deps():
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
-    build_caffe2(
+    build_pytorch(
         version=version,
         cmake_python_library=cmake_python_library,
         build_python=build_python,
@@ -730,47 +729,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     def build_extensions(self):
         self.create_compile_commands()
-        # The caffe2 extensions are created in
-        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
-        # and need to be copied to build/lib.linux.... , which will be a
-        # platform dependent build folder created by the "build" command of
-        # setuptools. Only the contents of this folder are installed in the
-        # "install" command by default.
-        # We only make this copy for Caffe2's pybind extensions
-        caffe2_pybind_exts = [
-            "caffe2.python.caffe2_pybind11_state",
-            "caffe2.python.caffe2_pybind11_state_gpu",
-            "caffe2.python.caffe2_pybind11_state_hip",
-        ]
-        if BUILD_LIBTORCH_WHL:
-            caffe2_pybind_exts = []
-        i = 0
-        while i < len(self.extensions):
-            ext = self.extensions[i]
-            if ext.name not in caffe2_pybind_exts:
-                i += 1
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = self.get_ext_filename(fullname)
-            report(f"\nCopying extension {ext.name}")
-
-            relative_site_packages = (
-                sysconfig.get_path("purelib")
-                .replace(sysconfig.get_path("data"), "")
-                .lstrip(os.path.sep)
-            )
-            src = os.path.join("torch", relative_site_packages, filename)
-            if not os.path.exists(src):
-                report(f"{src} does not exist")
-                del self.extensions[i]
-            else:
-                dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst_dir = os.path.dirname(dst)
-                if not os.path.exists(dst_dir):
-                    os.makedirs(dst_dir)
-                self.copy_file(src, dst)
-                i += 1
 
         # Copy functorch extension
         for i, ext in enumerate(self.extensions):
@@ -1060,9 +1018,7 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    excludes = ["tools", "tools.*"]
-    if not cmake_cache_vars["BUILD_CAFFE2"]:
-        excludes.extend(["caffe2", "caffe2.*"])
+    excludes = ["tools", "tools.*", "caffe2", "caffe2.*"]
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
     packages = find_packages(exclude=excludes)
@@ -1082,18 +1038,6 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_CAFFE2"]:
-        extensions.append(
-            Extension(name="caffe2.python.caffe2_pybind11_state", sources=[]),
-        )
-        if cmake_cache_vars["USE_CUDA"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_gpu", sources=[]),
-            )
-        if cmake_cache_vars["USE_ROCM"]:
-            extensions.append(
-                Extension(name="caffe2.python.caffe2_pybind11_state_hip", sources=[]),
-            )
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
@@ -1109,8 +1053,6 @@ def configure_extension_build():
 
     entry_points = {
         "console_scripts": [
-            "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
-            "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
         ],
         "torchrun.logs_specs": [
@@ -1347,6 +1289,7 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1395,6 +1338,7 @@ def main():
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_export/serde/*.yaml",
+        "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
@@ -1429,14 +1373,13 @@ def main():
                 "lib/*.lib",
             ]
         )
-    if get_cmake_cache_vars()["BUILD_CAFFE2"]:
-        torch_package_data.extend(
-            [
-                "include/caffe2/**/*.h",
-                "include/caffe2/utils/*.h",
-                "include/caffe2/utils/**/*.h",
-            ]
-        )
+        aotriton_image_path = os.path.join(lib_path, "aotriton.images")
+        aks2_files = []
+        for root, dirs, files in os.walk(aotriton_image_path):
+            subpath = os.path.relpath(root, start=aotriton_image_path)
+            for fn in files:
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
             [
@@ -1477,9 +1420,6 @@ def main():
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
-        package_data["caffe2"] = [
-            "python/serialized_test/data/operator_test/*.zip",
-        ]
     else:
         # no extensions in BUILD_LIBTORCH_WHL mode
         extensions = []

@@ -6,7 +6,7 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional
+from typing import Any, Callable, DefaultDict, Generic, List, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -736,6 +736,8 @@ class ExceptionWrapper:
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
     if hasattr(torch, "mtia") and torch.mtia.is_available():
@@ -882,17 +884,31 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-@deprecated(
-    "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-    category=FutureWarning,
-)
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+if TYPE_CHECKING:
 
-    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
-    """
-    return torch.compiler.is_compiling()
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
+
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+        TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
+        """
+        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
+            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
+        return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):

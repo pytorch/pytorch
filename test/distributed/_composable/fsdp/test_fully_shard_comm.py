@@ -11,30 +11,30 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import (
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import (
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed._composable.fsdp._fsdp_collectives import (
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from torch.distributed._composable.fsdp._fsdp_common import FSDPMeshInfo, TrainingState
-from torch.distributed._composable.fsdp._fsdp_init import (
+from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed._composable.fsdp._fsdp_param import ShardedState
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -253,6 +253,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_scatter_input,
             reduce_scatter_event,
             post_reduce_event,
+            _,
+            _,
             _,
         ) = foreach_reduce(
             fsdp_params,
