@@ -6,6 +6,7 @@ import os
 
 from generate import (
     get_arch_name,
+    run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
@@ -304,10 +305,11 @@ all_experiments = {
     # before we can turn on autoquant
     # or alterantively, we can save the model after autoquant and just load here to track
     # the performance
-    # run_llama2_7b_autoquant,
+    run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
+    # with this, benchmark requries more than 40G memory
     # run_mixtral_8x7b_autoquant,
     # A list of micro-benchmarks.
     run_mlp_layer_norm_gelu,
@@ -327,7 +329,11 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
             # This happens when torch is compiled with CUDA turning off completely
             device = "cpu"
 
-        torch.compiler.cudagraph_mark_step_begin()
+        if device == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
+            torch.compiler.cudagraph_mark_step_begin()
+
         lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))
