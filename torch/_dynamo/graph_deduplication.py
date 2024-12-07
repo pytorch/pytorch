@@ -1,13 +1,11 @@
 import logging
 import operator
-from collections import defaultdict
-from typing import Any, DefaultDict, Dict, Iterable, List, Set, Tuple
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 import torch.fx
 from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
-from .exc import unimplemented, Unsupported
 from .graph_region_tracker import Node, Region
 
 
@@ -64,22 +62,16 @@ when they are created in output_graph.
                 "get_attr", subgraph_name, (), {}
             )
         for region in region_group:
-            try:
-                _replace_region_with_subgraph(
-                    output_graph.graph,
-                    region,
-                    get_subgraph_node,
-                    node_ind_arg_inds.keys(),
-                    inds_with_external_users,
-                    sub_gm,
-                    subgraph_name,
-                    output_replacements,
-                )
-            except Unsupported:
-                log.debug(
-                    "Failed to substitute region %s due to input alias or mutation",
-                    region,
-                )
+            _replace_region_with_subgraph(
+                output_graph.graph,
+                region,
+                get_subgraph_node,
+                node_ind_arg_inds.keys(),
+                inds_with_external_users,
+                sub_gm,
+                subgraph_name,
+                output_replacements,
+            )
 
     return output_replacements
 
@@ -104,7 +96,11 @@ def _replace_region_with_subgraph(
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
     if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
-        unimplemented("NYI: replacing subgraph with input alias or mutation")
+        log.debug(
+            "NYI: Failed to substitute region %s due to input alias or mutation",
+            region,
+        )
+        return
 
     latest_region_node = region[-1]
     with graph.inserting_after(latest_region_node):
@@ -127,14 +123,18 @@ def _replace_region_with_subgraph(
 
 def _get_external_inputs(
     region: Region,
-) -> DefaultDict[Node, List[Tuple[int, int]]]:
-    external_node_to_indices = defaultdict(list)
-    nodes_unique = set(region)
+) -> Dict[Node, Tuple[int, int]]:
+    external_node_to_indices = dict()
+    region_unique = set(region)
     for node_ind, node in enumerate(region):
         flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
-            if in_node not in nodes_unique and isinstance(in_node, Node):
-                external_node_to_indices[in_node].append((node_ind, arg_ind))
+            if (
+                in_node not in region_unique
+                and in_node not in external_node_to_indices
+                and isinstance(in_node, Node)
+            ):
+                external_node_to_indices[in_node] = (node_ind, arg_ind)
 
     return external_node_to_indices
 
@@ -163,12 +163,13 @@ def _copy_nodes_and_remap_inputs(
     external_inputs_to_indices = _get_external_inputs(region)
     indices_to_placeholder_ind: Dict[Tuple[int, int], Any] = {}
     region_to_subgraph_node = {}
-    for arg_ind, node in enumerate(external_inputs_to_indices.keys()):
+    for node in external_inputs_to_indices.keys():
         placeholder = subgraph.placeholder(f"subgraph_input_{node.name}")
         region_to_subgraph_node[node] = placeholder
         arg_indices = external_inputs_to_indices[node]
-        for index_pair in arg_indices:
-            indices_to_placeholder_ind[index_pair] = None
+        # Note: insertion order matches the order in which placeholders were created
+        # for the calling convention of the subgraph
+        indices_to_placeholder_ind[arg_indices] = None
 
     def map_arg(node: Node) -> Node:
         if node in region_to_subgraph_node:
