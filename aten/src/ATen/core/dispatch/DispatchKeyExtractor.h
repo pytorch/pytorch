@@ -166,7 +166,8 @@ public:
     });
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
-      auto backend_idx = ks.getBackendIndex();
+      c10::impl::LocalDispatchKeySet tls = c10::impl::tls_local_dispatch_key_set();
+      auto backend_idx = ((ks | tls.included_) - tls.excluded_).getBackendIndex();
       return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
@@ -178,7 +179,8 @@ public:
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
-      auto backend_idx = ks.getBackendIndex();
+      c10::impl::LocalDispatchKeySet tls = c10::impl::tls_local_dispatch_key_set();
+      auto backend_idx = ((ks | tls.included_) - tls.excluded_).getBackendIndex();
       return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
