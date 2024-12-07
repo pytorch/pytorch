@@ -731,6 +731,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import (
             BuiltinVariable,
             ConstantVariable,
+            TorchInGraphFunctionVariable,
             TupleVariable,
             UserMethodVariable,
         )
@@ -767,6 +768,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
                 # TODO(anijain2305) - Why do we need to guard on all keys?
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
+                return ConstantVariable.create(
+                    args[0].as_python_constant() in self.value
+                )
+
+            if (
+                method is set.__contains__
+                and len(args) == 1
+                and isinstance(args[0], TorchInGraphFunctionVariable)
+            ):
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
                 )
