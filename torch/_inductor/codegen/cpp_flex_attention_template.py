@@ -20,6 +20,7 @@ from .cpp_template import CppTemplate
 
 log = logging.getLogger(__name__)
 
+# TODO: reuse cpp codegen to generate below pointwise/reduction kernels
 SOFTMAX_FUSIONS = r"""
 // 1) out = exp(a - val)
 // 2) val = sum(out)
@@ -583,6 +584,7 @@ extern "C"
         if (!need_pack) {
           auto k_addr_t = key_reorder_ptr + i * num_head * eheadSize * kvSize +
                   j * eheadSize * kvSize + n * eheadSize;
+          // TODO: use the micro-gemm template instead of brgemm API
           at::native::cpublas::brgemm(
               cur_qSplitSize,
               cur_kvSplitSize,
@@ -617,6 +619,7 @@ extern "C"
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
 {%- if score_mod and mask_mod %}
+        // TODO: vectorization optimization for below score and mask codegen functions
         // apply score mod function
         for (int64_t row = 0; row < cur_qSplitSize; ++row) {
           for (int64_t col = 0; col < cur_kvSplitSize; col++) {
@@ -764,9 +767,9 @@ extern "C"
       // Move to the next query
       at::native::data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
-    if (need_pack || std::is_same_v<scalar_t, float>) {
-      at::native::cpublas::brgemm_release();
-    }
+
+    at::native::cpublas::brgemm_release(need_pack);
+
   });
 }
 """

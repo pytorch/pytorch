@@ -1200,8 +1200,8 @@ void brgemm(
     float* C,
     bool is_vnni) {
 
-TORCH_CHECK(!is_vnni,
-"Float Brgemm does not support vnni layout.");
+  TORCH_CHECK(!is_vnni,
+    "Float Brgemm does not support vnni layout.");
 
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (Brgemm::device_check(ScalarType::Float)) {
@@ -1241,7 +1241,7 @@ void brgemm(
 #endif
   // fallback path
   TORCH_CHECK(!is_vnni,
-  "BFloat16 Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+    "BFloat16 Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
   auto beta = add_C ? 1 : 0;
   gemm(
     at::native::TransposeType::NoTranspose,
@@ -1272,7 +1272,7 @@ void brgemm(
 #endif
   // fallback path
   TORCH_CHECK(!is_vnni,
-  "Half Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx_fp16` is supported");
+    "Half Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx_fp16` is supported");
   auto beta = add_C ? 1 : 0;
   gemm(
     at::native::TransposeType::NoTranspose,
@@ -1282,10 +1282,12 @@ void brgemm(
     beta, C, ld_c);
 }
 
-void brgemm_release() {
+void brgemm_release(bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  dnnl::ukernel::brgemm::release_hw_context();
-  Brgemm::get_current() = nullptr;
+  if (is_vnni) {
+    dnnl::ukernel::brgemm::release_hw_context();
+    Brgemm::get_current() = nullptr;
+  }
 #endif
 }
 

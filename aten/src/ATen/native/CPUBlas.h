@@ -234,7 +234,7 @@ TORCH_API void brgemm(
     bool is_vnni = false);
 
 // Release brgemm hardware context
-TORCH_API void brgemm_release();
+TORCH_API void brgemm_release(bool is_vnni = true);
 
 // Pack B matrix to get better performance if needed
 void pack(
