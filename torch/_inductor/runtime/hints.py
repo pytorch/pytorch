@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
+import functools
 import typing
 from enum import auto, Enum
 from typing import Dict, List, Optional, Union
@@ -28,7 +31,7 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available():
+def _is_triton_available() -> bool:
     try:
         import triton  # noqa: F401
 
@@ -121,7 +124,8 @@ class DeviceProperties(typing.NamedTuple):
     warp_size: Optional[int] = None
 
     @classmethod
-    def create(cls, device):
+    @functools.lru_cache(None)
+    def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
@@ -164,22 +168,22 @@ class HalideInputSpec(typing.NamedTuple):
     offset: Optional[str] = None
     alias_of: Optional[str] = None
 
-    def bindings_type(self):
+    def bindings_type(self) -> str:
         if self.ctype in ("half*", "bfloat16*"):
             return "uint16_t*"  # half not defined
         return self.ctype
 
-    def halide_type(self):
+    def halide_type(self) -> str:
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
         if self.ctype == "bfloat16*":
             return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
-    def is_scalar(self):
+    def is_scalar(self) -> bool:
         return self.shape is None
 
-    def is_buffer(self):
+    def is_buffer(self) -> bool:
         return self.shape is not None
 
 
@@ -190,7 +194,7 @@ class HalideMeta(typing.NamedTuple):
     scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
-    def args(self):
+    def args(self) -> List[str]:
         """Command line args to pass to halide generator"""
         args = [f"target={self.target}"]
         if self.scheduler:
@@ -201,5 +205,5 @@ class HalideMeta(typing.NamedTuple):
                 args.append(f"autoscheduler.{k}={v}")
         return args
 
-    def is_cuda(self):
+    def is_cuda(self) -> bool:
         return self.cuda_device is not None
