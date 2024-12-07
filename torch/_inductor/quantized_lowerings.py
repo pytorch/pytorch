@@ -22,6 +22,10 @@ aten__weight_int8pack_mm = ExternKernelChoice(
     torch._weight_int8pack_mm, "at::_weight_int8pack_mm", has_out_variant=False
 )
 
+aten_da8w8_mm = ExternKernelChoice(
+    torch.ops.quantized_decomposed.da8w8_gemm, None, has_out_variant=False
+)
+
 quantized = torch.ops.quantized
 _quantized = torch.ops._quantized
 aten = torch.ops.aten
@@ -93,4 +97,41 @@ def register_woq_mm_ops() -> None:
 
         return autotune_select_algorithm(
             "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
+        )
+
+
+def register_da8w8_mm() -> None:
+    @register_lowering(
+        torch.ops.quantized_decomposed.da8w8_gemm, type_promotion_kind=None
+    )  # type: ignore[misc]
+    def da8w8_mm(
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        input_scale: torch.Tensor,
+        weight_scale: torch.Tensor,
+        weight_zp: torch.Tensor,
+        *,
+        layout: Any = None,
+    ) -> Any:
+        _, _, _, layout, mat1, mat2 = mm_args(
+            input, weight, layout=layout, mat2_transposed=False
+        )
+        aten_layout = layout
+
+        # options to tune from
+        choices = (
+            [
+                aten_da8w8_mm.bind(
+                    (mat1, mat2, input_scale, weight_scale, weight_zp), aten_layout
+                )
+            ]
+            if use_aten_gemm_kernels()
+            else []
+        )
+
+        return autotune_select_algorithm(
+            "_da8w8_mm",
+            choices,
+            [mat1, mat2, input_scale, weight_scale, weight_zp],
+            aten_layout,
         )
