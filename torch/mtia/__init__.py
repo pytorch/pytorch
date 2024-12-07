@@ -15,7 +15,7 @@ from torch.types import Device
 from ._utils import _get_device_index
 
 
-_device_t = Union[_device, str, int, None]
+_device_t = Union[_device, str, int]
 
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
@@ -149,19 +149,6 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
             (default).
     """
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
-
-
-def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
-    r"""Return a dictionary of MTIA memory allocator statistics for a given device.
-
-    Args:
-        device (torch.device or int, optional) selected device. Returns
-            statistics for the current device, given by current_device(),
-            if device is None (default).
-    """
-    if not is_initialized():
-        return {}
-    return torch._C._mtia_memoryStats(_get_device_index(device, optional=True))
 
 
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
@@ -325,6 +312,9 @@ def set_rng_state(
         UserWarning,
         stacklevel=2,
     )
+
+
+from .memory import *  # noqa: F403
 
 
 __all__ = [
