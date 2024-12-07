@@ -226,10 +226,8 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 
         buf_name = self._add_kernel_input(name)
         index_str = self._process_indexing(index)
-
         index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
         store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
-
         return store
 
     def _add_kernel_input(self, name: str):
