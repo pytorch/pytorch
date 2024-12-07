@@ -33,37 +33,3 @@ jobs:
           echo
           echo "Once the jobs are deemed stable enough (% red signal < 5% and TTS < 3h),"
           echo " they can graduate and move back to pull or trunk."
-
-  get-label-type:
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-
-  # TODO(huydhn): Mark executorch job as unstable until it's fixed
-  linux-jammy-py3-clang12-executorch-build:
-    name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3-clang12-executorch
-      docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
-      test-matrix: |
-        { include: [
-          { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3-clang12-executorch-test:
-    name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3-clang12-executorch-build
-    with:
-      build-environment: linux-jammy-py3-clang12-executorch
-      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
-    secrets: inherit

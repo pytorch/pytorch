@@ -573,6 +573,27 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dynamo_dtensor_from_local_redistribute_async(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        # pass in tensor as inputs/outputs, create DTensor and run redistribute
+        # (allgather collective) inside the fn
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+            out = dt.redistribute(mesh, [Replicate()], async_op=True).to_local()
+            if isinstance(out, AsyncCollectiveTensor):
+                return out.wait()
+            else:
+                return out
+
+        x = torch.ones(1)
+        ref = fn(x)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dtensor_dont_recompile_on_same_placement_devicemesh(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
@@ -652,7 +673,6 @@ def forward(self, primals_1):
     return (sin_1, primals_1, wait_tensor)""",
         )
 
-    @unittest.expectedFailure
     @skipIfTorchDynamo()
     def test_unwrap_async_collective_tensor_tangent(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor

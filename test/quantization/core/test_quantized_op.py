@@ -6,6 +6,7 @@ import itertools
 import numpy as np
 import operator
 import random
+import sys
 import unittest
 from typing import NamedTuple, List
 
@@ -64,6 +65,8 @@ class PointwisePostOp(NamedTuple):
 def avoid_vpmaddubsw_overflow_linear(
     batch_size, input_channels, output_channels, X, X_min, X_max, W, W_min, W_max
 ):
+    if sys.version_info >= (3, 13):
+        raise unittest.SkipTest("numpy 2.1 overflow error")
     for i, j in np.ndindex((batch_size, output_channels)):
         for k in range(0, input_channels // 2 * 2, 2):
             x0 = X[i, k] - X_min
@@ -2917,6 +2920,11 @@ class TestQuantizedOps(TestCase):
 
     @override_qengines
     def test_custom_module_lstm(self):
+        class QuantizableLSTMSplitGates(torch.ao.nn.quantizable.LSTM):
+            @classmethod
+            def from_float(cls, other, qconfig=None):
+                return super().from_float(other, qconfig, split_gates=True)
+
         qengine = torch.backends.quantized.engine
 
         batch_size = 4
@@ -2931,6 +2939,7 @@ class TestQuantizedOps(TestCase):
         Bias = [False, True]
         Batch_first = [False, True]
         Bidirectional = [False, True]
+        Split_gates = [False, True]
 
         dtype = np.uint8
         qtype = torch.quint8
@@ -2943,8 +2952,8 @@ class TestQuantizedOps(TestCase):
         x = qx.dequantize()
 
         with torch.no_grad():
-            for bias, batch_first, bidirectional in itertools.product(
-                    Bias, Batch_first, Bidirectional):
+            for bias, batch_first, bidirectional, split_gates in itertools.product(
+                    Bias, Batch_first, Bidirectional, Split_gates):
                 # Assume 12dB is sufficient for functional equivalence
                 # Without the bias, linear performs poorly
                 min_power = 10 if bias else 5
@@ -2968,17 +2977,36 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(lstm)
+                custom_config_dict = (
+                    None
+                    if not split_gates
+                    else {  # switch to class with split_gates True via from_float
+                        "float_to_observed_custom_module_class": {
+                            torch.nn.LSTM: QuantizableLSTMSplitGates
+                        },
+                        "observed_to_quantized_custom_module_class": {
+                            QuantizableLSTMSplitGates: torch.ao.nn.quantized.LSTM,
+                        },
+                    }
+                )
+                lstm_prepared = torch.ao.quantization.prepare(
+                    lstm, prepare_custom_config_dict=custom_config_dict
+                )
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
-                assert type(lstm_prepared[0]) == torch.ao.nn.quantizable.LSTM
+                self.assertEqual(
+                    lstm_prepared[0].layers[0].layer_fw.cell.split_gates, split_gates
+                )
+                assert isinstance(lstm_prepared[0], torch.ao.nn.quantizable.LSTM)
 
                 # Calibrate
                 y = lstm_prepared(x)
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
+                lstm_quantized = torch.ao.quantization.convert(
+                    lstm_prepared, convert_custom_config_dict=custom_config_dict
+                )
                 assert type(lstm_quantized[0]) == torch.ao.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
@@ -3749,6 +3777,39 @@ class TestDynamicQuantizedOps(TestCase):
         if qengine_is_qnnpack():
             return  # TODO: fix MakeDeConvOutputShape overflowing for convT3d with qnnpack
         self._test_qconv_op_impl(q_mod, dq_op, dim, dtype)
+
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16_onednn(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+            (True, False),  # use_bias
+            (True, False),  # use_relu
+        )
+        for batch_size, input_channels, output_channels, use_bias, use_relu in options:
+            qlinear_prepack = torch.ops.onednn.linear_prepack_fp16
+            if use_relu:
+                qlinear_dynamic = torch.ops.onednn.linear_relu_dynamic_fp16
+            else:
+                qlinear_dynamic = torch.ops.onednn.linear_dynamic_fp16
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels) if use_bias else None
+
+            w_packed = qlinear_prepack(w, x.shape)
+            out = qlinear_dynamic(x, w_packed, bias)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+            if use_relu:
+                ref.relu_()
+
+            self.assertEqual(out, ref)
 
 
 class TestQuantizedLinear(TestCase):
