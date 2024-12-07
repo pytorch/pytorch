@@ -393,10 +393,10 @@ def are_compatible_scales(size_a: Sequence[int], size_b: Sequence[int]) -> bool:
 
 def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
     def is_row_major(stride: Sequence[_IntLike]) -> bool:
-        return bool(stride[0] > stride[1] and stride[1] == 1)
+        return stride[1] == 1
 
     def is_col_major(stride: Sequence[_IntLike]) -> bool:
-        return bool(stride[0] == 1 and stride[1] > 1)
+        return stride[0] == 1
 
     def has_zero_dim(size: Sequence[_IntLike]) -> bool:
         return bool(size[0] == 0 or size[1] == 0)
