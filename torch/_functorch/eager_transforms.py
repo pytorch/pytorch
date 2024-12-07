@@ -65,45 +65,6 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _vjp_treespec_compare(primals_out, cotangents):
-    # Revert this once #116264 gets fixed
-    primals_out_spec = tree_structure(primals_out)
-    cotangents_spec = tree_structure(cotangents)
-    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
-    # function is not inlined.
-    if primals_out_spec != cotangents_spec:
-        raise RuntimeError(
-            f"Expected pytree structure of cotangents to be the same "
-            f"as pytree structure of outputs to the function. "
-            f"cotangents: {treespec_pprint(cotangents_spec)}, "
-            f"primal output: {treespec_pprint(primals_out_spec)}"
-        )
-
-
-def _jvp_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    primals_spec = tree_structure(primals)
-    tangents_spec = tree_structure(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f"{jvp_str}: Expected primals and tangents to have the same python "
-            f"structure. For example, if primals is a tuple of 3 tensors, "
-            f"tangents also must be. Got primals with structure {primals_spec} "
-            f"and tangents with structure {tangents_spec}"
-        )
-
-
-def _linearize_treespec_compare(primals, tangents):
-    # Revert this once #116264 gets fixed
-    primals_argspec = tree_structure(primals)
-    tangent_argspec = tree_structure(tangents)
-    if tangent_argspec != primals_argspec:
-        raise RuntimeError(
-            f"Expected the tangents {tangent_argspec} to have "
-            f"the same argspec as the primals {primals_argspec}"
-        )
-
-
 def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -390,10 +351,7 @@ def _vjp_with_argnums(
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            # Note for the reviewer: This is extremely odd but it passes the
-            # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-            # The equivalent "if argnums is None" fails for some reason
-            if not isinstance(argnums, int) and not argnums:
+            if argnums is None:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
@@ -427,8 +385,14 @@ def _vjp_with_argnums(
         def wrapper(cotangents, retain_graph=True, create_graph=None):
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
-            flat_cotangents = tree_leaves(cotangents)
-            _vjp_treespec_compare(primals_out, cotangents)
+            flat_cotangents, cotangents_spec = tree_flatten(cotangents)
+            if primals_out_spec != cotangents_spec:
+                raise RuntimeError(
+                    f"Expected pytree structure of cotangents to be the same "
+                    f"as pytree structure of outputs to the function. "
+                    f"cotangents: {treespec_pprint(cotangents_spec)}, "
+                    f"primal output: {treespec_pprint(primals_out_spec)}"
+                )
             result = _autograd_grad(
                 flat_primals_out,
                 flat_diff_primals,
@@ -600,6 +564,7 @@ def jacrev(
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -761,12 +726,6 @@ def jacrev(
         if has_aux:
             return output_input, aux
         return output_input
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
@@ -1116,8 +1075,14 @@ def _jvp_with_argnums(
         )
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
-    flat_tangents = tree_leaves(tangents)
-    _jvp_treespec_compare(diff_args, tangents)
+    flat_tangents, tangents_spec = tree_flatten(tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f"{jvp_str}: Expected primals and tangents to have the same python "
+            f"structure. For example, if primals is a tuple of 3 tensors, "
+            f"tangents also must be. Got primals with structure {primals_spec} "
+            f"and tangents with structure {tangents_spec}"
+        )
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, "primals")
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, "tangents")
 
@@ -1131,10 +1096,7 @@ def _jvp_with_argnums(
                     fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
                 )
                 duals = tree_unflatten(flat_duals, primals_spec)
-                # Note for the reviewer: This is extremely odd but it passes the
-                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
-                # The equivalent "if argnums is not None" fails for some reason
-                if isinstance(argnums, (int, tuple)):
+                if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
@@ -1288,6 +1250,7 @@ def jacfwd(
 
     """
 
+    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1339,12 +1302,6 @@ def jacfwd(
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
-
-    # Dynamo does not support HOP composition if their inner function is
-    # annotated with @functools.wraps(...). We circumvent this issue by applying
-    # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
-        wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
 
@@ -1824,8 +1781,12 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   It takes care of checking the argspec of tangents,
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
-        flat_tangents = tree_leaves(tangents)
-        _linearize_treespec_compare(primals, tangents)
+        flat_tangents, tangent_argspec = tree_flatten(tangents)
+        if tangent_argspec != primals_argspec:
+            raise RuntimeError(
+                f"Expected the tangents {tangent_argspec} to have "
+                f"the same argspec as the primals {primals_argspec}"
+            )
 
         forward_ad_checks(flat_tangents)
 

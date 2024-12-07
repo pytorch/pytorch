@@ -8172,13 +8172,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_noncontig_holes_ragged_dim_reduction",
     ),
-    # uses fill_ which isn't implemented
-    XFailRule(
-        error_type=NotImplementedError,
-        op_match_fn=lambda device, op: (op.full_name == "atanh"),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="atanh_unimplemented_fill",
-    ),
     # expected: autodiff on complex dtype is not supported
     XFailRule(
         error_type=RuntimeError,
@@ -8274,20 +8267,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for these activation ops
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="non-strided meta tensors not supported yet",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "nn.functional.hardshrink",
-                "nn.functional.softshrink",
-            }
-        ),
-        name="empty_with_jagged_layout_activation",
     ),
 ]
 
@@ -8488,20 +8467,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         in_f, fullgraph=True, backend="aot_eager_decomp_partition"
                     )
 
-                    if sample.input.is_contiguous():
-                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
-                        if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                            self.assertEqualIgnoringNestedInts(sample.input, out_ref)
-                        else:
-                            self.assertEqual(sample.input, out_ref)
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
                     else:
-                        # see https://github.com/pytorch/pytorch/issues/106456
-                        with self.assertRaisesRegex(
-                            RuntimeError,
-                            "Mutations on non-contiguous inputs are currently not "
-                            "allowed on tensor subclasses",
-                        ):
-                            compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                        self.assertEqual(sample.input, out_ref)
 
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -8557,6 +8527,150 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfTorchDynamo(
+        "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
+    )
+    def test_nested_tensor_non_contiguous_mutation(self):
+        def fn(x, x0):
+            x[0, 0, 0] = 2
+            return x
+
+        def _inp():
+            base = torch.zeros(32, 3)
+            v = base.t()
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ), torch.ones(2, 32)
+
+        ref_x, ref_x0 = _inp()
+        ref_y = fn(ref_x, ref_x0)
+
+        self.assertEqual(ref_y[0][0][0].item(), 2)
+
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
+        self.assertEqual(y[0][0][0], 2)
+
+    def test_nested_tensor_input_mutation_backward(self):
+        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+        # This test checks that AOTD correctly guess NJT tangent as NJT.
+        def fn(x):
+            x.mul_(2)
+            return x + 1
+
+        def _inp():
+            v = torch.zeros(32, 3, requires_grad=True)
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ).clone()
+
+        ref_x = _inp()
+        ref_y = fn(ref_x)
+        ref_y.sum().backward()
+
+        x = _inp()
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+        y.sum().backward()
+
+
+from torch.nested._internal.nested_int import NestedIntNode
+
+
+class TestNestedInt(torch.testing._internal.common_utils.TestCase):
+    def test_comparisons(self):
+        a = torch.SymInt(NestedIntNode(1, 1))
+        b = torch.SymInt(NestedIntNode(1, 1))
+        c = torch.SymInt(NestedIntNode(2, 1))
+        d = 3
+
+        self.assertTrue(a == a)
+        self.assertTrue(a == b)
+        self.assertFalse(a != a)
+        self.assertFalse(a != b)
+        self.assertFalse(a == c)
+        self.assertTrue(a != c)
+
+        self.assertFalse(a == d)
+        self.assertTrue(a != d)
+        self.assertFalse(d == a)
+        self.assertTrue(d != a)
+
+        # ge
+        self.assertTrue(a >= a)
+        self.assertTrue(a >= b)
+        self.assertTrue(b >= a)
+        with self.assertRaises(ValueError):
+            _ = a >= c
+        with self.assertRaises(ValueError):
+            _ = c >= a
+        with self.assertRaises(ValueError):
+            _ = c >= 3
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # lt
+        self.assertFalse(a < a)
+        self.assertFalse(a < b)
+        self.assertFalse(b < a)
+        with self.assertRaises(ValueError):
+            _ = a < c
+        with self.assertRaises(ValueError):
+            _ = c < a
+        with self.assertRaises(ValueError):
+            _ = 3 < a
+        with self.assertRaises(ValueError):
+            _ = 2 < a
+        self.assertTrue(a > 1)
+
+        # le
+        self.assertTrue(a <= a)
+        self.assertTrue(b <= a)
+        self.assertTrue(a <= b)
+        with self.assertRaises(ValueError):
+            _ = a <= c
+        with self.assertRaises(ValueError):
+            _ = c <= a
+        with self.assertRaises(ValueError):
+            _ = 3 <= c
+        self.assertTrue(c >= 2)
+        self.assertTrue(c >= 1)
+        self.assertFalse(c <= 1)
+
+        # gt
+        self.assertFalse(a > a)
+        self.assertFalse(b > a)
+        self.assertFalse(a > b)
+        with self.assertRaises(ValueError):
+            _ = a > c
+        with self.assertRaises(ValueError):
+            _ = c > a
+        with self.assertRaises(ValueError):
+            _ = a > 3
+        with self.assertRaises(ValueError):
+            _ = a > 2
+        self.assertTrue(a > 1)
+
+    def test_with_factor(self):
+        a = torch.SymInt(NestedIntNode(1, 5))
+        b = torch.SymInt(NestedIntNode(1, 10))
+        # eq
+        self.assertFalse(a == b)
+        self.assertFalse(a >= b)
+        self.assertTrue(b >= a)
+        self.assertTrue(a <= b)
+        self.assertFalse(b <= a)
+        # ne
+        self.assertTrue(a != b)
+        # mul
+        self.assertTrue(a * 2 == b)
+        self.assertTrue(a * 3 >= b)
+        self.assertTrue(a * 2 == 2 * a)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
