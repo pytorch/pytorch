@@ -7,7 +7,7 @@ import torch
 from torch._dynamo.source import GetItemSource
 
 from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -110,13 +110,6 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        if isinstance(self.value, type):
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                "Can't access members of type(obj) for a generated custom object. "
-                "Please use __class__ instead",
-                case_name="type_reflection_method",
-            )
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
