@@ -112,25 +112,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -241,25 +241,25 @@ jobs:
           name: wheel-py3_9-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -379,25 +379,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -509,25 +509,25 @@ jobs:
           name: wheel-py3_9-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -648,25 +648,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -778,25 +778,25 @@ jobs:
           name: wheel-py3_9-cuda12_4
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1185,25 +1185,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1314,25 +1314,25 @@ jobs:
           name: wheel-py3_9-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1451,25 +1451,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1580,25 +1580,25 @@ jobs:
           name: wheel-py3_10-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1718,25 +1718,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1848,25 +1848,25 @@ jobs:
           name: wheel-py3_10-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1987,25 +1987,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2117,25 +2117,25 @@ jobs:
           name: wheel-py3_10-cuda12_4
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2524,25 +2524,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2653,25 +2653,25 @@ jobs:
           name: wheel-py3_10-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2790,25 +2790,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2919,25 +2919,25 @@ jobs:
           name: wheel-py3_11-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3057,25 +3057,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3187,25 +3187,25 @@ jobs:
           name: wheel-py3_11-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3326,25 +3326,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3456,25 +3456,25 @@ jobs:
           name: wheel-py3_11-cuda12_4
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3863,25 +3863,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3992,25 +3992,25 @@ jobs:
           name: wheel-py3_11-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4129,25 +4129,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4258,25 +4258,25 @@ jobs:
           name: wheel-py3_12-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4396,25 +4396,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4526,25 +4526,25 @@ jobs:
           name: wheel-py3_12-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4665,25 +4665,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -4795,25 +4795,25 @@ jobs:
           name: wheel-py3_12-cuda12_4
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5202,25 +5202,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5331,25 +5331,25 @@ jobs:
           name: wheel-py3_12-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5468,25 +5468,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5597,25 +5597,25 @@ jobs:
           name: wheel-py3_13-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5735,25 +5735,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -5865,25 +5865,25 @@ jobs:
           name: wheel-py3_13-cuda11_8
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -6004,25 +6004,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -6134,25 +6134,25 @@ jobs:
           name: wheel-py3_13-cuda12_4
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -6541,25 +6541,25 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -6670,25 +6670,25 @@ jobs:
           name: wheel-py3_13-xpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
