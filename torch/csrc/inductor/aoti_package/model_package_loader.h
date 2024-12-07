@@ -11,6 +11,7 @@ class TORCH_API AOTIModelPackageLoader {
   AOTIModelPackageLoader(
       const std::string& model_package_path,
       const std::string& model_name);
+  ~AOTIModelPackageLoader();
 
   AOTIModelContainerRunner* get_runner();
   std::unordered_map<std::string, std::string> get_metadata();
@@ -18,6 +19,7 @@ class TORCH_API AOTIModelPackageLoader {
   std::vector<std::string> get_call_spec();
 
  private:
+  std::string temp_dir_;
   std::unique_ptr<AOTIModelContainerRunner> runner_;
   std::unordered_map<std::string, std::string> metadata_;
 
