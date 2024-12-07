@@ -10,7 +10,7 @@ from torch.utils._triton import has_triton_tma_device
 from .. import config as inductor_config
 from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
 from ..config import triton as triton_config
-from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
+from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -391,6 +391,29 @@ def are_compatible_scales(size_a: Sequence[int], size_b: Sequence[int]) -> bool:
     return False
 
 
+def check_supported_striding(mat_a: TensorBox, mat_b: TensorBox) -> None:
+    def is_row_major(stride: Sequence[_IntLike]) -> bool:
+        return bool(stride[0] > stride[1] and stride[1] == 1)
+
+    def is_col_major(stride: Sequence[_IntLike]) -> bool:
+        return bool(stride[0] == 1 and stride[1] > 1)
+
+    def has_zero_dim(size: Sequence[_IntLike]) -> bool:
+        return bool(size[0] == 0 or size[1] == 0)
+
+    # Check mat_a (self) stride requirements
+    torch._check(
+        is_row_major(mat_a.get_stride()) or has_zero_dim(mat_a.get_size()),
+        lambda: f"mat_a must be row_major, got stride {mat_a.get_stride()}",
+    )
+
+    # Check mat_b stride requirements
+    torch._check(
+        is_col_major(mat_b.get_stride()) or has_zero_dim(mat_b.get_size()),
+        lambda: f"mat_b must be col_major, got stride {mat_b.get_stride()}",
+    )
+
+
 def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
     config,  # triton.Config
     sym_m: sympy.core.numbers.Integer,
@@ -507,6 +530,9 @@ def tuned_scaled_mm(
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
     )
+
+    check_supported_striding(mat_a, mat_b)
+
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
     input_nodes: Tuple[Any, ...]

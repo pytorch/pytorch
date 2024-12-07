@@ -1,12 +1,11 @@
 # Owner(s): ["module: inductor"]
 
-import contextlib
 import functools
 import unittest
 
 import torch
 from torch import Tensor
-from torch._inductor import utils
+from torch._inductor import config, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -16,22 +15,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._triton import has_triton_tma_device
-
-
-@contextlib.contextmanager
-def enable_persistent_matmul(value: bool):
-    """Context manager to temporarily enable persistent matmul in Triton.
-
-    Example:
-        >>> with enable_persistent_matmul():
-        ...     model(input)
-    """
-    prev_value = torch._inductor.config.triton.enable_persistent_tma_matmul
-    try:
-        torch._inductor.config.triton.enable_persistent_tma_matmul = value
-        yield
-    finally:
-        torch._inductor.config.triton.enable_persistent_tma_matmul = prev_value
 
 
 torch.set_float32_matmul_precision("high")
@@ -485,7 +468,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with enable_persistent_matmul(persistent_matmul):
+        with config.patch({"triton.enable_persistent_tma_matmul": True}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
@@ -555,7 +538,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with enable_persistent_matmul(persistent_matmul):
+        with config.triton.patch("enable_persistent_tma_matmul", persistent_matmul):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
@@ -613,17 +596,17 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with enable_persistent_matmul(persistent_matmul):
+        with config.patch({"triton.enable_persistent_tma_matmul": True}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-        y_compiled = linear_compiled(
-            x_fp8,
-            x_inverse_scale,
-            w_t_fp8,
-            w_inverse_scale,
-            bias,
-        )
+            y_compiled = linear_compiled(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
@@ -672,17 +655,17 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with enable_persistent_matmul(persistent_matmul):
+        with config.patch({"triton.enable_persistent_tma_matmul": True}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
-        y_compiled = linear_compiled(
-            x_fp8,
-            x_inverse_scale,
-            w_t_fp8,
-            w_inverse_scale,
-            bias,
-        )
+            y_compiled = linear_compiled(
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
