@@ -81,6 +81,8 @@ RUN bash ./install_openssl.sh
 ENV OPENSSL_DIR /opt/openssl
 
 ARG INDUCTOR_BENCHMARKS
+ARG ANACONDA_PYTHON_VERSION
+ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface.txt huggingface.txt
