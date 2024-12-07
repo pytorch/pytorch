@@ -19,6 +19,7 @@ from .cpp_template import CppTemplate
 
 
 log = logging.getLogger(__name__)
+
 SOFTMAX_FUSIONS = r"""
 // 1) out = exp(a - val)
 // 2) val = sum(out)
@@ -137,6 +138,157 @@ inline void {{kernel_name}}_mul_scale_kernel(
 }
 
 """
+
+BRGEMM_PACK_FUNCTIONS = r"""
+template <typename scalar_t>
+inline void {{kernel_name}}_copy_value_with_pad(
+    const scalar_t* value_ptr,
+    scalar_t* dst_ptr,
+    int64_t rows,
+    int64_t cols,
+    int64_t prows,
+    int64_t pcols,
+    int64_t ldi) {
+  auto vec_size = at::vec::Vectorized<scalar_t>::size();
+  int64_t i = 0;
+  for (; i < rows; i++) {
+    int64_t j = 0;
+    for (; j < cols - (cols % vec_size); j += vec_size) {
+      auto vec_v =
+          at::vec::Vectorized<scalar_t>::loadu(value_ptr + i * ldi + j);
+      vec_v.store(dst_ptr + i * pcols + j);
+    }
+
+    if (j < cols) {
+      auto vec_v = at::vec::Vectorized<scalar_t>::loadu(
+          value_ptr + i * ldi + j, cols - j);
+      vec_v.store(dst_ptr + i * pcols + j, cols - j);
+    }
+
+    // col padding
+    auto psize = pcols - cols;
+    if (psize > 0) {
+      auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+      int64_t pj = 0;
+      for (; pj < psize - (psize % vec_size); pj += vec_size) {
+        zero_vec.store(dst_ptr + i * pcols + cols + pj);
+      }
+      if (pj < psize) {
+        zero_vec.store(dst_ptr + i * pcols + cols + pj, psize - pj);
+      }
+    }
+  }
+  // row padding
+  for (; i < prows; i++) {
+    auto zero_vec = at::vec::Vectorized<scalar_t>(0);
+    int64_t j = 0;
+    for (; j < pcols - (pcols % vec_size); j += vec_size) {
+      zero_vec.store(dst_ptr + i * pcols + j);
+    }
+    if (j < pcols) {
+      zero_vec.store(dst_ptr + i * pcols + j, pcols - j);
+    }
+
+  }
+}
+// Transpose a [2, 32] matrix to [32, 2]
+// Note: the output leading dimension should be 2,
+// that is, the output must be contiguous
+static inline void {{kernel_name}}_transpose_pad_2x32_block(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int krem = 2,
+    int nrem = 32) {
+#if defined(CPU_CAPABILITY_AVX512)
+  __m512i r0, r1;
+  __m512i d0, d1;
+  // load
+  if (nrem < 32) {
+    __mmask32 mask_krem_v = (1LL << nrem) - 1;
+    r0 = _mm512_maskz_loadu_epi16(mask_krem_v, src);
+    // if krem is not 2, pad with zeros
+    if (krem == 2) {
+      r1 = _mm512_maskz_loadu_epi16(mask_krem_v, src + ld_src);
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  } else {
+    r0 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src));
+    if (krem == 2) {
+      r1 = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + ld_src));
+    } else {
+      r1 = _mm512_setzero_si512();
+    }
+  }
+  // transpose
+  d0 = _mm512_unpacklo_epi16(r0, r1);
+  d1 = _mm512_unpackhi_epi16(r0, r1);
+  r0 = _mm512_shuffle_i32x4(d0, d1, 0x88);
+  r1 = _mm512_shuffle_i32x4(d0, d1, 0xdd);
+  d0 = _mm512_shuffle_i32x4(r0, r1, 0x88);
+  d1 = _mm512_shuffle_i32x4(r0, r1, 0xdd);
+
+  // store
+  if (nrem < 16) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2)) - 1;
+    _mm512_mask_storeu_epi16(dst, mask_rem_v, d0);
+  } else if (nrem == 16) {
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+  } else if (nrem < 32) {
+    __mmask32 mask_rem_v = (1LL << (nrem * 2 - 32)) - 1;
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_mask_storeu_epi16(
+        reinterpret_cast<__m512i*>(dst + 32), mask_rem_v, d1);
+  } else {
+    // normal store
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst), d0);
+    _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + 32), d1);
+  }
+#else
+TORCH_CHECK(false, "transpose_pad_2x32_block is only supported when avx512 is supported")
+#endif
+}
+
+// To use AMX to accelerate GEMM,
+// reorder the memory format [K, N] -> [K/2, N, 2]
+// Note: If K % 2 != 0, pad K implicitly
+static inline void {{kernel_name}}_pack_vnni2(
+    const uint16_t* src,
+    uint16_t* dst,
+    int64_t ld_src,
+    int64_t K,
+    int64_t N) {
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t bk = 0;
+  int64_t _K = K / 2 * 2;
+  int64_t _N = N / 32 * 32;
+  for (; bk < _K; bk += 2) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 2, nrem);
+    }
+  }
+  if (K % 2 == 1) {
+    int64_t bn = 0;
+    for (; bn < _N; bn += 32) {
+      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1);
+    }
+    int64_t nrem = N - bn;
+    if (nrem > 0) {
+      {{kernel_name}}_transpose_pad_2x32_block(src + bk * ld_src + bn, dst + bk * N + bn * 2, ld_src, 1, nrem);
+    }
+  }
+#else
+TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
+#endif
+}
+"""
+
 ALLOCATE_BUFFER = r"""
   int64_t {{buffer_name}}_dtype_itemsize = std::is_same_v<{{buffer_dtype}}, at::BFloat16> ? 2 : 4;
   auto& {{buffer_name}}_allocator = *at::getCPUAllocator();
@@ -144,12 +296,14 @@ ALLOCATE_BUFFER = r"""
   void* {{buffer_name}}_data_ptr = {{buffer_name}}_work_data.get();
   {{buffer_dtype}}* {{buffer_name}} = ({{buffer_dtype}}*){{buffer_name}}_data_ptr;
 """
+
 FLEX_ATTENTION_TEMPLATE = r"""
 {{template.header().getvalue()}}
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/Context.h>
 {{template.codegen_softmax_fusion(kernel.kernel_name)}}
+{{template.codegen_brgemm_pack_function(kernel.kernel_name)}}
 {%- set kernel_args = {"query": query, "key": key, "value": value,
                        "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices, "full_kv_num_blocks": full_kv_num_blocks} %}
 {%- set kernel_args = template.update_kernel_args(kernel_args) %}
@@ -288,7 +442,7 @@ extern "C"
   const scalar_t* v_data = value;
   scalar_t* out_data = output;
 
-  // Buffers to store acc results, padding query and transpose/packing key/value
+  // Buffers to store accum results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*qSplitSize*ekvSplitSize")}}
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize*num_head*eheadSize*kvSize")}}
@@ -338,7 +492,7 @@ extern "C"
           /* ld_dst */ cur_kvSplitSize);
 
         // Pack [headSize, cur_kvSplitSize]
-        pack_vnni2(
+        {{kernel.kernel_name}}_pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(transpose_ptr),
           /* dst */ reinterpret_cast<uint16_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
                   j * eheadSize * kvSize + n * eheadSize),
@@ -347,7 +501,7 @@ extern "C"
           /* N */ cur_kvSplitSize);
 
         // Pack [cur_kvSplitSize, headSize_v]
-        pack_vnni2(
+        {{kernel.kernel_name}}_pack_vnni2(
           /* src */ reinterpret_cast<const uint16_t*>(v_addr),
           /* dst */ reinterpret_cast<uint16_t*>(value_reorder_ptr +
                   i * num_head * kv_padding_size * headSize_v +
@@ -401,7 +555,7 @@ extern "C"
 
       if (!headSize_even && need_pack) {
         // Pad query if headSize is not even
-        copy_value_with_pad<scalar_t>(
+        {{kernel.kernel_name}}_copy_value_with_pad<scalar_t>(
           q_data + i * qStrideB + j * qStrideH + m * qStrideM,
           query_t_padding_ptr,
           cur_qSplitSize,
@@ -922,6 +1076,12 @@ class CppFlexAttentionTemplate(CppTemplate):
             dict(kernel_name=kernel_name)
         )
 
+    def codegen_brgemm_pack_function(self, kernel_name: str):
+        # TODO: make them general for common bmm templates
+        return self._template_from_string(BRGEMM_PACK_FUNCTIONS).render(
+            dict(kernel_name=kernel_name)
+        )
+
     def codegen_allocate_buffer(self, buffer_name: str, buffer_dtype, buffer_size):
         return self._template_from_string(ALLOCATE_BUFFER).render(
             dict(
@@ -930,3 +1090,4 @@ class CppFlexAttentionTemplate(CppTemplate):
                 buffer_size=buffer_size,
             )
         )
+

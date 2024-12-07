@@ -129,12 +129,11 @@ else:
     #    LONG_COMPILATION_ON_CPU = int(major_version) < 9
     #elif is_clang() or "clang" in get_cpp_compiler():
     #    LONG_COMPILATION_ON_CPU = True
-    if "CLANG" in torch_config_string.upper() or "clang" in torch_config_string:
+    if "CLANG" in torch_config_string.upper():
         LONG_COMPILATION_ON_CPU = True
-    print(torch_config_string)
     test_dtypes = (
         [torch.float32, torch.bfloat16]
-    if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
     )
     test_dtypes_fast = [torch.float32]
