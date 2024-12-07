@@ -175,7 +175,7 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    _cxx_pytree_exists = False
+    _cxx_pytree_available = _cxx_pytree_exists = False
 else:
     _cxx_pytree_exists = True
     from torch._vendor.packaging.version import Version
