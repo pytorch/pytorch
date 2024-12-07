@@ -31,7 +31,6 @@ from .hints import (
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
-    TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
     ceildiv,
@@ -1761,12 +1760,8 @@ def cooperative_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints = [1, *size_hints[1:]]
     xnumel, rnumel = size_hints
-
-    # TODO(jansel): we should base target on the SM count of the local GPU
-    target = 64
-    split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
+    split = inductor_meta["rsplit"]
     assert rnumel >= split
-    assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
             [xnumel, rnumel // split], reduction_hint, inductor_meta
@@ -1777,7 +1772,7 @@ def cooperative_reduction(
         )
     for config in configs:
         config.kwargs["RSPLIT"] = split
-    # TODO(jansel): add more configs in max_autotune
+    # TODO(jansel): add more configs in max_autotune we can shrink RSPLIT, but not grow it here
 
     return cached_autotune(
         size_hints,

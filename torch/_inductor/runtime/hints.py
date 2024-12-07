@@ -16,7 +16,6 @@ TRITON_MAX_BLOCK = {
     "Z": 1024,
     "R": 4096 * 16,  # * 16 is multi-kernel only
 }
-TRITON_MAX_RSPLIT = 64
 
 
 class ReductionHint(Enum):
