@@ -2,7 +2,7 @@
 
 # mypy: ignore-errors
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 from core.api import AutoLabels, GroupedBenchmark, TimerArgs
 
