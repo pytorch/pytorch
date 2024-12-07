@@ -5,20 +5,6 @@ description: Set up ROCm host for CI
 runs:
   using: composite
   steps:
-    - name: Set DOCKER_HOST
-      shell: bash
-      run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-
-    - name: Remove leftover Docker config file
-      shell: bash
-      continue-on-error: true
-      run: |
-        set -ex
-
-        cat ~/.docker/config.json || true
-        # https://stackoverflow.com/questions/64455468/error-when-logging-into-ecr-with-docker-login-error-saving-credentials-not
-        rm -f ~/.docker/config.json
-
     - name: Stop all running docker containers
       if: always()
       shell: bash
@@ -87,4 +73,6 @@ runs:
       shell: bash
       run: |
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        # Add render group for container creation.
+        render_gid=`cat /etc/group | grep render | cut -d: -f3`
+        echo "GPU_FLAG=--privileged --device=/dev/mem:/dev/mem:rw --volume /dev/mem:/dev/mem:rw --device=/dev/kfd:/dev/kfd:rw --volume /dev/kfd:/dev/kfd:rw --device /dev/dri:/dev/dri:rw --volume /dev/dri:/dev/dri:rw --group-add video --group-add $render_gid --group-add daemon --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
