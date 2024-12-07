@@ -324,12 +324,6 @@ def _remove_dir(path_dir: str) -> None:
 
 def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
     cmd = shlex.split(cmd_line)
-    version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
-    print("=============================")
-    print(cmd_line, flush=True)
-    print("=============================")
-    print(version_string, flush=True)
-    print("=============================")
     try:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
