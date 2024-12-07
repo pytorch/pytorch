@@ -1265,13 +1265,14 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-void ProcessGroupNCCL::waitForFutureOrTimeout(
+bool ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
     const std::string& futDescription,
     bool throwException,
     bool log) {
   std::string errorMsg;
+  bool complete = false;
 
   ::c10d::C10dLoggingData data;
   if (log) {
@@ -1295,6 +1296,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
+        complete = true;
       }
     } catch (const std::exception& e) {
       errorMsg = c10::str(
@@ -1339,6 +1341,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
   if (throwException && !errorMsg.empty()) {
     C10_THROW_ERROR(DistBackendError, errorMsg);
   }
+  return complete;
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
@@ -1513,18 +1516,21 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
-bool ProcessGroupNCCL::dumpDebuggingInfo() {
+bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
   static std::mutex writeDebugInfoMutex;
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
-  LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
+  LOG(ERROR)
+      << logPrefix()
+      << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
+      << includeStackTrace;
   if (traceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, true, false);
+    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -1729,16 +1735,28 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
-    std::future<bool> asyncDebugDump = std::async(
-        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+    bool dumpStackTrace = true;
+    for (int i = 0; i < 2; i++) {
+      std::future<bool> asyncDebugDump =
+          std::async(std::launch::async, [this, dumpStackTrace]() {
+            return this->dumpDebuggingInfo(dumpStackTrace);
+          });
 
-    // wait for the dump until timeout - log data
-    waitForFutureOrTimeout(
-        asyncDebugDump,
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-        "Flight recorder dump in heartbeatMonitor",
-        false,
-        true);
+      // wait for the dump until timeout - log data
+      auto complete = waitForFutureOrTimeout(
+          asyncDebugDump,
+          std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+          "Flight recorder dump in heartbeatMonitor",
+          false,
+          true);
+
+      if (complete) {
+        break;
+      }
+      // If we failed to dump, try dumping without stack trace in the 2nd
+      // iteration.
+      dumpStackTrace = false;
+    }
     // Indicate to watchdog thread that we have finished dumping.
     promiseFlightRecorderDump_.set_value();
   }
@@ -2007,11 +2025,14 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     shouldDump_.store(true);
     // Give time for dumping before throwing exception
     auto start = std::chrono::steady_clock::now();
+    // Give 2 * waitTimeoutDumpInMilSec_ to dump the flight recorder.
+    // We try capturing with stack traces first, and if it fails, we try without
+    // stack traces.
     auto status = promiseFlightRecorderDump_.get_future().wait_for(
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+        std::chrono::milliseconds(2 * waitTimeoutDumpInMilSec_));
     if (status == std::future_status::timeout) {
       LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                   << waitTimeoutDumpInMilSec_ << "ms"
+                   << 2 * waitTimeoutDumpInMilSec_ << "ms"
                    << " flight recorder dumps to finish.";
     } else if (status == std::future_status::ready) {
       auto end = std::chrono::steady_clock::now();
