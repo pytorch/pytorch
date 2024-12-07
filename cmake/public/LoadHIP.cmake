@@ -164,8 +164,10 @@ if(HIP_FOUND)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
     find_package_and_print_version(hipblaslt REQUIRED)
 
-    # roctx is part of roctracer
-    find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
+    # Short term work around for github issue filed here: https://github.com/ROCm/rocprofiler-sdk/issues/21
+    if(NOT TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+      find_package_and_print_version(rocprofiler-sdk-roctx REQUIRED)
+    endif()
 
     # check whether HIP declares new types
     set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")

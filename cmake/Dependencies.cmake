@@ -1075,7 +1075,8 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
+      hip::amdhip64 MIOpen hiprtc::hiprtc
+      rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
     if(UNIX)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
     endif(UNIX)
