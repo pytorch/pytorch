@@ -30,6 +30,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._higher_order_ops.hints_wrap import hints_wrapper
+from torch._higher_order_ops.wrap import wrap
 from torch._inductor.compile_fx import split_const_gm
 from torch._subclasses import FakeTensorMode
 from torch.export import (
@@ -8308,6 +8309,21 @@ def forward(self, x, y):
             r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
+
+    @testing.expectedFailureLegacyExportNonStrict
+    @testing.expectedFailureLegacyExportStrict
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
+    def test_wrap_simple(self):
+        def f(x, y):
+            return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = wrap(f, x, x)
+                x = wrap(lambda x: x * 2, x)
+                return x
+
+        ep = export(Foo(), (torch.randn(4, 4),), strict=True)
 
     def test_disable_forced_specializations_errors(self):
         # check error messages with hybrid symints
