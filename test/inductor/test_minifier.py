@@ -6,6 +6,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
+from torch.export import load as export_load
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -214,16 +215,15 @@ with torch.no_grad():
     )
     def test_aoti_cpu_compile_error(self):
         res = self._test_aoti("cpu", "CppCompileError")
+        ep_file_path = res.get_exported_program_path()
+        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            res.repro_module(),
+            str(gm.code).strip(),
             """\
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, linear):
-        relu = torch.ops.aten.relu.default(linear);  linear = None
-        return (relu,)""",
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
     @requires_gpu
@@ -236,16 +236,15 @@ class Repro(torch.nn.Module):
     )
     def test_aoti_gpu_compile_error(self):
         res = self._test_aoti(GPU_TYPE, "SyntaxError")
+        ep_file_path = res.get_exported_program_path()
+        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            res.repro_module(),
+            str(gm.code).strip(),
             """\
-class Repro(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, linear):
-        relu = torch.ops.aten.relu.default(linear);  linear = None
-        return (relu,)""",
+def forward(self, linear):
+    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
+    relu = torch.ops.aten.relu.default(linear);  linear = None
+    return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
 

@@ -844,6 +844,12 @@ Tensor scalar_tensor(const Scalar& s,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
+  // NB: It's always wrong to try to create a scalar tensor with the jagged layout.
+  // Rather than fix this everywhere, just use the strided layout and let NJT handle
+  // scalar tensor broadcasting.
+  if (layout == at::kJagged) {
+    layout = at::kStrided;
+  }
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 

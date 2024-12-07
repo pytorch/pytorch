@@ -140,6 +140,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
@@ -430,11 +431,6 @@ class VariableBuilder:
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
-    def set_source_and_track_mutable(self, value, var):
-        assert isinstance(var, VariableTracker)
-        var.source = self.source
-        return self.tx.output.side_effects.track_mutable(value, var)
-
     @classmethod
     def _type_dispatch(cls):
         return cls._type_dispatch_impl(config.trace_numpy)
@@ -591,7 +587,7 @@ class VariableBuilder:
             # key order.
             self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
+                TypingVariable(k): UserDefinedObjectVariable(
                     v,
                     source=GetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
@@ -606,7 +602,6 @@ class VariableBuilder:
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = CustomizedDictVariable.wrap(self, value)
-            result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -670,7 +665,7 @@ class VariableBuilder:
                     result, user_cls=type(value), source=self.source
                 )
 
-            return self.set_source_and_track_mutable(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -679,13 +674,23 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+        elif istype(value, frozenset) and all(
+            (
+                # For DBR quantization, we could get a frozenset of torch funcs.
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                or
+                # Another commonly used frozenset of types.
+                x in torch.utils._pytree.BUILTIN_TYPES
+            )
+            for x in value
         ):
-            # For frozenset, we can guard by object ID instead of value
-            # equality, this allows us to handle non-literal values
+            # For the limited cases of frozenset here, we know the items won't
+            # change across runs, so we can safely create sourceless VTs for
+            # them and only guard on the frozenset id.
+            # TODO support source for sets and remove the special logics here.
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable.create(value=value, source=self.source)
+            return FrozensetVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
@@ -878,9 +883,6 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, torch._C._SDPBackend):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -1129,7 +1131,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.set_source_and_track_mutable(
+            return self.tx.output.side_effects.track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -1140,6 +1142,7 @@ class VariableBuilder:
                     ],
                     user_cls=type(value),
                     user_cls_source=AttrSource(self.source, "__class__"),
+                    source=self.source,
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
@@ -1318,11 +1321,9 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
-        )
-        if istype(value, list):
-            return self.set_source_and_track_mutable(value, result)
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        if istype(value, (list, collections.deque)):
+            return self.tx.output.side_effects.track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -1333,17 +1334,16 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        result = TupleIteratorVariable(
-            output, mutation_type=ValueMutationNew(), source=self.source
-        )
-
-        return self.set_source_and_track_mutable(value, result)
+        result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator):
-        self.install_guards(GuardBuilder.TYPE_MATCH)
-        # Get all the values from the range iterator
+        self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
+        # Get all the values from the range iterator; no need to install guards
+        # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
-        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+        result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1504,7 +1504,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
-                return self.set_source_and_track_mutable(value, result)
+                return self.tx.output.side_effects.track_mutable(value, result)
             return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
@@ -1896,6 +1896,13 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
+
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
         if (
@@ -1910,6 +1917,7 @@ class VariableBuilder:
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2387,7 +2395,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
-            return ListVariable(unpacked, mutation_type=ValueMutationNew(), **options)
+            return ListVariable(unpacked, **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
