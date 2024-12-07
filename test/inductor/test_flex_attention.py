@@ -117,21 +117,21 @@ if TEST_ON_CUDA:
 else:
     test_device = "cpu"
     from torch._inductor.cpp_builder import is_clang, get_cpp_compiler
-    import subprocess
-    compiler_version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
-    LONG_COMPILATION_ON_CPU = False
+    #import subprocess
+    #compiler_version_string = subprocess.check_output([get_cpp_compiler(), "--version"]).decode("utf8")
+    #LONG_COMPILATION_ON_CPU = False
     torch_config_string = torch.__config__.show()
-    if IS_WINDOWS:
-        LONG_COMPILATION_ON_CPU = True
-    elif "g++" in compiler_version_string or "gcc" in compiler_version_string or "c++" in compiler_version_string or "cc" in compiler_version_string :
+    #if IS_WINDOWS:
+    #    LONG_COMPILATION_ON_CPU = True
+    #elif "g++" in compiler_version_string or "gcc" in compiler_version_string or "c++" in compiler_version_string or "cc" in compiler_version_string :
         # if the compiler is gcc with lower major version than 7, skip UT for CPU due to long compilation time found in CI
-        major_version = subprocess.check_output([get_cpp_compiler(), "-dumpversion"]).decode("utf8")
-        LONG_COMPILATION_ON_CPU = int(major_version) < 9
-    elif is_clang() or "clang" in get_cpp_compiler():
+    #    major_version = subprocess.check_output([get_cpp_compiler(), "-dumpversion"]).decode("utf8")
+    #    LONG_COMPILATION_ON_CPU = int(major_version) < 9
+    #elif is_clang() or "clang" in get_cpp_compiler():
+    #    LONG_COMPILATION_ON_CPU = True
+    if "CLANG" in torch_config_string.upper() or "clang" in torch_config_string:
         LONG_COMPILATION_ON_CPU = True
-    elif "CLANG" in torch_config_string.upper():
-        LONG_COMPILATION_ON_CPU = True
-
+    print(torch_config_string)
     test_dtypes = (
         [torch.float32, torch.bfloat16]
     if torch.ops.mkldnn._is_mkldnn_bf16_supported()
