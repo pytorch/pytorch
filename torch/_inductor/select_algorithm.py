@@ -230,33 +230,6 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
         store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-        #         store = f'''
-        # tl.inline_asm_elementwise(
-        #     """
-        #     red.global.relaxed.add.f32 [$8], $16;
-        #     red.global.relaxed.add.f32 [$9], $17;
-        #     red.global.relaxed.add.f32 [$10], $18;
-        #     red.global.relaxed.add.f32 [$11], $19;
-        #     red.global.relaxed.add.f32 [$12], $20;
-        #     red.global.relaxed.add.f32 [$13], $21;
-        #     red.global.relaxed.add.f32 [$14], $22;
-        #     red.global.relaxed.add.f32 [$15], $23;
-        #     """,
-        #     (
-        #         "=r,=r,=r,=r,=r,=r,=r,=r,"
-        #         "l,l,l,l,l,l,l,l,"
-        #         "r,r,r,r,r,r,r,r"
-        #     ),
-        #     args=[
-        #         ({buf_name} + {index_str}).to(tl.uint64),
-        #         {value},
-        #     ],
-        #     dtype=tl.uint32,
-        #     is_pure=False,
-        #     pack=8,
-        # )
-        # '''
-
         return store
 
     def _add_kernel_input(self, name: str):
