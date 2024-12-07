@@ -146,7 +146,6 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
