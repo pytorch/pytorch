@@ -175,13 +175,13 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 try:
     _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
-    _cxx_pytree_available = _cxx_pytree_exists = False
+    _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
 else:
     _cxx_pytree_exists = True
     from torch._vendor.packaging.version import Version
 
-    _cxx_pytree_available = Version(_optree_version) >= Version("0.13.0")
-    if not _cxx_pytree_available:
+    _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
+    if not _cxx_pytree_dynamo_traceable:
         warnings.warn(
             "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
             "C++ pytree support is disabled. "
@@ -243,7 +243,7 @@ def register_pytree_node(
         flatten_with_keys_fn=flatten_with_keys_fn,
     )
 
-    if not _cxx_pytree_available:
+    if not _cxx_pytree_exists:
         return
 
     if _cxx_pytree_imported:
