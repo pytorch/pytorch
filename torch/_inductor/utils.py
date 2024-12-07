@@ -32,7 +32,6 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    overload,
     Protocol,
     Sequence,
     Set,
@@ -730,16 +729,6 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     return sympy.sympify(expr).xreplace(
         {k: to_symbol(k, v) for k, v in replacements.items()}
     )
-
-
-@overload
-def is_symbolic(a: torch.SymInt) -> TypeGuard[torch.SymInt]:
-    ...
-
-
-@overload
-def is_symbolic(a: torch.Tensor) -> TypeGuard[torch.Tensor]:
-    ...
 
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
