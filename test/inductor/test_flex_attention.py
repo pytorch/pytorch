@@ -389,8 +389,6 @@ class TestFlexAttention(InductorTestCase):
             KV_S = Q_S
         if V_D is None:
             V_D = Q_D
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -565,9 +563,6 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
-
         assert Q_H % KV_H == 0
 
         q = torch.randn(
@@ -3302,6 +3297,27 @@ class GraphModule(torch.nn.Module):
             return full
 """,  # noqa: B950
         )
+
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_device_cuda_1(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, q, k, v, block_mask):
+                return flex_attention(q, k, v, block_mask=block_mask)
+
+        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        mask = create_block_mask(
+            lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
+            B=None,
+            H=None,
+            Q_LEN=256,
+            KV_LEN=256,
+            device="cuda:1",
+        )
+        mod = torch.compile(TestModule())
+        attn_output = mod(q, k, v, mask)
+        self.assertEqual(attn_output.device, torch.device("cuda:1"))
 
 
 class TestBlockMask(InductorTestCase):

@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch._inductor.config
 import torch.fx
-import torch.utils._pytree as pytree
 
 
 if TYPE_CHECKING:
@@ -21,7 +20,6 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
-    "_aoti_compile_and_package_inner",
 ]
 
 
@@ -88,6 +86,8 @@ def aoti_compile_and_package(
     """
     from torch.export import ExportedProgram
 
+    from .debug import aot_inductor_minifier_wrapper
+
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
@@ -110,6 +110,7 @@ def aoti_compile_and_package(
     ), f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
 
     inductor_configs = inductor_configs or {}
+    inductor_configs["aot_inductor.package"] = True
 
     if inductor_configs.get("aot_inductor.output_path"):
         raise RuntimeError(
@@ -117,20 +118,18 @@ def aoti_compile_and_package(
             "of setting the aot_inductor.output_path config."
         )
 
-    args, kwargs = exported_program.example_inputs
-
     # a wrapper around aoti_compile_and_package_inner.
-    return aoti_compile_and_package_debug_wrapper(
+    return aot_inductor_minifier_wrapper(
+        _aoti_compile_and_package_inner,
         exported_program,
-        args,
-        kwargs,
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
 
 
 def _aoti_compile_and_package_inner(
-    m,
+    gm: torch.nn.Module,
+    # flat_example_inputs: List[Any],
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
@@ -144,12 +143,13 @@ def _aoti_compile_and_package_inner(
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
     """
-    from torch._inductor.package import package_aoti
+    from .package import package_aoti
 
-    inductor_configs = inductor_configs or {}
-    inductor_configs["aot_inductor.package"] = True
+    assert isinstance(gm, torch.fx.GraphModule)
 
-    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
+    kwargs = kwargs or {}
+
+    aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
     assert isinstance(aoti_files, list)
 
     if package_path is None:
@@ -171,47 +171,8 @@ def _aoti_compile_and_package_inner(
 
     if load_and_run:
         compiled_model = aoti_load_package(package_path)
-        aoti_result = compiled_model(*args)
+        aoti_result = compiled_model(*args, **kwargs)
     return package_path
-
-
-def aoti_compile_and_package_debug_wrapper(
-    exported_program,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    package_path: Optional[Union[str, io.BytesIO]] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
-):
-    m = exported_program.module()
-    assert isinstance(m, torch.fx.GraphModule)
-
-    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
-
-    try:
-        return _aoti_compile_and_package_inner(
-            m,
-            args,
-            kwargs,
-            load_and_run=use_minifier,
-            package_path=package_path,
-            inductor_configs=inductor_configs,
-        )
-
-    except Exception as e:
-        if use_minifier:
-            # TODO: check accuracy and re-direct to minifier
-            from torch._dynamo.repro.aoti import dump_to_minify
-
-            exported_program._example_inputs = (args, kwargs)
-
-            dump_to_minify(
-                exported_program,
-                "compile_fx_aot",
-                options=inductor_configs,
-            )
-
-        raise e
 
 
 def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
@@ -256,67 +217,10 @@ def aot_compile(
         AOTI if aot_inductor.package=True.
         TODO: make it return a list by default
     """
-    from .compile_fx import compile_fx_aot, graph_returns_tuple
+    from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
 
-    assert graph_returns_tuple(gm), (
-        "Graph output must be a tuple(). This is so that we can avoid "
-        "pytree processing of the outputs. Please change the module to "
-        "have tuple outputs."
-    )
-
-    # We will serialize the pytree info into the .so as constant strings
-    in_spec = None
-    out_spec = None
-    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        codegen = gm.graph._codegen
-        gm.graph._codegen = torch.fx.graph.CodeGen()
-        gm.recompile()
-
-        if codegen.pytree_info.in_spec is not None:
-            in_spec = codegen.pytree_info.in_spec
-        if codegen.pytree_info.out_spec is not None:
-            out_spec = codegen.pytree_info.out_spec
-
-    else:
-        if hasattr(gm, "_in_spec"):
-            in_spec = gm._in_spec
-        if hasattr(gm, "_out_spec"):
-            out_spec = gm._out_spec
-
-    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
-    serialized_out_spec = (
-        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
-    )
-
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
-        (args, kwargs or {})
-    )
-
-    # Replace non-tensor (constant) inputs with Nones, since these are not being
-    # used anyways by the graph
-    flat_example_inputs = [
-        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
-    ]
-
-    if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
-    options = (
-        {
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
+    flat_example_inputs, options = _aoti_flatten_inputs(
+        gm, args, kwargs, options=options
     )
 
     return compile_fx_aot(
