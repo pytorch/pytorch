@@ -196,7 +196,7 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
-  constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
+  constexpr int thread_work_size = 8; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
 
   ${traits_string}
@@ -964,7 +964,7 @@ std::string generate_code(
 }
 
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
-#define THREAD_WORK_SIZE 4
+#define THREAD_WORK_SIZE 8
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(

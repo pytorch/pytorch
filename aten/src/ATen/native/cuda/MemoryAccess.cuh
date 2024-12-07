@@ -236,7 +236,7 @@ struct unroll {
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
 // has its job to do. So the reminders should be handled by the caller manually.
-template <int vec_size, typename data_t, int elems_per_thread>  // vec_size: number of scalars, can be 1, 2, or 4.
+template <int vec_size, typename data_t, int elems_per_thread>  // vec_size: number of scalars, can be 1, 2, 4 or 8.
 struct vectorized {
 
   static_assert(elems_per_thread % vec_size == 0, "The workload per thread must be a multiple of vec_size");
@@ -347,11 +347,14 @@ struct multi_outputs_unroll {
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
+inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer, const bool use_vec8 = false) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
   constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
-  if (address % vec4_alignment == 0) {
+  constexpr int vec8_alignment = std::alignment_of_v<aligned_vector<scalar_t, 8>>;
+  if (use_vec8 && address % vec8_alignment == 0) {
+     return 8;
+  } else if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
@@ -360,30 +363,30 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
 }
 
 template<typename scalar_t>
-inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
-  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer));
+inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer, const bool use_vec8 = false) {
+  return can_vectorize_up_to<scalar_t>(static_cast<const char*>(pointer), use_vec8);
 }
 
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _, const bool use_vec8 = false) {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    result = std::min<int>(result, can_vectorize_up_to<arg_t>(pointers[i + 1]));
+    result = std::min<int>(result, can_vectorize_up_to<arg_t>(pointers[i + 1], use_vec8));
   }
 };
 
 template<typename func_t, typename array_t>
-inline int can_vectorize_up_to(array_t pointers) {
+inline int can_vectorize_up_to(array_t pointers, const bool use_vec8 = false) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   constexpr int arity = traits::arity;
-  int result = can_vectorize_up_to<return_t>(pointers[0]);
+  int result = can_vectorize_up_to<return_t>(pointers[0], use_vec8);
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.
-  detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
+  detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits(), use_vec8);
   return result;
 }
 
