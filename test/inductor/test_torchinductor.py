@@ -1846,9 +1846,9 @@ class CommonTemplate:
         from torch._inductor.runtime.runtime_utils import next_power_of_2
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        size_hints = [67108864, 8192]
+        size_hints = {"x": 67108864, "r": 8192}
         for i in range(4):
-            size_hints[0] = next_power_of_2(size_hints[0])
+            size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
