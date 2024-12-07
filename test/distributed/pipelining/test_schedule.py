@@ -15,6 +15,7 @@ from torch.distributed.pipelining import (
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
+    ScheduleZBVZeroBubble,
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -239,7 +240,7 @@ class TestSchedulePlan(TestCase):
 
     @parametrize(
         "ScheduleClass",
-        [ScheduleInterleaved1F1B, ScheduleLoopedBFS],
+        [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleZBVZeroBubble],
     )
     def test_pipeline_order(self, ScheduleClass):
         for num_local_stages, num_microbatches, group_size in self.test_cases:
@@ -248,7 +249,10 @@ class TestSchedulePlan(TestCase):
                 num_microbatches=num_microbatches,
                 group_size=group_size,
             ):
-                if num_microbatches % group_size != 0:
+                if ScheduleClass is ScheduleZBVZeroBubble:
+                    if num_local_stages % 2 != 0:
+                        continue
+                elif num_microbatches % group_size != 0:
                     continue
 
                 logger.info(
@@ -267,18 +271,30 @@ class TestSchedulePlan(TestCase):
                 formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
+                # print(formatted_pipeline_order)
+                def stage_to_rank_zbv(stage):
+                    num_stages = group_size * num_local_stages
+                    chunks_per_block = num_local_stages // 2
+                    if stage < num_stages // 2:
+                        return stage // chunks_per_block
+                    return group_size - 1 - ((stage - num_stages//2) // chunks_per_block)
+
 
                 def stage_to_rank(stage):
                     return stage % group_size
 
+                stage_to_rank_func = stage_to_rank_zbv
+                if ScheduleClass is not ScheduleZBVZeroBubble:
+                    stage_to_rank_func = stage_to_rank
+
                 comms_sch = _add_send_recv(
                     schedule.pipeline_order,
-                    stage_to_rank=stage_to_rank,
+                    stage_to_rank=stage_to_rank_func,
                     num_stages=num_stages,
                 )
                 _simulate_comms_compute(
                     comms_sch,
-                    stage_to_rank=stage_to_rank,
+                    stage_to_rank=stage_to_rank_func,
                     num_stages=num_stages,
                 )
 

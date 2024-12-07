@@ -7,11 +7,12 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from enum import Enum
 from typing import (
     Any,
     Callable,
+    Deque,
     Dict,
     List,
     NamedTuple,
@@ -43,6 +44,7 @@ __all__ = [
     "ScheduleInterleaved1F1B",
     "ScheduleLoopedBFS",
     "ScheduleInterleavedZeroBubble",
+    "ScheduleZBVZeroBubble",
 ]
 
 logger = logging.getLogger(__name__)
@@ -1999,6 +2001,73 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         )
 
 
+def _add_bubbles_to_actions(num_stages_global, pipeline_order, pp_group_size):
+    actions = pipeline_order
+
+    def need_bubble(stage, op, microbatch, num_stages_global, seen_ops):
+        if op == _ComputationType.FORWARD:
+            if stage != 0 and (stage - 1, op, microbatch) not in seen_ops:
+                return True
+        elif op == _ComputationType.FULL_BACKWARD:
+            if stage == num_stages_global - 1:
+                return (stage, _ComputationType.FORWARD, microbatch) not in seen_ops
+            return (stage + 1, op, microbatch) not in seen_ops
+        return False
+
+    seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+    result: Dict[int, List[Optional[_Action]]] = {}
+    next_pointer: Dict[int, int] = {}
+    bubbles_added: Dict[int, int] = {}
+    total_bubbles_added = 0
+
+    for rank in range(pp_group_size):
+        result[rank] = []
+        next_pointer[rank] = 0
+        bubbles_added[rank] = 0
+
+    while True:
+        should_stop = True
+
+        temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
+
+        for rank in range(pp_group_size):
+            timestamp = next_pointer[rank]
+            if timestamp >= len(actions[rank]):
+                continue
+
+            should_stop = False
+
+            if actions[rank][timestamp] is not None:
+                temp_action = actions[rank][timestamp]
+                assert temp_action is not None
+                stage_index, op, microbatch = temp_action
+                if not need_bubble(
+                    stage_index, op, microbatch, num_stages_global, seen_ops
+                ):
+                    result[rank].append(actions[rank][timestamp])
+                    if microbatch is not None:
+                        temp_seen_ops.add((stage_index, op, microbatch))
+                    next_pointer[rank] += 1
+                else:
+                    result[rank].append(None)
+                    bubbles_added[rank] += 1
+            else:
+                next_pointer[rank] += 1
+                result[rank].append(None)
+
+        seen_ops.update(temp_seen_ops)
+        if should_stop:
+            break
+
+    if total_bubbles_added > 0:
+        logger.warning(
+            "Non zero bubbles added: total_bubbles_added=%s bubbles_added=%s",
+            total_bubbles_added,
+            bubbles_added,
+        )
+    return result
+
+
 class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
     """
     The Interleaved Zero Bubble schedule.
@@ -2049,8 +2118,8 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         # This function add bubbles to the generated schedule based on dependencies of actions
         # Note that the ZB1P schedule will not require bubbles to be manually added and it is
         # only useful when n_microbatches <= microbatches_per_round
-        self.pipeline_order = self._add_bubbles_to_actions(
-            self.n_local_stages * self.pp_group_size,
+        self.pipeline_order = _add_bubbles_to_actions(
+            self.n_local_stages * self.pp_group_size, self.pipeline_order, self.pp_group_size
         )
 
     def _calculate_single_rank_operations(self, rank) -> List[Optional[_Action]]:
@@ -2117,71 +2186,331 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
             enable_zero_bubble=True,
         )
 
-    def _add_bubbles_to_actions(self, num_stages_global):
-        actions = self.pipeline_order
 
-        def need_bubble(stage, op, microbatch, num_stages_global, seen_ops):
-            if op == _ComputationType.FORWARD:
-                if stage != 0 and (stage - 1, op, microbatch) not in seen_ops:
-                    return True
-            elif op == _ComputationType.FULL_BACKWARD:
-                if stage == num_stages_global - 1:
-                    return (stage, _ComputationType.FORWARD, microbatch) not in seen_ops
-                return (stage + 1, op, microbatch) not in seen_ops
-            return False
 
-        seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
-        result: Dict[int, List[Optional[_Action]]] = {}
-        next_pointer: Dict[int, int] = {}
-        bubbles_added: Dict[int, int] = {}
-        total_bubbles_added = 0
+class ScheduleZBVZeroBubble(PipelineScheduleMulti):
+    """
+    The ZBV Zero Bubble schedule.
+    See https://arxiv.org/pdf/2401.10241 for details.
+    """
 
-        for rank in range(self.pp_group_size):
-            result[rank] = []
-            next_pointer[rank] = 0
-            bubbles_added[rank] = 0
-
-        while True:
-            should_stop = True
-
-            temp_seen_ops: Set[Tuple[int, _ComputationType, int]] = set()
-
-            for rank in range(self.pp_group_size):
-                timestamp = next_pointer[rank]
-                if timestamp >= len(actions[rank]):
-                    continue
-
-                should_stop = False
-
-                if actions[rank][timestamp] is not None:
-                    temp_action = actions[rank][timestamp]
-                    assert temp_action is not None
-                    stage_index, op, microbatch = temp_action
-                    if not need_bubble(
-                        stage_index, op, microbatch, num_stages_global, seen_ops
-                    ):
-                        result[rank].append(actions[rank][timestamp])
-                        if microbatch is not None:
-                            temp_seen_ops.add((stage_index, op, microbatch))
-                        next_pointer[rank] += 1
-                    else:
-                        result[rank].append(None)
-                        bubbles_added[rank] += 1
-                else:
-                    next_pointer[rank] += 1
-                    result[rank].append(None)
-
-            seen_ops.update(temp_seen_ops)
-            if should_stop:
-                break
-
-        if total_bubbles_added > 0:
-            logger.warning(
-                "Non zero bubbles added: total_bubbles_added=%s bubbles_added=%s",
-                total_bubbles_added,
-                bubbles_added,
+    def __init__(
+        self,
+        stages: List[_PipelineStageBase],
+        n_microbatches: int,
+        loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
+        output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
+    ):
+        self.pp_group_size = stages[0].group_size
+        super().__init__(
+            stages=stages,
+            n_microbatches=n_microbatches,
+            loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
+            output_merge_spec=output_merge_spec,
+            use_full_backward=False,
+        )
+        self.n_local_stages = len(stages)
+        self.rank = stages[0].group_rank
+        if self.n_local_stages % 2 != 0:
+            raise ValueError(
+                "ZBV schedule requires the number of local chunks to be "
+                f"divisible by 2, but got {len(stages)}."
             )
-        return result
+
+        # 1. Create the pipeline_order (all ranks do this calculation)
+        # This will be used to keep track of the current state of the entire pipeline
+        # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
+        self.pipeline_order: Dict[int, List[Optional[_Action]]] = self._get_zbv_schedule(
+            len(stages),
+            self.pp_group_size,
+            n_microbatches,
+        )
+        self.pipeline_order = _add_bubbles_to_actions(
+            self.n_local_stages * self.pp_group_size,
+            self.pipeline_order,
+            self.pp_group_size,
+        )
+
+    def _get_zbv_schedule(
+        self,
+        num_model_chunks,
+        pipeline_parallel_size,
+        num_microbatches,
+    ):
+        pp_group_size = pipeline_parallel_size
+        mb_size = num_microbatches
+        num_local_stages = num_model_chunks
+        compute_schedules = {}
+        category_map = {
+            F: 0,
+            I: 1,
+            W: 2,
+        }
+        chunk_0 = 0
+        chunk_1 = 1
+        def get_compute_schedule(pipeline_parallel_size, num_microbatches):
+            num_chunks = 2
+            n_node = len(category_map) * num_chunks * pipeline_parallel_size * num_microbatches
+
+            def get_id(op, chunk, rank, microbatch_id):
+                category = category_map[op]
+                return (
+                    category * 2 * pipeline_parallel_size * num_microbatches
+                    + chunk * pipeline_parallel_size * num_microbatches
+                    + rank * num_microbatches
+                    + microbatch_id
+                )
+            ops_count = []
+
+            for i in range(pipeline_parallel_size):
+                temp = {}
+                temp[F] = [0] * 2
+                temp[I] = [0] * 2
+                temp[W] = [0] * 2
+                ops_count.append(temp)
+
+            fbw_mem = [3, -1, -2]
+            max_mem = 3 * (pipeline_parallel_size * 2)
+            end_time = [-1] * n_node
+            cur_time = [0] * pipeline_parallel_size
+            mem = [0] * pipeline_parallel_size
+            rank_bubble = [0] * pipeline_parallel_size
+            pending_w: List[Deque[Tuple[int, int, int]]] = [
+                deque() for _ in range(pipeline_parallel_size)
+            ]
+            schedule: Dict[int, List[Tuple[int, _ComputationType, int]]] = {}
+            for i in range(pipeline_parallel_size):
+                schedule[i] = []
+
+            def put_w(rank):
+                assert len(pending_w[rank]) > 0
+                _, chunk_, _ = pending_w[rank].popleft()
+                put(W, chunk_, rank)
+
+            def put(op, chunk, rank, assert_cnt=True):
+                """
+                Schedules an operation (forward, backward, or weight update) for a given chunk and rank.
+                op (_ComputationType): The type of operation (FORWARD, BACKWARD, WEIGHT).
+                chunk (int): The model chunk index (0 or 1).
+                rank (int): The pipeline stage index.
+                """
+                _cur_time = _no_bubble = cur_time[rank] + 1
+                category = category_map[op]
+                # Number of ops (F/B/W) with the same (action, chunk) on current rank
+                _op_count = ops_count[rank][op][chunk]
+                if chunk == chunk_1 and op in (F, I):
+                    if rank < pipeline_parallel_size - 1:
+                        _fa_id = get_id(op, chunk, rank + 1, microbatch_id=_op_count)
+                        assert end_time[_fa_id] >= 0
+                        _cur_time = max(_cur_time, end_time[_fa_id] + 1)
+                if chunk == chunk_0 and op in (F, I):
+                    if rank > 0:
+                        _fa_id = get_id(op, chunk, rank - 1, microbatch_id=_op_count)
+                        assert end_time[_fa_id] >= 0, f"{category}, {chunk}, {rank}, {_op_count}"
+                        _cur_time = max(_cur_time, end_time[_fa_id] + 1)
+                _id = get_id(op, chunk, rank, microbatch_id=_op_count)
+                if ops_count[rank][F][chunk_0] > 0:
+                    rank_bubble[rank] += _cur_time - _no_bubble
+                end_time[_id] = _cur_time
+                cur_time[rank] = _cur_time
+                mem[rank] += fbw_mem[category]
+                # For BACKWARD and WEIGHT operation, we will schedule chunk 1 before 0 so
+                # inversing the order before adding to the schedule
+                temp_chunk = chunk if op == F else 1 - chunk
+                schedule[rank].append((_op_count, op, temp_chunk))
+                if op == I:
+                    pending_w[rank].append((W, chunk, _op_count))
+                ops_count[rank][op][chunk] += 1
+
+            # Schedules forward pass operations for the first chunk across all pipeline stages.
+            # Ensures that every stage has at least one operation queued for the first chunk.
+            for cur_rank in range(pipeline_parallel_size):
+                put(F, chunk_0, cur_rank)
+
+            # Schedule forward passes for all pipeline stages in reverse order to prioritize downstream stages:
+            # - Chunk 1 is scheduled first for each stage, respecting dependencies on the next stage.
+            # - Chunk 0 is scheduled for all upstream ranks to minimize idle time and fully utilize the pipeline.
+            # - Memory constraints and microbatch limits are enforced.
+            for cur_rank in range(pipeline_parallel_size - 1, -1, -1):
+                if cur_rank == pipeline_parallel_size - 1:
+                    put(F, chunk_1, cur_rank)
+                    continue
+                tmp = end_time[get_id(F, chunk_1, cur_rank + 1, microbatch_id=0)]
+                while (
+                    cur_time[cur_rank] + 1 <= tmp
+                    and ops_count[cur_rank][F][chunk_0] < num_microbatches
+                ):
+                    for prev_rank in range(cur_rank + 1):
+                        put(F, chunk_0, prev_rank)
+                put(F, chunk_1, cur_rank)
+
+            iter_chunk_ = 0
+            # Ensure forward operation synchronization across pipeline stages
+            for current_rank in range(1, pipeline_parallel_size):
+                previous_rank = current_rank - 1
+                # Check if the current rank has caught up with the previous rank
+                while (
+                    ops_count[current_rank][F][chunk_0]
+                    + ops_count[current_rank][F][chunk_1]
+                    < ops_count[previous_rank][F][chunk_0]
+                    + ops_count[previous_rank][F][chunk_1]
+                    or ops_count[current_rank][F][chunk_1]
+                    <= ops_count[previous_rank][F][chunk_1]
+                    < num_microbatches
+                ):
+                    # Schedule forward operations for backward pipeline stages
+                    for stage in range(pipeline_parallel_size - 1, previous_rank, -1):
+                        if ops_count[stage][F][iter_chunk_] < num_microbatches:
+                            put(F, iter_chunk_, stage)
+                    iter_chunk_ = 1 - iter_chunk_
+
+            for _ in range(2 * num_microbatches):
+                # Handle memory constraints: schedule weight updates if there's not enough memory for a backward operation
+                for rank in range(pipeline_parallel_size):
+                    while mem[rank] + fbw_mem[1] > max_mem:
+                        put_w(rank)
+                # Classify ranks based on readiness for backward operations on chunk 0 or chunk 1
+                chunk_0_ready_ranks = []
+                chunk_1_ready_ranks = []
+                for rank in range(pipeline_parallel_size):
+                    chunk_0_ops = ops_count[rank][I][chunk_0]
+                    chunk_1_ops = ops_count[rank][I][chunk_1]
+                    if chunk_1_ops >= chunk_0_ops:
+                        chunk_0_ready_ranks.append(rank)
+                    elif rank == pipeline_parallel_size - 1:  # Last rank always prioritizes chunk 1
+                        chunk_1_ready_ranks.append(rank)
+                    else:
+                        dependency_id = get_id(
+                            I, chunk_1, rank + 1, microbatch_id=chunk_1_ops
+                        )
+                        if end_time[dependency_id] >= 0 or chunk_0_ops >= num_microbatches:
+                            chunk_1_ready_ranks.append(rank)
+                        else:
+                            chunk_0_ready_ranks.append(rank)
+
+                # Prioritize chunk 1 first, followed by chunk 0
+                scheduled_ranks = []
+                for rank in reversed(chunk_1_ready_ranks):
+                    scheduled_ranks.append((rank, chunk_1))
+                for rank in chunk_0_ready_ranks:
+                    scheduled_ranks.append((rank, chunk_0))
+
+                # Schedule backward operations for each rank
+                for rank, chunk in scheduled_ranks:
+                    dependency_id = -1
+                    if chunk == chunk_1 and rank < pipeline_parallel_size - 1:
+                        dependency_id = get_id(
+                            I, chunk_1, rank + 1, microbatch_id=ops_count[rank][I][chunk_1]
+                        )
+                    if chunk == chunk_0 and rank > 0:
+                        dependency_id = get_id(
+                            I, chunk_0, rank - 1, microbatch_id=ops_count[rank][I][chunk_0]
+                        )
+                    # Fill bubbles with weight updates if dependencies are blocking
+                    while (
+                        len(pending_w[rank]) > 0
+                        and dependency_id >= 0
+                        and end_time[dependency_id] >= cur_time[rank] + 1
+                    ):
+                        put_w(rank)
+
+                    # Schedule the backward operation
+                    put(I, chunk, rank)
+
+                # Schedule forward operations for each pipeline rank
+                for rank in range(pipeline_parallel_size):
+                    # Skip if all forward operations for chunk_1 are completed
+                    if ops_count[rank][F][chunk_1] >= num_microbatches:
+                        continue
+
+                    # Determine which chunk to prioritize for the forward operation
+                    put_item = None
+                    forward_chunk_1_count = ops_count[rank][F][chunk_1]
+                    forward_chunk_0_count = ops_count[rank][F][chunk_0]
+                    # Decide the priority between chunk_0 and chunk_1
+                    if forward_chunk_1_count >= forward_chunk_0_count:
+                        put_item = chunk_0  # Prioritize chunk_0
+                    elif rank == pipeline_parallel_size - 1:
+                        put_item = chunk_1  # Last rank always prioritizes chunk_1
+                    else:
+                        # Check dependencies to determine chunk readiness
+                        dep_id_chunk_1 = get_id(
+                            F, chunk_1, rank + 1, microbatch_id=forward_chunk_1_count
+                        )
+                        if end_time[dep_id_chunk_1] >= 0:
+                            put_item = chunk_1  # Chunk_1 is ready
+                        elif forward_chunk_0_count < num_microbatches:
+                            if rank == 0:
+                                put_item = chunk_0  # First rank always prioritizes chunk_0
+                            else:
+                                dep_id_chunk_0 = get_id(
+                                    F, chunk_0, rank - 1, microbatch_id=forward_chunk_0_count
+                                )
+                                if end_time[dep_id_chunk_0] >= 0:
+                                    put_item = chunk_0  # Chunk_0 is ready
+                    # Skip if no valid operation can be scheduled
+                    if put_item is None:
+                        continue
+                    # Handle memory constraints: schedule weight updates if needed
+                    while mem[rank] + fbw_mem[0] > max_mem:
+                        put_w(rank)
+                    # Handle dependencies for the selected chunk
+                    dependency_id = -1
+                    if put_item == chunk_0 and rank > 0:
+                        dependency_id = get_id(
+                            F, chunk_0, rank - 1, microbatch_id=forward_chunk_0_count
+                        )
+                    if put_item == chunk_1 and rank < pipeline_parallel_size - 1:
+                        dependency_id = get_id(
+                            F, chunk_1, rank + 1, microbatch_id=forward_chunk_1_count
+                        )
+                    # Fill pipeline bubbles with weight updates if dependencies are blocking
+                    while (
+                        len(pending_w[rank]) > 0
+                        and dependency_id >= 0
+                        and end_time[dependency_id] >= cur_time[rank] + 1
+                    ):
+                        put_w(rank)
+                    # Schedule the forward operation for the determined chunk
+                    put(F, put_item, rank)
+
+            for i in range(pipeline_parallel_size):
+                while len(pending_w[i]) > 0:
+                    put_w(i)
+
+            result = {}
+            for rank, schedule_current_rank in schedule.items():
+                expanded_results = []
+                total_stages = num_local_stages * pp_group_size
+                logical_stage_to_stages = {}
+                stage_0 = []
+                stage_1 = []
+                initial_bubbles = rank * int(num_local_stages / 2)
+                for i in range(int(num_local_stages / 2)):
+                    temp = int(i + rank * num_local_stages / 2)
+                    stage_0.append(temp)
+                    stage_1.append(total_stages - temp - 1)
+                logical_stage_to_stages[0] = stage_0
+                logical_stage_to_stages[1] = stage_1
+                for mb_id, op, stage_id in schedule_current_rank:
+                    if mb_id >= num_microbatches:
+                        continue
+                    stages = logical_stage_to_stages[stage_id]
+                    if op == I or op == W:
+                        stages = sorted(stages, reverse=True)
+                    else:
+                        stages = sorted(stages)
+                    for physical_stage in stages:
+                        expanded_results.append(_Action(physical_stage, op, mb_id))
+                result[rank] = expanded_results
+            return result
+
+        compute_schedules = get_compute_schedule(pp_group_size, mb_size)
+        return compute_schedules
 
 
 def get_schedule_class(schedule_name: str):
@@ -2199,6 +2528,7 @@ def get_schedule_class(schedule_name: str):
         "InterleavedZeroBubble": ScheduleInterleavedZeroBubble,
         "PipelineScheduleSingle": PipelineScheduleSingle,
         "PipelineScheduleMulti": PipelineScheduleMulti,
+        "ZBVZeroBubble": ScheduleZBVZeroBubble,
     }
     lowercase_keys = {k.lower(): k for k in schedule_map.keys()}
     lowercase_schedule_name = schedule_name.lower()
