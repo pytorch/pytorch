@@ -11,6 +11,7 @@ from typing import Dict, List, Set, TYPE_CHECKING, Union, Callable, cast, Tuple,
 import math
 from torch._dispatch.python import enable_python_dispatcher
 from .virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -33,24 +34,6 @@ overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
-
-
-def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
-    """
-    Greedily schedules waits as late as possible.
-    """
-    return _schedule_for_comm(
-        snodes, raise_comms=False, sink_waits=True, reorder_for_overlap=False
-    )
-
-
-def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
-    """
-    Greedily schedules comms as early as possible.
-    """
-    return _schedule_for_comm(
-        snodes, raise_comms=True, sink_waits=False, reorder_for_overlap=False
-    )
 
 
 def reorder_compute_for_overlap(
@@ -151,19 +134,19 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
-    }
+    snode_to_op_deps: Dict[str, OrderedSet[str]] = {snode.get_name(): snode.op_deps for snode in snodes}
 
     ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+    op_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
+    name_to_snode = {snode.get_name(): snode for snode in snodes}
 
-    for snode, deps in unmet_deps.items():
-        if len(deps) == 0:
+    for snode_name, op_deps in snode_to_op_deps.items():
+        snode = name_to_snode[snode_name]
+        if len(op_deps) == 0:
             heapq.heappush(ready, Runnable(snode))
-        for dep in deps:
-            buffer_users[dep].add(snode)
+        for op_dep in op_deps:
+            op_users[op_dep].add(snode)
 
     scheduled = []
 
@@ -172,11 +155,10 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for buf_name in snode.get_buffer_names():
-            for snode in buffer_users[buf_name]:
-                unmet_deps[snode].remove(buf_name)
-                if len(unmet_deps[snode]) == 0:
-                    heapq.heappush(ready, Runnable(snode))
+        for sn in op_users[snode.get_name()]:
+            snode_to_op_deps[sn.get_name()].remove(snode.get_name())
+            if len(snode_to_op_deps[sn.get_name()]) == 0:
+                heapq.heappush(ready, Runnable(sn))
 
     def get_overlapping_candidate():
         """
@@ -218,9 +200,9 @@ def _schedule_for_comm(
         else:
             schedule(snode)
 
-    assert all(len(deps) == 0 for deps in unmet_deps.values()), (
+    assert all(len(op_deps) == 0 for op_deps in snode_to_op_deps.values()), (
         "Detected unscheduled nodes. "
-        f"Nodes with unmet dependencies: {[(snode, deps) for snode, deps in unmet_deps.items() if len(deps) > 0]}"
+        f"Nodes with unmet dependencies: {[(snode_name, op_deps) for snode_name, op_deps in op_deps.items() if len(op_deps) > 0]}"
     )
     return scheduled
 
@@ -435,7 +417,7 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_nodes, group_size, group_name, wait_nodes)
 
     ag_wait_nodes = list(ag_node_to_wait_node.values())
-    ag_and_wait_nodes = set(ag_nodes + ag_wait_nodes)
+    ag_and_wait_nodes = OrderedSet(ag_nodes + ag_wait_nodes)
     new_graph: torch.fx.Graph = torch.fx.Graph()
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -677,7 +659,7 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
     rs_wait_nodes = list(rs_node_to_wait_node.values())
     for n in rs_wait_nodes:
         assert len(n.users) == 1, f"Expect only one user for {n}, but got {n.users}"
-    rs_and_its_recursive_users = set(rs_nodes + rs_wait_nodes)
+    rs_and_its_recursive_users = OrderedSet(rs_nodes + rs_wait_nodes)
     
     bucket_id_to_bucketed_op_info = {}
     bucket_id_is_scheduled = {}
@@ -685,7 +667,7 @@ def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_b
         _, reduce_op, group_size, group_name = list(rs_node_to_wait_node.keys())[0].args
         rs_input_nodes = []
         wait_nodes = []
-        wait_node_recursive_users = set()
+        wait_node_recursive_users = OrderedSet()
         for rs_node in rs_bucket:
             assert rs_node in rs_node_to_wait_node and rs_node.args[1] == reduce_op and rs_node.args[2] == group_size and rs_node.args[3] == group_name
             rs_input_nodes.append(rs_node.args[0])
@@ -1168,7 +1150,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -1195,7 +1177,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -1266,7 +1248,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,
