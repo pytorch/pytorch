@@ -1822,10 +1822,13 @@ class Kernel(CodeGen):
 
                         # only triton backend tracks dtype currently
                         if triton_backend:
-                            output_dtype = getattr(
-                                dtype_handler,
-                                name,
-                            )(*args, **kwargs)
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
                         else:
                             # cpp backend doesnt track dtype yet
                             output_dtype = None
