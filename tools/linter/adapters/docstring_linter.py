@@ -29,6 +29,9 @@ ERROR_FMT = "Every {type} with more than {length} lines needs a docstring"
 DESCRIPTION = """`docstring_linter` reports on long functions, methods or classes
 without docstrings"""
 
+# How many top violations to report?
+REPORT_TOP_RESULTS = 3
+
 
 def _is_def(t: TokenInfo) -> bool:
     return t.type == token.NAME and t.string in ("class", "def")
@@ -38,9 +41,11 @@ class DocstringLinter(_linter.FileLinter):
     linter_name = "docstring_linter"
     description = DESCRIPTION
     is_fixer = False
+    results: dict[str, list[tuple[int, Path, str]]]
 
     def __init__(self, argv: list[str] | None = None) -> None:
         super().__init__(argv)
+        self.results = {}
 
         help = "Maximum number of lines for an undocumented class"
         self.parser.add_argument(
@@ -65,6 +70,12 @@ class DocstringLinter(_linter.FileLinter):
     @cached_property
     def max_lines(self) -> dict[str, int]:
         return {"class": self.args.max_class, "def": self.args.max_def}
+
+    def lint_all(self) -> bool:
+        success = super().lint_all()
+        if not self.args.lintrunner and self.results:
+            self._report_results()
+        return success
 
     def _lint(self, pf: _linter.PythonFile) -> Iterator[_linter.LintResult]:
         tokens = pf.tokens
@@ -116,6 +127,24 @@ class DocstringLinter(_linter.FileLinter):
             else:
                 msg = msg + f" was too short ({docstring_len} characters)"
             yield _linter.LintResult(msg, *t.start)
+            if pf.path is not None:
+                self.results.setdefault(def_name, []).append((lines, pf.path, tname))
+
+    def _report_results(self) -> None:
+        print()
+        for i, (k, v) in enumerate(sorted(self.results.items())):
+            if i:
+                print()
+            top = sorted(v, reverse=True)[:REPORT_TOP_RESULTS]
+            if len(top) == 1:
+                s = "s"
+                t = ""
+            else:
+                s = ""
+                t = f"{len(top)} "
+            print(f"Top {t}undocumented {k}s:")
+            for lines, path, tname in top:
+                print(f"    {lines} lines: {path}:{tname}")
 
 
 def indent_to_dedent(tokens: Sequence[TokenInfo]) -> dict[int, int]:
