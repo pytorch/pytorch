@@ -12,6 +12,7 @@
 #include <iostream>
 
 #ifndef _WIN32
+#include <dirent.h>
 #include <sys/stat.h>
 #else
 #include <filesystem>
@@ -192,6 +193,62 @@ bool recursive_mkdir(const std::string& dir) {
   return ret == 0;
 }
 
+bool recursive_rmdir(const std::string& path) {
+#ifdef _WIN32
+  std::error_code ec;
+  return fs::remove_all(path, ec) != static_cast<std::uintmax_t>(-1);
+#else
+  DIR* dir = opendir(path.c_str());
+  if (!dir) {
+    return false;
+  }
+
+  struct dirent* entry = nullptr;
+  struct stat statbuf {};
+  bool success = true;
+
+  // Iterate through directory entries
+  while ((entry = readdir(dir)) != nullptr) {
+    std::string name = entry->d_name;
+
+    // Skip "." and ".."
+    if (name == "." || name == "..") {
+      continue;
+    }
+
+    std::string full_path = path;
+    full_path.append("/").append(name);
+
+    // Get file status
+    if (stat(full_path.c_str(), &statbuf) != 0) {
+      success = false;
+      continue;
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+      // Recursively delete subdirectory
+      if (!recursive_rmdir(full_path)) {
+        success = false;
+      }
+    } else {
+      // Delete file
+      if (unlink(full_path.c_str()) != 0) {
+        success = false;
+      }
+    }
+  }
+
+  closedir(dir);
+
+  // Remove the directory itself
+  if (rmdir(path.c_str()) != 0) {
+    success = false;
+  }
+
+  return success;
+#endif
+}
+
 std::string compile_so(
     const std::string& cpp_filename,
     const std::string& consts_filename) {
@@ -285,7 +342,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         mz_zip_get_error_string(mz_zip_get_last_error(&zip_archive)));
   }
 
-  std::string temp_dir = create_temp_dir();
+  temp_dir_ = create_temp_dir();
   std::string so_filename = "";
   std::string cpp_filename = "";
   std::string consts_filename = "";
@@ -311,7 +368,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     // Only compile files in the specified model directory
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
-      std::string output_path_str = temp_dir;
+      std::string output_path_str = temp_dir_;
       output_path_str += k_separator;
       output_path_str += filename_str;
 
@@ -350,7 +407,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     }
   }
 
-  // Close the zip archive as we have extracted all files to the temp directory
+  // Close the zip archive as we have extracted all files to the temp
+  // directory
   if (!mz_zip_reader_end(&zip_archive)) {
     throw std::runtime_error(
         std::string("Failed to close zip archive: {}") +
@@ -385,10 +443,15 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  std::string cubin_dir = temp_dir + k_separator + model_directory;
+  std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
+}
 
-  std::remove(temp_dir.c_str());
+AOTIModelPackageLoader::~AOTIModelPackageLoader() {
+  // Clean up the temporary directory
+  if (!temp_dir_.empty()) {
+    recursive_rmdir(temp_dir_);
+  }
 }
 
 AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
