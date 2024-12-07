@@ -1477,6 +1477,28 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
+    @unittest.skipIf(
+        not config.is_fbcode(),
+        "bfloat16 atomic add is only supported in fbcode today #97016",
+    )
+    def test_atomic_add_bfloat16(self):
+        def f(x, y):
+            return torch.index_select(x, 0, y)
+
+        x = torch.randn(
+            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        y = torch.ones(713268, dtype=torch.int64, device="cuda")
+        x_ref = x.clone().detach().requires_grad_(True)
+        y_ref = y.clone().detach().requires_grad_(True)
+
+        out, (_, bw_code) = run_fw_bw_and_get_code(f, x, y)
+        f = FileCheck()
+        f.check("tl.atomic_add")
+        f.run(bw_code)
+
+        self.assertEqual(f(x_ref, y_ref), out)
+
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
         device_stats = torch.cuda.memory_stats("cuda:0")
