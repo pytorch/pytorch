@@ -663,7 +663,7 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
             if rocr_devices is not None:
                 hip_device_list = [int(dev) for dev in hip_devices.split(",")]
                 rocr_device_list = rocr_devices.split(",")
-                var = ",".join(rocr_device_list[dev] for dev in hip_device_list)
+                var = ",".join(rocr_device_list[dev] for dev in hip_device_list if dev in rocr_device_list)
             else:
                 var = hip_devices
 
