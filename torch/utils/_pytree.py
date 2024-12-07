@@ -18,6 +18,7 @@ To improve the performance we can move parts of the implementation to C++.
 import dataclasses
 import functools
 import importlib
+import importlib.metadata
 import json
 import sys
 import threading
@@ -171,7 +172,25 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
-_cxx_pytree_exists = importlib.util.find_spec("optree")  # type: ignore[attr-defined]
+try:
+    _optree_version = importlib.metadata.version("optree")  # type: ignore[attr-defined]
+except importlib.metadata.PackageNotFoundError:
+    _cxx_pytree_exists = False
+else:
+    _cxx_pytree_exists = True
+    from torch._vendor.packaging.version import Version
+
+    _cxx_pytree_available = Version(_optree_version) >= Version("0.13.0")
+    if not _cxx_pytree_available:
+        warnings.warn(
+            "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
+            "C++ pytree support is disabled. "
+            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
+            FutureWarning,
+        )
+
+    del Version
+
 _cxx_pytree_imported = False
 _cxx_pytree_pending_imports: List[Any] = []
 
@@ -224,7 +243,7 @@ def register_pytree_node(
         flatten_with_keys_fn=flatten_with_keys_fn,
     )
 
-    if not _cxx_pytree_exists:
+    if not _cxx_pytree_available:
         return
 
     if _cxx_pytree_imported:

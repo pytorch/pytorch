@@ -89,7 +89,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = python_pytree._cxx_pytree_exists
+HAS_OPTREE = python_pytree._cxx_pytree_available
 if HAS_OPTREE:
     import torch.utils._cxx_pytree as cxx_pytree
 else:
