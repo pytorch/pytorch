@@ -773,11 +773,13 @@ def _shard_tensor(
     Locally shards a full tensor based on indicated sharding arrangement, and
     returns a DTensor containing the local shard.
 
-    .. warning:: This is a private API purposed to skip the communication
-        otherwise required by `distribute_tensor`. It is only applicable to a
-        case where all ranks have the same `full_tensor`. This API will not
-        check for data equality between ranks, it is thus user's responsibility
-        to ensure the `full_tensor` is the same across ranks.
+    .. warning:: This is a private API that is subject to change. It skips the
+        communication otherwise required by `distribute_tensor`. It is only
+        applicable to cases where all ranks have the same `full_tensor`. For
+        example, in distributed inference all ranks load from the same
+        checkpoint. This API will not check for data equality between ranks, it
+        is thus user's responsibility to ensure the `full_tensor` is the same
+        across ranks.
 
     Args:
         full_tensor (torch.Tensor): the full tensor to be sharded.
