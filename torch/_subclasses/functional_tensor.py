@@ -4,7 +4,6 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
-from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -20,8 +19,6 @@ from torch.utils._python_dispatch import (
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
-
-_P = ParamSpec("_P")
 
 
 # NOTE Some special handling for tensor conversion during export is needed.
@@ -39,7 +36,7 @@ _P = ParamSpec("_P")
 # pytorch document. https://pytorch.org/docs/stable/generated/torch.Tensor.float.html
 # thus we simply force them to go through .to() call.
 def _conversion_method_template(**extra_kwargs):
-    def _(self, *args: _P.args, **kwargs: _P.kwargs):
+    def _(self, *args, **kwargs):
         return self.to(*args, **{**kwargs, **extra_kwargs})
 
     return _
@@ -260,14 +257,14 @@ class FunctionalTensor(torch.Tensor):
         else:
             return [elem.tolist() for elem in self.elem]
 
-    def to(self, *args: _P.args, **kwargs: _P.kwargs):
+    def to(self, *args, **kwargs):
         if _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL).export:
             # If copy is specified as pos arg, it's always the second one.
             if len([arg for arg in args if isinstance(arg, bool)]) <= 1:
                 return super().to(*args, **{**kwargs, "copy": True})
         return super().to(*args, **kwargs)
 
-    def cuda(self, device=None, *args: _P.args, **kwargs: _P.kwargs):
+    def cuda(self, device=None, *args, **kwargs):
         device = device or torch.cuda.current_device()
         if len(args) > 0:
             return self.to(device, *args, **kwargs)
@@ -614,7 +611,7 @@ def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMo
         torch._sync(t)
         return torch._from_functional_tensor(t.elem)
 
-    def inner(*args: _P.args, **kwargs: _P.kwargs):
+    def inner(*args, **kwargs):
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
