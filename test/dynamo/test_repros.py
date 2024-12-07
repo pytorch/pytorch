@@ -5829,7 +5829,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(aot6_sub_58, aot6_mul_170)
 
-
     @torch._dynamo.config.patch(guard_nn_modules=False)
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_inlining_cornercase(self):
