@@ -783,196 +783,123 @@ class TestFlexAttention(InductorTestCase):
         S: int = S,
         D: int = D,
     ):
-        if self.device == "cpu":
-            test_inference_only = True
-        else:
-            test_inference_only = False
         score_mod, mask_mod = score_mask_mod
 
         # First batch with original dimensions (B, H, S, D)
-        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
+        block_mask1 = create_block_mask(mask_mod, 1, 1, S, S)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
 
-        q1 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        k1 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        v1 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
+        q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-        if not test_inference_only:
-            backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
-            golden_out1.backward(backward_grad1.to(torch.float64))
-            ref_out1.backward(backward_grad1)
+
+        backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out1.backward(backward_grad1.to(torch.float64))
+        ref_out1.backward(backward_grad1)
 
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
         B = int(B * 2)
         S = int(S / 2)
-        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
+        block_mask2 = create_block_mask(mask_mod, 1, 1, S, S)
         sdpa_partial2 = create_attention(score_mod, block_mask=block_mask2)
 
-        q2 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        k2 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        v2 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
+        q2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
         q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, torch.float64)
         ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
         golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
-        if not test_inference_only:
-            backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
-            golden_out2.backward(backward_grad2.to(torch.float64))
-            ref_out2.backward(backward_grad2)
+
+        backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out2.backward(backward_grad2.to(torch.float64))
+        ref_out2.backward(backward_grad2)
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
         S = int(S / 2)
-        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S, device=self.device)
+        block_mask3 = create_block_mask(mask_mod, 1, 1, S, S)
         sdpa_partial3 = create_attention(score_mod, block_mask=block_mask3)
 
-        q3 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        k3 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
-        v3 = torch.randn(
-            (B, H, S, D),
-            dtype=dtype,
-            device=self.device,
-            requires_grad=not test_inference_only,
-        )
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
         q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
         ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
         golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
-        if not test_inference_only:
-            backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device=self.device)
-            golden_out3.backward(backward_grad3.to(torch.float64))
-            ref_out3.backward(backward_grad3)
+
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        golden_out3.backward(backward_grad3.to(torch.float64))
+        ref_out3.backward(backward_grad3)
 
         # Clear dynamo counters
         torch._dynamo.reset()
-        # Compiling with dynamic shape in the first batch.
-        compiled_sdpa = torch.compile(sdpa_partial1, dynamic=True)
-        compiled_out1 = compiled_sdpa(q1, k1, v1)
 
-        if test_inference_only:
-            self._check_out(
-                golden_out1,
-                ref_out1,
-                compiled_out1,
-                is_paged_attention=False,
-            )
-        else:
-            compiled_out1.backward(backward_grad1)
+        # First compilation with original dimensions
+        compiled_sdpa1 = torch.compile(sdpa_partial1, dynamic=True)
+        compiled_out1 = compiled_sdpa1(q1, k1, v1)
+        compiled_out1.backward(backward_grad1)
 
-            self._check_out_and_grad(
-                golden_out1,
-                ref_out1,
-                compiled_out1,
-                q1_gold,
-                q1_ref,
-                q1,
-                k1_gold,
-                k1_ref,
-                k1,
-                v1_gold,
-                v1_ref,
-                v1,
-            )
+        self._check_out_and_grad(
+            golden_out1,
+            ref_out1,
+            compiled_out1,
+            q1_gold,
+            q1_ref,
+            q1,
+            k1_gold,
+            k1_ref,
+            k1,
+            v1_gold,
+            v1_ref,
+            v1,
+        )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # Second compilation with new dimensions
         compiled_sdpa2 = torch.compile(sdpa_partial2, dynamic=True)
         compiled_out2 = compiled_sdpa2(q2, k2, v2)
-        if test_inference_only:
-            self._check_out(
-                golden_out2,
-                ref_out2,
-                compiled_out2,
-                is_paged_attention=False,
-            )
-        else:
-            compiled_out2.backward(backward_grad2)
+        compiled_out2.backward(backward_grad2)
 
-            self._check_out_and_grad(
-                golden_out2,
-                ref_out2,
-                compiled_out2,
-                q2_gold,
-                q2_ref,
-                q2,
-                k2_gold,
-                k2_ref,
-                k2,
-                v2_gold,
-                v2_ref,
-                v2,
-            )
+        self._check_out_and_grad(
+            golden_out2,
+            ref_out2,
+            compiled_out2,
+            q2_gold,
+            q2_ref,
+            q2,
+            k2_gold,
+            k2_ref,
+            k2,
+            v2_gold,
+            v2_ref,
+            v2,
+        )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
         # Third compilation with new dimensions
         compiled_sdpa3 = torch.compile(sdpa_partial3, dynamic=True)
         compiled_out3 = compiled_sdpa3(q3, k3, v3)
-        if test_inference_only:
-            self._check_out(
-                golden_out3,
-                ref_out3,
-                compiled_out3,
-                is_paged_attention=False,
-            )
-        else:
-            compiled_out3.backward(backward_grad3)
+        compiled_out3.backward(backward_grad3)
 
-            self._check_out_and_grad(
-                golden_out3,
-                ref_out3,
-                compiled_out3,
-                q3_gold,
-                q3_ref,
-                q3,
-                k3_gold,
-                k3_ref,
-                k3,
-                v3_gold,
-                v3_ref,
-                v3,
-            )
+        self._check_out_and_grad(
+            golden_out3,
+            ref_out3,
+            compiled_out3,
+            q3_gold,
+            q3_ref,
+            q3,
+            k3_gold,
+            k3_ref,
+            k3,
+            v3_gold,
+            v3_ref,
+            v3,
+        )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
     def run_automatic_dynamic_test(
@@ -1138,6 +1065,7 @@ class TestFlexAttention(InductorTestCase):
         )
         self.run_test_with_call(attention, dtype, B, H, 64, D, B, H, 64, D)
 
+    @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
     def test_builtin_score_mods_dynamic(
