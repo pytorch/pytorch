@@ -356,8 +356,8 @@ if torch._C._has_mkldnn:
         ops.sub: "sub",
     }
 
-    def _is_valid_binary(match, computation_op, binary_op):
-        binary_nodes = filter_nodes(match.nodes, binary_op)
+    def _is_valid_binary(match, fn):
+        binary_nodes = filter_nodes(match.nodes, fn)
         if len(binary_nodes) < 1:
             return False
 
@@ -381,50 +381,13 @@ if torch._C._has_mkldnn:
         ):
             return False
 
-        def _check_input_sizes(n, computation_op):
-            # Check if the tensor shape of the 'other' node is the same as or
-            # can be broadcasted to the tensor shape of the computation node.
-            computation_node = (
-                n.args[0] if n.args[1] is match.kwargs["other"] else n.args[1]
-            )
-            assert computation_node.target == computation_op
-            computation_node_size = get_meta_value(computation_node).size()
-            if computation_op is mkldnn._linear_pointwise.default:
-                if len(computation_node_size) >= 2:
-                    broadcast_sizes = [
-                        torch.Size(
-                            [1 for _ in range(len(computation_node_size) - 1)]
-                            + [computation_node_size[-1]]
-                        ),
-                        torch.Size([1 for _ in range(len(computation_node_size))]),
-                    ]
-                else:
-                    broadcast_sizes = [
-                        torch.Size([1 for _ in range(len(computation_node_size))]),
-                    ]
-            else:
-                assert len(computation_node_size) > 2
-                broadcast_sizes = [
-                    torch.Size(
-                        [computation_node_size[0], computation_node_size[1]]
-                        + [1 for _ in range(len(computation_node_size) - 2)]
-                    ),
-                    torch.Size(
-                        [1, computation_node_size[1]]
-                        + [1 for _ in range(len(computation_node_size) - 2)]
-                    ),
-                    torch.Size([1 for _ in range(len(computation_node_size))]),
-                ]
-            return (
-                get_meta_value(match.kwargs["other"]).size()
-                in [
-                    computation_node_size,
-                ]
-                + broadcast_sizes
-            )
-
         if any(
-            not _check_input_sizes(n, computation_op)
+            get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
+            or not all(
+                get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
+                for i in range(get_meta_value(n.args[0]).dim())
+            )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -439,7 +402,7 @@ if torch._C._has_mkldnn:
         def fn(match):
             if not _is_single_computation_op(computation_op)(match):
                 return False
-            if not _is_valid_binary(match, computation_op, binary_op):
+            if not _is_valid_binary(match, binary_op):
                 return False
             return True
 
@@ -562,7 +525,7 @@ if torch._C._has_mkldnn:
         else:
             return not (
                 isinstance(_other.data, ir.ReinterpretView)
-                or len(_other.data.get_inputs_that_alias_output()) > 0
+                or len(_other.get_inputs_that_alias_output()) > 0
             )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
