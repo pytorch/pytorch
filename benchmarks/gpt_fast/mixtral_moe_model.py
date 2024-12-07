@@ -18,7 +18,7 @@ def find_multiple(n: int, k: int) -> int:
 class ModelArgs:
     block_size: int = 2048
     vocab_size: int = 32000
-    n_layer: int = 8
+    n_layer: int = 32
     n_head: int = 32
     dim: int = 4096
     intermediate_size: int = None
