@@ -36,20 +36,18 @@ def _ge(lhs: Any, rhs: Any) -> bool:
         raise ValueError("inputs unsupported")
 
 
-def _get_tensor_id(t) -> int:
-    ret = None
+def _get_tensor_id(t: torch.Tensor) -> int:
+    ret: List[Optional[int]] = [None]
 
-    def func(t):
-        nonlocal ret
-
+    def func(t: torch.Tensor) -> None:
         if try_get_int(t) is None:
-            ret = register_tensor(t)
+            ret[0] = register_tensor(t)
         else:
-            ret = try_get_int(t)
+            ret[0] = try_get_int(t)
 
     apply_func(t, func, only_source_fields=True)
-    assert ret is not None
-    return ret
+    assert ret[0] is not None
+    return ret[0]
 
 
 class NestedIntNode:
@@ -138,7 +136,8 @@ class NestedIntNode:
         assert type(num) is int
         return ConstantIntNode(num)
 
-def get_metadata(x: torch.SymInt):
+
+def get_metadata(x: torch.SymInt) -> torch.Tensor:
     if isinstance(x.node, NestedIntNode):
         return x.node.nested_int_cache()
     else:

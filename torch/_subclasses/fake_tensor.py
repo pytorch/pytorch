@@ -74,6 +74,8 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.nested._internal.cached_tensor import CachedTensor
+
 
 log = logging.getLogger(__name__)
 
@@ -728,7 +730,6 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
-        self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -903,7 +904,7 @@ class FakeTensor(Tensor):
     def try_get_nested_int_id(self) -> Optional[int]:
         return self.nested_int_id
 
-    def register_nested_int_id(self, nid: Optional[int] = None):
+    def register_nested_int_id(self, nid: Optional[int] = None) -> int:
         if nid is None:
             self.nested_int_id = self.fake_mode.get_next_nested_int_id()
         else:
@@ -2519,7 +2520,7 @@ class FakeTensorMode(TorchDispatchMode):
     def get_nested_int(
         self,
         *,
-        cache,
+        cache: CachedTensor,
         coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
         # The cache holds a weakref to the nested int
@@ -2535,7 +2536,7 @@ class FakeTensorMode(TorchDispatchMode):
         assert isinstance(ret, torch.SymInt)
         return ret * coeff
 
-    def create_symbolic_nested_int(self, *, cache) -> torch.SymInt:
+    def create_symbolic_nested_int(self, *, cache: CachedTensor) -> torch.SymInt:
         # Precondition: The cache, upon creation has already registered tensors to have
         # id using get_next_nested_id.
         # See Note: [Creating symbolic nested int]
@@ -2548,7 +2549,7 @@ class FakeTensorMode(TorchDispatchMode):
         src = _try_get_source(cache)
         if src is None:
             src = torch._dynamo.source.EphemeralSource(
-                f"intermediate_offsets_or_lengths"
+                "intermediate_offsets_or_lengths"
             )
         else:
             src = torch._dynamo.source.NestedIntSource(src)

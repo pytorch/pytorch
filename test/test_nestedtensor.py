@@ -19,12 +19,12 @@ import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
+    _construct_nested_tensor_compat,
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
     NestedTensor,
     ViewNestedFromBuffer,
-    _construct_nested_tensor_compat,
 )
 from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
@@ -1760,10 +1760,22 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         # edge case: invalid dropout
         error_msg = "dropout probability has to be between 0 and 1"
         # Dynamo raises RuntimeError instead of ValueError
-        self.assertRaisesRegex((RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(-0.1))
-        self.assertRaisesRegex((RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(1.1))
-        self.assertRaisesRegex((RuntimeError, ValueError), error_msg, lambda: torch.nn.functional.dropout(nt, -0.1))
-        self.assertRaisesRegex((RuntimeError, ValueError), error_msg, lambda: torch.nn.functional.dropout(nt, 1.1))
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(-0.1)
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(1.1)
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError),
+            error_msg,
+            lambda: torch.nn.functional.dropout(nt, -0.1),
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError),
+            error_msg,
+            lambda: torch.nn.functional.dropout(nt, 1.1),
+        )
         # edge case: no dropout
         dropouter = torch.nn.Dropout(0.0)
         y0 = dropouter(nt)
@@ -8567,8 +8579,8 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
-        cache = torch.tensor(1.)
-        cache2 = torch.tensor(1.)
+        cache = torch.tensor(1.0)
+        cache2 = torch.tensor(1.0)
 
         a = torch.SymInt(NestedIntNode(cache, 1))
         b = torch.SymInt(NestedIntNode(cache, 1))
@@ -8644,7 +8656,7 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a > 1)
 
     def test_with_factor(self):
-        cache = torch.tensor(1.)
+        cache = torch.tensor(1.0)
 
         a = torch.SymInt(NestedIntNode(cache, 5))
         b = torch.SymInt(NestedIntNode(cache, 10))
@@ -8673,22 +8685,18 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         b = torch.tensor([4, 5, 6], dtype=torch.float32)
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b, "c": c}
-        source_fields = ("a", "b")
-        extra_fields = ("c",)
-        # Create CachedTensor without target_field
-        cached_tensor = CachedTensor(metadata, source_fields, extra_fields)
+        # Create CachedTensor with source_fields="a"
+        cached_tensor = CachedTensor(metadata, source_field="a")
         # Test that cached_tensor is created correctly
         self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
         self.assertEqual(cached_tensor.shape, a.shape)
         # Test that cached_tensor behaves like 'a'
         self.assertEqual(cached_tensor + 1, a + 1)
-        # Test that accessing extra_fields works
+        # Test that accessing other fields works
         self.assertIs(cached_tensor.c, c)
-        # Create CachedTensor with target_field='b'
-        cached_tensor_b = CachedTensor(
-            metadata, source_fields, extra_fields, target_field="b"
-        )
+        # Create CachedTensor with source_field='b'
+        cached_tensor_b = CachedTensor(metadata, source_field="b")
         self.assertEqual(cached_tensor_b.shape, b.shape)
         self.assertEqual(cached_tensor_b + 1, b + 1)
 
@@ -8710,9 +8718,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             b = torch.tensor([4, 5, 6], dtype=torch.float32)
             c = torch.tensor([7, 8, 9], dtype=torch.float32)
             metadata = {"a": a, "b": b, "c": c}
-            source_fields = ("a", "b")
-            extra_fields = ("c",)
-            cached_tensor = CachedTensor(metadata, source_fields, extra_fields)
+            cached_tensor = CachedTensor(metadata, source_field="a")
 
             # Before registration, clone unwraps
             cloned_cached_tensor = cached_tensor.clone()
@@ -8722,21 +8728,18 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             # a new CachedTensor.
             @register_cached_tensor_func(torch.ops.aten.clone.default)
             def cached_tensor_clone(op, inp, *args, **kwargs):
-                cloned_metadata = inp.metadata.copy()
-                for key in inp.all_fields:
-                    if cloned_metadata.get(key) is not None:
-                        cloned_metadata[key] = cloned_metadata[key].clone()
+                cloned_metadata = {}
+                for k, v in inp.metadata.items():
+                    cloned_metadata[k] = v.clone()
                 return CachedTensor(
                     cloned_metadata,
-                    inp.source_fields,
-                    inp.extra_fields,
-                    target_field=inp.metadata.get("target_field"),
+                    inp.source_field,
                 )
 
             cloned_cached_tensor = cached_tensor.clone()
             self.assertIsInstance(cloned_cached_tensor, CachedTensor)
 
-            for key in cached_tensor.all_fields:
+            for key in cached_tensor.metadata.keys():
                 assert isinstance(cloned_cached_tensor, CachedTensor)
                 self.assertEqual(
                     cloned_cached_tensor.metadata[key], cached_tensor.metadata[key]
@@ -8755,10 +8758,8 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         b = torch.tensor([4, 5, 6], dtype=torch.float32)
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b, "c": c}
-        source_fields = ("a", "b")
-        extra_fields = ("c",)
 
-        cached_tensor = CachedTensor(metadata, source_fields, extra_fields)
+        cached_tensor = CachedTensor(metadata, source_field="a")
 
         @torch.compile
         def fn(x):

@@ -45,7 +45,6 @@ from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
-from typing_extensions import TypeAlias, TypeGuard
 
 
 if TYPE_CHECKING:
@@ -229,8 +228,10 @@ class MetaTensorDescriber:
             self.next_storage_id = MetaStorageId(self.next_storage_id + 1)
         return self.lookup_storage[s]
 
-    def describe_custom_size_strides(self, t: torch.Tensor):
-        def process(x):
+    def describe_custom_size_strides(
+        self, t: torch.Tensor
+    ) -> MetaCustomSizeStridesDesc:
+        def process(x: Any) -> Optional[MetaNestedIntDesc]:
             from torch.nested._internal.nested_int import NestedIntNode
 
             if isinstance(x, torch.SymInt) and isinstance(x.node, NestedIntNode):
@@ -274,7 +275,7 @@ class MetaTensorDescriber:
         recurse: bool = True,
         trace: bool = False,
         subclass_inner_attr: Optional[str] = None,
-    ):
+    ) -> MetaTensorDesc:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -369,10 +370,7 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.tensor_registry import (
-            _global_tensor_registry,
-            try_get_int,
-        )
+        from torch.nested._internal.tensor_registry import try_get_int
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -403,7 +401,9 @@ class MetaTensorDescriber:
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             nested_int=try_get_int(t),
-            custom_size_strides=self.describe_custom_size_strides(t) if is_nested else None,
+            custom_size_strides=self.describe_custom_size_strides(t)
+            if is_nested
+            else None,
             subclass_inner_attr=subclass_inner_attr,
             is_functional=is_functional,
             layout=layout,
@@ -489,7 +489,7 @@ class MetaTensorDescriber:
 
 @dataclass(frozen=True)
 class MetaNestedIntDesc:
-    cache: MetaNestedCacheDesc
+    cache: MetaTensorDesc
 
 
 @dataclass(frozen=True)
@@ -550,7 +550,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_view: bool = False
     is_nested: bool = False
     nested_int: Optional[int] = None
-    custom_size_strides: MetaCustomSizeStridesDesc = None
+    custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None
     subclass_inner_attr: Optional[str] = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
@@ -820,8 +820,8 @@ class MetaConverter(Generic[_TensorT]):
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
-        def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
-            inner_callback = functools.partial(callback, device=t.device)
+        def metafy_fn(t: MetaTensorDesc, src: Source) -> torch.Tensor:
+            inner_callback = functools.partial(callback, device=t.device)  # type: ignore[call-arg]
 
             if (
                 inner_contexts := getattr(symbolic_context, "inner_contexts", None)

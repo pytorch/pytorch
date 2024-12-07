@@ -59,7 +59,11 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
-from torch._subclasses.meta_utils import is_sparse_any
+from torch._subclasses.meta_utils import (
+    is_sparse_any,
+    MetaCustomSizeStridesDesc,
+    MetaNestedIntDesc,
+)
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
 from torch.fx.experimental.recording import (
@@ -3117,7 +3121,7 @@ class ShapeEnv:
         self.size_like: Set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, sympy.Symbol] = {}
+        self.val_to_var: Dict[Union[int, torch.SymInt], sympy.Symbol] = {}
         if specialize_zero_one:
             self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
@@ -3809,7 +3813,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
-        metafy_fn = None,
+        metafy_fn: Optional[Callable] = None,
         custom_size_strides: Optional[MetaCustomSizeStridesDesc] = None,
     ) -> Tuple[
         Tuple[Union[int, SymInt], ...],
@@ -3925,8 +3929,16 @@ class ShapeEnv:
                 )
         assert all(x is not None for x in stride)
 
-        custom_size_strides_size = [None] * len(size) if custom_size_strides is None else custom_size_strides.size
-        custom_size_strides_stride = [None] * len(stride) if custom_size_strides is None else custom_size_strides.stride
+        custom_size_strides_size = (
+            [None] * len(size)
+            if custom_size_strides is None
+            else custom_size_strides.size
+        )
+        custom_size_strides_stride = (
+            [None] * len(stride)
+            if custom_size_strides is None
+            else custom_size_strides.stride
+        )
 
         sym_sizes = [
             self.create_symintnode(
@@ -3936,10 +3948,14 @@ class ShapeEnv:
                 metafy_fn=metafy_fn,
                 nested_int_desc=opt_nested_int,
             )
-            for i, (sym, hint, opt_nested_int) in enumerate(zip(size, ex_size, custom_size_strides_size))
+            for i, (sym, hint, opt_nested_int) in enumerate(
+                zip(size, ex_size, custom_size_strides_size)
+            )
         ]
         sym_stride = []
-        for i, (stride_expr, opt_nested_int) in enumerate(zip(stride, custom_size_strides_stride)):
+        for i, (stride_expr, opt_nested_int) in enumerate(
+            zip(stride, custom_size_strides_stride)
+        ):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
@@ -4000,10 +4016,12 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             out = int(sym)
-        elif is_nested_int(hint) and nested_int_desc is not None:
+        elif hint is not None and is_nested_int(hint) and nested_int_desc is not None:
             from torch._dynamo.source import SymNodePropertySource
             from torch.nested._internal.nested_int import NestedIntNode
 
+            assert metafy_fn is not None
+            assert source is not None
             cache = metafy_fn(
                 nested_int_desc.cache,
                 SymNodePropertySource(source, "nested_int_cache"),
@@ -4012,7 +4030,9 @@ class ShapeEnv:
 
             out = SymInt(
                 SymNode(
-                    sym, self, int,
+                    sym,
+                    self,
+                    int,
                     SymInt(NestedIntNode(cache, coeff=coeff)),
                     fx_node=fx_node,
                 )
@@ -4913,13 +4933,14 @@ class ShapeEnv:
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
                         curr_t.storage_offset(),
                     )
-                    from torch.nested._internal.nested_int import _get_tensor_id
-                    from torch.nested._internal.nested_tensor import NestedTensor
 
-                    if isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor) and curr_t.try_get_nested_int_id() is not None:
+                    if (
+                        isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor)
+                        and curr_t.try_get_nested_int_id() is not None
+                    ):
                         track_symint(
                             torch._dynamo.source.NestedIntSource(src),
-                            torch._nested_int_from_offsets(curr_t)
+                            torch._nested_int_from_offsets(curr_t),
                         )
 
         # 1. Every input must equal the final simplified symbolic expression

@@ -595,9 +595,8 @@ def to_dtype(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
-    from torch.nested._internal.wrappers import make_cached_tensor, make_offload_tensor
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
-    from torch.nested._internal.nested_tensor import source_fields, extra_fields
+    from torch.nested._internal.wrappers import make_cached_tensor_for_nested
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -608,47 +607,29 @@ def to_copy_default(func, *args, **kwargs):
     new_values = func(inp._values, **new_kwargs)
     new_device = new_values.device
 
-    # Only update the source fields, ignore {max,min}_seqlen, and inv_indices, etc.
+    # NB: Device conversion for NT metadata
+    # - Performs moves synchronously
+    # - Only move offsets/lengths ignore {max,min}_seqlen, and inv_indices, etc.
+    # - Keep host copy of offsets/lengths cached when .to(device)
+    #   but no longer keep alive device copy when .to(cpu)
+    # - Registers new offsets/lengths to the same int in the tensor registry
     new_raw_metadata = inp._metadata.metadata.copy()
     for k in ("lengths", "offsets"):
+        device_tensor = new_raw_metadata.get(f"_device_{k}")
+        host_tensor = new_raw_metadata.get(f"_host_{k}")
         if new_values.is_cpu:
-            if (
-                new_raw_metadata.get(f"_device_{k}") is not None
-                and new_raw_metadata.get(f"_host_{k}") is None
-            ):
-                new_raw_metadata[f"_host_{k}"] = new_raw_metadata[f"_device_{k}"].to(
-                    "cpu"
-                )
-                # Tensor registration happens on the inner tensors of the OffloadTensors
-                source_tensor = (
-                    new_raw_metadata[f"_device_{k}"].host_tensor
-                    or new_raw_metadata[f"_device_{k}"].device_tensor
-                )
-                register_tensor(
-                    new_raw_metadata[f"_host_{k}"], try_get_int(source_tensor)
-                )
+            if device_tensor is not None and host_tensor is None:
+                host_tensor = device_tensor.to(new_device)
+                register_tensor(host_tensor, try_get_int(device_tensor))
+                new_raw_metadata[f"_host_{k}"] = host_tensor
                 del new_raw_metadata[f"_device_{k}"]
         else:
-            if (
-                new_raw_metadata.get(f"_host_{k}") is not None
-                and new_raw_metadata.get(f"_device_{k}") is None
-            ):
-                device_tensor = new_raw_metadata[f"_host_{k}"].to(new_device)
-                register_tensor(
-                    device_tensor,
-                    try_get_int(new_raw_metadata[f"_host_{k}"]),
-                )
-                new_raw_metadata[f"_device_{k}"] = make_offload_tensor(
-                    device_tensor,
-                    None,
-                    None,
-                )
+            if host_tensor is not None and device_tensor is None:
+                device_tensor = host_tensor.to(new_device)
+                register_tensor(device_tensor, try_get_int(host_tensor))
+                new_raw_metadata[f"_device_{k}"] = device_tensor
 
-    new_metadata = make_cached_tensor(
-        metadata=new_raw_metadata,
-        source_fields=source_fields,
-        extra_fields=extra_fields,
-    )
+    new_metadata = make_cached_tensor_for_nested(new_raw_metadata)
 
     new_non_contig_offsets = None
     if inp._non_contig_offsets is not None:
@@ -953,7 +934,9 @@ def chunk_default(func, *args, **kwargs):
         # Note that the actual number of chunks returned is not necessarily the same as
         # the input number; it can be counter-intuitive, but it matches dense behavior.
         return [
-            _construct_nested_tensor_compat(values=chunk_values[i], **(nested_kwargs[i]))
+            _construct_nested_tensor_compat(
+                values=chunk_values[i], **(nested_kwargs[i])
+            )
             for i in range(0, len(chunk_values))
         ]
     else:
@@ -979,7 +962,7 @@ def unbind_int(func, *args, **kwargs):
     non_contig_offsets = inp._non_contig_offsets
     offsets = inp.offsets()
     ragged_idx = inp._ragged_idx
-    lengths = inp.lengths()
+    lengths: Optional[torch.Tensor] = inp.lengths()
 
     if non_contig_offsets is None:
         lengths = lengths if lengths is not None else offsets.diff()
@@ -997,7 +980,7 @@ def unbind_int(func, *args, **kwargs):
             )
     return [
         torch.narrow(
-            values, dim=(ragged_idx - 1), start=non_contig_offsets[i], length=lengths[i]
+            values, dim=(ragged_idx - 1), start=non_contig_offsets[i], length=lengths[i]  # type: ignore[call-overload]
         )
         for i in range(lengths.shape[0])
     ]
@@ -1782,10 +1765,9 @@ def index_put_(func, *args, **kwargs):
     # We can run on the underlying values directly
 
     # Validate indices
-    if inp.lengths() is None:
+    lengths = inp.lengths()
+    if lengths is None:
         lengths = inp.offsets().diff()
-    else:
-        lengths = inp.lengths()
     torch._assert_async(
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
@@ -2321,13 +2303,16 @@ def _nested_select_backward_default(func, *args, **kwargs):
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
 def record_stream_default(func, *args, **kwargs):
     from torch.nested._internal.utils import apply_func
+
     inp = args[0]
     stream = args[1]
+
     # ensure all components live until stream computation completes
-    def apply(x):
+    def _apply_fn(x: torch.Tensor) -> None:
         if not x.is_cpu:
             x.record_stream(stream)
-    apply_func(lambda x: apply(x), inp._metadata, only_source_fields=False)
+
+    apply_func(inp._metadata, _apply_fn, only_source_fields=False)
     inp._non_contig_offsets.record_stream(stream)
     inp._values.record_stream(stream)
 
