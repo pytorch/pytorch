@@ -32,10 +32,12 @@ if _TYPE_CHECKING:
     from types import ModuleType
 
     import torch.utils._cxx_pytree as cxx
-    from torch.utils._cxx_pytree import (
+    from torch.utils._cxx_pytree import (  # noqa: TCH004
+        _broadcast_to_and_flatten as _broadcast_to_and_flatten,
         FlattenFunc as FlattenFunc,
         FlattenWithKeysFunc as FlattenWithKeysFunc,
         FromDumpableContextFn as FromDumpableContextFunc,
+        PyTreeSpec as PyTreeSpec,
         ToDumpableContextFn as ToDumpableContextFunc,
         tree_all as tree_all,
         tree_all_only as tree_all_only,
@@ -56,6 +58,7 @@ if _TYPE_CHECKING:
 
 
 __all__ = [
+    "PyTreeSpec",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
@@ -195,5 +198,22 @@ tree_any_only = _reexport(implementation.module.tree_any_only)
 treespec_pprint = _reexport(implementation.module.treespec_pprint)
 
 
+# Used in vmap
+_broadcast_to_and_flatten = _reexport(implementation.module._broadcast_to_and_flatten)
+
+
 del _reexport
 del PyTreeImplementation
+
+
+# Use the __getattr__ function allowing us to change the underlying `implementation` at runtime.
+def __getattr__(name: str) -> _Any:
+    name = {"PyTreeSpec": "TreeSpec"}.get(name, name)
+    try:
+        return getattr(implementation.module, name)
+    except AttributeError as ex:
+        raise AttributeError(
+            f"module {__name__!r} has no attribute {name!r}: "
+            f"no attribute {name!r} in "
+            f"{implementation.name} implementation: {implementation.module.__name__!r}"
+        ) from ex

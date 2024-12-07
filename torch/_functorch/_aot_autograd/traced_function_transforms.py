@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import torch
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
