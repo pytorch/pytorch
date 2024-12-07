@@ -1441,7 +1441,8 @@ void ProcessGroupNCCL::shutdown() {
   // timeout is reach, this will throw an exception.
   for (auto& it : devNCCLCommMap_) {
     auto& ncclComm = it.second;
-    ncclComm->waitReady();
+    // Use long interval to avoid acquiring CPU too frequently
+    ncclComm->waitReady(true);
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
