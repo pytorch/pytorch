@@ -6,6 +6,7 @@ from torch import Tensor
 
 from . import _lazy_call, _lazy_init, current_device, device_count
 
+rng_supported_mesh = True
 
 def get_rng_state(device: Union[int, str, torch.device] = "xpu") -> Tensor:
     r"""Return the random number generator state of the specified GPU as a ByteTensor.

@@ -14,6 +14,7 @@ from torch import Tensor
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
+rng_supported_mesh = True
 
 # local helper function (not public or exported)
 def _get_default_mps_generator() -> torch._C.Generator:
