@@ -117,10 +117,12 @@ if TEST_ON_CUDA:
     test_dtypes_fast = [torch.float16]
 else:
     test_device = "cpu"
-    from torch._inductor.cpp_builder import is_clang
-
-    # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
-    LONG_COMPILATION_ON_CPU = is_clang()
+    torch_config_string = torch.__config__.show()
+    LONG_COMPILATION_ON_CPU = False
+    if "CLANG" in torch_config_string.upper():
+        # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
+        # TODO: check reason of long compile time
+        LONG_COMPILATION_ON_CPU = True
     test_dtypes = (
         [torch.float32, torch.bfloat16]
         if torch.ops.mkldnn._is_mkldnn_bf16_supported()
