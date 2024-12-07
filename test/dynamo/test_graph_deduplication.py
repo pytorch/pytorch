@@ -432,6 +432,158 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_input_mutation(self):
+        def inner_fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        def inner_fn2(x, y):
+            x0 = x + 1
+            y0 = y + 1
+            x.add_(x0)
+            y.add_(y0)
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            x0 = torch.sin(x)
+            y0 = torch.cos(y)
+            # o0 = inner_fn(x0, y0)
+            # o1 = inner_fn(x0, o0)
+            o2 = inner_fn2(x0, y)
+            o3 = inner_fn2(x0.clone(), y.clone())
+            return o2 + o3
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        ref_result = fn(x, y)
+        result, graphs, fw_graphs = self.run_and_return_graphs(fn, x_clone, y_clone)
+
+        torch.allclose(ref_result, result)
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertExpectedInline(
+            graph_str(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
+        sin: "f32[10, 10]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+
+        add: "f32[10, 10]" = torch.ops.aten.add.Tensor(sin, 1)
+
+        add_1: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+
+        add_2: "f32[10, 10]" = torch.ops.aten.add.Tensor(sin, add);  sin = add = None
+
+        add_3: "f32[10, 20]" = torch.ops.aten.add.Tensor(arg1_1, add_1);  add_1 = None
+
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
+'subgraph_0', (add_3, add_2));  repeated_subgraph0 = None
+        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        clone: "f32[10, 10]" = torch.ops.aten.clone.default(add_2);  add_2 = None
+        clone_1: "f32[10, 20]" = torch.ops.aten.clone.default(add_3)
+
+        add_4: "f32[10, 10]" = torch.ops.aten.add.Tensor(clone, 1)
+
+        add_5: "f32[10, 20]" = torch.ops.aten.add.Tensor(clone_1, 1)
+
+        add_6: "f32[10, 10]" = torch.ops.aten.add.Tensor(clone, add_4);  clone = add_4 = None
+
+        add_7: "f32[10, 20]" = torch.ops.aten.add.Tensor(clone_1, add_5);  clone_1 = add_5 = None
+
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
+'subgraph_0', (add_7, add_6));  repeated_subgraph0_1 = add_7 = add_6 = None
+        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
+        add_8: "f32[]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+
+        copy_: "f32[10, 20]" = torch.ops.aten.copy_.default(arg1_1, add_3);  arg1_1 = add_3 = copy_ = None
+        return (add_8,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[10, 20]", arg1_1: "f32[10, 10]"):
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+            sum_2: "f32[]" = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+            add: "f32[]" = torch.ops.aten.add.Tensor(sum_2, sum_1);  sum_2 = sum_1 = None
+            return (add,)
+""",
+        )
+
+    def test_input_aliasing(self):
+        def inner_fn(x, y):
+            x0 = x.view(x.size())
+            return x0.view(x.size())
+
+        def inner_fn2(x, y):
+            x = x * 2
+            y = y * 2
+            return x.sum() + y.sum()
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = inner_fn(x, y)
+            o2 = inner_fn2(x, y)
+            o3 = inner_fn2(x, y)
+            return o0 + o1 + o2.sum() + o3.sum()
+
+        x = torch.rand(10, 10, requires_grad=False)
+        y = torch.rand(10, 20, requires_grad=False)
+        x_clone = x.clone()
+        y_clone = y.clone()
+
+        ref_result = fn(x, y)
+        result, graphs, fw_graphs = self.run_and_return_graphs(fn, x_clone, y_clone)
+
+        torch.allclose(ref_result, result)
+        self.assertEqual(len(graphs), 1)
+        self.assertEqual(len(fw_graphs), 1)
+        self.assertExpectedInline(
+            graph_str(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[10, 10]", arg1_1: "f32[10, 20]"):
+        view: "f32[10, 10]" = torch.ops.aten.view.default(arg0_1, [10, 10])
+
+        view_1: "f32[10, 10]" = torch.ops.aten.view.default(view, [10, 10]);  view = None
+
+        view_2: "f32[10, 10]" = torch.ops.aten.view.default(arg0_1, [10, 10])
+
+        view_3: "f32[10, 10]" = torch.ops.aten.view.default(view_2, [10, 10]);  view_2 = None
+
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, \
+'subgraph_0', (arg1_1, arg0_1));  repeated_subgraph0 = None
+        getitem: "f32[]" = invoke_subgraph[0];  invoke_subgraph = None
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, \
+'subgraph_0', (arg1_1, arg0_1));  repeated_subgraph0_1 = arg1_1 = arg0_1 = None
+        getitem_1: "f32[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+
+        add: "f32[10, 10]" = torch.ops.aten.add.Tensor(view_1, view_3);  view_1 = view_3 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
+        add_1: "f32[10, 10]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+        add_2: "f32[10, 10]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
+        return (add_2,)
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[10, 20]", arg1_1: "f32[10, 10]"):
+            mul: "f32[10, 20]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            mul_1: "f32[10, 10]" = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(mul);  mul = None
+            sum_2: "f32[]" = torch.ops.aten.sum.default(mul_1);  mul_1 = None
+            add: "f32[]" = torch.ops.aten.add.Tensor(sum_2, sum_1);  sum_2 = sum_1 = None
+            return (add,)
+""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
