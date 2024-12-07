@@ -2,9 +2,40 @@
 from numbers import Number
 from typing import Generator, List, Optional, overload, Sequence, Tuple, Union
 
-from torch import Tensor
-from torch.types import _bool, _int, _float, _size, _complex, SymInt
+from torch import memory_format, Tensor
+from torch.types import _bool, _complex, _device, _dtype, _float, _int, _size, SymInt
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp
 
 ${stubs}
+
+# Manual additions
+# Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
+def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
+
+# Defined at tools/autograd/templates/python_nn_functions.cpp
+@overload
+def _parse_to(
+    device: _device,
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    tensor: Tensor,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
