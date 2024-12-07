@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import cast, Sequence, Tuple
+from typing import Any, cast, Dict, Sequence, Tuple
 
 import sympy
 
@@ -216,6 +216,19 @@ mixed_mm_kernel_configs = (
     else mm_kernel_configs
 )
 
+persistent_mm_kernel_configs = [
+    {"config": (128, 128, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 4, 8), "cond": True},
+    {"config": (128, 128, 128, 4, 4), "cond": True},
+    {"config": (128, 128, 128, 3, 4), "cond": True},
+    {"config": (128, 128, 128, 5, 4), "cond": True},
+    {"config": (128, 128, 128, 5, 8), "cond": True},
+    {"config": (128, 128, 128, 6, 8), "cond": True},
+    {"config": (128, 128, 64, 4, 8), "cond": True},
+]
+
+
 scaled_mm_kernel_configs = [
     {"config": (128, 256, 32, 3, 8), "cond": True},
     {"config": (256, 128, 32, 3, 8), "cond": True},
@@ -344,6 +357,12 @@ scaled_mm_platform_configs = tuple(
     if config["cond"]
 )
 
+persistent_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in persistent_mm_kernel_configs
+    if config["cond"]
+)
+
 # On ROCm convert num_stages to improve performance
 if torch.version.hip:
     mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
@@ -377,12 +396,25 @@ scaled_mm_configs = functools.partial(
     configs=scaled_mm_platform_configs,
 )
 
+persistent_mm_configs = functools.partial(
+    filtered_configs, configs=persistent_mm_platform_configs
+)
+
 
 def mm_grid(m, n, meta):
     """
     The CUDA grid size for matmul triton templates.
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
+
+
+def persistent_grid(M: int, N: int, meta: Dict[str, Any]):
+    """Defines the grid for persistent kernels."""
+    return (
+        min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
+        1,
+        1,
+    )
 
 
 def acc_type(dtype):
