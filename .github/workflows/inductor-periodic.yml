@@ -104,6 +104,8 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
+      # disable monitor in smoke perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-periodic-dynamo-benchmarks-build:
