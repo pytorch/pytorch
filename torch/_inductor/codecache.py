@@ -1727,10 +1727,12 @@ class AotCodeCompiler:
                         pos += rc
             return consts_o
 
-        from filelock import FileLock
+        from torch.utils.filelock import FileLock
 
         lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        lock = FileLock(
+            os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT
+        )
         with lock:
             if serialized_extern_kernel_nodes:
                 extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
@@ -2148,7 +2150,7 @@ class CppCodeCache:
         key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils.filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
@@ -2213,7 +2215,7 @@ def _worker_compile_cpp(
     fb_input_path: str,
     fb_output_path: str,
 ) -> None:
-    from filelock import FileLock
+    from torch.utils.filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         binary_path = (
@@ -2788,10 +2790,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         afile = str(dirpath / "standalone_halide_runtime.a")
         sofile = str(dirpath / libname)
         if not os.path.exists(donefile):
-            import filelock
             import halide as hl  # type: ignore[import-untyped,import-not-found]
 
-            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
+            from torch.utils.filelock import FileLock
+
+            with FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
                     with open(hookfile, "w") as f:
                         if device_type == "cuda":
@@ -2822,7 +2825,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
 
 def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
-    from filelock import FileLock
+    from torch.utils.filelock import FileLock
 
     try:
         with FileLock(lockfile, LOCK_TIMEOUT):
@@ -3217,10 +3220,12 @@ class CUDACodeCache:
         """
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils.filelock import FileLock
 
             lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            lock = FileLock(
+                os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT
+            )
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
@@ -3308,10 +3313,12 @@ class ROCmCodeCache:
 
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils.filelock import FileLock
 
             lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            lock = FileLock(
+                os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT
+            )
             with lock:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
