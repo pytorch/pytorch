@@ -18,8 +18,10 @@ from typing import (
     List,
     Optional,
     Tuple,
+    TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
@@ -122,6 +124,10 @@ class OptimStateKeyType(Enum):
 
     PARAM_NAME = auto()
     PARAM_ID = auto()
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class FullyShardedDataParallel(nn.Module, _FSDPState):
@@ -839,7 +845,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             prev_state_dict_settings.optim_state_dict_config,
         )
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
+    def forward(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         """Run the forward pass for the wrapped module, inserting FSDP-specific pre- and post-forward sharding logic."""
         handle = self._handle
         with torch.autograd.profiler.record_function(
@@ -980,8 +986,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_buffers(
         self,
-        *args,
-        **kwargs,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """Return an iterator over module buffers, yielding both the name of the buffer and the buffer itself.
 

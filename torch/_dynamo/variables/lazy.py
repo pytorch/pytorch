@@ -1,7 +1,7 @@
 import collections
 import functools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from typing_extensions import Self
+from typing_extensions import ParamSpec, Self
 
 from .base import VariableTracker
 from .tensor import SymNodeVariable
@@ -33,6 +33,9 @@ class LazyCache:
         del self.source
 
 
+_P = ParamSpec("_P")
+
+
 class LazyVariableTracker(VariableTracker):
     """
     A structure that defers the creation of the actual VariableTracker
@@ -53,7 +56,7 @@ class LazyVariableTracker(VariableTracker):
     def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
-    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
+    def __init__(self, _cache: LazyCache, **kwargs: _P.kwargs) -> None:
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
@@ -75,7 +78,7 @@ class LazyVariableTracker(VariableTracker):
     def is_realized(self) -> bool:
         return self._cache.vt is not None
 
-    def clone(self, **kwargs: Any) -> VariableTracker:
+    def clone(self, **kwargs: _P.kwargs) -> VariableTracker:
         assert kwargs.get("_cache", self._cache) is self._cache
         if kwargs.get("source", self.source) is not self.source:
             self.realize()
