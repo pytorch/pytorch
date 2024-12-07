@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 
 from .. import polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n
+from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     handle_observed_exception,
     ObservedException,
@@ -354,8 +354,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._dynamo.bytecode_transformation import is_generator
-
         assert is_generator(self.vt.get_code())
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
@@ -382,8 +380,10 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         )
         # gen_obj = fn(*args)
         # _args = [_locals.get(name) for name in code.co_varnames if name in _locals]
-        _args = [_locals.get(name) for name in inspect.signature(fn).parameters.keys()]
-        gen_obj = fn(*_args)
+        sig = inspect.signature(fn).bind_partial(*args, **kwargs)
+        _args = sig.args
+        _kwargs = sig.kwargs
+        gen_obj = fn(*_args, **_kwargs)
 
         # calling a generator returns a generator object
         return GeneratorObjectVariable(gen_obj, inline_tracer, source=self.source)
@@ -496,10 +496,10 @@ class GeneratorObjectVariable(VariableTracker):
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
-            # if "graph_break" not in e.msg:
-            #     raise e
+            if "graph_break" not in e.msg:
+                raise e
 
-            # skip_code(self.get_code())
+            # torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
 
     def has_unpack_var_sequence(self, tx):

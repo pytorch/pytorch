@@ -3052,8 +3052,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return False
 
     def replace_tos_if_return_is_generator(self):
-        tos = self.stack[-1]
-        if isinstance(tos, GeneratorObjectVariable):
+        if (tos := self.stack[-1]) and isinstance(tos, GeneratorObjectVariable):
             self.stack[-1] = ListIteratorVariable(
                 tos.force_unpack_var_sequence(self),
                 mutation_type=ValueMutationNew(),
