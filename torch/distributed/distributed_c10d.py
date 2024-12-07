@@ -361,16 +361,18 @@ class BackendConfig:
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
-            # default config when backend is not specified
-            # supported since PyTorch 2.0
-            for device, default_backend in Backend.default_device_backend_map.items():
-                if is_backend_available(default_backend):
-                    if (
-                        default_backend == Backend.NCCL
-                        and not torch.cuda.is_available()
-                    ):
-                        continue
-                    self.device_backend_map[device] = Backend(default_backend)
+            # Detect the accelerator on the machine. If no accelerator is
+            # available, it returns CPU.
+            device_type = torch._C._get_accelerator().type
+            try:
+                backend_str = Backend.default_device_backend_map[device_type]
+                self.device_backend_map[device_type] = Backend(backend_str)
+            except KeyError:
+                raise ValueError(
+                    f"We detected accelerator {device_type} on your machine. "
+                    f"But we don't know which communication backend to use for this accelerator. "
+                    f"Please specify the `backend` argument in the `init_process_group` call."
+                ) from None
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -4477,7 +4479,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
 
 @_exception_logger
-def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
+def barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD, async_op=False, device_ids=None
+):
     """
     Synchronize all processes.
 
@@ -4519,7 +4523,11 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         work.wait()
 
 
-def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=False):
+def monitored_barrier(
+    group: Optional[ProcessGroup] = GroupMember.WORLD,
+    timeout=None,
+    wait_all_ranks=False,
+):
     """
     Synchronize processes similar to ``torch.distributed.barrier``, but consider a configurable timeout.
 
@@ -4589,7 +4597,9 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
-    return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
+    return group_to_use.monitored_barrier(  # type:ignore[attr-defined]
+        timeout, wait_all_ranks=wait_all_ranks
+    )
 
 
 def _create_process_group_wrapper(
