@@ -660,3 +660,126 @@ jobs:
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13t-cpu-aarch64-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
+      ALPINE_IMAGE: "arm64v8/alpine"
+      build_name: manywheel-py3_13t-cpu-aarch64
+      build_environment: linux-aarch64-binary-manywheel
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13t-cpu-aarch64-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_13t-cpu-aarch64-build
+      - get-label-type
+    uses: ./.github/workflows/_binary-test-linux.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cpu-aarch64
+      build_environment: linux-aarch64-binary-manywheel
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.arm64.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13t-cpu-aarch64-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cpu-aarch64-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cpu-aarch64
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13t-cuda-aarch64-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_TYPE: cuda-aarch64
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: linux.arm64.m7g.4xlarge.ephemeral
+      ALPINE_IMAGE: "arm64v8/alpine"
+      build_name: manywheel-py3_13t-cuda-aarch64
+      build_environment: linux-aarch64-binary-manywheel
+      timeout-minutes: 420
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13t-cuda-aarch64-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cuda-aarch64-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu124
+      GPU_ARCH_TYPE: cuda-aarch64
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cuda-aarch64
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
