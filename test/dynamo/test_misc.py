@@ -6091,6 +6091,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_enum_method(self):
+        class Bool(enum.IntEnum):
+            TRUE = enum.auto()
+            FALSE = enum.auto()
+
+            def is_true(self, x):
+                # Return `x + 1` to make sure Dynamo actually traced into this,
+                # rather than invoking it.
+                return self == Bool.TRUE, x + 1
+
+        def f(x, e):
+            cond, y = e.is_true(x)
+            if cond:
+                return y + 2
+            else:
+                return y - 2
+
+        opt_f = torch.compile(fullgraph=True)(f)
+        args = [torch.zeros(1), Bool.TRUE]
+        ref_out = f(*args)
+        opt_out = opt_f(*args)
+        self.assertTrue(same(ref_out, opt_out))
+
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
 

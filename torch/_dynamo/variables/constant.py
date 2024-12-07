@@ -4,7 +4,7 @@ import operator
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
-from torch._dynamo.source import GetItemSource
+from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import variables
 from ..exc import unimplemented
@@ -110,7 +110,10 @@ its type to `common_constant_types`.
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        return getattr(self.value, name)
+        member = getattr(self.value, name)
+        if callable(member):
+            raise NotImplementedError
+        return member
 
     def call_method(
         self,
@@ -216,5 +219,7 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
-        return getattr(self.value, name)
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        member = getattr(self.value, name)
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, member, source=source)

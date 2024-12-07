@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
 from ..utils import istype
 
@@ -319,19 +320,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         raise NotImplementedError
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
-        """
-        This method implements `getattr(object_represented_by_self, name)` and
-        returns a python object, while accounting for any side-effect. In most
-        cases the override will be for constant-like object with the default
-        side-effect-free `__getattr__`.
-        """
+        """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
+        if not variables.ConstantVariable.is_literal(value):
+            raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
-        return VariableTracker.build(tx, value, source)
+        if source:
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+        return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
         try:
