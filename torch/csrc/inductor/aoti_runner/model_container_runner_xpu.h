@@ -8,7 +8,11 @@ namespace torch::inductor {
 
 // NOTICE: Following APIs are subject to change due to active development
 // We provide NO BC guarantee for these APIs
-class TORCH_API AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
+
+// HERE we use C10_EXPORT because libtorch_python needs this Symbol be exported.
+// And `TORCH_API and `TORCH_XPU_API`` do not export the symbol in Windows
+// build.
+class C10_EXPORT AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
  public:
   // @param device_str: xpu device string, e.g. "xpu", "xpu:0"
   AOTIModelContainerRunnerXpu(
