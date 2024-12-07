@@ -2207,7 +2207,7 @@ class TritonKernel(SIMDKernel):
 
                 result_var = tuple(
                     self.cse.generate(
-                        self.compute, self.reduction_resize(var_name), dtype=value.dtype
+                        self.compute, self.reduction_resize(var_name), dtype=dtype
                     )
                     for var_name in (mean, m2, weight)
                 )
