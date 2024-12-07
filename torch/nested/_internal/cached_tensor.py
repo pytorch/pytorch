@@ -5,38 +5,14 @@ import torch
 from torch.utils import _pytree as pytree
 
 
-def _get_source_field(
-    metadata: Dict[str, torch.Tensor], source_fields: Tuple[str, ...]
-) -> str:
-    return next(k for k in source_fields if metadata.get(k) is not None)
-
-
-def _get_source(
-    metadata: Dict[str, torch.Tensor],
-    source_fields: Tuple[str, ...],
-    target_field: Optional[str],
-) -> torch.Tensor:
-    # Unless specified via target_field, CachedTensor's source is the first non-None entry in source_fields
-    if target_field is not None:
-        return metadata[target_field]
-    source_field = _get_source_field(metadata, source_fields)
-    return metadata[source_field]
-
-
 class CachedTensor(torch.Tensor):
     @staticmethod
     def __new__(
         cls,
         metadata: Dict[str, torch.Tensor],
-        source_fields: Tuple[str, ...],
-        extra_fields: Tuple[str, ...],
-        target_field: Optional[str] = None,
+        source_field: str,
     ) -> "CachedTensor":
-        assert source_fields is not None
-        assert any(
-            metadata.get(k) is not None for k in source_fields
-        ), f"CachedTensor: At least one of {source_fields} must be passed"
-        source = _get_source(metadata, source_fields, target_field)
+        source = metadata[source_field]
         shape = source.shape
         kwargs = {}
         kwargs["strides"] = source.stride()
@@ -51,24 +27,16 @@ class CachedTensor(torch.Tensor):
     def __init__(
         self,
         metadata: Dict[str, torch.Tensor],
-        source_fields: Tuple[str, ...],
-        extra_fields: Tuple[str, ...],
-        target_field: Optional[str] = None,
+        source_field: str,
     ):
-        self.source_fields = source_fields
-        self.extra_fields = extra_fields
-        self.all_fields = source_fields + extra_fields
-        self.target_field = target_field
+        self.source_field = source_field
         self.metadata = metadata
 
         # Compile only
         self.nested_int_ref: Any = None
 
     def __repr__(self) -> str:  # type: ignore[override]
-        source_repr = repr(
-            _get_source(self.metadata, self.source_fields, self.target_field)
-        )
-        return f"CachedTensor({source_repr})"
+        return f"CachedTensor({repr(self.metadata[self.source_field])})"
 
     def __getattr__(self, name: str) -> torch.Tensor:
         if name in self.metadata:
@@ -80,16 +48,15 @@ class CachedTensor(torch.Tensor):
 
     def __tensor_flatten__(self) -> Tuple[List[str], Dict[str, Any]]:
         ctx = {
-            "source_fields": self.source_fields,
-            "extra_fields": self.extra_fields,
+            "source_field": self.source_field,
         }
-        return [x for x in self.all_fields if self.metadata.get(x) is not None], ctx
+        return list(self.metadata.keys()), ctx
 
     @staticmethod
     def __tensor_unflatten__(
         inner_tensors: Dict, meta: Dict, outer_size: Any, outer_stride: Any
     ) -> "CachedTensor":
-        return CachedTensor(inner_tensors, **meta)
+        return CachedTensor(inner_tensors, source_field=meta["source_field"])
 
     @classmethod
     def __torch_dispatch__(
@@ -98,22 +65,22 @@ class CachedTensor(torch.Tensor):
         # Ensure that any registered ops are loaded
         import torch.nested._internal.ops  # noqa: F401
 
-        # Doing any operation on a CachedTensor automatically unwraps and returns a non-CachedTensor
-        # We can improve this to do smarter things, like automatically cache .diff(), .cumsum(), etc.
         if kwargs is None:
             kwargs = {}
 
         if op in _func_registry:
             return _func_registry[op](op, *args, **kwargs)
 
+        # By default, doing any operation on a CachedTensor automatically unwraps and
+        # returns a non-CachedTensor
         unwrapped_args = pytree.tree_map_only(
             CachedTensor,
-            lambda x: _get_source(x.metadata, x.source_fields, x.target_field),
+            lambda x: x.metadata[x.source_field],
             args,
         )
         unwrapped_kwargs = pytree.tree_map_only(
             CachedTensor,
-            lambda x: _get_source(x.metadata, x.source_fields, x.target_field),
+            lambda x: x.metadata[x.source_field],
             kwargs,
         )
         return op(*unwrapped_args, **unwrapped_kwargs)
@@ -150,17 +117,3 @@ def register_cached_tensor_func(aten_op: Any) -> Callable:
         return func
 
     return wrapper
-
-
-def _make_cached_tensor(
-    metadata: Dict[str, torch.Tensor],
-    source_fields: Tuple[str, ...],
-    extra_fields: Tuple[str, ...],
-    target_field: Optional[str] = None,
-) -> CachedTensor:
-    return CachedTensor(
-        metadata,
-        source_fields=source_fields,
-        extra_fields=extra_fields,
-        target_field=target_field,
-    )
