@@ -409,7 +409,8 @@ extern "C"
   if (std::is_same_v<scalar_t, at::BFloat16>) {
     // check platform ability
     need_pack = at::native::cpublas::could_pack(at::kBFloat16);
-
+  }
+  if (need_pack) {
     // When the number of gemm is greater than the number of pack,
     // the pack overhead can be overlaped.
     int64_t thresh_size = 64 ;
