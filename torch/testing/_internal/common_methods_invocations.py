@@ -17952,6 +17952,8 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.complex128]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', 
+                                    dtypes=[torch.bool], device_type='mps'),
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,

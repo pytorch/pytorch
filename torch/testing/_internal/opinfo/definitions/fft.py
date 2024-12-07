@@ -546,7 +546,10 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
-        skips=(),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', 
+                                    dtypes=[torch.bool], device_type='mps'),
+        ),
         check_batched_grad=False,
     ),
     SpectralFuncInfo(
@@ -580,6 +583,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warnings"),
         ),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', 
+                                    dtypes=[torch.bool], device_type='mps'),
+        )
     ),
     SpectralFuncInfo(
         "fft.ihfftn",
@@ -611,6 +618,10 @@ op_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}), "TestFFT", "test_reference_nd"
             ),
         ],
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', 
+                                    dtypes=[torch.bool], device_type='mps'),
+        )
     ),
     SpectralFuncInfo(
         "fft.irfft",
@@ -640,6 +651,13 @@ op_db: List[OpInfo] = [
                 'TestCommon',
                 'test_out_warning',
                 device_type='mps',
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                'TestCommon', 
+                'test_non_standard_bool_values', 
+                dtypes=[torch.bool], 
+                device_type='mps'
             ),
         )
     ),
@@ -679,6 +697,13 @@ op_db: List[OpInfo] = [
                 'test_out_warning',
                 device_type='mps',
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestCommon', 
+                'test_non_standard_bool_values', 
+                dtypes=[torch.bool], 
+                device_type='mps'
+            ),
         )
     ),
     SpectralFuncInfo(
@@ -709,6 +734,10 @@ op_db: List[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', 
+                                    dtypes=[torch.bool], device_type='mps'),
+        )
     ),
     OpInfo(
         "fft.fftshift",
