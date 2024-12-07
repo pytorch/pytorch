@@ -712,9 +712,13 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
-                submesh = _mesh_resources.create_sub_mesh(
-                    self, mesh_dim_names, slice_mesh_dims
-                )
+                # Cannot import it too early because it is going to cause a
+                # circular dependency.
+                from torch.utils._mode_utils import no_dispatch
+                with no_dispatch():
+                    submesh = _mesh_resources.create_sub_mesh(
+                        self, mesh_dim_names, slice_mesh_dims
+                    )
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
