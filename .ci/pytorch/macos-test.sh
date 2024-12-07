@@ -276,25 +276,6 @@ test_timm_perf() {
 
 install_tlparse
 
-if [[ $TEST_CONFIG == *"test_mps"* ]]; then
-  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_python_shard "${SHARD_NUMBER}"
-    if [[ "${SHARD_NUMBER}" == 1 ]]; then
-      test_libtorch
-      test_custom_script_ops
-    elif [[ "${SHARD_NUMBER}" == 2 ]]; then
-      test_jit_hooks
-      test_custom_backend
-    fi
-  else
-    test_python_all
-    test_libtorch
-    test_custom_script_ops
-    test_jit_hooks
-    test_custom_backend
-  fi
-fi
-
 if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf
@@ -307,4 +288,19 @@ elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
 elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest
+elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_python_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_libtorch
+    test_custom_script_ops
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    test_jit_hooks
+    test_custom_backend
+  fi
+else
+  test_python_all
+  test_libtorch
+  test_custom_script_ops
+  test_jit_hooks
+  test_custom_backend
 fi
