@@ -2270,10 +2270,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
-        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -3266,7 +3263,7 @@ if torch.distributed.is_available():
         "torch.distributed._composable.replicate",
     }
     if not torch._dynamo.config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
+        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3326,7 +3323,7 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     if not torch._dynamo.config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
+        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
