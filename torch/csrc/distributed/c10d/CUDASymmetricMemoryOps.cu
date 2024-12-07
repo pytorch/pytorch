@@ -387,13 +387,6 @@ at::Tensor one_shot_all_reduce_out(
   return out;
 }
 
-at::Tensor one_shot_all_reduce_meta(
-    const at::Tensor& input,
-    std::string reduce_op,
-    std::string group_name) {
-  return at::empty_like(input);
-}
-
 at::Tensor one_shot_all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
@@ -610,12 +603,9 @@ at::Tensor stream_write_value32_(
 
 } // namespace
 
-TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-  m.def(
-      "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
-      {at::Tag::pt2_compliant_tag});
+  m.impl("multimem_all_reduce_", ::multimem_all_reduce_);
 
   // NOTE: [multimem_one_shot_all_reduce]
   // multimem.ld_reduce does not guarantee a fixed accumulation order. This
@@ -624,61 +614,14 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   // identical results across ranks. There may be use cases that can take
   // advantage of this property, but it should not be used without
   // understanding the caveats.
-  m.def(
-      "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
-      torch::dispatch(
-          c10::DispatchKey::CUDA, ::multimem_one_shot_all_reduce_out),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
-      {at::Tag::pt2_compliant_tag});
-
+  m.impl("multimem_one_shot_all_reduce", ::multimem_one_shot_all_reduce);
   m.impl(
-      "one_shot_all_reduce",
-      torch::dispatch(c10::DispatchKey::Meta, ::one_shot_all_reduce_meta));
-  m.impl(
-      "one_shot_all_reduce",
-      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce));
-
-  m.def(
-      "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce_out),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
-      {at::Tag::pt2_compliant_tag});
-
-  // An mm that supports consuming asynchronous input. It guarantees the
-  // following rasterization order, and that the corresponding signal arrives
-  // before an input chunk is consumed.
-  //
-  // num_chunks = a_chunks_signals.numel()
-  // for chunk_idx in range(a_chunk_pivot, num_chunks + a_chunk_pivot):
-  //     chunk_idx = chunk_idx % num_chunks
-  //     wait_signal(a_chunk_signals, chunk_idx)
-  //     # Compute output tiles that consumes the input chunk
-  m.def(
-      "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::CUDA, c10d::cuda::detail::async_input_mm),
-      {at::Tag::pt2_compliant_tag});
-
+      "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
+  m.impl("one_shot_all_reduce", ::one_shot_all_reduce);
+  m.impl("one_shot_all_reduce_out", ::one_shot_all_reduce_out);
+  m.impl("two_shot_all_reduce_", ::two_shot_all_reduce_);
+  m.impl("_async_input_mm", c10d::cuda::detail::async_input_mm);
 #endif
-  m.def(
-      "stream_write_value32_(Tensor(a!) input, int offset, int val) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::stream_write_value32_),
-      {at::Tag::pt2_compliant_tag});
-
-  m.def(
-      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
-      torch::dispatch(c10::DispatchKey::CUDA, ::memset32_),
-      {at::Tag::pt2_compliant_tag});
+  m.impl("stream_write_value32_", ::stream_write_value32_);
+  m.impl("memset32_", ::memset32_);
 }
