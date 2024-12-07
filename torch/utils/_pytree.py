@@ -173,7 +173,7 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 # as much as possible. This is for isolation: a user who is not using C++ pytree
 # shouldn't pay for it, and it helps makes things like cpython upgrades easier.
 try:
-    _optree_version = importlib.metadata.version("optree")  # type: ignore[attr-defined]
+    _optree_version = importlib.metadata.version("optree")
 except importlib.metadata.PackageNotFoundError:
     _cxx_pytree_exists = False
 else:
