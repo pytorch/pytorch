@@ -273,6 +273,7 @@ extern "C"
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
   int64_t ekvSplitSize = need_pack && (kvSplitSize % 2 != 0) ? kvSplitSize + 1 : kvSplitSize;
   int64_t ekvTail = need_pack && (kvTail % 2 != 0) ? kvTail + 1 : kvTail;
+  int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
 
   // Allocate per thread temp buf (accumulate type)
   int64_t _size_per_thread =
@@ -281,68 +282,51 @@ extern "C"
       /* qk_sum */ qSplitSize +
       /* dst    */ qSplitSize * headSize_v;
 
+  // Inputs/outputs buffers
   const scalar_t* q_data = query;
   const scalar_t* k_data = key;
   const scalar_t* v_data = value;
-
   scalar_t* out_data = output;
+
+  // Buffers to store acc results, padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
-
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*qSplitSize*ekvSplitSize")}}
-  if (!is_reduced_type){
-    buf_reduced_data = nullptr;
-  }
-
-  // Buffer if need pack, to store padding query and packing key/value
-  scalar_t* key_reorder_ptr = nullptr;
-  scalar_t* value_reorder_ptr = nullptr;
-  scalar_t* query_padding_ptr = nullptr;
-  int64_t kv_padding_size = (kvSize - 1) / kvSplitSize * ekvSplitSize + ekvTail;
-
-  if (!headSize_even && need_pack) {
-    {{template.codegen_allocate_buffer("query_padding_alloc_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
-    query_padding_ptr = query_padding_alloc_ptr;
-  }
+  {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize*num_head*eheadSize*kvSize")}}
+  {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize*num_head*kv_padding_size*headSize_v")}}
+  {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
+  {{template.codegen_allocate_buffer("query_padding_ptr", "scalar_t", "num_thread*qSplitSize*eheadSize")}}
 
   // Reorder K, V and transpose K
-  if (need_pack) {
-    {{template.codegen_allocate_buffer("key_reorder_alloc_ptr", "scalar_t", "batchSize*num_head*eheadSize*kvSize")}}
-    key_reorder_ptr = key_reorder_alloc_ptr;
-
-    {{template.codegen_allocate_buffer("value_reorder_alloc_ptr", "scalar_t", "batchSize*num_head*kv_padding_size*headSize_v")}}
-    value_reorder_ptr = value_reorder_alloc_ptr;
-
-    {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
-
-    at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
-      int ompIdx = at::get_thread_num();
-      int64_t i = 0, j = 0, l = 0, n = 0;
-      scalar_t* transpose_ptr = need_pack? transpose_buffer_ptr + ompIdx * kvSplitSize * headSize : nullptr;
-      at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
-      for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
-        n = l * kvSplitSize;
-        int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
-        auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
-        auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
-        auto kv_block_num = n / cur_kvSplitSize;
-        auto kv_block_offset = n - kv_block_num * cur_kvSplitSize;
-        // getting kv indices by [BS, Head, 1, kv_block_num]
-        auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
-        auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
-        auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
-                                j_kvi * kviStrideH + kv_block_num;
-        auto k_addr =
-              k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
-        auto v_addr =
-              v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
-        if (use_kv_indice) {
-            k_addr =
-                k_data + i_kv * kStrideB + j_kv * kStrideH +
-                (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * kStrideN;
-            v_addr =
-                v_data + i_kv * vStrideB + j_kv * vStrideH +
-                (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * vStrideN;
-        }
+  at::parallel_for(0, batchSize * num_head * kvSlice, 1, [&](int64_t begin, int64_t end) {
+    int ompIdx = at::get_thread_num();
+    int64_t i = 0, j = 0, l = 0, n = 0;
+    scalar_t* transpose_ptr = need_pack? transpose_buffer_ptr + ompIdx * kvSplitSize * headSize : nullptr;
+    at::native::data_index_init(begin, i, batchSize, j, num_head, l, kvSlice);
+    for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
+      n = l * kvSplitSize;
+      int64_t cur_kvSplitSize = std::min(kvSplitSize, kvSize - n);
+      auto i_kv = is_broadcast_bs_kv ? i/bs_shards : i;
+      auto j_kv = is_broadcast_head_kv ? j/gqa_shards : j;
+      auto kv_block_num = n / cur_kvSplitSize;
+      auto kv_block_offset = n - kv_block_num * cur_kvSplitSize;
+      // getting kv indices by [BS, Head, 1, kv_block_num]
+      auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
+      auto j_kvi = is_broadcast_head_kvi ? j/gqa_shards_kvi : j;
+      auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
+                              j_kvi * kviStrideH + kv_block_num;
+      auto k_addr =
+            k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+      auto v_addr =
+            v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
+      if (use_kv_indice) {
+          k_addr =
+              k_data + i_kv * kStrideB + j_kv * kStrideH +
+              (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * kStrideN;
+          v_addr =
+              v_data + i_kv * vStrideB + j_kv * vStrideH +
+              (*kv_logical_data * cur_kvSplitSize + kv_block_offset) * vStrideN;
+      }
+      if (need_pack) {
         // transpose [cur_kvSplitSize, headSize] -> [headSize, cur_kvSplitSize]
         at::native::utils::transpose<uint16_t>(
           cur_kvSplitSize,
@@ -371,16 +355,23 @@ extern "C"
           /* ld_src */ vStrideN,
           /* K */ cur_kvSplitSize,
           /* N */ headSize_v);
-      // Move to the next query
-      at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
+      } else {
+        using trans_t = std::conditional_t<std::is_same_v<scalar_t, at::BFloat16>, uint16_t, float>;
+        at::native::utils::transpose<trans_t>(
+          cur_kvSplitSize,
+          headSize,
+          /* src_ptr */
+          reinterpret_cast<const trans_t*>(k_addr),
+          /* ld_src */ kStrideN,
+          /* dst */ reinterpret_cast<trans_t*>(key_reorder_ptr + i * num_head * eheadSize * kvSize +
+                  j * eheadSize * kvSize + n * eheadSize),
+          /* ld_dst */ cur_kvSplitSize);
       }
-    });
-  }
-  scalar_t* key_transpose_alloc_ptr = nullptr;
-  if (!need_pack) {
-     {{template.codegen_allocate_buffer("key_transpose_alloc_buff_ptr", "scalar_t", "num_thread*eheadSize*kvSize")}}
-     key_transpose_alloc_ptr = key_transpose_alloc_buff_ptr;
-  }
+    // Move to the next query
+    at::native::data_index_step(i, batchSize, j, num_head, l, kvSlice);
+    }
+  });
+
   // Attention loop below
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -391,9 +382,6 @@ extern "C"
     accum_t* qk_max_data = qk_data + qSplitSize * kvSplitSize;
     accum_t* qk_sum_data = qk_max_data + qSplitSize;
     accum_t* dst_data = qk_sum_data + qSplitSize;
-    scalar_t* key_transpose_ptr = need_pack
-            ? nullptr
-            : key_transpose_alloc_ptr + ompIdx * eheadSize*kvSize;
     scalar_t *qk_reduced_data =
         is_reduced_type
             ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
@@ -438,25 +426,8 @@ extern "C"
         auto kv_logical_data = kv_indices_data + i_kvi * kviStrideB +
                                 j_kvi * kviStrideH + kv_block_num;
         if (!need_pack) {
-          auto k_addr =
-              k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
-          if (use_kv_indice) {
-              k_addr =
-                  k_data + i_kv * kStrideB + j_kv * kStrideH +
-                  (*kv_logical_data * kvBlockSize + kv_block_offset) * kStrideN;
-          }
-
-          using trans_t =std::conditional_t<std::is_same_v<scalar_t, at::BFloat16>, uint16_t, float>;
-          // transpose [cur_kvSplitSize, eheadSize] -> [eheadSize, cur_kvSplitSize]
-          at::native::utils::transpose<trans_t>(
-                cur_kvSplitSize,
-                eheadSize,
-                /* src_ptr */
-                reinterpret_cast<const trans_t*>(k_addr),
-                /* ld_src */ kStrideN,
-                /* dst */ reinterpret_cast<trans_t*>(key_transpose_ptr + n * eheadSize),
-                /* ld_dst */ cur_kvSplitSize);
-          auto k_addr_t = key_transpose_ptr + n * eheadSize;
+          auto k_addr_t = key_reorder_ptr + i * num_head * eheadSize * kvSize +
+                  j * eheadSize * kvSize + n * eheadSize;
           at::native::cpublas::brgemm(
               cur_qSplitSize,
               cur_kvSplitSize,
@@ -638,7 +609,7 @@ extern "C"
       // Move to the next query
       at::native::data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
-    if (need_pack) {
+    if (need_pack || std::is_same_v<scalar_t, float>) {
       at::native::cpublas::brgemm_release();
     }
   });
