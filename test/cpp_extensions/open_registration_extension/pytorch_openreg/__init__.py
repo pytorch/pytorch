@@ -11,6 +11,9 @@ from ._device_daemon import NUM_DEVICES as NUM_DEVICES
 import pytorch_openreg._C  # noqa: F401  # usort: skip
 
 
+""" TODO Add back and rename all 'foo' to 'openreg'
+
+
 # Module used for our backend
 class _OpenRegMod:
     pass
@@ -19,3 +22,4 @@ class _OpenRegMod:
 # Set all the appropriate state on PyTorch
 torch.utils.rename_privateuse1_backend("openreg")
 torch._register_device_module("openreg", _OpenRegMod())
+"""
