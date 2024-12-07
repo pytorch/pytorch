@@ -80,15 +80,6 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == tuple:
-                    if typing.get_args(t) == ():
-                        return "Tuple[()]", "std::tuple<>", "bool"
-                    yaml_head, cpp_head, thrift_head, thrift_tail = (
-                        "Tuple",
-                        "std::tuple",
-                        "bool",
-                        "",
-                    )
                 elif o == Union:
                     assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
@@ -111,8 +102,6 @@ def _staged_schema():
                     (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
                     f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
-            elif t == ():
-                return "()", "", ""
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
