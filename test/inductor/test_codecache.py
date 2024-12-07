@@ -10,6 +10,7 @@ from unittest import mock
 import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
@@ -28,6 +29,7 @@ from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch._library import capture_triton
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -113,6 +115,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        AOTAutogradCache.clear()
         PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
@@ -422,24 +425,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-        # Now pretend the constants are frozen params.
-        counters.clear()
-        self.reset()
-
-        with mock.patch(
-            "torch._inductor.codecache.has_frozen_params", return_value=True
-        ):
-            # A call to fn1 should miss in the cache since we do not consider
-            # the constant values.
-            self.assertEqual(fn1(a), compiled_fn1(a))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-
-            # A call to fn2 should hit for the same reason.
-            self.assertEqual(fn2(a), compiled_fn2(a))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -447,7 +432,7 @@ class TestFxGraphCache(TestCase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         block_mask = create_block_mask(
-            lambda b, h, q, kv: q >= kv, None, None, 2048, 2048
+            lambda b, h, q, kv: q >= kv, None, None, 512, 512
         )
 
         def score_mod(score, b, h, q, kv):
@@ -586,6 +571,55 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("bundle_triton", (False, True))
+    def test_triton_op(self, bundle_triton):
+        libname = "my_cool_namespace"
+        opname = "my_triton_operator"
+
+        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        def f(x, y):
+            return add(x, y)
+
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(f, fullgraph=True)
+
+            x = torch.randn(4, device=GPU_TYPE)
+            y = torch.randn(4, device=GPU_TYPE)
+
+            result = compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            result = compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     def test_generated_kernel_count(self):
@@ -621,45 +655,24 @@ class TestFxGraphCache(TestCase):
         """
         Test that we bump the inductor counters on a cache hit.
         """
-        compile_to_fn = GraphLowering.compile_to_fn
 
-        counter_name = "a_test_counter"
-        counter_incr = 7
+        def fn(a, b):
+            return torch.mm(a, b)
 
-        def bump_counter(self):
-            # Mock that bumps some arbitrary test counter by a set amount, then calls
-            # the original GraphLowering.compile_to_fn.
-            counters["inductor"][counter_name] += counter_incr
-            return compile_to_fn(self)
+        a = torch.rand(8, 32, device="cpu")
+        b = torch.rand(32, 8, device="cpu")
 
-        with mock.patch.object(GraphLowering, "compile_to_fn", bump_counter):
+        compiled_fn = torch.compile(fn)
 
-            def fn(a, b):
-                return torch.mm(a, b)
+        # Verify the "miss" case.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            a = torch.rand(8, 32, device="cpu")
-            b = torch.rand(32, 8, device="cpu")
-
-            compiled_fn = torch.compile(fn)
-
-            # Verify the "miss" case.
-            counter_val = 2
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
-
-            # Verify the "hit" case.
-            self.reset()
-            counter_val = 5
-            counters["inductor"][counter_name] = counter_val
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-            self.assertEqual(
-                counters["inductor"][counter_name], counter_val + counter_incr
-            )
+        # Verify the "hit" case.
+        self.reset()
+        counter_val = 5
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -775,14 +788,28 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
-    def test_freezing(self, device):
+    @parametrize("inlinable", (True, False))
+    def test_freezing(self, device, inlinable):
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        # For machines with mkldnn_fp16 support, weight_pack in mkldnn_fusion.py causes
+        # the creation of a mkldnn format tensor which the current implementation does
+        # not support.
+        if (
+            device == "cpu"
+            and torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        ):
+            raise unittest.SkipTest("mkldnn tensors unsupported")
+
+        # The shape of the frozen constant determines if it will be inlined.
+        shape = (4,) if inlinable else (8, 8)
 
         class MM(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.param = torch.nn.Parameter(torch.rand(8, 8))
+                self.param = torch.nn.Parameter(torch.rand(shape))
 
             def forward(self, x):
                 return x @ self.param
@@ -792,71 +819,37 @@ class TestFxGraphCache(TestCase):
         # Populate a cache entry.
         mod1 = MM().to(device=device, dtype=dtype)
         with torch.no_grad():
-            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            x = torch.rand(shape).to(device=device, dtype=dtype)
             out0 = mod1(x)
             out1 = torch.compile(mod1)(x)
             self.assertEqual(out0, out1)
 
-        # For mahcine that has mkldnn_fp16 support, the weight_pack in mkldnn_fusion.py
-        # wroks, which result in mkldnn format tensor, then the exception
-        # BypassFxGraphCache("mkldnn tensors unpickleable") is raised, and cause the
-        # fxgraph not cached.
-        def is_cpu_mkldnn_fp16_supported():
-            return (
-                device == "cpu"
-                and torch.backends.mkldnn.is_available()
-                and torch.ops.mkldnn._is_mkldnn_fp16_supported()
-            )
-
-        if is_cpu_mkldnn_fp16_supported():
-            fxgraph_cache_bypass_cnt = 1
-            fxgraph_cache_miss_cnt = 0
-            fxgraph_cache_hit_cnt = 0
-        else:
-            fxgraph_cache_bypass_cnt = 0
-            fxgraph_cache_miss_cnt = 1
-            fxgraph_cache_hit_cnt = 0
-
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
-        )
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
-        )
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
-        )
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
         counters.clear()
         self.reset()
 
-        # Same nn.Module, but with different parameters should cache hit.
+        # Same nn.Module, but with different parameters. In the case that the param can
+        # be inlined, we should consider the actual tensor value and we expect a cache
+        # miss (because the values are different here). If the param cannot be inlined,
+        # then we consider only the tensor metadata and we expect a cache hit.
         mod2 = MM().to(device=device, dtype=dtype)
         self.assertNotEqual(mod1.param, mod2.param)
 
         with torch.no_grad():
-            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            x = torch.rand(shape).to(device=device, dtype=dtype)
             out0 = mod2(x)
             out1 = torch.compile(mod2)(x)
             self.assertEqual(out0, out1)
 
-        if is_cpu_mkldnn_fp16_supported():
-            fxgraph_cache_bypass_cnt = 1
-            fxgraph_cache_miss_cnt = 0
-            fxgraph_cache_hit_cnt = 0
-        else:
-            fxgraph_cache_bypass_cnt = 0
-            fxgraph_cache_miss_cnt = 0
-            fxgraph_cache_hit_cnt = 1
-
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
         self.assertEqual(
-            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+            counters["inductor"]["fxgraph_cache_miss"], 1 if inlinable else 0
         )
         self.assertEqual(
-            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
-        )
-        self.assertEqual(
-            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+            counters["inductor"]["fxgraph_cache_hit"], 0 if inlinable else 1
         )
 
 
@@ -1229,7 +1222,7 @@ class TestAutotuneCache(TestCase):
             for k in global_stats.autotune_remote.cache.keys():
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
             for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c11")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")

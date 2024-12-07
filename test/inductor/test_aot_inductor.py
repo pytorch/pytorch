@@ -1,11 +1,9 @@
 # Owner(s): ["module: inductor"]
-import copy
 import itertools
 import logging
 import os
 import sys
 import tempfile
-import types
 import unittest
 from typing import Dict, Tuple
 from unittest import skip
@@ -37,11 +35,9 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
-    find_library_location,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     skipIfRocm,
     TEST_WITH_ROCM,
@@ -78,7 +74,12 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_aot_inductor_utils import AOTIRunnerUtil
+        from .test_aot_inductor_utils import (
+            AOTIRunnerUtil,
+            check_model,
+            check_model_with_multiple_inputs,
+            code_check_count,
+        )
         from .test_control_flow import (
             CondModels,
             prepend_counters,
@@ -89,6 +90,9 @@ try:
     except ImportError:
         from test_aot_inductor_utils import (  # @manual=fbcode//caffe2/test/inductor:aot_inductor_utils-library
             AOTIRunnerUtil,
+            check_model,
+            check_model_with_multiple_inputs,
+            code_check_count,
         )
         from test_control_flow import (  # @manual=fbcode//caffe2/test/inductor:control_flow-library
             CondModels,
@@ -105,93 +109,6 @@ except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
-
-
-def check_model(
-    self: TestCase,
-    model,
-    example_inputs,
-    options=None,
-    dynamic_shapes=None,
-    disable_constraint_solver=False,
-    atol=None,
-    rtol=None,
-):
-    with torch.no_grad(), config.patch(
-        {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
-    ):
-        torch.manual_seed(0)
-        if not isinstance(model, types.FunctionType):
-            model = model.to(self.device)
-        ref_model = copy.deepcopy(model)
-        ref_inputs = copy.deepcopy(example_inputs)
-        expected = ref_model(*ref_inputs)
-
-        torch.manual_seed(0)
-        actual = AOTIRunnerUtil.run(
-            self.device,
-            model,
-            example_inputs,
-            options,
-            dynamic_shapes,
-            disable_constraint_solver,
-        )
-
-    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
-
-
-def check_model_with_multiple_inputs(
-    self: TestCase,
-    model,
-    list_example_inputs,
-    options=None,
-    dynamic_shapes=None,
-):
-    with torch.no_grad(), config.patch(
-        {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
-    ):
-        torch.manual_seed(0)
-        model = model.to(self.device)
-        ref_model = copy.deepcopy(model)
-        ref_inputs = copy.deepcopy(list_example_inputs)
-        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
-
-        torch.manual_seed(0)
-        list_actual = AOTIRunnerUtil.run_multiple(
-            self.device, model, list_example_inputs, options, dynamic_shapes
-        )
-
-    self.assertTrue(same(list_actual, list_expected))
-
-
-def code_check_count(
-    self: TestCase,
-    model,
-    example_inputs,
-    target_str: str,
-    target_count: int,
-):
-    with torch.no_grad(), config.patch(
-        {
-            "allow_stack_allocation": self.allow_stack_allocation,
-            "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-        }
-    ):
-        so_path = torch._export.aot_compile(model, example_inputs)
-
-    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
-        src_code = cpp.read()
-        FileCheck().check_count(
-            target_str,
-            target_count,
-            exactly=True,
-        ).run(src_code)
 
 
 class AOTInductorTestsTemplate:
@@ -2938,163 +2855,6 @@ class AOTInductorTestsTemplate:
         model.weight += 1
         self.check_model(model, example_inputs)
 
-    def test_custom_op_add(self) -> None:
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
-
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
-        self.check_model(m, args)
-
-    def test_custom_op_add_output_path(self) -> None:
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
-
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
-        with config.patch("aot_inductor.output_path", "model.so"):
-            with self.assertRaises(Exception):
-                self.check_model(m, args)
-
-    def test_custom_op_all_inputs(self) -> None:
-        class MyModel(torch.nn.Module):
-            # pyre-fixme[3]: Return type must be annotated.
-            def __init__(self):
-                super().__init__()
-
-            # pyre-fixme[3]: Return type must be annotated.
-            # pyre-fixme[2]: Parameter must be annotated.
-            def forward(self, x, y):
-                with torch.no_grad():
-                    x_dim0 = x.shape[0]
-                    x_dim1 = x.shape[1]
-                    y_dim0 = y.shape[0]
-                    y_dim1 = y.shape[1]
-                    symint_0 = x_dim0 + x_dim1
-                    symint_1 = y_dim0 * y_dim1
-
-                    z = torch.concat((x, x))
-
-                    _2547 = torch.ops.aoti_custom_ops.fn_with_all_inputs(
-                        tensor=x,
-                        tensors=[x, y],
-                        optional_tensors=[None, z],
-                        b8=False,
-                        b8s=[True, False],
-                        i64=42,
-                        i64s=[16, 17],
-                        symint=symint_0,
-                        symints=[symint_0, symint_1],
-                        f64=3.14,
-                        f64s=[2.2, 3.3],
-                        scalar=1.23,
-                        scalars=[45, 67],
-                        string="hello",
-                        strings=["ab", "cde"],
-                        # dtype=torch.float16,
-                        # memory_format=torch.contiguous_format,
-                        # layout=torch.strided,
-                        device=torch.device("cpu"),
-                        # optional
-                        o_tensor=None,
-                        o_tensors=[x, y],
-                        o_b8=False,
-                        o_b8s=[True, False],
-                        o_i64=None,
-                        o_i64s=[16, 17],
-                        o_symint=symint_1,
-                        o_symints=[symint_1, symint_0],
-                        o_f64=3.14,
-                        o_f64s=None,
-                        o_scalar=None,
-                        o_scalars=[89, 910],
-                        o_string="hello",
-                        o_strings=["ab", "cde"],
-                        # o_dtype=None,
-                        # o_memory_format=torch.contiguous_format,
-                        # o_layout=torch.strided,
-                        o_device=None,
-                    )
-
-                return _2547
-
-        m = MyModel().to(device=self.device)
-        x = torch.zeros(4, 8, device=self.device)
-        y = torch.ones(3, 9, device=self.device)
-        args = (x, y)
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_multiple_outputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = x + y
-                # tuple of Tensor output
-                out3, out4 = torch.ops.aoti_custom_ops.fn_with_tuple_output(out, 1)
-                # TensorList output
-                out5, out6 = torch.ops.aoti_custom_ops.fn_with_list_output(
-                    [out3, out4], 1
-                )
-                # tuple of Tensor and TensorList
-                out7, [out8, out9] = torch.ops.aoti_custom_ops.fn_with_mix_outputs(
-                    out5, [out6, out4]
-                )
-                return out3, out4, out5, out6, out7, out8, out9
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(4, 4, device=self.device),
-            torch.randn(4, 4, device=self.device),
-        )
-        m(*args)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_reinterpret_view_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                out = x.permute([1, 0])
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
-    def test_custom_op_with_concat_inputs(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                out = torch.concat([x, y], dim=0)
-                return torch.ops.aoti_custom_ops.fn_with_default_input(out, 1)
-
-        m = Model().to(device=self.device)
-        args = (
-            torch.randn(2, 3, device=self.device),
-            torch.randn(2, 3, device=self.device),
-        )
-
-        self.check_model(m, args)
-
-    def test_custom_op_missing_arg_with_default_value(self) -> None:
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                # missing second arg
-                return torch.ops.aoti_custom_ops.fn_with_default_input(x)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(2, 3, device=self.device),)
-
-        self.check_model(m, args)
-
     def test_triton_kernel_extern_kernel_arg(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -4106,6 +3866,86 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(2, 128, 4096, device=self.device),)
         self.check_model(Model(), example_inputs, dynamic_shapes={"x": {0: bs}})
 
+    def test_update_constant_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+
+        # Let's check whether the model has correct constant name mapping.
+        expected_original_fqns = {
+            "L__self___weight": "L__self___weight",
+            "L__self___bias": "L__self___bias",
+        }
+        self.assertEqual(
+            expected_original_fqns, runner.get_constant_names_to_original_fqns()
+        )
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output)
+
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+        }
+        runner.update_constant_buffer(new_weights, False, False)
+        new_output = runner_call(test_inputs)
+        new_expected = torch.nn.functional.linear(
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+        )
+        self.assertEqual(new_expected, new_output)
+
+    def test_cond_share_predicte(self):
+        class Model(torch.nn.Module):
+            def forward(self, predicate, x):
+                y = torch.cond(
+                    predicate,
+                    lambda: x + 1,
+                    lambda: x + 2,
+                )
+
+                z = torch.cond(
+                    predicate,
+                    lambda: y + 1,
+                    lambda: y + 2,
+                )
+                return (z,)
+
+        example_inputs = (
+            torch.tensor([True]).to(self.device),
+            torch.tensor([1, 2, 3]).to(self.device),
+        )
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -4128,20 +3968,6 @@ class AOTInductorLoggingTest(LoggingTestCase):
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
 
-class AOTITestCase(TestCase):
-    def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library("//caffe2/test/inductor:custom_ops")
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libaoti_custom_ops.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("aoti_custom_ops.dll")
-            torch.ops.load_library(str(lib_file_path))
-        super().setUp()
-
-
 def fail_cpu(is_skip=False):
     return TestFailure(
         ("cpu",),
@@ -4160,6 +3986,7 @@ def fail_cuda(is_skip=False):
 CPU_TEST_FAILURES = {
     # TODO: failed internally
     "test_multiple_output_alias": fail_cpu(is_skip=True),
+    "test_update_constant_buffer": fail_cpu(is_skip=True),
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
@@ -4170,7 +3997,7 @@ CUDA_TEST_FAILURES = {
 }
 
 
-class AOTInductorTestABICompatibleCpu(AOTITestCase):
+class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
     device_type = "cpu"
     check_model = check_model
@@ -4189,7 +4016,7 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(AOTITestCase):
+class AOTInductorTestABICompatibleCuda(TestCase):
     device = "cuda"
     device_type = "cuda"
     check_model = check_model

@@ -474,7 +474,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 torch.compiler.set_stance(
                     "force_eager" if i < 1 else "default"
                 )  # eager warmup for 1 iteration
-                with torch._dynamo.compiled_autograd.enable(
+                with torch._dynamo.compiled_autograd._enable(
                     torch.compile(backend="inductor", fullgraph=True)
                 ):
                     out = model_compiled(inputs)

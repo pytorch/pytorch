@@ -306,7 +306,11 @@ class OptimizedModule(torch.nn.Module):
         return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
-        if hasattr(self._orig_mod, "_initialize_hook"):
+        if (
+            hasattr(self._orig_mod, "_initialize_hook")
+            and hasattr(self._orig_mod, "_infer_parameters")
+            and callable(self._orig_mod._infer_parameters)
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -665,7 +669,9 @@ class OptimizeContext(_TorchDynamoContext):
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+                ctx = torch._dynamo.compiled_autograd._enable(
+                    compiler_fn, dynamic=self._dynamic
+                )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
 
@@ -986,7 +992,7 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
@@ -1087,12 +1093,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def transform(self):
         result_gm = super().transform()
-        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                "dynamo_flat_name_to_original_fqn"
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[  # type: ignore[index]
+                "dynamo_flat_name_to_original_fqn"  # type: ignore[index]
             ]
-        if "dynamo_compile_id" in self.module.meta:
-            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
+        if "dynamo_compile_id" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]  # type: ignore[index]
         return result_gm
 
 
@@ -1497,6 +1503,7 @@ def export(
                 # NB: this is wrong if graph_captured_result has
                 # data-dependent output size!
                 ignore_fresh_unbacked = null_context()
+                assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 

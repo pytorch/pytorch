@@ -657,11 +657,11 @@ def put_local_code_state(cache_key: str) -> None:
         lock_path = path + ".lock"
         # We /mostly/ don't need the lock but the tmp file could be clobbered
         # TODO: use a safe tempfile create to eliminate lock
-        from torch.utils.waitcounterfilelock import WaitCounterFileLock
+        from torch.utils.filelock import FileLock
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        with WaitCounterFileLock(lock_path, timeout=LOCK_TIMEOUT):
+        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
             with open(tmp_path, "wb") as f:
                 pickle.dump(_CODE_STATE, f)
                 chromium_log.add_event_data(name, cache_size_bytes=f.tell())

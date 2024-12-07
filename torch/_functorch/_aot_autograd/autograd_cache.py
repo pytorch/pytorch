@@ -23,7 +23,6 @@ from torch._inductor.codecache import (
     _ident,
     add_ephemeral_timeout_increase_for_distributed,
     BypassFxGraphCache,
-    CompiledFxGraph,
     create_cache,
     extract_tensor_metadata_for_cache_key,
     FxGraphCache,
@@ -35,6 +34,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
+from torchgen.utils import dataclass_repr
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -50,6 +50,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
+    from torch._inductor.output_code import CompiledFxGraph
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -238,9 +239,10 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
         self.autograd_config = config.save_config()
         try:
-            # TODO: example_inputs causes more cache misses than necessary
-            # with dynamic shapes, because this is before we add
-            # symints to tensor metadata. Improve this later.
+            # FXGraphCache has constraints on what can be pickled in its inductor
+            # config. Check that the gm is cacheable by inductor first,
+            # and if it raises an exception, also bypass on our end.
+            FxGraphCache._check_can_cache(gm)
             super().__init__(gm, example_inputs, fx_config, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
@@ -447,10 +449,36 @@ class AOTAutogradCacheEntry:
                 torch._logging.trace_structured(
                     "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
                 )
+
             if self.aot_forward_graph_str is not None:
                 torch._logging.trace_structured(
-                    "aot_forward_graph", payload_fn=lambda: self.aot_forward_graph_str
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "aot_forward_graph_fw_metadata",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: dataclass_repr(self.runtime_metadata),
                 )
+                if self.maybe_subclass_meta is not None:
+                    torch._logging.trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "aot_forward_graph_fw_subclass_metadata",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: dataclass_repr(self.maybe_subclass_meta),
+                    )
+
+                # It's called an inference graph if not running with autograd
+                name = (
+                    "aot_forward_graph"
+                    if self.aot_backward_graph_str is not None
+                    else "aot_inference_graph"
+                )
+                torch._logging.trace_structured(
+                    name, payload_fn=lambda: self.aot_forward_graph_str
+                )
+
             if self.aot_backward_graph_str is not None:
                 torch._logging.trace_structured(
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
@@ -462,10 +490,12 @@ class AOTAutogradCacheEntry:
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            chromium_log.add_event_data("backend_compile", dispatch_mode="autograd")
+            chromium_log.try_add_event_data("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
-            chromium_log.add_event_data("backend_compile", dispatch_mode="inference")
+            chromium_log.try_add_event_data(
+                "backend_compile", dispatch_mode="inference"
+            )
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -675,12 +705,27 @@ class AOTAutogradCache:
                 cache_state = "miss"
                 if config.strict_autograd_cache:
                     raise e
-            except BypassAOTAutogradCache as e:
+            # Most often this is BypassAOTAutogradCache, but
+            # if there's ever different reason we can't cache,
+            # we still never want to hard throw an exception, since
+            # we can always fallback to a cache bypass.
+            # As an example, if the user calls autograd via
+            # standalone inductor, we will sometimes get a GraphModule
+            # that doesn't actually have a `.graph` on it. Instead
+            # of checking every single case, we safely catch the exception
+            # in those cases.
+            except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
+                # TODO: this gets logged implicitly by cache_bypass_reason,
+                # and here we explicitly log it into tlparse.
+                # We may want to log this as an extra column in Scuba, though.
+                cache_info["cache_bypass_hard_exception"] = not isinstance(
+                    e, BypassAOTAutogradCache
+                )
                 if remote:
                     log_cache_bypass("bypass_aot_autograd", str(e))
                 if config.strict_autograd_cache:
@@ -704,8 +749,7 @@ class AOTAutogradCache:
             chromium_log.log_instant_event(
                 f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
             )
-
-            chromium_log.add_event_data(
+            chromium_log.try_add_event_data(
                 "backend_compile",
                 cache_state=cache_state,
                 cache_event_time=cache_event_time,
