@@ -8,7 +8,6 @@ import functools
 import itertools
 import logging
 import os
-import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -20,6 +19,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Set,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -61,12 +61,13 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     Placeholder,
-    sympy_dot,
     sympy_subs,
+    triton_type,
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
+from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
     CSE,
@@ -86,6 +87,7 @@ from .simd import (
     IterationRangesEntry,
     IterationRangesRoot,
     pexpr,
+    prefix_is_reduction,
     SIMDKernel,
     SIMDScheduling,
 )
@@ -104,6 +106,22 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+
+
+class OpDtypeSupport:
+    """
+    Some Triton ops such as libdevice and tl.math only support float32 and float64.
+    This class records which dtypes are supported by specific IR ops.
+    """
+
+    supported_dtypes: Dict[str, Set[torch.dtype]] = {}
+    convert_outputs: Dict[str, bool] = {}
+
+    @classmethod
+    def register_upcast(cls, func: Callable[..., str], convert_output: bool):
+        op_name = func.__name__
+        cls.supported_dtypes[op_name] = {torch.float32, torch.float64}
+        cls.convert_outputs[op_name] = convert_output
 
 
 @lru_cache(None)
@@ -154,14 +172,14 @@ class TritonSymbols:
 
     block_offsets = {
         symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True, nonnegative=True)
-        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, SymT.RINDEX]
     }
 
     block_sizes = {
         symt: sympy.Symbol(
             f"{prefix_str[symt].upper()}BLOCK", integer=True, positive=True
         )
-        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
+        for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, SymT.RINDEX]
     }
 
     @classmethod
@@ -339,7 +357,7 @@ class BlockPtrOptions:
         if (
             not V.kernel.inside_reduction
             and len(params.strides) == len(V.kernel.numels) - 1
-            and V.kernel.numels[-1] != 1
+            and V.kernel.numels["r"] != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
             final_shape.append(sympy.S.One)
@@ -658,22 +676,6 @@ class TritonPrinter(PythonPrinter):
 
 texpr = TritonPrinter().doprint
 
-# correct cases where Triton types names don't match PyTorch
-_triton_type_mapping = {
-    "tl.bool": "tl.int1",
-    "tl.float8_e4m3fn": "tl.float8e4nv",
-    "tl.float8_e5m2": "tl.float8e5",
-    "tl.float8_e4m3fnuz": "tl.float8e4b8",
-    "tl.float8_e5m2fnuz": "tl.float8e5b16",
-}
-_triton_type_re = re.compile(r"^.*[.]")
-
-
-def triton_type(dtype: torch.dtype) -> str:
-    """Convert torch.dtype to triton type"""
-    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
-    return _triton_type_mapping.get(triton_type_name, triton_type_name)
-
 
 def triton_compute_type(dtype: torch.dtype) -> str:
     """Convert torch.dtype to triton type and upcast [b]float16 to float32"""
@@ -725,6 +727,69 @@ class TritonCSEVariable(CSEVariable):
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
                 self.mask_vars.update({f"{arg.name[0]}mask"})
+
+
+def maybe_upcast_float32(convert_output: bool = True):
+    """
+    Codegen helper to upcast arguments to float32, depending on the config and dtype.
+    This decorates tl.math/libdevice codegen functions.
+    """
+
+    def needs_upcast(var) -> bool:
+        return (
+            not config.triton.codegen_upcast_to_fp32
+            and isinstance(var, CSEVariable)
+            and var.dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+            }
+        )
+
+    def maybe_upcast_arg(var) -> str:
+        upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
+        return f"{var}{upcast_string}"
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        # Record that this function only supports float32 and float64.
+        OpDtypeSupport.register_upcast(func, convert_output)
+
+        def wrapped(*args, **kwargs) -> str:
+            # Optionally upcast args to float32.
+            upcast_args = [maybe_upcast_arg(arg) for arg in args]
+            upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
+
+            # Infer the output dtype from the inputs.
+            # This promotes to the largest input type.
+            all_args = args + tuple(kwargs.values())
+            input_dtypes = [
+                var.dtype
+                for var in all_args
+                if isinstance(var, CSEVariable) and var.dtype is not None
+            ]
+            result_dtype = (
+                functools.reduce(torch.promote_types, input_dtypes)
+                if len(input_dtypes) > 0
+                else None
+            )
+
+            # Call the decorated function, optionally downcasting the result.
+            result = func(*upcast_args, **upcast_kwargs)
+            needs_downcast = (
+                convert_output
+                and any(needs_upcast(var) for var in all_args)
+                and result_dtype not in {torch.float32, None}
+            )
+            downcast_string = (
+                f".to({triton_type(result_dtype)})"
+                if needs_downcast and result_dtype is not None
+                else ""
+            )
+            return f"{result}{downcast_string}"
+
+        return wrapped
+
+    return decorator
 
 
 class TritonOverrides(OpOverrides):
@@ -833,41 +898,42 @@ class TritonOverrides(OpOverrides):
         return cls._shaped_constant(value, dtype, shape=[])
 
     @staticmethod
+    @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_abs(x):
         return f"libdevice.abs({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def exp(x):
         return f"tl_math.exp({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_exp(x):
         return f"libdevice.exp({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def exp2(x):
         return f"libdevice.exp2({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def expm1(x):
         return f"libdevice.expm1({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sqrt(x):
-        if config.triton.codegen_upcast_to_fp32:
-            return f"libdevice.sqrt({x})"
-        else:
-            needs_upcast = x.dtype in (torch.float16, torch.bfloat16)
-            orig_dtype = triton_type(x.dtype)
-            upcast_string = ".to(tl.float32)" if needs_upcast else ""
-            downcast_string = f".to({orig_dtype})" if needs_upcast else ""
-            return f"libdevice.sqrt({x}{upcast_string}){downcast_string}"
+        return f"libdevice.sqrt({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_sqrt(x):
         return f"libdevice.sqrt({x})"
 
@@ -912,18 +978,22 @@ class TritonOverrides(OpOverrides):
         return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
 
     @staticmethod
+    @maybe_upcast_float32()
     def cos(x):
         return f"tl_math.cos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_cos(x):
         return f"libdevice.cos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sin(x):
         return f"tl_math.sin({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_sin(x):
         return f"libdevice.sin({x})"
 
@@ -936,74 +1006,92 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
 
     @staticmethod
+    @maybe_upcast_float32()
     def lgamma(x):
         return f"libdevice.lgamma({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erf(x):
         return f"libdevice.erf({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def cosh(x):
         return f"libdevice.cosh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sinh(x):
         return f"libdevice.sinh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def acos(x):
         return f"libdevice.acos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def acosh(x):
         return f"libdevice.acosh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def asin(x):
         return f"libdevice.asin({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def asinh(x):
         return f"libdevice.asinh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atan2(x, y):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atan(x):
         return f"libdevice.atan({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atanh(x):
         return f"libdevice.atanh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def copysign(x, y):
         return f"libdevice.copysign({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erfc(x):
         return f"libdevice.erfc({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erfinv(x):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def hypot(x, y):
         return f"libdevice.hypot({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log10(x):
         return f"libdevice.log10({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log2(x):
         return f"libdevice.log2({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def nextafter(x, y):
         return f"libdevice.nextafter({x}, {y})"
 
@@ -1067,22 +1155,27 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.load_seed not implemented outside a kernel")
 
     @staticmethod
+    @maybe_upcast_float32()
     def rsqrt(x):
         return f"libdevice.rsqrt({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log1p(x):
         return f"libdevice.log1p({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def tan(x):
         return f"libdevice.tan({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def tanh(x):
         return f"libdevice.tanh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -1094,34 +1187,42 @@ class TritonOverrides(OpOverrides):
         )
 
     @staticmethod
+    @maybe_upcast_float32()
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def pow(a, b):
         return f"libdevice.pow({a}, {b})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log(x):
         return f"tl_math.log({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_log(x):
         return f"libdevice.log({x})"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     def isnan(x):
         return f"libdevice.isnan({x}).to(tl.int1)"
 
     @staticmethod
+    @maybe_upcast_float32()
     def round(x):
         return f"libdevice.nearbyint({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def floor(x):
         return f"libdevice.floor({x})"
 
@@ -1143,6 +1244,7 @@ class TritonOverrides(OpOverrides):
         return f"{sub}.to({x}.dtype)"
 
     @staticmethod
+    @maybe_upcast_float32()
     def trunc(x):
         return f"libdevice.trunc({x})"
 
@@ -1153,6 +1255,7 @@ class TritonOverrides(OpOverrides):
         return f"{a} // {b}"
 
     @staticmethod
+    @maybe_upcast_float32()
     def ceil(x):
         return f"libdevice.ceil({x})"
 
@@ -1418,7 +1521,7 @@ class TritonKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         min_elem_per_thread=0,
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
@@ -1426,7 +1529,7 @@ class TritonKernel(SIMDKernel):
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
-        super().__init__(*groups, **kwargs)
+        super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
@@ -1462,7 +1565,7 @@ class TritonKernel(SIMDKernel):
             if tree.grid_dim is not None:
                 tree.grid_dim += 1
 
-        sem_count, _ = self.numels
+        sem_count = self.numels["x"]
         if self.fixed_config:
             sem_count = CeilDiv(sem_count, self.fixed_config["XBLOCK"])
         self.semaphores_name = self.args.semaphores(sem_count)
@@ -1563,7 +1666,7 @@ class TritonKernel(SIMDKernel):
             else:
                 # var is one of xN, yN or rN
                 assert symbol_is_type(
-                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK)
+                    var, (SymT.RINDEX, SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK)
                 ), var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
@@ -1650,73 +1753,18 @@ class TritonKernel(SIMDKernel):
 
                 # Pattern match to find the strides and offset.
                 index_var = range_tree.symbol()
-                wild = functools.partial(sympy.Wild, exclude=[index_var])
-                dims: List[sympy.Expr] = [
-                    wild(f"dim_mod{idx}") for idx in range(num_dims)
-                ]
-                strides: List[sympy.Expr] = [
-                    wild(f"stride_mod{idx}") for idx in range(num_dims)
-                ]
-
-                def get_slice_numels(dims: List[Any]) -> List[Any]:
-                    """
-                    Compute the cumulative size of each dimension's slice.
-                    This proceeds from the last dim up to the second.
-                    """
-                    numels = [sympy.S.One]
-                    for dim in dims[:0:-1]:
-                        numel = dim * numels[0]
-                        numels.insert(0, numel)
-                    return numels
-
-                # The first dimension's index is computed by division.
-                # The remaining are computed by modulo.
-                slice_numels = get_slice_numels(dims[:num_dims])
-                block_index_exprs = [FloorDiv(index_var, slice_numels[0])] + [
-                    ModularIndexing(index_var, numel, dim)
-                    for dim, numel in zip(dims[1:], slice_numels[1:])
-                ]
-
-                # Calculate a linear index from block indices.
-                match_expr = sympy_dot(strides, block_index_exprs)
-
-                # Pattern match.
-                match = index.match(match_expr)
-                if match is None:
+                match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                    index, index_var, range_tree.numel, num_dims
+                )
+                if match_result is None:
                     return None
 
-                # Provide default values for unmatched dims and strides.
-                for dim in dims[1:]:
-                    if dim not in match:
-                        match[dim] = sympy.S.One
-                for stride in strides[1:]:
-                    if stride not in match:
-                        match[stride] = sympy.S.Zero
-
-                sizevars = V.graph.sizevars
-
-                def get_match(expr: sympy.Expr) -> sympy.Expr:
-                    return sizevars.lookup_precomputed_size(match[expr])
-
-                # Replace wildcards with matched expressions.
-                dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
-                strides = [get_match(stride) for stride in strides]
-                slice_numels = get_slice_numels(dims)
-                block_index_exprs = [
-                    sympy_subs(expr, match) for expr in block_index_exprs
-                ]
-
-                # The leading dimension is not directly matched in our expression.
-                # We solve for it by dividing the range tree numel by the product of
-                # all other dimensions. We quit if they are not known to be divisible.
-                assert (
-                    dims[0] not in match
-                ), "Expected not to match the leading dimension!"
-                if not sizevars.statically_known_multiple_of(
-                    range_tree.numel, slice_numels[0]
-                ):
-                    return None
-                dims[0] = range_tree.numel / slice_numels[0]
+                (
+                    dims,
+                    strides,
+                    block_index_exprs,
+                ) = match_result
+                slice_numels = BlockPatternMatcher.get_slice_numels(dims)
 
                 # Check for applicable iteration range sizes.
                 # When mapping a 1D block into an ND one, we need to know that
@@ -1727,6 +1775,7 @@ class TritonKernel(SIMDKernel):
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
                 #  2. Numels are multiples of the maximum possible block size.
+                sizevars = V.graph.sizevars
                 max_block = self.max_block(range_tree.prefix)
                 if any(
                     not sizevars.statically_known_multiple_of(numel, max_block)
@@ -1785,19 +1834,20 @@ class TritonKernel(SIMDKernel):
                 )
                 range_trees = self.active_range_trees(reorder=True)
 
-                # Match each range tree separately.
-                range_symbols = {tree.symbol() for tree in range_trees}
-                index_terms = sympy.Add.make_args(index_relative_to_xyr_index)
-                block_params = BlockParameters()
-                for tree in range_trees:
-                    # Partition the index into subexpressions pertaining to each range tree.
-                    # For example xindex * 5 + rindex * 3 is partitioned to
-                    # (xindex * 5, rindex * 3).
-                    symbol = tree.symbol()
-                    subexpr = sympy.S.Zero + sum(
-                        expr for expr in index_terms if symbol in expr.free_symbols
+                # Partition the index into subexpressions pertaining to each range tree.
+                # For example xindex * 5 + rindex * 3 is partitioned to
+                # (xindex * 5, rindex * 3).
+                index_subexprs = [
+                    BlockPatternMatcher.get_subexpr_involving_symbol(
+                        index_relative_to_xyr_index, tree.symbol()
                     )
+                    for tree in range_trees
+                ]
 
+                # Match each range tree's subexpression separately.
+                range_symbols = {tree.symbol() for tree in range_trees}
+                block_params = BlockParameters()
+                for tree, subexpr in zip(range_trees, index_subexprs):
                     # Reject mixed terms, e.g. xindex * rindex.
                     # NB: the zero expression is allowed, for broadcasting.
                     if len(range_symbols.intersection(subexpr.free_symbols)) > 1:
@@ -1810,11 +1860,7 @@ class TritonKernel(SIMDKernel):
                     block_params += params
 
                 # Collect leftover terms as a constant offset.
-                offset = sum(
-                    expr
-                    for expr in index_terms
-                    if not range_symbols.intersection(expr.free_symbols)
-                )
+                offset = index_relative_to_xyr_index - sum(index_subexprs)
 
                 # Form the block pointer.
                 self.filter_masks(mask_vars)
@@ -2224,7 +2270,9 @@ class TritonKernel(SIMDKernel):
         acc_type = triton_acc_type(src_dtype)
         torch_acc_type = upcast_acc_dtype(src_dtype)
         result_var: Any = self.cse.newvar(dtype=torch_acc_type)
-        result_var.mask_vars = OrderedSet(var for var in masks if var[0] != "r")
+        result_var.mask_vars = OrderedSet(
+            var for var in masks if not prefix_is_reduction(var[0])
+        )
         cond = " & ".join(masks)
 
         def where_cond(tval, fval):
@@ -2494,7 +2542,7 @@ class TritonKernel(SIMDKernel):
         column.  After the barrier, every thread block loads the completed value so that it can compute the final
         value independently.
         """
-        xnumel, rnumel = self.numels
+        xnumel = self.numels["x"]
         mask = "xindex < xnumel" if xnumel != 1 and not self.no_x_dim else None
         expand = "" if self.no_x_dim else "[None,:]"
 
@@ -2744,7 +2792,7 @@ class TritonKernel(SIMDKernel):
                 self.cse.put(cache_key, result_var)
             return tuple(result_vars)
 
-        assert self.range_trees[-1].prefix == "r"
+        assert self.range_trees[-1].is_reduction
         rnumel = "None" if self._has_constant_mask(self.range_trees[-1]) else "rnumel"
 
         if len(values) == 2:
@@ -2878,7 +2926,7 @@ class TritonKernel(SIMDKernel):
             for tree in self.active_range_trees():
                 expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
                 extra_args.append(expr)
-                if tree.prefix != "r":
+                if not tree.is_reduction:
                     grid.append(expr)
             if self.need_numel_args():
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
@@ -3000,7 +3048,7 @@ class TritonKernel(SIMDKernel):
         code = IndentedBuffer()
 
         size_hints = []
-        for numel in self.numels:
+        for numel in self.numels.values():
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
@@ -3136,7 +3184,7 @@ class TritonKernel(SIMDKernel):
         self.triton_meta = triton_meta
 
         for tree in self.range_trees:
-            if tree.prefix == "r" and self.persistent_reduction:
+            if tree.is_reduction and self.persistent_reduction:
                 # RBLOCK for persistent_reduction is defined in codegen_static_numels
                 continue
             if tree.tensor_dim is None:
@@ -3246,12 +3294,12 @@ class TritonKernel(SIMDKernel):
         knows that its a static numel, as that you just plop a constant into the kernel.
         """
         for tree in self.range_trees:
-            if tree.prefix != "r" or self.inside_reduction:
+            if not tree.is_reduction or self.inside_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
-            if tree.prefix == "r" and self.persistent_reduction:
+            if tree.is_reduction and self.persistent_reduction:
                 val = self._get_persistent_RBLOCK(tree.numel)
                 if self.cooperative_reduction:
                     val = f"{val} // RSPLIT"
@@ -3276,7 +3324,7 @@ class TritonKernel(SIMDKernel):
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
-            if tree.prefix != "r" or self.inside_reduction:
+            if not tree.is_reduction or self.inside_reduction:
                 call_args.append(expr)
                 arg_types.append(type(expr))
             if tree.grid_dim is not None:
@@ -3345,7 +3393,7 @@ class TritonKernel(SIMDKernel):
         if (
             self.cooperative_reduction
             and self.persistent_reduction
-            and entry.prefix == "r"
+            and entry.is_reduction
         ):
             suffix = f"{suffix} + rsplit_start"
         return f"tl.arange(0, {entry.prefix.upper()}BLOCK){size}{suffix}"
@@ -3389,21 +3437,34 @@ class TritonKernel(SIMDKernel):
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
-        if tree.prefix == "r" and self.persistent_reduction:
+        if tree.is_reduction and self.persistent_reduction:
             max_block = self._get_persistent_RBLOCK(tree.numel)
         elif tree.prefix == "x" and self.no_x_dim:
             max_block = 1
         else:
             max_block = self.max_block(tree.prefix)
 
-        if tree.prefix == "r" and self.cooperative_reduction:
+        if tree.is_reduction and self.cooperative_reduction:
             max_block = max_block * self.max_rsplit()
 
         # Optional optimization: if block divides numel exactly, we will
         # never need to do a masked load to handle stragglers at the end.
+        # If this tree is for the y dimension, we should only use a constant
+        # mask if it can be guaranteed that:
+        # 1. (ynumel / YBLOCK) < max_ygrid or
+        # 2. (ynumel / YBLOCK) % max_ygrid == 0
+        # Because YBLOCK is not constant, use a conservative heuristic:
+        # only use a constant mask if ynumel < max_ygrid.
         # It's faster to avoid masking at all.  But it is sound to always
         # mask.
-        return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
+        if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):
+            return (
+                tree.grid_dim != 1
+                or tree.has_zdim
+                or V.graph.sizevars.statically_known_leq(tree.numel, get_max_y_grid())
+            )
+
+        return False
 
     def filter_masks(self, mask_vars):
         for tree in self.range_trees:
@@ -3438,7 +3499,7 @@ class TritonKernel(SIMDKernel):
 
 
 class TritonScheduling(SIMDScheduling):
-    kernel_type = TritonKernel
+    kernel_type: Type[Any] = TritonKernel
     backend_features = dict.fromkeys(  # dict for deterministic order
         [
             BackendFeature.FOREACH,
@@ -3696,7 +3757,7 @@ class TritonScheduling(SIMDScheduling):
                 )
             )
         if optional_cooperative:
-            _, rnumel = kernel.numels
+            rnumel = kernel.numels["r"]
             # for larger sizes non-cooperative gets very slow
             if V.graph.sizevars.statically_known_leq(rnumel, 65536):
                 kernels.append(
