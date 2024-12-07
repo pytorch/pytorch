@@ -329,7 +329,9 @@ def generate_wheels_matrix(
             )
 
             # TODO: Enable python 3.13 on aarch64, windows
-            if (os not in [
+            if (
+                os
+                not in [
                     "linux",
                     "linux-s390x",
                     "linux-aarch64",
