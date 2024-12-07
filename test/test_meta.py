@@ -1286,7 +1286,7 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
-    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_gpu_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
     @onlyCUDA
     def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
@@ -1295,7 +1295,7 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     # only test one dtype, as output stride behavior is the same for all dtypes
-    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_cuda_one)
+    @ops(itertools.chain(op_db, foreach_op_db), dtypes=OpDTypes.any_common_cpu_gpu_one)
     # Only test on CUDA, as CUDA kernel's stride is the reference
     @onlyCUDA
     def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):

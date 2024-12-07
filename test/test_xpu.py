@@ -40,7 +40,7 @@ TEST_MULTIXPU = torch.xpu.device_count() > 1
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
 
-any_common_cpu_xpu_one = OpDTypes.any_common_cpu_cuda_one
+ 
 _xpu_computation_op_list = [
     "fill",
     "zeros",
@@ -327,7 +327,7 @@ print(torch.xpu.device_count())
 
     @onlyXPU
     @suppress_warnings
-    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
+    @ops(_xpu_computation_ops, dtypes=OpDTypes.any_common_cpu_gpu_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):

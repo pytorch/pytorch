@@ -5567,3 +5567,30 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
+
+# General utils to get GPU information
+GPU_TYPES = ["cuda", "xpu"]
+
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+HAS_CUDA = torch.cuda.is_available()
+
+HAS_XPU = torch.xpu.is_available()
+
+HAS_GPU = HAS_CUDA or HAS_XPU
+
+GPU_TYPE = get_gpu_type()
+
+HAS_MULTIGPU = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPU_TYPES
+)
+
+def get_gpu_autocast():
+    return torch.cuda.amp.autocast if HAS_CUDA else torch.autocast
+
