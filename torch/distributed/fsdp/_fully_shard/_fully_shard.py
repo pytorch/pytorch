@@ -221,7 +221,7 @@ class FSDPModule:
         # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
+        self.__init__(*args, **kwargs)  # type: ignore[misc]
         return self
 
     def reshard(self) -> None:
