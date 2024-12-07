@@ -519,6 +519,7 @@ coverage_ignore_functions = [
     "is_initialized",
     "is_mpi_available",
     "is_nccl_available",
+    "is_xccl_available",
     "is_torchelastic_launched",
     "is_ucc_available",
     "isend",
