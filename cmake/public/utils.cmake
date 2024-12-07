@@ -386,7 +386,7 @@ function(torch_compile_options libname)
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi)
+      list(APPEND private_compile_options -Wunused-private-field)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
