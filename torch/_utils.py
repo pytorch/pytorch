@@ -885,7 +885,6 @@ def classproperty(func):
 
 
 if TYPE_CHECKING:
-
     # TorchScript does not support `@deprecated`
     # This is a workaround to avoid breaking TorchScript
     @deprecated(
