@@ -27,6 +27,9 @@ TORCH_API bool init_amx();
 // Detect if CPU supports Arm(R) architecture SVE ISA
 TORCH_API bool is_arm_sve_supported();
 
+// Get the max SVE vector length on Arm(R) architecture SVE ISA supported CPU's
+TORCH_API uint32_t get_max_arm_sve_length();
+
 // Get the L1 cache size per core in Byte
 TORCH_API uint32_t L1d_cache_size();
 

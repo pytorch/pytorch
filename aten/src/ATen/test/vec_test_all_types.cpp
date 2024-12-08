@@ -1826,7 +1826,6 @@ namespace {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -1850,8 +1849,6 @@ namespace {
 
     #undef TEST_MASK_CHECK_N
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -1877,8 +1874,6 @@ namespace {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1923,7 +1918,6 @@ namespace {
     #undef TEST_MASK_CAST
     #undef TEST_MASK_CAST_N
     }
-#endif
 #else
 #error GTEST does not have TYPED_TEST
 #endif

@@ -56,7 +56,7 @@ Windows llvm will not have this defination.
 #endif
 
 // These macros helped us unify vec_base.h
-#ifdef CPU_CAPABILITY_AVX512
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_SVE512)
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(64)))
 #elif defined(_WIN32)
@@ -66,17 +66,7 @@ Windows llvm will not have this defination.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
-#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
-// SVE code expects 256-vectors; leave that set for SVE?
-#if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(16)))
-#elif defined(_WIN32)
-#define __at_align__ __declspec(align(16))
-#else
-#define __at_align__
-#endif
-#define VECTOR_WIDTH 16
-#else // CPU_CAPABILITY_AVX512
+#elif defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_SVE256)
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
@@ -86,7 +76,16 @@ Windows llvm will not have this defination.
 #endif
 #define VECTOR_WIDTH 32
 #define int_vector __m256i
-#endif // CPU_CAPABILITY_AVX512
+#else // CPU_CAPABILITY_SVE128 || CPU_CAPABILITY_DEFAULT (NEON)
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
+#endif
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
@@ -165,7 +164,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vectorized(Args... vals) : values{vals...}{
+  Vectorized(Args... vals) : values{static_cast<T>(vals)...}{
   }
   Vectorized(const T(&arr)[kSize]) {
     std::memcpy(values, arr, sizeof(values));
