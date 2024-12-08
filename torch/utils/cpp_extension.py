@@ -149,7 +149,7 @@ def _find_sycl_home() -> Optional[str]:
 
     sycl_home_from_env = os.environ.get('ONEAPI_ROOT')
     icpx_path = shutil.which('icpx')
-
+    sycl_home = None
     # Guess #1
     if sycl_home_from_env and valid_sycl_home(sycl_home_from_env):
         sycl_home = sycl_home_from_env
