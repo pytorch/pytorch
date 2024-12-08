@@ -774,6 +774,23 @@ class TestDeserialize(TestCase):
             # TODO Auto_functionalize is not supported on pre_dispatch IR
             self.check_graph(M(), orig_args, use_pre_dispatch=False)
 
+    def test_hoo_symint_input(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c):
+                num = c.item()
+                return torch.cond(
+                    pred=torch.tensor([True]),
+                    true_fn=lambda a, b: a + b + num,
+                    false_fn=lambda a, b: a - b - num,
+                    operands=(a, b),
+                )
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(2))
+        self.check_graph(Mod(), inp, use_pre_dispatch=False)
+
     def test_multi_return(self) -> None:
         """
         Test multiple return from a single node (ex. layer_norm has 2 outputs)
