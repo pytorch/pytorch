@@ -138,7 +138,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.arm64.2xlarge.ephemeral"
     strategy:
       matrix:
-        cuda_version: ["12.4"]
+        cuda_version: ["12.6"]
     env:
       GPU_ARCH_TYPE: cuda-aarch64
       GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
@@ -172,15 +172,15 @@ jobs:
           retry_wait_seconds: 90
           command: |
             .ci/docker/manywheel/build.sh manylinuxaarch64-builder:cuda${{matrix.cuda_version}}
-  build-docker-rocm:
+  build-docker-rocm-manylinux_2_28:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        rocm_version: ["6.1", "6.2"]
+        rocm_version: ["6.1", "6.2.4"]
     env:
-      GPU_ARCH_TYPE: rocm
+      GPU_ARCH_TYPE: rocm-manylinux_2_28
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
     steps:
       - name: Checkout PyTorch
@@ -191,7 +191,7 @@ jobs:
         if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-            docker-image-name: manylinux-builder-rocm${{matrix.rocm_version}}
+            docker-image-name: manylinux2_28-builder-rocm${{matrix.rocm_version}}
             docker-build-dir:  .ci/docker/manywheel
             always-rebuild: true
             push: true
@@ -213,7 +213,7 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
-            .ci/docker/manywheel/build.sh manylinux-builder:rocm${{matrix.rocm_version}}
+            .ci/docker/manywheel/build.sh manylinux2_28-builder:rocm${{matrix.rocm_version}}
   build-docker-cpu:
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     needs: get-label-type

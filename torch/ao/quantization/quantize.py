@@ -263,16 +263,14 @@ def _add_observer_(
             needs_observation(child)
             and type_before_parametrizations(child) in custom_module_class_mapping
         ):
-            observed_child = custom_module_class_mapping[
+            observed_class = custom_module_class_mapping[
                 type_before_parametrizations(child)
-            ].from_float(child)
+            ]
+            observed_child = observed_class.from_float(child)
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if (
-                custom_module_class_mapping[type_before_parametrizations(child)]
-                not in no_observer_set()
-            ):
+            if not issubclass(observed_class, tuple(no_observer_set())):
                 insert_activation_post_process(observed_child)
         else:
             _add_observer_(

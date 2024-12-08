@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 from typing_extensions import assert_never
 
 from torchgen import local
@@ -30,6 +30,10 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # This file describes the translation of JIT schema to the native functions API.

@@ -38,6 +38,7 @@
 #include <mutex>
 #include <optional>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,

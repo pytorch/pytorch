@@ -1622,7 +1622,7 @@ class TestNNParametrization(NNTestCase):
                 # When using the swap_tensors path, this is needed so that the autograd
                 # graph is not alive anymore.
                 if get_swap_module_params_on_conversion():
-                    w_init = m.weight.clone().detach()
+                    w_init = m.weight.detach().clone()
                 else:
                     w_init = m.weight.clone()
                 if parametrization == "householder" and m.weight.is_complex():
@@ -1771,9 +1771,9 @@ class TestNNParametrization(NNTestCase):
                 and type_after_registration == Tensor
             ):
                 model._apply(lambda t: TwoTensor(t, t))
-            initial_weight = model.weight.clone().detach()
+            initial_weight = model.weight.detach().clone()
             initial_weight_id = id(model.weight)
-            initial_buf = model.buf.clone().detach()
+            initial_buf = model.buf.detach().clone()
             initial_buf_id = id(model.buf)
             type_original_weight = (
                 type_before_registration
