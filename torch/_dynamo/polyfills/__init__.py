@@ -8,7 +8,7 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from typing import Any, Callable, List, Sequence, TYPE_CHECKING
 
 import torch
 
@@ -175,6 +175,22 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+def foreach_map_fn(*args):
+    op = args[0]
+    new_args: List[Any] = []
+    for arg in args[1:]:
+        if not isinstance(arg, (list, tuple)):
+            new_args.append((arg,))
+        else:
+            new_args.append(arg)
+
+    out = []
+    for unpacked in zip_longest(*new_args):
+        out.append(op(*unpacked))
+
+    return out
 
 
 def foreach_lerp_inplace(self, end, weight):
