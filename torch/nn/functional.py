@@ -6290,7 +6290,8 @@ def multi_head_attention_forward(
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        # Use inferred dimension when possible for ONNX export tracing
+        k = k.view(-1 if k.numel() > 0 else k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert (
@@ -6301,7 +6302,8 @@ def multi_head_attention_forward(
         ), f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        # Use inferred dimension when possible for ONNX export tracing
+        v = v.view(-1 if v.numel() > 0 else v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert (
