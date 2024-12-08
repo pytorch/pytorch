@@ -189,7 +189,9 @@ def fn_prepped_for_autograd(
 # (2) fn() cannot mutate any inputs that require gradient.
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
-def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
+def create_joint(
+    fn: Callable, *, aot_config: AOTConfig, materialize_grads=False
+) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
 
@@ -260,6 +262,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                         needed_outs,
                         grad_primals,
                         allow_unused=True,
+                        materialize_grads=materialize_grads,
                     )
                 else:
                     backward_out = torch.autograd.grad(
@@ -267,6 +270,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
                         grad_primals,
                         grad_outputs=needed_tangents,
                         allow_unused=True,
+                        materialize_grads=materialize_grads,
                     )
         backward_out_iter = iter(backward_out)
         return outs, [
