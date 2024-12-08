@@ -1152,7 +1152,7 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
-            if config.triton.store_cubin:
+            if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_reset_kernel_saved_flags()
 
             for line in self.lines:
@@ -1169,7 +1169,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.profile_bandwidth:
                 self.generate_end_graph()
 
-            if config.triton.store_cubin:
+            if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_save_uncompiled_kernels()
 
             if config.triton.autotune_at_compile_time:
@@ -1592,7 +1592,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=None,  # try to infer based on symints
