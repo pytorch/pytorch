@@ -20,6 +20,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .multi_kernel import MultiKernelCall
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
@@ -48,6 +49,9 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self.keys = keys
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
             params is not None
@@ -97,6 +101,10 @@ class DeferredGpuDefaultGrid:
             return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = self._process_grid(grid)
@@ -133,6 +141,10 @@ class DeferredGpuGridLine(DeferredLineBase):
         self.autotune_configs = autotune_configs
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
             params is not None
