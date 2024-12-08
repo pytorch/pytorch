@@ -3402,27 +3402,30 @@ else:
         for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
-                    dest = make_arg(other_sizes, num_dest, dim, dest_contig)
                     src = make_arg(other_sizes, num_copy, dim, src_contig)
-                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[:num_copy]
-                    if not index_contig:
-                        idx = torch.repeat_interleave(idx, 2, dim=-1)
-                        idx = idx[..., ::2]
-                    dest2 = dest.clone()
-                    dest.index_copy_(dim, idx, src)
-                    ref_index_copy(dest2, dim, idx, src)
-                    self.assertEqual(dest, dest2)
+                    for idx_dtype in [torch.int, torch.long]:
+                        dest = make_arg(other_sizes, num_dest, dim, dest_contig)
+                        idx = torch.randperm(num_dest, dtype=idx_dtype, device=device)[:num_copy]
+                        if not index_contig:
+                            idx = torch.repeat_interleave(idx, 2, dim=-1)
+                            idx = idx[..., ::2]
+                        dest2 = dest.clone()
+                        dest.index_copy_(dim, idx, src)
+                        ref_index_copy(dest2, dim, idx, src)
+                        self.assertEqual(dest, dest2)
 
     # FIXME: move to test indexing
     # onlyNativeDeviceTypes due to an XLA error:
     # https://github.com/pytorch/pytorch/issues/53256
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_index_copy_scalars(self, device, dtype):
+    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16), (torch.int, torch.long)))
+    def test_index_copy_scalars(self, device, dtypes):
+        value_type = dtypes[0]
+        idx_type = dtypes[1]
         # Create the 8 possible combinations of scalar sizes for target / index / source
-        scalars = ((make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
-                    make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
-                    make_tensor(size_s, dtype=dtype, device=device, low=None, high=None))
+        scalars = ((make_tensor(size_t, dtype=value_type, device=device, low=None, high=None),
+                    make_tensor(size_i, dtype=idx_type, device=device, low=0, high=1),
+                    make_tensor(size_s, dtype=value_type, device=device, low=None, high=None))
                    for size_t, size_i, size_s in product([(), (1,)], repeat=3))
         for target, idx, source in scalars:
             target.index_copy_(0, idx, source)
@@ -3438,20 +3441,29 @@ else:
 
         # Too large of an index
         a = torch.randn(batch_dim, tgt_dim, device=device)
-        idx = torch.full((idx_dim,), tgt_dim, device=device)
         c = torch.zeros(batch_dim, idx_dim, device=device)
         with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), tgt_dim, dtype=torch.long, device=device)
+            a.index_copy_(1, idx, c)
+        with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), tgt_dim, dtype=torch.int, device=device)
             a.index_copy_(1, idx, c)
 
         # Too small (negative indices)
-        idx = torch.full((idx_dim,), -1, device=device)
         with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), -1, dtype=torch.long, device=device)
+            a.index_copy_(1, idx, c)
+        with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), -1, dtype=torch.int, device=device)
             a.index_copy_(1, idx, c)
 
         # Too small (very negative indices) - they should be unsupported even
         # when support for negative indices is implemented for index_copy_
-        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
         with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), -tgt_dim - 1, dtype=torch.long, device=device)
+            a.index_copy_(1, idx, c)
+        with self.assertRaises(IndexError):
+            idx = torch.full((idx_dim,), -tgt_dim - 1, dtype=torch.int, device=device)
             a.index_copy_(1, idx, c)
 
     def _prepare_data_for_index_copy_and_add_deterministic(
@@ -3527,19 +3539,21 @@ else:
                 self.assertEqual(output, input_list)
 
     # FIXME: move to test indexing
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16), (torch.int, torch.long)))
     @skipIfMPS
-    def test_index_fill(self, device, dtype):
-        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
-        index = torch.tensor([0], device=device)
+    def test_index_fill(self, device, dtypes):
+        value_type = dtypes[0]
+        index_type = dtypes[1]
+        x = torch.tensor([[1, 2], [4, 5]], dtype=value_type, device=device)
+        index = torch.tensor([0], dtype=index_type, device=device)
         x.index_fill_(1, index, 0)
-        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=value_type, device=device))
         if not x.is_complex() and not device == "meta":
             with self.assertRaisesRegex(RuntimeError, r"Scalar"):
                 x.index_fill_(1, index, 1 + 1j)
         # Make sure that the result stays 0-dim while applied to
         # a 0-dim input
-        x = torch.tensor(1, dtype=dtype, device=device)
+        x = torch.tensor(1, dtype=value_type, device=device)
         self.assertEqual(0, x.index_fill(0, index, -1).dim())
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 

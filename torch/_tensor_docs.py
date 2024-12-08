@@ -2443,7 +2443,7 @@ match :attr:`self`, or an error will be raised.
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`tensor` to select from
+    index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to copy
 
 Example::
@@ -2470,7 +2470,7 @@ selecting the indices in the order given in :attr:`index`.
 
 Args:
     dim (int): dimension along which to index
-    index (LongTensor): indices of :attr:`self` tensor to fill in
+    index (IntTensor or LongTensor): indices of :attr:`self` tensor to fill in
     value (float): the value to fill with
 
 Example::
