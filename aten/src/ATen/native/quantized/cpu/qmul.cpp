@@ -13,7 +13,6 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/quantized/Quantizer.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -56,14 +55,32 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 #ifdef USE_XNNPACK
+C10_ALWAYS_INLINE
+enum xnn_status xnnp_define_q_tensor(const Tensor& tensor, MemoryFormat format, uint32_t& id, xnn_subgraph_t subgraph_ptr, uint32_t external_id, uint32_t flags){
+  Tensor contig_tensor = tensor.contiguous(format);
+  const auto tensor_shape = xnnp_utils::get_mem_format_aware_shape(contig_tensor);
+  const int32_t zero_point = static_cast<int32_t>(contig_tensor.q_zero_point());
+  const float scale = static_cast<float>(contig_tensor.q_scale());
+
+  return xnn_define_quantized_tensor_value(
+    subgraph_ptr,
+    xnn_datatype_qint8,
+    zero_point,
+    scale,
+    tensor.ndimension(),
+    tensor_shape.data(),
+    nullptr,
+    external_id,
+    flags,
+    &id);
+}
+
 template <typename scalar_t, bool ReLUFused = false>
 Tensor _mul_out_xnnpack(
     const Tensor& self,
     const Tensor& other,
     double output_scale,
     int64_t output_zero_point) {
-  using underlying_t = typename scalar_t::underlying;
-
   const string func_name = "xnnp_mul()";
   TORCH_CHECK(self.ndimension() > 0, func_name, ": Got empty input tensor.");
   TORCH_CHECK(
@@ -89,96 +106,108 @@ Tensor _mul_out_xnnpack(
     return out;
   }
 
-  int64_t self_zero_point = self_contig.q_zero_point();
-  double self_scale = self_contig.q_scale();
-  int64_t other_zero_point = other_contig.q_zero_point();
-  double other_scale = other_contig.q_scale();
-
-  int64_t output_min = std::numeric_limits<underlying_t>::min();
-  int64_t output_max = std::numeric_limits<underlying_t>::max();
-
-  if(ReLUFused) {
-    /*
-     * FIXME: use activationLimits<T>()
-     * With <T>, MSVC runs into "error C3862: identifier activationLimits not
-     * found".
-     */
-    constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
-    constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
-    int64_t qvalue = static_cast<int64_t>(output_zero_point);
-    qvalue = std::max<int64_t>(qvalue, qmin);
-    output_min = static_cast<underlying_t>(std::min<int64_t>(qvalue, qmax));
+  auto output_max = std::numeric_limits<float>::infinity();
+  auto output_min = -std::numeric_limits<float>::infinity();
+  if (ReLUFused) {
+    output_min = 0;
   }
 
-  xnn_operator_t xnnp_op = nullptr;
-  xnnpack_operator xnnp_qmul_operator;
-
-  // create xnnpack multiply operator ...
-  auto status = xnn_create_multiply_nd_qs8(
-      self_zero_point,
-      self_scale,
-      other_zero_point,
-      other_scale,
-      static_cast<underlying_t>(output_zero_point),
-      static_cast<float>(output_scale),
-      output_min,
-      output_max,
-      0,
-      &xnnp_op);
-
+  // Create XNNPACK Subgraph
+  xnn_subgraph_t subgraph_ptr = nullptr;
+  auto status = xnn_create_subgraph(
+    /*external_value_ids=*/3,
+    /*flags=*/0,
+    &subgraph_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name,
-      ": xnn create operator failed(",
-      status,
-      ")!");
-  xnnp_qmul_operator = xnnpack_operator(xnnp_op);
+      func_name, ": xnn create subgraph failed(", status,")!");
+  std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
+      subgraph_ptr, &xnn_delete_subgraph);
 
+  uint32_t input0_id = XNN_INVALID_VALUE_ID;
+  uint32_t input1_id = XNN_INVALID_VALUE_ID;
+  uint32_t output_id = XNN_INVALID_VALUE_ID;
 
-  const auto self_shape = xnnp_utils::get_mem_format_aware_shape(self_contig);
-  const auto other_shape = xnnp_utils::get_mem_format_aware_shape(other_contig);
-
-  // reshape operator
-  status = xnn_reshape_multiply_nd_qs8(
-      xnnp_qmul_operator.get(),
-      self_shape.size(),
-      self_shape.data(),
-      other_shape.size(),
-      other_shape.data(),
-      caffe2::pthreadpool_());
-
-  TORCH_CHECK(
-      status == xnn_status_success,
-      func_name,
-      ": xnn reshape operator failed(",
-      status,
-      ")!");
-
-  // set up operator
-  status = xnn_setup_multiply_nd_qs8(
-      xnnp_qmul_operator.get(),
-      reinterpret_cast<const underlying_t*>(self_contig.data_ptr<scalar_t>()),
-      reinterpret_cast<const underlying_t*>(other_contig.data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>())
+  // Defining the quantized input 0
+  status = xnnp_define_q_tensor(
+    self,
+    qa_mem_format,
+    input0_id,
+    subgraph_ptr,
+    0,
+    XNN_VALUE_FLAG_EXTERNAL_INPUT
   );
+  TORCH_CHECK(
+      status == xnn_status_success && input0_id != XNN_INVALID_VALUE_ID,
+      func_name, ": xnn define input 0 failed(", status,")!");
 
+  // Defining the quantized input 1
+  status = xnnp_define_q_tensor(
+    other,
+    qa_mem_format,
+    input1_id,
+    subgraph_ptr,
+    1,
+    XNN_VALUE_FLAG_EXTERNAL_INPUT
+  );
+  TORCH_CHECK(
+      status == xnn_status_success && input1_id != XNN_INVALID_VALUE_ID,
+      func_name, ": xnn define input 1 failed(", status,")!");
+
+  // Defining the quantized output
+  status = xnnp_define_q_tensor(
+    out,
+    qa_mem_format,
+    output_id,
+    subgraph_ptr,
+    2,
+    XNN_VALUE_FLAG_EXTERNAL_OUTPUT
+  );
+  TORCH_CHECK(
+      status == xnn_status_success && output_id != XNN_INVALID_VALUE_ID,
+      func_name, ": xnn define output failed(", status,")!");
+
+  const struct xnn_binary_params binary_params = {output_min, output_max};
+  status = xnn_define_binary(
+    subgraph_ptr,
+    xnn_binary_multiply,
+    &binary_params,
+    input0_id,
+    input1_id,
+    output_id,
+    0);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name,
-      ": xnn setup operator failed(",
-      status,
-      ")!");
+      func_name, ": xnn define binary add failed(", status,")!");
 
-  // Run the operator
-  status = xnn_run_operator(
-      xnnp_qmul_operator.get(), /* xnn_operator_t op */
-      caffe2::pthreadpool_()); /* pthreadpool_t threadpool */
+  // create runtime
+  xnn_runtime_t runtime_ptr = nullptr;
+  status = xnn_create_runtime_v2(subgraph_ptr, caffe2::pthreadpool_(), 0, &runtime_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name,
-      ": xnn run operator failed(",
-      status,
-      ")");
+      func_name, ": xnn create runtime failed(", status,")!");
+  TORCH_CHECK(
+      runtime_ptr != nullptr,
+      func_name, ": xnn create runtime failed because runtime_ptr is null");
+  std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
+      runtime_ptr, &xnn_delete_runtime);
+
+  std::array<xnn_external_value, 3> external = {
+    xnn_external_value{input0_id, reinterpret_cast<void*>(self.data_ptr<scalar_t>())},
+    xnn_external_value{input1_id, reinterpret_cast<void*>(other.data_ptr<scalar_t>())},
+    xnn_external_value{output_id, reinterpret_cast<void*>(out.data_ptr<scalar_t>())}};
+
+  status = xnn_setup_runtime(
+    runtime_ptr,
+    external.size(),
+    external.data());
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name, ": xnn setup runtime failed(", status,")!");
+  status = xnn_invoke_runtime(runtime_ptr);
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name, ": xnn invoke runtime failed(", status,")!");
 
   return out;
 }

@@ -85,7 +85,7 @@ std::ostream& operator<<(std::ostream& out, const Check& c) {
   }
   out << ": " << c.search_str_;
   return out;
-};
+}
 
 namespace {
 
