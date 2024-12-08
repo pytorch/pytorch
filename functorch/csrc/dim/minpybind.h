@@ -601,7 +601,15 @@ struct vector_args {
             PyObject *dummy = NULL;
             _PyArg_ParseStackAndKeywords((PyObject*const*)args, nargs, kwnames.ptr(), _parser, &dummy, &dummy, &dummy, &dummy, &dummy);
 #else
+#if IS_PYTHON_3_12_PLUS
+            _PyArg_Parser* _parser = new _PyArg_Parser{
+                    .format = NULL,
+                    .keywords = &names_buf[0],
+                    .fname = fname_cstr,
+                    .kwtuple = 0};
+#else
             _PyArg_Parser* _parser = new _PyArg_Parser{NULL, &names_buf[0], fname_cstr, 0};
+#endif
             std::unique_ptr<PyObject*[]> buf(new PyObject*[names.size()]);
             _PyArg_UnpackKeywords((PyObject*const*)args, nargs, NULL, kwnames.ptr(), _parser, required, (Py_ssize_t)values.size() - kwonly, 0, &buf[0]);
 #endif
@@ -683,6 +691,18 @@ inline object handle::call_vector(vector_args args) {
         throw mpy::exception_set(); \
     }
 
+#if IS_PYTHON_3_12_PLUS
+#define MPY_PARSE_ARGS_KWNAMES(fmt, FORALL_ARGS) \
+    static const char * const kwlist[] = { FORALL_ARGS(MPY_ARGS_NAME) nullptr}; \
+    FORALL_ARGS(MPY_ARGS_DECLARE) \
+    static _PyArg_Parser parser = { \
+            .format = fmt,\
+            .keywords = kwlist,\
+            .kwtuple = 0}; \
+    if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, FORALL_ARGS(MPY_ARGS_POINTER) nullptr)) { \
+        throw mpy::exception_set(); \
+    }
+#else
 #define MPY_PARSE_ARGS_KWNAMES(fmt, FORALL_ARGS) \
     static const char * const kwlist[] = { FORALL_ARGS(MPY_ARGS_NAME) nullptr}; \
     FORALL_ARGS(MPY_ARGS_DECLARE) \
@@ -690,3 +710,4 @@ inline object handle::call_vector(vector_args args) {
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, FORALL_ARGS(MPY_ARGS_POINTER) nullptr)) { \
         throw mpy::exception_set(); \
     }
+#endif
