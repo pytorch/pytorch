@@ -26,20 +26,13 @@ from io import StringIO
 from typing import (
     Any,
     Callable,
-    Dict,
     Generic,
-    Iterable,
-    List,
     NamedTuple,
     Optional,
     Protocol,
-    Sequence,
-    Set,
-    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
-    ValuesView,
 )
 from typing_extensions import Concatenate, dataclass_transform, ParamSpec, TypeGuard
 from unittest import mock
@@ -50,6 +43,8 @@ import torch
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence, ValuesView
+
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
 from torch.utils._pytree import tree_map_only
@@ -93,7 +88,7 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-VarRanges = Dict[sympy.Expr, sympy.Expr]
+VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
@@ -229,7 +224,7 @@ def has_torchvision_roi_align() -> bool:
         return False
 
 
-def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
+def decode_device(device: torch.device | None | str) -> torch.device:
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
@@ -253,9 +248,7 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(
-    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
-) -> Union[int, sympy.Expr]:
+def ceildiv(numer: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Expr:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
         return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
@@ -302,9 +295,7 @@ def _type_of(key):
     return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
-def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]]
-) -> List[sympy.Expr]:
+def convert_shape_to_inductor(lst: Iterable[int | torch.SymInt]) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
     trivial. But for symbolic tensors, we need to map from SymIntNode into
@@ -314,8 +305,8 @@ def convert_shape_to_inductor(
 
 
 def convert_shape_to_symint(
-    lst: Iterable[Union[int, sympy.Expr]]
-) -> List[Union[int, torch.SymInt]]:
+    lst: Iterable[int | sympy.Expr],
+) -> list[int | torch.SymInt]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
@@ -345,7 +336,7 @@ def is_view(op: torch._ops.OpOverload) -> bool:
 
 
 def is_pointwise_use(
-    use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
+    use, is_pointwise_fn: Callable[[torch._ops.OpOverload], bool] | None = None
 ) -> bool:
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
@@ -429,7 +420,7 @@ def precompute_method(obj: Any, method: str):
     setattr(obj, method, lambda: result)
 
 
-def precompute_methods(obj: Any, methods: List[str]):
+def precompute_methods(obj: Any, methods: list[str]):
     """Replace methods with new methods that returns a precomputed constants."""
     for method in methods:
         precompute_method(obj, method)
@@ -447,7 +438,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x: Tuple[_T, ...]) -> List[_T]:
+def tuple_sorted(x: tuple[_T, ...]) -> list[_T]:
     if len(x) == 0:
         return []
 
@@ -614,7 +605,7 @@ def get_kernel_metadata(node_schedule, wrapper):
 
 def dominated_nodes(
     initial_queue: Iterable[torch.fx.Node], skip_filter=None
-) -> Set[torch.fx.Node]:
+) -> set[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
     dominated_set = set(initial_queue)
@@ -708,7 +699,7 @@ def sympy_index_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.Expr:
     """
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.
@@ -744,7 +735,7 @@ def any_is_symbolic(*args: Any) -> bool:
 
 def get_first_incompatible_cudagraph_node(
     gm: torch.fx.GraphModule,
-) -> Optional[torch.fx.Node]:
+) -> torch.fx.Node | None:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -793,7 +784,7 @@ def output_node(gm: torch.fx.GraphModule):
     return last_node
 
 
-_registered_caches: List[Any] = []
+_registered_caches: list[Any] = []
 
 
 def clear_on_fresh_inductor_cache(obj: Any):
@@ -860,16 +851,14 @@ def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
         clear_inductor_caches()
 
 
-def argsort(seq) -> List[int]:
+def argsort(seq) -> list[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
-def argsort_sym(
-    shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
-) -> List[int]:
+def argsort_sym(shape_env, seq: Sequence[int | torch.SymInt | sympy.Expr]) -> list[int]:
     def cmp(a, b):
         a_idx, a_val = a
         b_idx, b_val = b
@@ -1073,7 +1062,7 @@ class DeferredLineBase:
             line = ""
         self.line = line
 
-    def __call__(self) -> Optional[str]:
+    def __call__(self) -> str | None:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError
 
@@ -1141,7 +1130,7 @@ def use_max_autotune() -> bool:
     )
 
 
-def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+def _use_template_for_cuda(layout, allowed_layout_dtypes: list[torch.dtype]) -> bool:
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
@@ -1392,10 +1381,10 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+def run_and_get_code(fn, *args, **kwargs) -> tuple[Any, list[str]]:
     from .graph import GraphLowering
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str):
         source_codes.append(code)
@@ -1419,7 +1408,7 @@ def get_code(fn, *args, **kwargs):
     """Get the inductor-generated code, but skip any actual compilation or running."""
     from .graph import GraphLowering
 
-    source_codes: List[str] = []
+    source_codes: list[str] = []
 
     def save_output_code(code: str):
         source_codes.append(code)
@@ -1935,7 +1924,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: Optional[str]):
+def is_gpu(device: str | None):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 
@@ -2105,13 +2094,13 @@ def shape_env_from_inputs(inputs: Sequence[InputType]):
 
 
 def align_inputs_from_check_idxs(
-    model: Callable[[List[InputType]], Any],
+    model: Callable[[list[InputType]], Any],
     inputs_to_check: Sequence[int],
-) -> Callable[[List[InputType]], Any]:
+) -> Callable[[list[InputType]], Any]:
     if len(inputs_to_check) == 0:
         return model
 
-    def run(new_inputs: List[InputType]):
+    def run(new_inputs: list[InputType]):
         copy_misaligned_inputs(new_inputs, inputs_to_check)
         return model(new_inputs)
 
@@ -2131,7 +2120,7 @@ def clone_preserve_strides(x: torch.Tensor):
 
 
 def copy_misaligned_inputs(
-    new_inputs: List[InputType], check_inputs_idxs: Sequence[int]
+    new_inputs: list[InputType], check_inputs_idxs: Sequence[int]
 ) -> None:
     for i in check_inputs_idxs:
         _inp = new_inputs[i]
@@ -2293,16 +2282,16 @@ def boolean_ops():
 @dataclasses.dataclass
 class OpDtypeRule:
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
-    override_return_dtype: Optional[torch.dtype]
+    override_return_dtype: torch.dtype | None
 
 
-op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+op_dtype_propagation_rules: dict[str, OpDtypeRule] = {}
 
 
 def register_op_dtype_propagation_rules(
     name,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-    override_return_dtype: Optional[torch.dtype],
+    override_return_dtype: torch.dtype | None,
 ):
     op_dtype_propagation_rules[name] = OpDtypeRule(
         type_promotion_kind, override_return_dtype
@@ -2333,7 +2322,7 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     return wrap(cls)
 
 
-def get_donated_idxs() -> Optional[List[int]]:
+def get_donated_idxs() -> list[int] | None:
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
