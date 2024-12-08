@@ -1823,7 +1823,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     ):
         def extract_output_name(out):
             if out is None:
-                return None
+                # None indicates kernel does not return a value
+                return []
             elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, ir.MutationOutput):

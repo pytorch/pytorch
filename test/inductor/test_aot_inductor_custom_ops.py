@@ -200,6 +200,21 @@ class AOTInductorTestsTemplate:
 
         self.check_model(m, args)
 
+    def test_custom_op_out_variant_without_return(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                torch.ops.aoti_custom_ops.fn_out_variant_without_return(x, y)
+                return y
+
+        m = Model().to(device=self.device)
+        args = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        m(*args)
+
+        self.check_model(m, args)
+
     def test_custom_op_with_reinterpret_view_inputs(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
