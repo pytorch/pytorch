@@ -12,8 +12,8 @@ from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
 from ..codecache import CudaKernelParamCache
-from ..ir import IRNode
-from ..utils import DeferredLineBase, get_gpu_type
+from ..ir import IRNode, TensorBox
+from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
@@ -207,6 +207,34 @@ class CppWrapperGpu(CppWrapperCpu):
             f"AOTI_TORCH_ERROR_CODE_CHECK({self.device_codegen.aoti_get_stream()}({device_idx}, (void**)&{name}));"
         )
         return name
+
+    def codegen_inputs(self):
+        # See Note: [Input Alignment handling in Inductor]
+        #
+        # JIT Inductor does not guard on input alignment. It relies on copy_misaligned_inputs to
+        # copy misaligned inputs to aligned buffers. For AOTInductor, we expect users to use it
+        # as non-Python deployment for its best performance, so implicitly copying misaligned inputs
+        # to aligned buffers is going to bring a surprising performance hit. Instead, we check input
+        # alignment and throw an error if any input is misaligned.
+        if V.graph.aot_mode and V.graph.inputs_to_check:
+            for idx in V.graph.inputs_to_check:
+                input_name = V.graph.graph_input_names[idx]
+                assert (
+                    input_name in V.graph.graph_inputs
+                ), f"{input_name} not found in graph inputs"
+                value = V.graph.graph_inputs[input_name]
+                assert isinstance(
+                    value, TensorBox
+                ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                self.prefix.splice(
+                    f"""
+                    if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
+                        throw std::runtime_error("{input_name} is not aligned to {GPU_ALIGN_BYTES} bytes");
+                    }}
+                    """
+                )
+
+        super().codegen_inputs()
 
     def define_kernel(
         self,
