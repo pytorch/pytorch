@@ -3,7 +3,18 @@
 import functools
 import itertools
 import operator
-from typing import cast, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Callable,
+    cast,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import ParamSpec
 
 import torch
 from torch.distributed.tensor._api import DTensor
@@ -24,15 +35,21 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
-def register_prop_rule(op, schema_info=None):
+def register_prop_rule(
+    op: Union[torch._ops.OpOverload, List[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl):
+    def wrapper(impl: Callable[_P, _T]) -> Callable[_P, _T]:
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
@@ -43,7 +60,9 @@ def register_prop_rule(op, schema_info=None):
     return wrapper
 
 
-def register_op_strategy(op, schema_info=None):
+def register_op_strategy(
+    op, schema_info=None
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # pyre-fixme[53]: Captured variable `func` is not annotated.
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
