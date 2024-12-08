@@ -971,6 +971,7 @@ class _InProcessFxCompile(FxCompile):
                     const_output_index=const_output_index,
                     const_code=const_code,
                     const_module=const_graph,
+                    inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
                 with V.set_graph_handler(graph):
