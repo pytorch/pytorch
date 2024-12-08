@@ -52,7 +52,11 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
-from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
+from torch._functorch.aot_autograd import (
+    aot_export_module,
+    make_boxed_func,
+    SerializableAOTDispatchCompiler,
+)
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -1663,20 +1667,20 @@ def compile_fx(
         )
 
         def fw_compiler_base(
-            model: GraphModule,
-            example_inputs: List[InputType],
+            gm: GraphModule,
+            example_inputs: Sequence[InputType],
             is_inference: bool,
         ) -> OutputCode:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
-                    _recursive_joint_graph_passes(model)
+                    _recursive_joint_graph_passes(gm)
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)
                 )
 
-                model_outputs_node = output_node(model)
+                model_outputs_node = output_node(gm)
                 if config.keep_output_stride:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                     num_model_outputs = len(model_outputs)
@@ -1733,7 +1737,7 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 return inner_compile(
-                    model,
+                    gm,
                     example_inputs,
                     static_input_idxs=get_static_input_idxs(fixed),
                     cudagraphs=cudagraphs,
@@ -1742,7 +1746,10 @@ def compile_fx(
                     boxed_forward_device_index=forward_device,
                 )
 
-        fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler: Callable[
+            [GraphModule, Sequence[InputType]], OutputCode
+        ] = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
         if config.freezing and not torch.is_grad_enabled():
             inference_compiler: Callable[..., Any] = functools.partial(
@@ -1756,6 +1763,9 @@ def compile_fx(
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
+            inference_compiler = SerializableAOTDispatchCompiler(
+                OutputCode, inference_compiler
+            )
 
         def partition_fn(
             gm: GraphModule,
@@ -1771,14 +1781,14 @@ def compile_fx(
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
-            model: GraphModule, example_inputs: List[InputType]
+            gm: GraphModule, example_inputs: Sequence[InputType]
         ) -> OutputCode:
             from torch._dynamo.convert_frame import compile_lock
 
             with dynamo_utils.dynamo_timed(
                 "compile_fx.<locals>.bw_compiler"
             ), compile_lock:
-                model_outputs_node = output_node(model)
+                model_outputs_node = output_node(gm)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                     model_outputs_node.meta["user_visible_output_idxs"] = [
@@ -1789,12 +1799,12 @@ def compile_fx(
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
-                fixed = count_tangents(model)
+                fixed = count_tangents(gm)
                 with config.patch(
                     get_cpp_wrapper_config()
                 ) if config.cpp_wrapper else contextlib.nullcontext():
                     return inner_compile(
-                        model,
+                        gm,
                         example_inputs,
                         static_input_idxs=list(range(fixed)),
                         cudagraphs=cudagraphs,
@@ -1802,6 +1812,8 @@ def compile_fx(
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
                     )
+
+        bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
         fake_mode = detect_fake_mode(
             example_inputs_
