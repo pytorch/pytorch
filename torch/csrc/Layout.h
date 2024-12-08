@@ -1,5 +1,5 @@
 #pragma once
-
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/Layout.h>
@@ -15,7 +15,7 @@ struct THPLayout {
   char name[LAYOUT_NAME_LEN + 1];
 };
 
-extern PyTypeObject THPLayoutType;
+TORCH_PYTHON_API extern PyTypeObject THPLayoutType;
 
 inline bool THPLayout_Check(PyObject* obj) {
   return Py_TYPE(obj) == &THPLayoutType;
