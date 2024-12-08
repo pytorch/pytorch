@@ -278,8 +278,9 @@ def aot_compile_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning(
-        "torch._export.aot_compile() is being deprecated, please switch to "
-        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
+        "torch._export.aot_compile()/torch._export.aot_load() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export())/"
+        "torch._inductor.aoti_load_package() instead.")
 
 
 def aot_compile(
@@ -366,6 +367,8 @@ def aot_load(so_path: str, device: str) -> Callable:
     Returns:
         A callable
     """
+    aot_compile_warning()
+
     if device == "cpu":
         runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):

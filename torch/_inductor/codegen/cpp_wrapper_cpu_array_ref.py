@@ -654,10 +654,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # certain that the shim function cannot return an alias of a
         # borrowed argument, or 2) be certain that the returned Tensor from
         # the shim function cannot escape.
-        assert not self.allow_stack_allocation and not self.stack_allocated_buffers, (
+        assert self.is_safe_to_use_borrow_arrayref_tensor_as_tensor(), (
             "borrowing arguments to shim functions is unsafe with "
             "stack allocation on! (see comment above this assertion)"
         )
+
+    def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
+        return not self.allow_stack_allocation and not self.stack_allocated_buffers
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
@@ -996,8 +999,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                 base_handle = self.val_to_arg_str(val, element_type)
                 if config.aot_inductor.use_minimal_arrayref_interface:
-                    self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
-                    base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
+                    if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
+                        base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
+                    else:
+                        base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
                 (
                     tmp_raii_handle_var,
                     tmp_raii_handle_var_decl,
