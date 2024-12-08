@@ -19,7 +19,7 @@ flaky_models = {
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
-    except Exception as e:
+    except Exception:
         return None
 
 
