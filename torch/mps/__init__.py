@@ -140,6 +140,12 @@ def recommended_max_memory() -> int:
     return torch._C._mps_recommendedMaxMemory()
 
 
+def _compile_shader(source: str):
+    if not hasattr(torch._C, "_mps_compileShader"):
+        raise RuntimeError("MPS is not available")
+    return torch._C._mps_compileShader(source)
+
+
 def is_available() -> bool:
     return device_count() > 0
 
