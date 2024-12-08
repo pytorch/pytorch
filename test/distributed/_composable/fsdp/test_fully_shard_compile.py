@@ -12,16 +12,19 @@ from unittest import mock
 
 import torch
 import torch._dynamo.testing
-import torch.distributed._composable.fsdp._fsdp_param
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_common import TrainingState
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
+from torch.distributed.fsdp import (
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
@@ -51,6 +54,20 @@ def _is_fallback_op_in_snodes(snodes, op):
 orig_F_scaled_dot_product_attention = F.scaled_dot_product_attention
 
 
+class Mod(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.encoder = torch.nn.Sequential(
+            torch.nn.Linear(28 * 28, 1024, device="cuda"),
+            torch.nn.Linear(1024, 1024, device="cuda"),
+            torch.nn.Linear(1024, 4096, device="cuda"),
+        )
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
 class TestFullyShardCompileCompute(FSDPTest):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -68,7 +85,7 @@ class TestFullyShardCompileCompute(FSDPTest):
     ):
         torch._dynamo.reset()
         trace_rules_check_count = 0
-        HOOKS_FILE_NAME = "torch/distributed/_composable/fsdp/_fsdp_state.py"
+        HOOKS_FILE_NAME = "torch/distributed/fsdp/_fully_shard/_fsdp_state.py"
         HOOK_WRAPPER_NAME = "fsdp_hook_wrapper"
 
         def patched_trace_rules_check(*args, **kwargs):
@@ -459,7 +476,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 torch.compiler.set_stance(
                     "force_eager" if i < 1 else "default"
                 )  # eager warmup for 1 iteration
-                with torch._dynamo.compiled_autograd.enable(
+                with torch._dynamo.compiled_autograd._enable(
                     torch.compile(backend="inductor", fullgraph=True)
                 ):
                     out = model_compiled(inputs)
@@ -1061,6 +1078,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 2,
                 "Expected at least 3 separate lowerings to Triton code, which means at least 1 graph break in FWD graph",
             )
+
+    def test_dynamo_recompiles_on_fsdp_layers(self):
+        m = Mod()
+        for name, child in m.encoder.named_children():
+            if isinstance(child, torch.nn.Linear):
+                new_child = torch.compile(child)
+                setattr(m.encoder, name, new_child)
+        m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
+        inp = torch.randn(32, 784, device="cuda")
+        out = m(inp)
 
 
 if __name__ == "__main__":

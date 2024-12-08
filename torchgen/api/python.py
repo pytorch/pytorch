@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -195,66 +199,6 @@ from torchgen.model import (
 # These differences have been encapsulated in signature_str() vs. signature_str_pyi()
 # to display the full signatures, and argument_str() vs argument_str_pyi() to display arguments.
 # For examples, only pyi signatures include return types.
-
-
-inplace_binary_ops = {
-    "iadd",
-    "iand",
-    "ifloordiv",
-    "ilshift",
-    "imatmul",
-    "imod",
-    "imul",
-    "ior",
-    "ipow",
-    "irshift",
-    "isub",
-    "itruediv",
-    "ixor",
-}
-binary_ops = inplace_binary_ops | {
-    "add",
-    "sub",
-    "mul",
-    "div",
-    "pow",
-    "lshift",
-    "rshift",
-    "mod",
-    "truediv",
-    "matmul",
-    "floordiv",
-    "radd",
-    "rsub",
-    "rmul",
-    "rtruediv",
-    "rfloordiv",
-    "rpow",  # reverse arithmetic
-    "and",
-    "or",
-    "xor",
-    "rand",
-    "ror",
-    "rxor",  # logic
-    "iadd",
-    "iand",
-    "idiv",
-    "ilshift",
-    "imul",
-    "ior",
-    "irshift",
-    "isub",
-    "ixor",
-    "ifloordiv",
-    "imod",  # inplace ops
-}
-symmetric_comparison_ops = {"eq", "ne"}
-asymmetric_comparison_ops = {"ge", "gt", "lt", "le"}
-comparison_ops = symmetric_comparison_ops | asymmetric_comparison_ops
-
-unary_ops = {"pos", "neg", "abs", "invert"}
-to_py_type_ops = {"bool", "float", "complex", "long", "index", "int", "nonzero"}
-all_ops = binary_ops | comparison_ops | unary_ops | to_py_type_ops
 
 
 def format_function_signature(
@@ -1033,8 +977,7 @@ def argument_type_str_pyi(t: Type) -> str:
             # TODO: this doesn't seem right...
             # Tensor?[] currently translates to tuple[Tensor, ...] | list[Tensor] | None
             # It should probably translate to   tuple[Tensor | None, ...] | list[Tensor | None]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
+            add_optional = True
             ret = (
                 "Tensor | tuple[Tensor, ...] | list[Tensor]"
                 if t.size is not None
@@ -1129,23 +1072,14 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
 
 
 def returns_str_pyi(signature: PythonSignature) -> str:
-    name = signature.name
     field_names = structseq_fieldnames(signature.returns.returns)
     if field_names:
-        return f"torch.return_types.{name}"
+        return f"torch.return_types.{signature.name}"
 
     python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
     if len(python_returns) > 1:
         return "tuple[" + ", ".join(python_returns) + "]"
     if len(python_returns) == 1:
-        if (
-            name.startswith("__")
-            and name.endswith("__")
-            and name[2:-2] in inplace_binary_ops  # e.g.: `__iadd__`, `__imul__`
-        ):
-            # Got in-place dunder magic method
-            # use `Self` as return type to allow for subclasses
-            return "Self"
         return python_returns[0]
     return "None"
 

@@ -1154,7 +1154,7 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr createNamed(const std::optional<c10::QualifiedName>& name,
-      const std::vector<c10::string_view>& field_names,
+      const std::vector<std::string_view>& field_names,
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr create(
@@ -1190,7 +1190,7 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
-  std::optional<std::vector<c10::string_view>> names() const;
+  std::optional<std::vector<std::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 
@@ -1950,12 +1950,6 @@ struct getTypePtr_<at::Generator> final {
 };
 template <>
 struct getTypePtr_<std::string> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
-template <>
-struct getTypePtr_<c10::string_view> final {
   static decltype(auto) call() {
     return StringType::get();
   }
