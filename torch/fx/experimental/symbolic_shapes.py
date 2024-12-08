@@ -1446,6 +1446,9 @@ class DimDynamic(Enum):
     SIZE_LIKE_UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
+    # Treat the dimension as a size-like unbacked with the additional assumption
+    # that the tensor is contiguous and thus we can infer the strides from the sizes.
+    SIZE_LIKE_UNBACKED_CONTIGUOUS = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3870,9 +3873,16 @@ class ShapeEnv:
             ex_size, source, symbolic_context
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
+        if any(
+            s is DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS for s in symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
+        ):
+            stride = [sympy.Integer(1)] * len(size)
+            for i in range(len(size) - 2, -1, -1):
+                stride[i] = stride[i + 1] * size[i + 1]
+        else:
+            for i, val in enumerate(ex_stride):
+                if val in (0, 1):
+                    stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
@@ -4237,7 +4247,10 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+        if dynamic_dim in (
+            DimDynamic.SIZE_LIKE_UNBACKED,
+            DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS,
+        ):
             out = self.create_unbacked_symint().node.expr
             self._constrain_range_for_size(out)
             # TODO: maybe put the hint somewhere
