@@ -826,7 +826,7 @@ class TransformerEncoderLayer(Module):
             tensor_args = (
                 src,
                 self.self_attn.in_proj_weight,
-                not_none(self.self_attn.in_proj_bias),
+                self.self_attn.in_proj_bias,
                 self.self_attn.out_proj.weight,
                 not_none(self.self_attn.out_proj.bias),
                 self.norm1.weight,
