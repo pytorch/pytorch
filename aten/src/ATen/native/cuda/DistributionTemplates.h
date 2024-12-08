@@ -67,13 +67,10 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
   int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
