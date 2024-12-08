@@ -389,8 +389,6 @@ class TestFlexAttention(InductorTestCase):
             KV_S = Q_S
         if V_D is None:
             V_D = Q_D
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
         q = torch.randn(
             (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
         )
@@ -565,9 +563,6 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        if TEST_WITH_ROCM and Q_H != KV_H:
-            self.skipTest("enable_gqa=True is unsupported on ROCM, for now")
-
         assert Q_H % KV_H == 0
 
         q = torch.randn(
@@ -3303,6 +3298,27 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
+    def test_device_cuda_1(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, q, k, v, block_mask):
+                return flex_attention(q, k, v, block_mask=block_mask)
+
+        q = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        k = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        v = torch.randn(1, 1, 256, 32, device="cuda:1", dtype=torch.bfloat16)
+        mask = create_block_mask(
+            lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
+            B=None,
+            H=None,
+            Q_LEN=256,
+            KV_LEN=256,
+            device="cuda:1",
+        )
+        mod = torch.compile(TestModule())
+        attn_output = mod(q, k, v, mask)
+        self.assertEqual(attn_output.device, torch.device("cuda:1"))
+
 
 class TestBlockMask(InductorTestCase):
     @supported_platform
@@ -4313,7 +4329,8 @@ class TestLearnableBiases(InductorTestCase):
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_relative_1d_bias(self, params):
+    @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
+    def test_relative_1d_bias(self, params, mode: str):
         query, key, value = self._init_tensors(params)
         bias = torch.randn(
             2 * params.seq_length,
@@ -4325,7 +4342,7 @@ class TestLearnableBiases(InductorTestCase):
         def bias_func(score, b, h, q_idx, kv_idx):
             return score + bias[torch.abs(q_idx - kv_idx)]
 
-        flex_compiled = torch.compile(flex_attention)
+        flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
         out_gold = flex_attention(
@@ -4620,7 +4637,8 @@ class TestLearnableBiases(InductorTestCase):
     @common_utils.parametrize(
         "params", get_params([torch.float32]), name_fn=lambda x: f"{x}"
     )
-    def test_symmetric_bias(self, params):
+    @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
+    def test_symmetric_bias(self, params, mode: str):
         query, key, value = self._init_tensors(params)
         bias = torch.randn(
             params.seq_length,
@@ -4632,7 +4650,7 @@ class TestLearnableBiases(InductorTestCase):
         def bias_func(score, b, h, q_idx, kv_idx):
             return score + bias[q_idx] + bias[kv_idx]
 
-        flex_compiled = torch.compile(flex_attention)
+        flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
         out_gold = flex_attention(
@@ -4689,7 +4707,8 @@ class TestLearnableBiases(InductorTestCase):
     @common_utils.parametrize(
         "params", get_params(test_dtypes), name_fn=lambda x: f"{x}"
     )
-    def test_head_specific_gate(self, params):
+    @common_utils.parametrize("mode", ["default", "max-autotune-no-cudagraphs"])
+    def test_head_specific_gate(self, params, mode: str):
         query, key, value = self._init_tensors(params)
         gate_score = torch.randn(
             params.num_heads,
@@ -4701,7 +4720,7 @@ class TestLearnableBiases(InductorTestCase):
         def bias_func(score, b, h, q_idx, kv_idx):
             return score * torch.sigmoid(gate_score[h].to(torch.float32))
 
-        flex_compiled = torch.compile(flex_attention)
+        flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
         out_gold = flex_attention(
