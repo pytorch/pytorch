@@ -309,6 +309,12 @@ local_repository(
     path = "third_party/gemmlowp/gemmlowp",
 )
 
+new_local_repository(
+    name = "openrng",
+    build_file = "@//third_party:openrng.BUILD",
+    path = "third_party/openrng",
+)
+
 ### Unused repos start
 
 # `unused` repos are defined to hide bazel files from submodules of submodules.

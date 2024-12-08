@@ -483,3 +483,8 @@ Name: zstd
 License: BSD-3-Clause
 Files: third_party/zstd
   For details, see: third_party/zstd/LICENSE
+
+Name: openrng
+License: MIT OR Apache-2.0 WITH LLVM-exception
+Files: ./openrng
+  For details, see: third_party/openrng/LICENSE
