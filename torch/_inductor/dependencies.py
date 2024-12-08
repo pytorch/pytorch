@@ -25,6 +25,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
+from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
@@ -80,7 +81,10 @@ class MemoryDep(Dep):
     mode: Optional[str] = None
 
     def __repr__(self) -> str:
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
+        maybe_mode = ""
+        if self.mode is not None:
+            maybe_mode = f", {self.mode}"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode})"
 
     @property
     def num_vars(self):
@@ -207,6 +211,15 @@ class MemoryDep(Dep):
     def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
         """{c0: 128, c1: 512, ...}"""
         return dict(zip(self.var_names, self.size))
+
+    def simplify_with_ranges(self):
+        return MemoryDep(
+            name=self.name,
+            index=V.graph.sizevars.simplify_with_ranges(self.index, self.ranges),
+            var_names=self.var_names,
+            size=self.size,
+            mode=self.mode,
+        )
 
     def get_numel(self) -> sympy.Expr:
         if self.is_indirect():
@@ -588,37 +601,12 @@ def extract_read_writes(
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
 
-    from .loop_body import LoopBody, MemoryUsageType
+    from .loop_body import LoopBody
 
     if isinstance(fn, LoopBody):
-        # Fast path to avoid tracing when we already have a LoopBody
-        inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
-        name_to_index = fn.indexing_from_args([*args, *hidden_args])
-        if fn.indirect_vars:
-            # mimic the `tmpX` naming tracing gives us
-            repl = {v: sympy.Symbol(f"tmp{i}") for i, v in enumerate(fn.indirect_vars)}
-            name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-            inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.STORE]:
-            inner.store(
-                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
-            )
-        for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
-            inner.store_reduction(
-                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
-            )
-        for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
-            inner.index_expr(name_to_index[entry.index_name], None)
-        for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
-            # All that matters is that we record the buffer name, so place it in the
-            # "boundaries" name position to ensure that it's recorded.
-            inner.bucketize(
-                None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
-            )
-        # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+        inner = extract_loop_body_with_args(
+            fn, [*args, *hidden_args], var_ranges, normalize
+        )
     else:
         # Slow path tracing the function
         rw = RecordLoadStore(var_ranges, normalize=normalize)
@@ -640,8 +628,42 @@ def extract_read_writes(
     )
 
 
+def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
+    from .loop_body import MemoryUsageType
+
+    # Fast path to avoid tracing when we already have a LoopBody
+    inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
+    name_to_index = fn.indexing_from_args(args)
+    if fn.indirect_vars:
+        # mimic the `tmpX` naming tracing gives us
+        repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
+        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.LOAD]:
+        inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
+        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.STORE]:
+        inner.store(
+            entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+        )
+    for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
+        inner.store_reduction(
+            entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+        )
+    for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
+        inner.index_expr(name_to_index[entry.index_name], None)
+    for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+        # All that matters is that we record the buffer name, so place it in the
+        # "boundaries" name position to ensure that it's recorded.
+        inner.bucketize(
+            None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
+        )
+    # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+    return inner
+
+
 def extract_input_node_reduction_ranges(
-    input_node: "torch._inductor.ir.TensorBox",
+    input_node: "torch._inductor.ir.IRNode",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -655,7 +677,7 @@ def extract_input_node_reduction_ranges(
     size: Optional[List[sympy.Expr]]
     reduction_size: Optional[List[sympy.Expr]]
 
-    if isinstance(input_node.data, ComputedBuffer):
+    if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
         size = [*input_node.get_size()]
         reduction_size = [*input_node.get_reduction_size()]
@@ -672,8 +694,8 @@ def extract_input_node_reduction_ranges(
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
-    reduction_size = None
-    size = None
+    reduction_size: Optional[List[sympy.Expr]] = None
+    size: Optional[List[sympy.Expr]] = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
         new_reads: List[Dep] = []
@@ -692,9 +714,11 @@ def extract_input_node_reduction_ranges(
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
                 if reduction_size is None:
-                    reduction_size = op.get_reduction_size()
-                    size = op.get_size()
-                elif reduction_size != op.get_reduction_size() or size != op.get_size():
+                    reduction_size = [*op.get_reduction_size()]
+                    size = [*op.get_size()]
+                elif reduction_size != [*op.get_reduction_size()] or size != [
+                    *op.get_size()
+                ]:
                     return (None, None)
             else:
                 new_reads.extend(op.get_reads())

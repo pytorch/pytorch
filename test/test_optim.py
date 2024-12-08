@@ -1027,8 +1027,11 @@ class TestOptimRenewed(TestCase):
         if _get_device_type(device) == "mps" and dtype not in (
             torch.float16,
             torch.float32,
+            torch.bfloat16,
         ):
-            self.skipTest("MPS supports only torch.float16 and torch.float32")
+            self.skipTest(
+                "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
+            )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @optims(

@@ -80,6 +80,7 @@ from .graph_signature import (  # noqa: F401
     OutputKind,
     OutputSpec,
     SymBoolArgument,
+    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -521,6 +522,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return TensorArgument(name=new_ph.name)
         elif isinstance(old_arg, SymIntArgument):
             return SymIntArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymFloatArgument):
+            return SymFloatArgument(name=new_ph.name)
         elif isinstance(old_arg, SymBoolArgument):
             return SymBoolArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
@@ -594,7 +597,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     output_specs = [
         OutputSpec(
-            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
+            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )

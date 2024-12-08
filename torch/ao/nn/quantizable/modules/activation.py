@@ -198,7 +198,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.embed_dim,
             self.num_heads,
             self.dropout,
-            (self.linear_Q._weight_bias()[1] is not None),
+            (self.linear_Q._weight_bias()[1] is not None),  # type: ignore[operator]
             (self.bias_k is not None),
             self.add_zero_attn,
             self.kdim,

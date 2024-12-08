@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         itertools as itertools,
         operator as operator,
         os as os,
+        pytree as pytree,
         sys as sys,
     )
 
@@ -101,10 +102,15 @@ def set_intersection(set1, set2):
 
 def set_union(set1, set2):
     union_set = set1.copy()
-    for x in set2:
-        if x not in union_set:
-            union_set.add(x)
+    set_update(union_set, set2)
     return union_set
+
+
+def set_update(set1, set2):
+    for x in set2:
+        if x not in set1:
+            set1.add(x)
+    return set1
 
 
 def set_difference(set1, set2):
@@ -193,3 +199,16 @@ def predicate(obj: Any) -> bool:
     if obj:
         return True
     return False
+
+
+def object_eq(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
+    return self is other
+
+
+def object_ne(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
+    # Using `==` is important because `self` might have a user-defined `__eq__`.
+    return not (self == other)
