@@ -203,13 +203,21 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def reconstruct(self, codegen):
-        def is_new_item(value, other):
-            # compare the id of the realized values if both values are not lazy VTs
-            if value and value.is_realized() and other.is_realized():
-                return id(value.realize()) != id(other.realize())
-            return id(value) != id(other)
+    def has_new_items(self):
+        if self.should_reconstruct_all:
+            return True
+        return any(
+            self.is_new_item(self.original_items.get(key.vt), value)
+            for key, value in self.items.items()
+        )
 
+    def is_new_item(self, value, other):
+        # compare the id of the realized values if both values are not lazy VTs
+        if value and value.is_realized() and other.is_realized():
+            return id(value.realize()) != id(other.realize())
+        return id(value) != id(other)
+
+    def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -225,7 +233,7 @@ class ConstDictVariable(VariableTracker):
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
-            if is_new_item(item, value) or self.should_reconstruct_all:
+            if self.is_new_item(item, value) or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -304,7 +312,9 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.clone(items=self.items.copy(), mutation_type=ValueMutationNew())
+            return self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
@@ -835,7 +845,7 @@ class CustomizedDictVariable(ConstDictVariable):
                 if val is not None:
                     key = ConstantVariable.create(key)
                     items[key] = var
-        return cls(items, user_cls)
+        return cls(items, user_cls, source=builder.source)
 
     def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)

@@ -390,6 +390,9 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(FloatType::get());
   } else if (PyComplex_CheckExact(input.ptr())) {
     return InferredType(ComplexType::get());
+  } else if (py::isinstance<py::bytes>(input)) {
+    // NOTE: We may need a ByteType in the future
+    return InferredType(StringType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
