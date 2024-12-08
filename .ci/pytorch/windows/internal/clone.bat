@@ -1,14 +1,10 @@
-:: @echo off
+@echo off
 
 :: The conda and wheels jobs are separated on Windows, so we don't need to clone again.
 if not exist "%NIGHTLIES_PYTORCH_ROOT%" goto clone_pytorch
-:: XPU windows build can't work with long src path, use NIGHTLIES_PYTORCH_ROOT directly.
-:: Refer https://github.com/pytorch/pytorch/issues/134956
-:: if "%CUDA_VERSION%" == "xpu" (
 echo "Changing to NIGHTLIES_PYTORCH_ROOT"
 cd "%NIGHTLIES_PYTORCH_ROOT%"
 goto submodule
-::)
 
 :clone_pytorch
 
@@ -51,9 +47,5 @@ IF ERRORLEVEL 1 git checkout tags/%PYTORCH_BRANCH%
 
 :submodule
 
-echo "In submodule update - status"
-git status
-echo "Doing submodule update"
 git submodule update --init --recursive
-echo "submodule update complete"
 IF ERRORLEVEL 1 exit /b 1

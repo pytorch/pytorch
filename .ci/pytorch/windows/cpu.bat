@@ -8,10 +8,9 @@ IF NOT EXIST "setup.py" IF NOT EXIST "%MODULE_NAME%" (
 ) ELSE (
     call internal\clean.bat
 )
-echo "Finished clone or clean"
+
 IF ERRORLEVEL 1 goto :eof
 
-echo "Calling Check deps"
 call internal\check_deps.bat
 IF ERRORLEVEL 1 goto :eof
 
