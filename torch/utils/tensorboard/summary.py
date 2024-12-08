@@ -726,9 +726,9 @@ def custom_scalars(layout):
     categories = []
     for k, v in layout.items():
         charts = []
-        for chart_name, chart_meatadata in v.items():
-            tags = chart_meatadata[1]
-            if chart_meatadata[0] == "Margin":
+        for chart_name, chart_metadata in v.items():
+            tags = chart_metadata[1]
+            if chart_metadata[0] == "Margin":
                 assert len(tags) == 3
                 mgcc = layout_pb2.MarginChartContent(
                     series=[
