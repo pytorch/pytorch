@@ -142,6 +142,7 @@ class TestEmbeddingNN(NNTestCase):
         "bag_use_grad,per_sample_weights_use_grad",
         [(True, True), (True, False), (False, True), (False, False)],
     )
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_bag_per_sample_weights_grad_cuda(
         self, bag_use_grad: bool, per_sample_weights_use_grad: bool
     ):
