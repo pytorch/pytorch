@@ -247,6 +247,27 @@ class AOTICompiledModel:
     def get_metadata(self) -> Dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
+    def load_constants(
+        self,
+        constants_map: Dict[str, torch.Tensor],
+        *,
+        check_full_update: bool,
+    ) -> None:
+        """
+        Given a mapping of constant fqns to tensors, load the constants into the model.
+        You can use ``get_constant_fqns`` to get the list of constant fqns that
+        are needed in the compiled model.
+
+        Args:
+            constants_map: A mapping of constant fqns to tensors.
+            check_full_update: Whether to add check to see if all the constants
+            are updated and have values.
+        """
+        self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
+
+    def get_constant_fqns(self) -> List[str]:
+        return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
+
 
 def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
     assert isinstance(path, io.BytesIO) or (
