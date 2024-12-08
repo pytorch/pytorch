@@ -35,11 +35,14 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_CUDA,
+    TEST_HPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -50,6 +53,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
+
+
+dev_type = torch.device(get_devtype())
 
 
 class SimpleModel(nn.Module):
@@ -98,7 +104,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     @property
     def device_type(self) -> str:
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return "cuda" if TEST_CUDA else "hpu" if TEST_HPU else "cpu"
 
     @property
     def world_size(self) -> int:
@@ -892,7 +898,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         tp_model = parallelize_module(model, twod_mesh["tp"], parallelize_plan)
         eager_2d = FSDP(
             tp_model,
-            device_id=self.rank,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
@@ -904,7 +910,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
         fsdp_2d = FSDP(
             tp_model2,
-            device_id=self.rank,
+            device_id=dev_type.type,
             use_orig_params=True,
             device_mesh=twod_mesh["dp"],
         )
