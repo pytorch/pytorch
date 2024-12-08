@@ -30,11 +30,8 @@ else:
         """
         Indicates whether we are tracing/compiling with torch.compile() or torch.export().
         """
-        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
-            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-            # FutureWarning,  # TorchScript does not support Warning type
-            stacklevel=2,
-        )
+        # NOTE: With `@torch.compile(backend="eager")`, torch._dynamo.is_compiling() will get traced
+        # and return true. torch.compiler.is_compiling() is skipped and will return false.
         return torch.compiler.is_compiling()
 
 

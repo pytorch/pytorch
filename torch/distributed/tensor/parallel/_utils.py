@@ -7,14 +7,15 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.placement_types import Placement
 
 
+try:
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+except Exception:
+
+    def is_torchdynamo_compiling():  # type: ignore[misc]
+        return False
+
+
 LayoutsType = Union[Placement, Tuple[Placement, ...]]
-
-
-def is_torchdynamo_compiling() -> bool:
-    # Use local function to avoid circular imports
-    from torch.compiler import is_compiling
-
-    return is_compiling()
 
 
 def _deprecate_warnings(func_name: str, extra_msg: str) -> None:

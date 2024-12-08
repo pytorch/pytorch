@@ -4621,7 +4621,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # requires_grad = False does not currently work with dynamo tests and throws this error:
         #   AssertionError: SymInts must use SymNodeVariable.
         #   If the underlying value is static, we will create a ConstantVariable and specialize.
-        if torch.compiler.is_compiling() and not requires_grad:
+        if torch._dynamo.is_compiling() and not requires_grad:
             return
 
         tensor_lists = self._get_example_tensor_lists(

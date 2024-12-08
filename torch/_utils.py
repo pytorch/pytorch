@@ -899,8 +899,6 @@ else:
     def is_compiling() -> bool:
         """
         Indicates whether we are tracing/compiling with torch.compile() or torch.export().
-
-        TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
         """
         warnings.warn(  # use `warnings.warn` instead of `@deprecated`
             "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
