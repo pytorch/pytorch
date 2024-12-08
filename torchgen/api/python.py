@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -974,8 +978,7 @@ def argument_type_str_pyi(t: Type) -> str:
             # TODO: this doesn't seem right...
             # Tensor?[] currently translates to tuple[Tensor, ...] | list[Tensor] | None
             # It should probably translate to   tuple[Tensor | None, ...] | list[Tensor | None]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
+            add_optional = True
             ret = (
                 "Tensor | tuple[Tensor, ...] | list[Tensor]"
                 if t.size is not None

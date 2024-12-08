@@ -40,8 +40,16 @@ namespace at::native {
 // Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
   // Uninitialized value
-  static auto value = c10::utils::check_env("TORCH_LINEAR_FLATTEN_3D");
-  return value.has_value() && value.value();
+  static int value = -1;
+  if (value == -1) {
+    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
+    if (env_str != nullptr && strcmp(env_str, "1") == 0) {
+      value = 1;
+    } else {
+      value = 0;
+    }
+  }
+  return bool(value);
 }
 
 // `_flatten_nd_linear` flattens all but the last dimension of the input tensor
@@ -244,7 +252,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
 // If a path is specified, we reduce in the order specified by the path, else we
 // default to going left => right. The path is a list of indices processed the same
 // way as opt-einsum: https://optimized-einsum.readthedocs.io/en/stable/path_finding.html#format-of-the-path
-Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
+Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   const auto num_ops = operands.size();
 

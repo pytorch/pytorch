@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._sympy.functions import (
+    CleanDiv,
     FloorDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
@@ -370,6 +371,39 @@ class TestPySymInt(TestCase):
 
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
+
+    def test_symint_bitwise_and(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_and = a0 & b0
+        self.assertEqual(res_and, 0b1000)
+        self.assertIsInstance(res_and, torch.SymInt, msg=type(res_and))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_and(s0, s1), 8)"""
+        )
+
+        a1 = create_symint(shape_env, 3)
+        b1 = create_symbool(shape_env, True)
+        self.assertEqual(a1 & b1, 1)
+
+        a2 = create_symint(shape_env, 0b1100)
+        self.assertEqual(a2 & 0b1010, 0b1000)
+
+        a3 = create_symbool(shape_env, True)
+        b3 = create_symbool(shape_env, True)
+        self.assertEqual(a3 & b3, True)
+
+    def test_symint_bitwise_or(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_or = a0 | b0
+        self.assertEqual(res_or, 0b1110)
+        self.assertIsInstance(res_or, torch.SymInt, msg=type(res_or))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s0, s1), 14)"""
+        )
 
     def test_stride(self):
         shape_env = ShapeEnv()
@@ -843,6 +877,162 @@ def forward(self, x_1):
             )
         )
 
+    def test_sympy_optimized_add_binary_search(self):
+        import sympy
+
+        from torch.fx.experimental.sym_node import _binary_search_insert_arg
+
+        a = sympy.Symbol("a")
+        b = sympy.Symbol("b")
+        c = sympy.Symbol("c")
+
+        args = []
+        args = _binary_search_insert_arg([], b)
+        self.assertEqual(args, [b])
+
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+
+        args = _binary_search_insert_arg(args, a)
+        self.assertEqual(args, [a, b])
+
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+        self.assertEqual(_binary_search_insert_arg(args, a), None)
+
+        args = _binary_search_insert_arg(args, c)
+        self.assertEqual(args, [a, b, c])
+
+        self.assertEqual(_binary_search_insert_arg(args, a), None)
+        self.assertEqual(_binary_search_insert_arg(args, b), None)
+        self.assertEqual(_binary_search_insert_arg(args, c), None)
+
+        a1 = sympy.Symbol("a1")
+        a2 = sympy.Symbol("a2")
+
+        args = _binary_search_insert_arg(args, a1)
+        self.assertEqual(args, [a, a1, b, c])
+
+        args = _binary_search_insert_arg(args, a2)
+        self.assertEqual(args, [a, a1, a2, b, c])
+
+        c1 = sympy.Symbol("c1")
+        args = _binary_search_insert_arg(args, c1)
+        self.assertEqual(args, [a, a1, a2, b, c, c1])
+
+        # insert to front
+        _a = sympy.Symbol("_a")
+        args = _binary_search_insert_arg(args, _a)
+        self.assertEqual(args, [_a, a, a1, a2, b, c, c1])
+
+    def test_floor_clean_div_axioms(self):
+        # Test that if we add an axiom that have FloorDiv, after which the
+        # shapeEnv changed such that it can be simplified it to CleanDiv, then
+        # We still correctly replace CleanDiv with the axiom value of FloorDiv.
+        shape_env = ShapeEnv()
+        a = shape_env.create_unbacked_symint()
+
+        shape_env.defer_runtime_assert((a // 3 == 1).node.expr, " test")
+
+        from sympy import Eq
+
+        test1 = Eq(FloorDiv(a.node.expr, 3), 1)
+        test2 = Eq(CleanDiv(a.node.expr, 3), 1)
+
+        self.assertTrue(shape_env.evaluate_expr(test1))
+        self.assertEqual(shape_env._maybe_evaluate_static(test2), None)
+
+        # After this FloorDiv(a, 3) is simplified to CleanDiv(a, 3)
+        shape_env.defer_runtime_assert(Eq(Mod(a, 3), 0), " test")
+        self.assertEqual(test2, shape_env.simplify(test1))
+
+        self.assertTrue(shape_env.evaluate_expr(test1))
+        self.assertTrue(shape_env.evaluate_expr(test2))
+
+    def test_sympy_optimized_add(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        sum = s0 + s1
+
+        self.assertTrue(sum.node._optimized_summation)
+
+        def assert_optimized(sym):
+            self.assertTrue(sym.node._optimized_summation)
+
+        def assert_not_optimized(sym):
+            self.assertFalse(getattr(sym.node, "_optimized_summation", False))
+
+        assert_optimized(sum)
+
+        # add duplicate symbol
+        assert_not_optimized(sum + s0)
+
+        # add constant.
+        assert_not_optimized(sum + 1)
+
+        # add new unique symbol, should maintain _optimized_summation property.
+        assert_optimized(sum + s2)
+
+        assert_optimized(s2 + sum)
+
+        # add x + (a+b) with no  _optimized_summation on the rhs sum.
+        a = create_symint(shape_env, 10)
+        b = create_symint(shape_env, 11)
+        two_sum = torch.sym_sum([a, b])
+        assert_not_optimized(two_sum)
+        assert_optimized(sum + two_sum)
+
+        # adding two expressions of length >2 that are _optimized_summation.
+        a = s0 + s1 + s2
+        s3 = create_symint(shape_env, 10)
+        s4 = create_symint(shape_env, 20)
+        s5 = create_symint(shape_env, 30)
+        b = s3 + s4 + s5
+        assert_optimized(a)
+        assert_optimized(b)
+        assert_optimized(a + b)
+        assert_optimized(b + a)
+
+        # same as above but b does not have ordered_summation_of_unique_symbols.
+        s6 = create_symint(shape_env, 11)
+        s7 = create_symint(shape_env, 21)
+        s8 = create_symint(shape_env, 31)
+        b = torch.sym_sum([s6, s7, s8])
+        assert_optimized(a)
+        assert_not_optimized(b)
+        assert_not_optimized(a + b)
+
+    def test_max_of_unique_summation_opt(self):
+        shape_env = ShapeEnv()
+        s0 = shape_env.create_unbacked_symint()
+        s1 = shape_env.create_unbacked_symint()
+        s2 = shape_env.create_unbacked_symint()
+        s3 = shape_env.create_unbacked_symint()
+        s4 = shape_env.create_unbacked_symint()
+        s5 = shape_env.create_unbacked_symint()
+        s7 = shape_env.create_unbacked_symint()
+
+        def assert_optimized(sym):
+            self.assertTrue(sym.node.expr.unique_summations_symbols is not None)
+
+        def assert_not_optimized(sym):
+            getattr(sym.node.expr, "unique_summations_symbols", None)
+
+        mx1 = torch.sym_max(s0, s1)
+        assert_not_optimized(mx1)
+
+        mx2 = torch.sym_max(s0 + s1, s2 + s3)
+        assert_optimized(mx2)
+
+        mx3 = torch.sym_max(mx2, s4 + s5)
+        assert_optimized(mx3)
+        assert_optimized(torch.sym_max(s4 + s5, mx2))
+
+        assert_not_optimized(torch.sym_max(mx3, s7))
+        assert_not_optimized(torch.sym_max(mx3, 10))
+        assert_not_optimized(torch.sym_max(mx3, s3 + s7))
+        assert_not_optimized(torch.sym_max(mx3, s7 * 2))
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -1272,6 +1462,9 @@ class TestSymNumberMagicMethods(TestCase):
 
         if second_type == "float" and fn in ["mod"]:
             self.skipTest(f"{fn} only handles int")
+
+        if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
+            self.skipTest(f"{fn} is a bitwise op, only handles int")
 
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
@@ -2624,8 +2817,8 @@ class TestGuardsExpressions(TestCase):
         guard_int(sym_int(s0 / 2.0))
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertIn("ToFloat", guards)
-        self.assertIn("FloatTrueDiv", guards)
+        self.assertIn("math.trunc(", guards)
+        self.assertIn("float(", guards)
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 

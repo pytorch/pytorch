@@ -106,10 +106,11 @@ StatementMacros:
   - C10_DEFINE_int32
   - C10_DEFINE_int64
   - C10_DEFINE_string
+  - DEFINE_BINARY
   - PyObject_HEAD
   - PyObject_VAR_HEAD
   - PyException_HEAD
-  - DEFINE_BINARY
+  - TORCH_DECLARE_bool
 
 TabWidth:        8
 UseTab:          Never

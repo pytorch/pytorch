@@ -5,8 +5,19 @@
 import itertools
 import sys
 from dataclasses import dataclass
-from functools import wraps
-from typing import Any, Callable, cast, Dict, Iterator, List, Sequence, Tuple, TypeVar
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -360,13 +371,13 @@ class DTensorTestBase(MultiProcessTestCase):
         return run_subtests(self, *args, **kwargs)
 
 
-TestFunc = Callable[[object], object]
+TestFunc = Callable[[...], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: bool = False) -> TestFunc:
+def with_comms(eager_init: Union[TestFunc, bool] = False) -> TestFunc:
 
-    def decorator(func):
+    def decorator(func, eager_init: bool = False):
 
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
@@ -390,8 +401,7 @@ def with_comms(eager_init: bool = False) -> TestFunc:
 
         return wrapper
 
-    return decorator
-
+    return decorator(func=eager_init) if callable(eager_init) else partial(decorator, eager_init=eager_init)
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
@@ -432,14 +442,11 @@ class DTensorConverter:
         self.flatten_kwargs: List[object] = flatten_kwargs
         self.flatten_kwargs_spec: TreeSpec = flatten_kwargs_spec
 
-        choices_for_args = []
-        for arg in self.flatten_args:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args = [self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_args if isinstance(arg, torch.Tensor)]
 
-        for arg in self.flatten_kwargs:
-            if isinstance(arg, torch.Tensor):
-                choices_for_args.append(self.gen_sharding_choices_for_arg(arg))
+        choices_for_args.extend(
+            self.gen_sharding_choices_for_arg(arg) for arg in self.flatten_kwargs if isinstance(arg, torch.Tensor)
+        )
 
         self.sharding_combs: Iterator[Sequence[Placement]] = iter(
             itertools.product(*choices_for_args)
