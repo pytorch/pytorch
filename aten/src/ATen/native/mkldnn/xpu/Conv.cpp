@@ -2,15 +2,15 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/native/ConvUtils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/utils/ParamUtils.h>
 #include <ATen/ops/full.h>
 #include <ATen/ops/neg.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/Exception.h>
-#include <optional>
-#include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <torch/library.h>
-#include <ATen/native/ConvUtils.h>
+#include <optional>
 
 using namespace dnnl;
 using namespace at::native;
@@ -337,9 +337,13 @@ Attr get_onednn_conv_sum_attr(
       dilation_);
   MemoryFormat mem_fmt = at::MemoryFormat::Contiguous;
   auto input_fmt = input_r.suggest_memory_format();
-  auto input_is_cl = (input_fmt == at::MemoryFormat::ChannelsLast || input_fmt == at::MemoryFormat::ChannelsLast3d);
+  auto input_is_cl =
+      (input_fmt == at::MemoryFormat::ChannelsLast ||
+       input_fmt == at::MemoryFormat::ChannelsLast3d);
   auto weight_fmt = weight_r.suggest_memory_format();
-  auto weight_is_cl = (weight_fmt == at::MemoryFormat::ChannelsLast || weight_fmt == at::MemoryFormat::ChannelsLast3d);
+  auto weight_is_cl =
+      (weight_fmt == at::MemoryFormat::ChannelsLast ||
+       weight_fmt == at::MemoryFormat::ChannelsLast3d);
 
   bool propagate_channels_last = input_is_cl || weight_is_cl;
   if (propagate_channels_last)
@@ -403,7 +407,8 @@ Tensor _convolution_out(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
   // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested = use_channels_last_for_conv(input_r, weight_r, transposed_);
+  bool is_channels_last_suggested =
+      use_channels_last_for_conv(input_r, weight_r);
 
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
@@ -499,7 +504,7 @@ Tensor _convolution_out(
     }
 
     // create output and propagate memory format
-    if (! output_r.defined()) {
+    if (!output_r.defined()) {
       auto dst_tz = conv_dst_size(
           input.ndimension(),
           input.sizes(),
@@ -577,7 +582,8 @@ Tensor convolution_overrideable(
   auto k = weight_r.ndimension();
   at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
   if (xpu_conv_use_channels_last(input_r, weight_r)) {
-      backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
+    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d
+                                     : at::MemoryFormat::ChannelsLast;
   }
   Tensor input_c = input_r.contiguous(backend_memory_format);
   Tensor weight_c = weight_r.contiguous(backend_memory_format);
@@ -618,7 +624,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16, half and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight, transposed);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
@@ -655,9 +661,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   }
 
   // ensure the tensors are contiguous
-  auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(input_.ndimension())
+  auto mfmt = is_channels_last_suggested
+      ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ =  grad_output_.contiguous(mfmt);
+  grad_output_ = grad_output_.contiguous(mfmt);
   weight_ = weight_.contiguous(mfmt);
   input_ = input_.contiguous(mfmt);
 
@@ -730,9 +737,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-TORCH_LIBRARY_IMPL(aten, XPU, m){
+TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl("convolution_overrideable", TORCH_FN(convolution_overrideable));
-  m.impl("convolution_backward_overrideable", TORCH_FN(convolution_backward_overrideable));
+  m.impl(
+      "convolution_backward_overrideable",
+      TORCH_FN(convolution_backward_overrideable));
 }
 
 } // namespace xpu

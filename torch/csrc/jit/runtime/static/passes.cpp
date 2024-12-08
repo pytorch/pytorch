@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
+// clang-format off
 C10_DEFINE_bool(
     enable_clip_ranges_gather_fusions,
     true,
