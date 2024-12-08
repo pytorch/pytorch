@@ -48,6 +48,7 @@ from .torch_function import (
     dispatch_torch_function,
     TorchFunctionModeStackVariable,
 )
+from dataclasses import replace
 
 
 try:
@@ -600,6 +601,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_sym_stride(self_, tx, self, dim=None):
             if dim is not None:
                 return self.call_method(tx, "stride", [dim], {})
+
+        @register(replace)  # Registering dataclasses.replace
+        def handle_dataclass_replace(self, tx: "InstructionTranslator", instance, **changes):
+            # You can inline the logic for handling the replacement, similar to how other handlers are handled
+            # Use the instance and changes to create the new dataclass instance
+            new_instance = dataclasses.replace(instance, **changes)
+
+            # Wrap the result in a way Dynamo can process it, e.g., ConstantVariable
+            return ConstantVariable.create(new_instance)
 
         @register(torch.addcdiv)
         def handle_addcdiv(self, tx: "InstructionTranslator", *args, **kwargs):
