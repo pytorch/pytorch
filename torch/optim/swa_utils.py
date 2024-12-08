@@ -241,7 +241,7 @@ class AveragedModel(Module):
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
 
-    def forward(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
+    def forward(self, *args: _P.args, **kwargs: _P.kwargs):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
