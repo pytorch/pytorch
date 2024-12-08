@@ -145,10 +145,10 @@ def triton_hash_to_path_key(key):
         from triton.runtime.cache import _base64
 
         return _base64(key)
-    except Exception as e:
+    except Exception:
         try:
             from triton.runtime.cache import _base32
 
             return _base32(key)
-        except Exception as e:
+        except Exception:
             return key
