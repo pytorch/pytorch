@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
@@ -89,6 +89,7 @@ class Linear(Module):
     in_features: int
     out_features: int
     weight: Tensor
+    bias: Optional[Tensor]
 
     def __init__(
         self,
@@ -190,6 +191,7 @@ class Bilinear(Module):
     in2_features: int
     out_features: int
     weight: Tensor
+    bias: Optional[Tensor]
 
     def __init__(
         self,
