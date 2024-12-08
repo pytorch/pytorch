@@ -10,6 +10,7 @@ import threading
 import warnings
 from typing import (
     Any,
+    Callable as _Callable,
     cast,
     Dict as _Dict,
     Optional as _Optional,
@@ -18,7 +19,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, Self
+from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec, Self
 
 import torch
 from torch._utils import _to, _type
@@ -45,6 +46,8 @@ _share_memory_lock = threading.Lock()
 _share_memory_map: _Dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
+_U = TypeVar("_U")
+_R = TypeVar("_R")
 _P = _ParamSpec("_P")
 
 
@@ -427,9 +430,11 @@ class _StorageBase:
         self._byteswap(elem_size)
 
 
-def _share_memory_lock_protected(fn):
+def _share_memory_lock_protected(
+    fn: _Callable[_Concatenate[_U, _P], _R],
+) -> _Callable[_Concatenate[_U, _P], _R]:
     @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: _U, *args: _P.args, **kwargs: _P.kwargs):
         to_free = None
         to_wait = None
         with _share_memory_lock:

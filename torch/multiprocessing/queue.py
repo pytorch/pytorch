@@ -3,10 +3,6 @@ import io
 import multiprocessing.queues
 import pickle
 from multiprocessing.reduction import ForkingPickler
-from typing_extensions import ParamSpec
-
-
-_P = ParamSpec("_P")
 
 
 class ConnectionWrapper:
@@ -31,7 +27,7 @@ class ConnectionWrapper:
 
 
 class Queue(multiprocessing.queues.Queue):
-    def __init__(self, *args: _P.args, **kwargs: _P.kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._reader: ConnectionWrapper = ConnectionWrapper(self._reader)
         self._writer: ConnectionWrapper = ConnectionWrapper(self._writer)
