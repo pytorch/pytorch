@@ -8,7 +8,7 @@ using namespace c10;
 #ifndef C10_MOBILE
 static void check(int64_t value) {
   const auto i = SymInt(value);
-  EXPECT_EQ(i.maybe_as_int(), std::make_optional(value));
+  EXPECT_EQ(i.maybe_as_int(), value);
 }
 
 TEST(SymIntTest, ConcreteInts) {
