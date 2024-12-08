@@ -111,7 +111,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x[0].clone().detach().cpu() + x
+            return x[0].detach().clone().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
 

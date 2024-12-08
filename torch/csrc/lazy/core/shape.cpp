@@ -1,4 +1,3 @@
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
@@ -9,7 +8,7 @@
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
-    "Enables calculation of if dims are symbolic");
+    "Enables calculation of if dims are symbolic")
 
 namespace torch::lazy {
 
@@ -59,7 +58,7 @@ Shape Shape::with_symbolic_dims(
 }
 
 bool symbolicShapeEnabled() {
-  static const bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
+  static bool enabled = std::getenv("LTC_ENABLE_SYMBOLIC_SHAPES") != nullptr;
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 

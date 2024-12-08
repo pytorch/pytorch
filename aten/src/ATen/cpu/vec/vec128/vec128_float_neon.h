@@ -303,8 +303,8 @@ public:
   Vectorized<float> exp_u20() const {
     return exp();
   }
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(fmod, Sleef_fmodf4);
-  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(hypot, Sleef_hypotf4_u05);
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(fmod, Sleef_fmodf4)
+  DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(hypot, Sleef_hypotf4_u05)
   Vectorized<float> i0() const {
     return map(calc_i0);
   }
