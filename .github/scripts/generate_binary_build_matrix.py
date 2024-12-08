@@ -215,7 +215,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
-        "cuda-aarch64": "cu124",
+        "cuda-aarch64": "cu126",
         "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
