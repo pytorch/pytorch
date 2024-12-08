@@ -8,17 +8,16 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
 #include <memory>
-#include <random>
+#include <utility>
 #include <vector>
 
 using namespace torch::nn;
 using namespace torch::optim;
 
 template <typename OptimizerClass, typename Options>
-bool test_optimizer_xor(Options options) {
+static bool test_optimizer_xor(Options options) {
   torch::manual_seed(0);
 
   Sequential model(
@@ -30,9 +29,9 @@ bool test_optimizer_xor(Options options) {
   const int64_t kBatchSize = 200;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
-  OptimizerClass optimizer(model->parameters(), options);
+  OptimizerClass optimizer(model->parameters(), std::move(options));
 
-  float running_loss = 1;
+  double running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
     auto inputs = torch::empty({kBatchSize, 2});
@@ -46,8 +45,8 @@ bool test_optimizer_xor(Options options) {
 
     auto step = [&](OptimizerClass& optimizer,
                     Sequential model,
-                    torch::Tensor inputs,
-                    torch::Tensor labels) {
+                    const torch::Tensor& inputs,
+                    const torch::Tensor& labels) {
       auto closure = [&]() {
         optimizer.zero_grad();
         auto x = model->forward(inputs);
@@ -60,11 +59,10 @@ bool test_optimizer_xor(Options options) {
 
     torch::Tensor loss = step(optimizer, model, inputs, labels);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
-    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<double>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
       std::cout << "Loss is too high after epoch " << epoch << ": "
-                << running_loss << std::endl;
+                << running_loss << '\n';
       return false;
     }
     epoch++;
@@ -73,10 +71,10 @@ bool test_optimizer_xor(Options options) {
 }
 
 template <typename Parameters>
-void assign_parameter(
+static void assign_parameter(
     const Parameters& parameters,
     const char* name,
-    torch::Tensor new_tensor) {
+    const torch::Tensor& new_tensor) {
   auto parameter = parameters[name];
   parameter.set_requires_grad(false);
   parameter.flatten().copy_(new_tensor);
@@ -84,7 +82,7 @@ void assign_parameter(
 }
 
 template <typename OptimizerClass, typename Options>
-void check_exact_values(
+static void check_exact_values(
     Options options,
     std::vector<std::vector<torch::Tensor>> expected_parameters) {
   const size_t kIterations = 1001;
@@ -119,7 +117,7 @@ void check_exact_values(
   assign_parameter(
       parameters, "2.bias", torch::tensor({-0.0711}, torch::kFloat64));
 
-  auto optimizer = OptimizerClass(parameters.values(), options);
+  auto optimizer = OptimizerClass(parameters.values(), std::move(options));
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64)
           .reshape({3, 2});
@@ -145,8 +143,7 @@ void check_exact_values(
             expected_parameters.at(i / kSampleEvery).at(p).to(torch::kFloat64);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
-                    << " != " << expected << " (parameter " << p << ")"
-                    << std::endl;
+                    << " != " << expected << " (parameter " << p << ")" << '\n';
           ASSERT_TRUE(false);
         }
       }
@@ -166,8 +163,7 @@ TEST(OptimTest, OptimizerAccessors) {
   ASSERT_TRUE(options == options_);
   // test for param_groups() with non-const reference return
   auto& params_groups = optimizer.param_groups();
-  // NOLINTNEXTLINE(modernize-use-emplace)
-  params_groups.push_back(OptimizerParamGroup(params));
+  params_groups.emplace_back(params);
   auto& params_1 = params_groups[1].params();
   for (const auto i : c10::irange(params_1.size())) {
     torch::equal(params[i], params_1[i]);
@@ -204,7 +200,7 @@ TEST(OptimTest, OptimizerAccessors) {
 
 struct MyOptimizerOptions
     : public OptimizerCloneableOptions<MyOptimizerOptions> {
-  MyOptimizerOptions(double lr = 1.0) : lr_(lr){};
+  MyOptimizerOptions(double lr = 1.0) : lr_(lr) {}
   TORCH_ARG(double, lr) = 1.0;
 };
 
@@ -216,18 +212,16 @@ TEST(OptimTest, OldInterface) {
     }
     explicit MyOptimizer(
         std::vector<at::Tensor> params,
-        MyOptimizerOptions defaults = {})
-        : // NOLINTNEXTLINE(performance-move-const-arg)
-          Optimizer(
-              {std::move(OptimizerParamGroup(params))},
+        const MyOptimizerOptions& defaults = {})
+        : Optimizer(
+              std::move(params),
               std::make_unique<MyOptimizerOptions>(defaults)) {}
   };
   std::vector<torch::Tensor> parameters = {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t size;
+    size_t size = 0;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, parameters.size());
   }
@@ -235,8 +229,7 @@ TEST(OptimTest, OldInterface) {
     std::vector<at::Tensor> params;
     MyOptimizer optimizer(params);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t size;
+    size_t size = 0;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, 0);
 
@@ -255,8 +248,7 @@ TEST(OptimTest, OldInterface) {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t size;
+    size_t size = 0;
     OLD_INTERFACE_WARNING_CHECK(size = optimizer.size());
     ASSERT_EQ(size, linear->parameters().size());
   }
@@ -480,7 +472,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
 
 // Check whether the learning rate of the parameter groups in the optimizer are
 // the same as the expected learning rates given in the epoch:learning rate map
-void check_lr_change(
+static void check_lr_change(
     Optimizer& optimizer,
     LRScheduler& lr_scheduler,
     std::map<unsigned, double> expected_epoch_lrs) {
@@ -512,7 +504,7 @@ void check_lr_change(
 // Very similar to check_lr_change, but for ReduceLROnPlateauScheduler
 // which does not inherit from LRScheduler and requires a metrics
 // input to step().
-void check_lr_change_for_reduce_on_plateau(
+static void check_lr_change_for_reduce_on_plateau(
     Optimizer& optimizer,
     ReduceLROnPlateauScheduler& lr_scheduler,
     std::map<unsigned, double> expected_epoch_lrs) {

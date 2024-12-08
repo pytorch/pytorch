@@ -277,6 +277,10 @@ class ValueCache {
  public:
   ValueCache() = default;
   ValueCache(const ValueCache&) = delete;
+  ValueCache& operator==(const ValueCache&) = delete;
+  ValueCache(ValueCache&&) = default;
+  ValueCache& operator==(ValueCache&&) = delete;
+  ~ValueCache() = default;
 
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
