@@ -2212,6 +2212,7 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
+                assert isinstance(masked_value, CSEVariable)
                 result_var = self.cse.generate(
                     self.compute,
                     final_reduction(masked_value),
