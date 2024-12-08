@@ -701,7 +701,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Sign
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
     ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
-    ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
+    ast_func_def: ast.FunctionDef = ast_mod.body[0]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
     arg_type_map = {"args": Parameter.POSITIONAL_OR_KEYWORD}
