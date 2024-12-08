@@ -1,3 +1,5 @@
+#define PYBIND11_DETAILED_ERROR_MESSAGES
+
 #include <ATen/ATen.h>
 #include <c10/util/CallOnce.h>
 #include <pybind11/pytypes.h>
@@ -288,13 +290,11 @@ PyMethodDef* python_functions() {
 #ifdef USE_MPS
 namespace {
 template <typename T = uint64_t>
-std::optional<std::vector<T>> fetch_optional_vec_from_kwargs(
-    const py::kwargs& kwargs,
-    const char* name) {
-  if (!kwargs.contains(name)) {
+std::optional<std::vector<T>> optional_vec_from_pyobject(
+    const py::object& py_value) {
+  if (py_value.is_none()) {
     return std::nullopt;
   }
-  auto py_value = kwargs[name];
   if (py::isinstance<py::int_>(py_value)) {
     return std::vector({py_value.cast<T>()});
   }
@@ -307,12 +307,15 @@ struct OptionalArgCaster {
  public:
   OptionalArgCaster(const py::object& arg) {
     if (arg.is_none()) {
-    } else if (py::isinstance<std::string>(arg)) {
+    } else if (py::isinstance<py::str>(arg)) {
       default_cast = arg.cast<std::string>();
     } else if (py::isinstance<py::dict>(arg)) {
       cast_map = arg.cast<std::unordered_map<unsigned, std::string>>();
     } else {
-      TORCH_CHECK(false, "Unexpected caster arg");
+      TORCH_CHECK(
+          false,
+          "Unexpected caster arg type ",
+          arg.attr("__class__").attr("__name__").cast<const std::string>());
     }
   }
   template <typename T>
@@ -384,21 +387,21 @@ void initModule(PyObject* module) {
           [](DynamicMetalShaderLibrary& self, const std::string& name) {
             return self.getKernelFunction(name);
           })
-      .def_property_readonly(
-          "function_names", &DynamicMetalShaderLibrary::getFunctionNames);
+      .def("__dir__", [](DynamicMetalShaderLibrary& self) {
+        return self.getFunctionNames();
+      });
   py::class_<MetalKernelFunction, std::shared_ptr<MetalKernelFunction>>(
       m, "_mps_MetalKernel")
       .def(
           "__call__",
           [](MetalKernelFunction& self,
              const py::args& args,
-             const py::kwargs& kwargs) {
-            auto threads = fetch_optional_vec_from_kwargs(kwargs, "threads");
-            auto group_size =
-                fetch_optional_vec_from_kwargs(kwargs, "group_size");
-            OptionalArgCaster caster(
-                kwargs.contains("arg_casts") ? kwargs["arg_casts"]
-                                             : py::none().cast<py::object>());
+             const py::object& py_threads,
+             const py::object& py_group_size,
+             const py::object& arg_casts) {
+            auto threads = optional_vec_from_pyobject(py_threads);
+            auto group_size = optional_vec_from_pyobject(py_group_size);
+            OptionalArgCaster caster(arg_casts);
             self.runCommandBlock([&] {
               self.startEncoding();
               for (auto idx : c10::irange(args.size())) {
@@ -437,7 +440,11 @@ void initModule(PyObject* module) {
                 TORCH_CHECK(false, "3D shaders are not supported yet");
               }
             });
-          })
+          },
+          py::kw_only(),
+          py::arg("threads") = py::none(),
+          py::arg("group_size") = py::none(),
+          py::arg("arg_casts") = py::none())
       .def_property_readonly(
           "max_threads_per_threadgroup",
           &MetalKernelFunction::getMaxThreadsPerThreadgroup)
