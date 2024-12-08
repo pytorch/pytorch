@@ -2,7 +2,7 @@ name: Upload torch dynamo performance stats
 
 on:
   workflow_run:
-    workflows: [inductor-A100-perf-nightly, inductor-perf-nightly-A10g, inductor-perf-nightly-aarch64, inductor-perf-nightly-x86]
+    workflows: [inductor-A100-perf-nightly, inductor-perf-nightly-A10g, inductor-perf-nightly-aarch64, inductor-perf-nightly-x86, perf-nightly-macos]
     types:
       - completed
 
@@ -49,7 +49,7 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
+          pip3 install requests==2.32.2 boto3==1.35.42
 
       - name: Upload torch dynamo performance stats to S3
         id: upload-s3
@@ -64,13 +64,12 @@ jobs:
           # on HUD
           python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
-      - name: Upload torch dynamo performance stats to Rockset
+      - name: Upload torch dynamo performance stats to s3
         if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success'
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --rockset-collection torch_dynamo_perf_stats --rockset-workspace inductor --dynamodb-table torchci-dynamo-perf-stats --match-filename "^inductor_"
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --dynamodb-table torchci-dynamo-perf-stats --match-filename "^inductor_"

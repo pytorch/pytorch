@@ -89,10 +89,6 @@ class RingAttentionTest(DTensorTestBase):
             torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
         )
 
-        if is_causal and compiled and self.world_size > 2:
-            # TODO: Fix this after we move `wait_tensor` to use `with_effect`.
-            return
-
         _cp_options.enable_load_balance = load_balance
 
         q = torch.rand(
@@ -124,9 +120,9 @@ class RingAttentionTest(DTensorTestBase):
             out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
             out.sum().backward()
 
-        cp_q = q.clone().detach()
-        cp_k = k.clone().detach()
-        cp_v = v.clone().detach()
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
         # Theoretically, context_parallel() should not be used to shard
         # parameters because when require_grad is True, resize_ is not
         # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
