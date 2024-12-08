@@ -418,6 +418,8 @@ class _KinetoProfile:
                 with gzip.open(path, "wt") as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
+        elif path.endswith(".json"):
+            self.mem_tl.export_memory_timeline_json(path, device)
         else:
             self.mem_tl.export_memory_timeline(path, device)
 
