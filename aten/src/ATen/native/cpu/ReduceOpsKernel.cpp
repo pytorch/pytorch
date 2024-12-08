@@ -49,8 +49,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result)
     .add_const_input(self)
     .build();
@@ -151,27 +150,24 @@ static void std_var_kernel_impl(TensorIterator& iter, double correction, bool ta
 
 static void prod_kernel_impl(TensorIterator& iter) {
   // Workaround for the error: '*' in boolean context, suggest '&&' instead
-  // [-Werror=int-in-bool-context]
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     binary_kernel_reduce_vec(
         iter,
         [=](scalar_t a, scalar_t b)
-            __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
+            -> scalar_t { return a && b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-            __ubsan_ignore_undefined__ { return a && b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
+            { return a && b; },
+        /*ident=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)
-              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+              -> scalar_t { return a * b; },
           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-              __ubsan_ignore_undefined__ { return a * b; },
-          // NOLINTNEXTLINE(bugprone-argument-comment)
-          /*identity=*/1);
+              { return a * b; },
+          /*ident=*/1);
     });
   }
 }
