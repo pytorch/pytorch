@@ -641,7 +641,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
 void svd_cusolver(const Tensor& A,
                   const bool full_matrices,
                   const bool compute_uv,
-                  const std::optional<c10::string_view>& driver,
+                  const std::optional<std::string_view>& driver,
                   const Tensor& U,
                   const Tensor& S,
                   const Tensor& V,
@@ -655,7 +655,7 @@ void svd_cusolver(const Tensor& A,
 
   // The default heuristic is to use gesvdj driver
 #ifdef USE_ROCM
-  const auto driver_v = c10::string_view("gesvdj");
+  const auto driver_v = std::string_view("gesvdj");
 #else
   const auto driver_v = driver.value_or("gesvdj");
 #endif
@@ -1427,9 +1427,9 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
 }
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-  // for ROCm's hipSolver, syevj is fastest.
 #ifdef USE_ROCM
-  linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  // syevj has larger numerical errors than syevd
+  linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
     // Use syevjBatched for batched matrix operation when matrix size <= 32

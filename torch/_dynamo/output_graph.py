@@ -11,7 +11,18 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -21,6 +32,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -28,10 +40,16 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
-from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    guard_scalar,
+    is_symbolic,
+    ShapeEnv,
+)
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -40,6 +58,7 @@ from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
     create_instruction,
+    create_load_const,
     Instruction,
     unique_id,
 )
@@ -98,7 +117,7 @@ from .variables.builder import (
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
-from .variables.misc import NullVariable
+from .variables.misc import CellVariable, NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -613,8 +632,11 @@ class OutputGraph:
         """
         Saves to out if it is provided. Else saves to the tracing context's global_state.
         """
-        global_state = (
-            out if out is not None else self.tracing_context.global_context.global_state
+        global_state = cast(
+            Dict[str, Tuple[Callable[..., Any], bool]],
+            out
+            if out is not None
+            else self.tracing_context.global_context.global_state,
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
@@ -637,11 +659,11 @@ class OutputGraph:
             functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
-        global_state["autocast_gpu_dtype"] = (
+        global_state["autocast_gpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cuda"),
             torch.get_autocast_dtype("cuda"),
         )
-        global_state["autocast_cpu_dtype"] = (
+        global_state["autocast_cpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cpu"),
             torch.get_autocast_dtype("cpu"),
         )
@@ -918,7 +940,7 @@ class OutputGraph:
                     alias_insts.extend(
                         [
                             create_instruction("LOAD_FAST", argval=list_name),
-                            create_instruction("LOAD_CONST", argval=list_idx),
+                            create_load_const(list_idx),
                             create_instruction("BINARY_SUBSCR"),
                             create_instruction("STORE_FAST", argval=alias_name),
                         ]
@@ -1018,6 +1040,8 @@ class OutputGraph:
             # This was very tricky to debug. For an example, dump the graph at call_user_compiler
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
+                continue  # no need to restore initial state
+            if isinstance(v, CellVariable) and v.local_name == k:
                 continue  # no need to restore initial state
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
@@ -1142,6 +1166,10 @@ class OutputGraph:
                 )
 
     def codegen_suffix(self, tx, stack_values, cg):
+        # NOTE: `codegen_save_tempvars` must run first to update `source` fields
+        # for variables with `AttributeMutationNew`, as they don't implement
+        # `reconstruct` themselves.
+        self.side_effects.codegen_save_tempvars(cg)
         if self.backward_state:
             assert not self.export
             for name, val in self.backward_state.items():
@@ -1149,7 +1177,6 @@ class OutputGraph:
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
         self.side_effects.codegen_hooks(cg)
-        self.side_effects.codegen_save_tempvars(cg)
 
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
@@ -1301,6 +1328,8 @@ class OutputGraph:
             ncalls = count_calls(self.graph)
             counters["stats"]["calls_captured"] += ncalls
 
+            self.remove_tensorify_specialized_graphargs()
+
             # free a bit of memory
             self.real_value_cache.clear()
 
@@ -1391,6 +1420,7 @@ class OutputGraph:
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",
             log_pt2_compile_event=True,
+            dynamo_compile_column_us="aot_autograd_cumulative_compile_time_us",
         ):
             return self._call_user_compiler(gm)
 
@@ -1425,6 +1455,8 @@ class OutputGraph:
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
                 raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
@@ -1459,9 +1491,7 @@ class OutputGraph:
         return compiled_fn
 
     def example_inputs(self) -> List[torch.Tensor]:
-        result = []
-        for arg in self.graphargs:
-            result.append(arg.example)
+        result = [arg.example for arg in self.graphargs]
         return result
 
     def remove_unused_graphargs(self) -> None:
@@ -1612,6 +1642,40 @@ class OutputGraph:
                 else:
                     # Make sure we delete later occurrences of the same symbol
                     used_symbols.remove(symbol)
+
+    def remove_tensorify_specialized_graphargs(self) -> None:
+        # This is a pretty interesting function. Basically we have this problem
+        # where our compiler tends to choke when we have unused inputs. The way
+        # we support dynamic float arguments is by doing a joint fx pass and
+        # tensorifying away as many symfloats as we can. For the remaining symfloats
+        # we have no choice but to specialize... HOWEVER at that point in time
+        # we can no longer remove graph inputs. So our sledgehammer solution is to
+        # save the state of what inputs we should have specialized in dynamo and
+        # restart analysis. This function incorporates this "view from the future"
+        # state and specializes inputs that we know we won't be able to tensorify
+        # away in the joint pass. In principle we shouldn't choke on unused inputs
+        # and so this shouldn't be necessary. In practice CUDA graphs choke on
+        # unused inputs so we need this for now.
+
+        # Import here to prevent circular import
+        from torch._dynamo.symbolic_convert import TensorifyState
+
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value")
+            if (
+                isinstance(example_value, FakeTensor)
+                and example_value.item_memo is not None
+                and hasattr(example_value.item_memo.node._expr, "name")
+                and all(u.target == "item" for u in node.users)
+                and TensorifyState.should_specialize(
+                    # We use _expr instead of expr b/c we want the symbol not the replacement
+                    example_value.item_memo.node._expr.name
+                )
+            ):
+                for u in list(node.users):
+                    u.replace_all_uses_with(guard_scalar(example_value.item_memo))
+                    self.remove_node(u)
+                self.remove_node(node)
 
     def add_output_instructions(self, prefix: List[Instruction]) -> None:
         """
@@ -2109,7 +2173,7 @@ class SubgraphTracer(fx.Tracer):
         # So we are a bit more strict about what sources can become inputs
         # in export
         if self.is_export and self.parent is None:
-            if not is_from_local_source(source, allow_cell_or_freevar=False):
+            if not is_from_local_source(source, only_allow_input=True):
                 self.output_graph.source_to_user_stacks.setdefault(source, []).append(
                     TracingContext.extract_stack()
                 )

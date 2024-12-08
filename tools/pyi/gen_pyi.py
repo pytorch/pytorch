@@ -41,17 +41,10 @@ from tools.autograd.gen_python_functions import (
 )
 
 from torchgen.api.python import (
-    all_ops,
-    binary_ops,
-    comparison_ops,
     format_function_signature as defs,
-    inplace_binary_ops,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_structseq_pyi,
-    symmetric_comparison_ops,
-    to_py_type_ops,
-    unary_ops,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
@@ -191,6 +184,56 @@ blocklist = [
     "copy_",
 ]
 
+shift_ops = (
+    "lshift",
+    "rshift",
+    "ilshift",
+    "irshift",  # inplace ops
+)
+arithmetic_ops = (
+    "add",
+    "sub",
+    "mul",
+    "div",
+    "pow",
+    "mod",
+    "truediv",
+    "matmul",
+    "floordiv",
+    "radd",
+    "rsub",
+    "rmul",
+    "rtruediv",
+    "rfloordiv",
+    "rpow",  # reverse arithmetic
+    "iadd",
+    "idiv",
+    "imul",
+    "isub",
+    "ifloordiv",
+    "imod",  # inplace ops
+)
+logic_ops = (
+    "and",
+    "or",
+    "xor",
+    "rand",
+    "ror",
+    "rxor",  # reverse logic
+    "iand",
+    "ior",
+    "ixor",  # inplace ops
+)
+binary_ops = shift_ops + arithmetic_ops + logic_ops
+
+symmetric_comparison_ops = ("eq", "ne")
+asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
+unary_ops = ("neg", "abs", "invert")
+to_py_type_ops = ("bool", "float", "complex", "long", "index", "int", "nonzero")
+all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
+
 
 def sig_for_ops(opname: str) -> list[str]:
     """sig_for_ops(opname : str) -> list[str]
@@ -202,25 +245,32 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in symmetric_comparison_ops:
-        # e.g.: `__eq__`, `__ne__`
-        # unsafe override https://github.com/python/mypy/issues/5704
-        # PYI032 any-eq-ne-annotation https://docs.astral.sh/ruff/rules/any-eq-ne-annotation
-        return [
-            f"def {opname}(self, other: Any) -> Tensor: ...  # type: ignore[override] # noqa: PYI032"
+    if name == "rpow":
+        return [  # somehow required to make mypy ci happy?
+            f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[has-type]"
         ]
-    if name in inplace_binary_ops:
-        # e.g.: `__iadd__`, `__imul__`
-        # Use `Self` as return type instead of `Tensor` to allow for subclasses
-        return [f"def {opname}(self, other: Any) -> Self: ..."]
-    if name in binary_ops or name in comparison_ops:
-        # e.g.: `__add__`, `__mul__` and `__le__`, `__gt__`
-        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    if name in unary_ops:
-        # e.g.: `__pos__`, `__neg__`, `__abs__`
+    elif name in arithmetic_ops:
+        if name.startswith("i"):
+            # In-place binary-operation dunder methods, like `__iadd__`, should return `Self`
+            return [
+                f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # noqa: PYI034"
+            ]
+        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+    elif name in logic_ops:
+        return [f"def {opname}(self, other: Tensor | _bool) -> Tensor: ..."]
+    elif name in shift_ops:
+        return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
+    elif name in symmetric_comparison_ops:
+        return [
+            # unsafe override https://github.com/python/mypy/issues/5704
+            f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...  # type: ignore[override]",
+            f"def {opname}(self, other: object) -> _bool: ...",
+        ]
+    elif name in asymmetric_comparison_ops:
+        return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+    elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     if name in to_py_type_ops:
-        # e.g.: `__int__`, `__index__`, `__float__`, `__bool__`
         if name in {"bool", "float", "complex"}:
             tname = name
         elif name == "nonzero":
@@ -1104,13 +1154,6 @@ def gen_pyi(
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
         hint = hint.replace("at::Reduction::Mean", "1")
         hint = hint.replace(": Tensor = None", ": Tensor | None = None")
-        # Match both:
-        # ": Tensor | tuple[Tensor | ...] | list[Tensor] = None"
-        # ": tuple[Tensor | ...] | list[Tensor] = None"
-        hint = hint.replace(
-            "tuple[Tensor, ...] | list[Tensor] = None",
-            "tuple[Tensor, ...] | list[Tensor] | None = None",
-        )
         return hint
 
     docstrs = gather_docstrs()
@@ -1294,6 +1337,7 @@ def gen_pyi(
             "_is_view": [defs("_is_view", ["self"], "_bool")],
             "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
+            "is_xpu": ["is_xpu: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
             "is_sparse": ["is_sparse: _bool"],
