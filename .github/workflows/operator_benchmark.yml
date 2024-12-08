@@ -1,0 +1,57 @@
+name: operator_benchmark
+
+on:
+  pull_request:
+    branches-ignore:
+      - nightly
+  push:
+    branches:
+      - main
+      - release/*
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        required: false
+        type: string
+        default: 'short'
+        description: tag filter for operator benchmarks, options from long, short, all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-opbenchmark-build
+      test-matrix: |
+        { include: [
+          { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+        ]}
+
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-on-demand-build:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == 'pytorch' }}
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-opbenchmark-build
+      test-matrix: |
+        { include: [
+          { config: "cpu_operator_benchmark_${{ inputs.test_mode }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+        ]}
+
+  linux-jammy-cpu-py3_9-gcc11-opbenchmark-test:
+    name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-cpu-py3_9-gcc11-opbenchmark-build
+    with:
+      build-environment: linux-jammy-py3.9-gcc11-build
+      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.test-matrix }}
