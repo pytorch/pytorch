@@ -1982,6 +1982,53 @@ class TestSparse(TestSparseBase):
         _test_basic_ops()
         _test_basic_ops_hybrid()
 
+    def _test_add_sparse_broadcasting_shape(self, sparse_dim1, nnz1, shape1, sparse_dim2, nnz2, shape2, dtype, device, coalesced):
+        x1, _, _ = self._gen_sparse(sparse_dim1, nnz1, shape1, dtype, device, coalesced)
+        x2, _, _ = self._gen_sparse(sparse_dim2, nnz2, shape2, dtype, device, coalesced)
+        y1 = x1 + x2
+        y2 = x1.clone()
+        y2.add_(x2)
+        expected = self.safeToDense(x1) + self.safeToDense(x2)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_add_sparse_broadcasting(self, device, dtype, coalesced):
+        def test_add_sparse_broadcasting():
+            self._test_add_sparse_broadcasting_shape(5, 6, [2, 5, 1, 8, 1], 5, 3, [1, 5, 6, 1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(5, 6, [2, 5, 1, 8, 1], 4, 3, [5, 6, 1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(5, 6, [2, 5, 1, 8, 1], 2, 3, [1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(3, 6, [30, 1, 50], 3, 3, [1, 6, 1], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(
+                7, 0, [20, 1, 5, 1, 8, 9, 10], 6, 20, [10, 5, 6, 1, 9, 1], dtype, device, coalesced
+            )
+
+        def test_add_sparse_broadcasting_hybrid():
+            self._test_add_sparse_broadcasting_shape(4, 6, [2, 5, 1, 8, 1], 4, 3, [1, 5, 6, 1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(3, 6, [2, 5, 1, 8, 1], 2, 3, [5, 6, 1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(4, 6, [2, 5, 1, 8, 1], 1, 3, [1, 9], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(2, 16, [30, 1, 50], 2, 13, [1, 6, 1], dtype, device, coalesced)
+            self._test_add_sparse_broadcasting_shape(
+                2, 0, [20, 1, 5, 1, 8, 9, 10], 1, 20, [10, 5, 6, 1, 9, 1], dtype, device, coalesced
+            )
+
+        test_add_sparse_broadcasting()
+        test_add_sparse_broadcasting_hybrid()
+
+    @dtypes(torch.double)
+    def test_add_sparse_mismatch(self, device, dtype):
+        def test_dense_dim_mismatch(dense_size, sparse_dim1, sparse_dim2):
+            x = torch.ones(dense_size, dtype=dtype, device=device)
+            sparse_x1 = x.to_sparse(sparse_dim=sparse_dim1)
+            sparse_x2 = x.to_sparse(sparse_dim=sparse_dim2)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "add: expected 'self' and 'other' to have same number of dense dimensions"):
+                sparse_x1 + sparse_x2
+        test_dense_dim_mismatch([3, 4], 2, 1)
+        test_dense_dim_mismatch([3, 2, 5, 6, 7, 8], 5, 3)
+
     @dtypes(torch.double, torch.cdouble)
     def test_add_dense_sparse_mismatch(self, device, dtype):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
