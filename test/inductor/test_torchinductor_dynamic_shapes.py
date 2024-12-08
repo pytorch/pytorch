@@ -962,7 +962,7 @@ class TestInductorDynamic(TestCase):
             return x.sum()
 
         x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 0, assume_contiguous=False)
         f(x)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)

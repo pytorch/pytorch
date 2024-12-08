@@ -432,7 +432,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_unbacked(t, index):
+def mark_unbacked(t, index, assume_contiguous=True):
     """
     Mark a tensor as having an unbacked dim.  This changes the semantics of operations,
     we will always report the size does not equal zero/one, we will turn asserts
@@ -443,10 +443,19 @@ def mark_unbacked(t, index):
     # You could have copied the mark_dynamic behavior but I'm not convinced
     # it's what you want
     assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+    assert (
+        not assume_contiguous or assume_contiguous == t.is_contiguous()
+    ), "The tensor is not contiguous yet you assumed it to be so."
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
+        if not hasattr(t, "_dynamo_assume_contiguous"):
+            t._dynamo_assume_contiguous = assume_contiguous
+        assert t._dynamo_assume_contiguous == assume_contiguous, (
+            f"mark_unbacked contiguity assumption mismatch: previously assumed {t._dynamo_assume_contiguous}, "
+            f"but now {assume_contiguous}"
+        )
         t._dynamo_unbacked_indices.add(index)
         return
 

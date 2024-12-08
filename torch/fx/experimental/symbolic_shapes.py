@@ -322,11 +322,11 @@ def has_symbolic_sizes_strides(elem: torch.Tensor) -> bool:
 Int: TypeAlias = Union[torch.SymInt, int]
 
 
-def create_contiguous(shape: Sequence[Union[torch.SymInt, Int]]) -> List[sympy.Expr]:
-    strides = [sympy.Integer(1)] * len(shape)
-    for i in range(len(shape) - 2, -1, -1):
-        strides[i] = strides[i + 1] * shape[i + 1]
-    return strides
+def create_contiguous(shape: Sequence[Int]) -> List[Int]:
+    strides: List[Int] = [1]
+    for dim in reversed(shape[:-1]):
+        strides.append(dim * strides[-1])  # type: ignore[operator]
+    return list(reversed(strides))
 
 
 def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
@@ -3876,7 +3876,9 @@ class ShapeEnv:
         if any(
             s is DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS for s in symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
         ):
-            stride = create_contiguous(size)
+            stride = [sympy.Integer(1)] * len(size)
+            for i in range(len(size) - 2, -1, -1):
+                stride[i] = stride[i + 1] * size[i + 1]
         else:
             for i, val in enumerate(ex_stride):
                 if val in (0, 1):

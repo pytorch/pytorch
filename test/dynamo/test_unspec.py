@@ -832,7 +832,7 @@ def forward(self):
         x1 = torch.rand(3, 5, 4, 8).to(memory_format=torch.channels_last)
         x2 = torch.rand(1, 5, 4, 8).to(memory_format=torch.channels_last)
 
-        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, assume_contiguous=False)
 
         o1_ref = main_model(x1, 2)
         o1 = opt_model(x1, 2)
