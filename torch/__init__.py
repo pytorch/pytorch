@@ -167,7 +167,7 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
-        usebase_path = os.path.join(
+        userbase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
 
@@ -180,9 +180,16 @@ if sys.platform == "win32":
         else:
             base_py_dll_path = ""
 
+        # when using pip install on a project that depends on PyTorch, pip installs
+        # torch & mkl in a custom path that's included in sys.path but does not match
+        # any of the other DLLs path above, so we need to manually add it here.
+        mkl_dll_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "Library", "bin"
+        )
+
         dll_paths = [
             p
-            for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path)
+            for p in (th_dll_path, py_dll_path, base_py_dll_path, userbase_path, mkl_dll_path)
             if os.path.exists(p)
         ]
 
