@@ -35,6 +35,22 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
+    def test_patch_dynamo_unsupported_functions(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, cst):
+                torch._dynamo.mark_static_address(cst)
+                if torch.jit.isinstance(a, torch.Tensor):
+                    return a + cst
+                else:
+                    return a - cst
+
+        model = Model()
+
+        a = torch.rand(8, 8, dtype=torch.float16)
+        cst = torch.rand(8, 8, dtype=torch.float16)
+        onnx_program = torch.onnx.export(model, (a, cst), dynamo=True, fallback=False)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+
     def test_constant_complex(self):
         class MulModule(torch.nn.Module):
             def forward(self, x):
