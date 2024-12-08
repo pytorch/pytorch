@@ -443,7 +443,6 @@ def mark_unbacked(t, index):
     # You could have copied the mark_dynamic behavior but I'm not convinced
     # it's what you want
     assert not is_traceable_wrapper_subclass(t), "not implemented yet"
-    assert t.is_contiguous(), "mark_unbacked can only be used with contiguous tensors"
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_unbacked_indices"):

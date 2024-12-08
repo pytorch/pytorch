@@ -322,10 +322,10 @@ def has_symbolic_sizes_strides(elem: torch.Tensor) -> bool:
 Int: TypeAlias = Union[torch.SymInt, int]
 
 
-def create_contiguous(size: Sequence[Union[torch.SymInt, Int]]) -> List[sympy.Expr]:
-    strides = [sympy.Integer(1)] * len(size)
-    for i in range(len(size) - 2, -1, -1):
-        strides[i] = strides[i + 1] * size[i + 1]
+def create_contiguous(shape: Sequence[Union[torch.SymInt, Int]]) -> List[sympy.Expr]:
+    strides = [sympy.Integer(1)] * len(shape)
+    for i in range(len(shape) - 2, -1, -1):
+        strides[i] = strides[i + 1] * shape[i + 1]
     return strides
 
 
@@ -1446,6 +1446,9 @@ class DimDynamic(Enum):
     SIZE_LIKE_UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
+    # Treat the dimension as a size-like unbacked with the additional assumption
+    # that the tensor is contiguous and thus we can infer the strides from the sizes.
+    SIZE_LIKE_UNBACKED_CONTIGUOUS = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3871,7 +3874,7 @@ class ShapeEnv:
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         if any(
-            s is DimDynamic.SIZE_LIKE_UNBACKED for s in symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
+            s is DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS for s in symbolic_context.dynamic_sizes  # type: ignore[attr-defined]
         ):
             stride = create_contiguous(size)
         else:
@@ -4242,7 +4245,10 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim is DimDynamic.SIZE_LIKE_UNBACKED:
+        if dynamic_dim in (
+            DimDynamic.SIZE_LIKE_UNBACKED,
+            DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS,
+        ):
             out = self.create_unbacked_symint().node.expr
             self._constrain_range_for_size(out)
             # TODO: maybe put the hint somewhere

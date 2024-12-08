@@ -2742,9 +2742,10 @@ def _automatic_dynamic(
         constraint_sizes.append(constraint_size)
         constraint_strides.append(constraint_stride)
 
-        if marked_unbacked:
+        if marked_unbacked and e.is_contiguous():
+            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED_CONTIGUOUS
+        elif marked_unbacked:
             dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
-            constraint_stride = RelaxedUnspecConstraint(warn_only=True)
         elif (
             constraint_size is not None
             or marked_dynamic
