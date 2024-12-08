@@ -204,7 +204,6 @@ class Embedding(torch.nn.Module):
                 + torch.ao.nn.qat.Embedding.__name__
             )
             weight_observer = mod.weight_fake_quant
-            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == nn.Embedding, (
                 "nnq."

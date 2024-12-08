@@ -257,7 +257,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
-                g = FakeifyFirstAOTInvocationGuard()
+                g = FakeifyFirstAOTInvocationGuard()  # noqa: F841
 
             from torch._dynamo.utils import counters
 
