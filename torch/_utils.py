@@ -904,7 +904,7 @@ else:
         """
         warnings.warn(  # use `warnings.warn` instead of `@deprecated`
             "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
-            FutureWarning,
+            # FutureWarning,  # TorchScript does not support Warning type
             stacklevel=2,
         )
         return torch.compiler.is_compiling()

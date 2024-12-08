@@ -1558,7 +1558,7 @@ class PythonWrapperCodegen(CodeGen):
                         arg, 1  # type: ignore[arg-type]
                     ):
                         equal_to_1_args.append(key)
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
                 signature,
                 size_dtype=None,  # try to infer based on symints
