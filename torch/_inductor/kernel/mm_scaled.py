@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 
@@ -194,7 +194,7 @@ aten__fp8_mm = ExternKernelChoice(
 )
 
 
-def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
+def are_compatible_scales(size_a: Sequence[int], size_b: Sequence[int]) -> bool:
     # Same sized scales are compatable
     if len(size_a) == len(size_b):
         return True

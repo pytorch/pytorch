@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import torch
 from torch import Tensor
@@ -18,6 +18,7 @@ from torch.ao.quantization.quantize_pt2e import (
 )
 from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
+    EdgeOrNode,
     FixedQParamsQuantizationSpec,
     QuantizationAnnotation,
     QuantizationSpec,
@@ -2338,6 +2339,100 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         # Convert should succeed
         m = convert_pt2e(m)
         m(*example_inputs)
+
+    def test_prepare_obs_or_fq_callback(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = torch.nn.functional.max_pool2d(x, 2, 2)
+                x = torch.nn.functional.pixel_shuffle(x, 2)
+                return x.permute(0, 2, 3, 1)
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = QuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                for node in model.graph.nodes:
+                    if node.op == "call_function" and node.target in (
+                        torch.ops.aten.max_pool2d.default,
+                        torch.ops.aten.permute.default,
+                        torch.ops.aten.pixel_shuffle.default,
+                    ):
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                node.args[0]: act_qspec,
+                            },
+                            output_qspec=SharedQuantizationSpec((node.args[0], node)),
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+            def prepare_obs_or_fq_callback(
+                self,
+                model: torch.fx.GraphModule,
+                edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+            ) -> None:
+                # hard code output quant by updating entire sharing group
+                output_node = next(n for n in model.graph.nodes if n.op == "output")
+                output_value = output_node.args[0][0]
+                old_observer = edge_or_node_to_obs_or_fq[output_value]
+                sharing_group = [
+                    k for k, v in edge_or_node_to_obs_or_fq.items() if v is old_observer
+                ]
+                new_observer = observer.FixedQParamsObserver(
+                    scale=0.125,
+                    zero_point=42,
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                )
+                for x in sharing_group:
+                    edge_or_node_to_obs_or_fq[x] = new_observer
+
+        example_inputs = (torch.rand(1, 32, 16, 16),)
+        gm = export_for_training(Model().eval(), example_inputs).module()
+        gm = prepare_pt2e(gm, BackendAQuantizer())
+        gm = convert_pt2e(gm)
+        for n in gm.graph.nodes:
+            if n.op == "call_function" and n.target in (
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ):
+                # Entire graph share the same qspec which was overriden by FixedQParamsObserver
+                self.assertEqual(n.args[1], 0.125)
+                self.assertEqual(n.args[2], 42)
+
+    def test_preserve_nn_module_stack(self):
+        """Test we can preserve nn_module_stack on replaced pattern's nodes"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
+        )
+
+        def check_nn_module(node):
+            self.assertTrue("nn_module_stack" in node.meta)
+            self.assertTrue(
+                "ConvWithBNRelu" in node.meta["nn_module_stack"]["L__self__"][1]
+            )
+
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.op not in ["placeholder", "output", "get_attr"]:
+                check_nn_module(node)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.name == "mul":
+                check_nn_module(node)
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)

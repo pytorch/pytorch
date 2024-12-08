@@ -302,7 +302,7 @@ __all__ += ["fractional_max_pool3d_with_indices"]
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Tensor,
+    var: Tensor | float,
     full: bool | None = ...,
     eps: float | None = ...,
     reduction: str | None = ...,

@@ -102,7 +102,7 @@ void CUDAHooks::init() const {
 #endif
 }
 
-const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 

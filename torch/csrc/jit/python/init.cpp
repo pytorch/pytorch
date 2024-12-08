@@ -1514,7 +1514,7 @@ void initJITBindings(PyObject* module) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
       start_offset_ = py::cast<size_t>(current);
-      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      buffer.attr("seek")(0, py::module::import("os").attr("SEEK_END"));
       size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
       // If we can read directly into a buffer, do that instead of an extra copy
@@ -1695,14 +1695,12 @@ void initJITBindings(PyObject* module) {
                                        c10::DispatchKey dk_,
                                        const py::args& args,
                                        const py::kwargs& kwargs) {
-                    std::optional<c10::DispatchKey> dk =
-                        std::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
+                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
                   });
-              return std::make_optional(
-                  py::make_tuple(func, func_dk, py::cast(op->getTags().vec())));
+              return py::make_tuple(
+                  func, func_dk, py::cast(op->getTags().vec()));
             }
           }
           return std::nullopt;

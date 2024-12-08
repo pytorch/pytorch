@@ -34,7 +34,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        cuda_version: ["124", "121", "118"]  # There is no pytorch/manylinux-cuda126 yet
+        cuda_version: ["126", "124", "121", "118"]  # There is no pytorch/manylinux-cuda126 yet
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v4

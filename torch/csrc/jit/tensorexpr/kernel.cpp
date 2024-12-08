@@ -54,49 +54,47 @@ bool setFallbackAllowed(bool value) {
 }
 
 bool fallbackAllowed() {
-  static const auto enable_opt =
-      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
-  if (!enable_opt.has_value()) {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
     return fallback_allowed;
   }
-  if (enable_opt == "0") {
+  if (std::string(enable_c_str) == "0") {
     return false;
   }
   return true;
 }
 
 static bool fallbackEnforced() {
-  static const auto enable_opt =
-      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
   }
-  if (!enable_opt.has_value()) {
+  if (!enable_c_str) {
     return fallback_allowed;
   }
-  if (enable_opt == "2") {
+  if (std::string(enable_c_str) == "2") {
     return true;
   }
   return false;
 }
 
 static int64_t randomTransformsRequested() {
-  const auto enable_opt =
-      c10::utils::get_env("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
-  if (!enable_opt.has_value()) {
+  const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_c_str) {
     return 0;
   }
-  return std::stoi(enable_opt.value());
+  return std::stoi(std::string(enable_c_str));
 }
 
 #ifdef TORCH_ENABLE_LLVM
 static bool dontUseLLVMFlag() {
-  static const auto enable_opt =
-      c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
-  if (!enable_opt) {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_c_str) {
     return false;
   }
-  return enable_opt == "1";
+  return std::string(enable_c_str) == "1";
 }
 #endif
 
