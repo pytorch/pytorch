@@ -6434,7 +6434,7 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
-            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+            self.get_kwargs_value(key) for key in self.ordered_kwargs_for_cpp_kernel
         ]
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
