@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import copy
+import functools
 import io
 import sys
 import tempfile
 import unittest
+from typing import Callable
 
 from parameterized import parameterized_class
 
@@ -14,6 +16,19 @@ from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.triton_utils import HAS_CUDA
+
+
+def skipif(predicate: Callable[[str, bool], bool], reason: str):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if predicate(self.device, self.package_cpp_only):
+                self.skipTest(reason)
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def compile(
@@ -358,6 +373,72 @@ class TestAOTInductorPackage(TestCase):
         self.assertTrue(
             torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
         )
+
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
+        "No support for cpp only and cpu",
+    )
+    def test_package_without_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        inductor_configs = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        compiled = compile(model, example_inputs, inductor_configs=inductor_configs)
+
+        self.assertEqual(
+            set(compiled.get_constant_fqns()), set(model.state_dict().keys())
+        )
+
+        compiled.load_constants(model.state_dict(), check_full_update=True)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = compiled(test_inputs)
+        self.assertEqual(expected, output)
+
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
+        "No support for cpp only and cpu",
+    )
+    def test_update_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        compiled = self.check_model(model, example_inputs)
+
+        new_state_dict = {
+            "linear.weight": torch.randn(N, K, device=self.device),
+            "linear.bias": torch.randn(N, device=self.device),
+        }
+        model.load_state_dict(new_state_dict)
+
+        compiled.load_constants(model.state_dict(), check_full_update=True)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = compiled(test_inputs)
+        self.assertEqual(expected, output)
 
 
 if __name__ == "__main__":

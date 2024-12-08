@@ -250,7 +250,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
   get_bazel
-  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -396,7 +395,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python tools/stats/export_test_times.py
 fi
-
-if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+# don't do this for bazel or s390x as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi
