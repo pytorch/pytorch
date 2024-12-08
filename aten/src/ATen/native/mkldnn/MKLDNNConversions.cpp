@@ -53,22 +53,24 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dt
     mkldnn_tensor.options().layout(c10::kStrided).dtype(data_type));
   if (stensor.is_empty()) return cpu_tensor;
   auto pub_tensor =
-      data_type == ScalarType::Float
-      ? stensor.to_public(cpu_tensor.template data_ptr<float>(),
-                          ideep::tensor::data_type::f32)
-      : (data_type == ScalarType::BFloat16
-         ? stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
-                         ideep::tensor::data_type::bf16)
-         : (data_type == ScalarType::Half
-            ? stensor.to_public(cpu_tensor.template data_ptr<Half>(),
-                            ideep::tensor::data_type::f16)
-          : (data_type == ScalarType::Byte
-              ? stensor.to_public(cpu_tensor.template data_ptr<uint8_t>(),
-                              ideep::tensor::data_type::u8)
-              : stensor.to_public(cpu_tensor.template data_ptr<int8_t>(),
-                              ideep::tensor::data_type::s8)
-            )
-           )
+      stensor.is_public_format()
+      ? stensor
+      : (data_type == ScalarType::Float)
+        ? stensor.to_public(cpu_tensor.template data_ptr<float>(),
+                            ideep::tensor::data_type::f32)
+        : (data_type == ScalarType::BFloat16
+           ? stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
+                           ideep::tensor::data_type::bf16)
+           : (data_type == ScalarType::Half
+              ? stensor.to_public(cpu_tensor.template data_ptr<Half>(),
+                              ideep::tensor::data_type::f16)
+            : (data_type == ScalarType::Byte
+                ? stensor.to_public(cpu_tensor.template data_ptr<uint8_t>(),
+                                ideep::tensor::data_type::u8)
+                : stensor.to_public(cpu_tensor.template data_ptr<int8_t>(),
+                                ideep::tensor::data_type::s8)
+              )
+             )
       );
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   // Make sure that NC11 strides follow formula of contiguous tensor.
