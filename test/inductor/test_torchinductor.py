@@ -771,6 +771,16 @@ def skip_if_halide(fn):
     return wrapper
 
 
+def skip_if_triton(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if is_triton_backend(self.device):
+            raise unittest.SkipTest("triton not supported")
+        return fn(self)
+
+    return wrapper
+
+
 def skip_if_dynamic(fn):
     @functools.wraps(fn)
     def wrapper(self):
@@ -785,6 +795,12 @@ def is_halide_backend(device):
     if getattr(device, "type", device) == "cpu":
         return config.cpu_backend == "halide"
     return config.cuda_backend == "halide"
+
+
+def is_triton_backend(device):
+    if getattr(device, "type", device) == "cpu":
+        return config.cpu_backend == "triton"
+    return config.cuda_backend == "triton"
 
 
 def is_triton_cpu_backend(device):
@@ -10254,7 +10270,7 @@ class CommonTemplate:
             self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
-    @xfail_if_triton_cpu  # bf16
+    @skip_if_triton  # No inductor data type propagation pass on scheduler nodes
     @skip_if_halide  # bf16
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
@@ -10524,12 +10540,16 @@ class CommonTemplate:
             # 2. y has memory_format contiguity and fn gets preserve kwarg
             # 3. y has some other strides (not contiguous or channels last) and fn gets preserve
             yield x, torch.randn(*y_size), memory_format
-            yield x, torch.randn(*y_size).contiguous(
-                memory_format=memory_format
-            ), torch.preserve_format
-            yield x, torch.randn(*y_size).permute(
-                tuple(reversed(range(len(y_size))))
-            ), torch.preserve_format
+            yield (
+                x,
+                torch.randn(*y_size).contiguous(memory_format=memory_format),
+                torch.preserve_format,
+            )
+            yield (
+                x,
+                torch.randn(*y_size).permute(tuple(reversed(range(len(y_size))))),
+                torch.preserve_format,
+            )
 
     @skipIfXpu
     def test_resize_as(self):
