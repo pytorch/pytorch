@@ -621,7 +621,7 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    def __init__(self):
+    def __init__(self, is_subgraph=False):
         super().__init__()
         self._names_iter: Iterator[int] = count()
         self.imports = IndentedBuffer()
@@ -667,6 +667,8 @@ class PythonWrapperCodegen(CodeGen):
         self.codegened_graph_stack = []
         self.computed_sizes_stack = []
 
+        self.is_subgraph = is_subgraph
+        # breakpoint()
         self.write_header()
         self.write_prefix()
         self.write_kernel_autotune_defs_header()
@@ -711,6 +713,7 @@ class PythonWrapperCodegen(CodeGen):
     def create(
         is_subgraph: bool, subgraph_name: str, parent_wrapper: PythonWrapperCodegen
     ):
+        # breakpoint()
         if is_subgraph:
             return SubgraphPythonWrapperCodegen(subgraph_name, parent_wrapper)
         return PythonWrapperCodegen()
@@ -846,6 +849,7 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def codegen_input_size_asserts(self) -> None:
+        # breakpoint()
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
@@ -858,6 +862,7 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def codegen_input_nan_asserts(self) -> None:
+        # breakpoint()
         self.prefix.writeline("# make sure graph inputs are not nan/inf")
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
@@ -877,7 +882,7 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
-    def write_prefix(self) -> None:
+    def write_prefix_for_subgraph(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
         self.prefix.splice(
@@ -886,6 +891,43 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
         with self.prefix.indent():
+            if config.triton.debug_sync_graph:
+                self.prefix.writeline(V.graph.device_ops.synchronize())
+            if V.graph.graph_inputs:
+                lhs = ", ".join(V.graph.graph_input_names)
+                if len(V.graph.graph_input_names) == 1:
+                    lhs += ","
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
+
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_input_size_and_nan_asserts()
+
+    def write_prefix(self) -> None:
+        # breakpoint()
+        if self.is_subgraph:
+            self.write_prefix_for_subgraph()
+            return
+
+        assert self.launcher_fn_name is not None
+        self.write_async_compile_wait()
+        self.prefix.splice(
+            """
+            class Runner:
+                def __init__(self):
+                    pass
+
+                def recursively_apply_fns(self, fns):
+                    new_callables = []
+                    for fn, c in zip(fns, self.callables):
+                        new_callables.append(fn(c))
+                    self.callables = new_callables
+
+                def call(self, args):
+            """
+        )
+
+        with self.prefix.indent(2):
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
             if V.graph.graph_inputs:
@@ -1135,7 +1177,7 @@ class PythonWrapperCodegen(CodeGen):
 
             if config.triton.store_cubin:
                 self.generate_reset_kernel_saved_flags()
-
+            breakpoint()
             for line in self.lines:
                 if isinstance(line, WrapperLine):
                     line.codegen(self.wrapper_call)
@@ -1161,12 +1203,19 @@ class PythonWrapperCodegen(CodeGen):
         self.finalize_prefix()
         result.splice(self.prefix)
 
-        with result.indent():
+        with result.indent(2):
             result.splice(self.wrapper_call)
 
         self.generate_before_suffix(result)
         result.splice(self.suffix)
-
+        if not self.is_subgraph:
+            result.splice(
+                """
+                runner = Runner()
+                call = runner.call
+                recursively_apply_fns = runner.recursively_apply_fns
+                """
+            )
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
@@ -2456,7 +2505,7 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # because __init__ calls set_launcher_fn_name
         self.subgraph_name = subgraph_name
         self.parent_wrapper = parent_wrapper
-        super().__init__()
+        super().__init__(is_subgraph=True)
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of

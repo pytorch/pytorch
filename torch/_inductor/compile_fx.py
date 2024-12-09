@@ -970,6 +970,7 @@ class _InProcessFxCompile(FxCompile):
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
                 with V.set_graph_handler(graph):
+                    breakpoint()
                     graph.run(*example_inputs)
                     output_strides: List[Optional[Tuple[_StrideExprStr, ...]]] = []
                     if graph.graph_outputs is not None:
