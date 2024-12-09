@@ -21,7 +21,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto log_string = jiterator_stringify(
-        template <typename T> T log_kernel(T x) { return std::log(x); });
+        template <typename T> T log_kernel(T x) { return ::log(x); });
     AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "log_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log_name,
@@ -53,7 +53,7 @@ void log10_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto log10_string = jiterator_stringify(
-        template <typename T> T log10_kernel(T x) { return std::log10(x); });
+        template <typename T> T log10_kernel(T x) { return ::log10(x); });
     AT_DISPATCH_COMPLEX_TYPES(common_dtype, "log10_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log10_name,
@@ -90,7 +90,7 @@ void log2_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto log2_string = jiterator_stringify(
-        template <typename T> T log2_kernel(T x) { return std::log2(x); });
+        template <typename T> T log2_kernel(T x) { return ::log2(x); });
     AT_DISPATCH_COMPLEX_TYPES(common_dtype, "log2_cuda", [&]() {
       jitted_gpu_kernel<
           /*name=*/log2_name,
