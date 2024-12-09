@@ -462,19 +462,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -575,19 +562,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -699,19 +673,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -1161,19 +1122,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -1274,19 +1222,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -1398,19 +1333,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -1930,19 +1852,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -2043,19 +1952,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -2167,19 +2063,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -2629,19 +2512,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -2742,19 +2612,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -2866,19 +2723,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -3339,19 +3183,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
