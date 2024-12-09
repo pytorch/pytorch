@@ -100,6 +100,8 @@ from .triton_utils import (
 
 
 if TYPE_CHECKING:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
     from ..ir import IRNode
 
 log = logging.getLogger(__name__)
@@ -729,6 +731,12 @@ class TritonCSEVariable(CSEVariable):
                 self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
+def get_dtype_handler() -> DtypePropagationOpsHandler:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
+    return DtypePropagationOpsHandler()
+
+
 def maybe_upcast_float32(convert_output: bool = True):
     """
     Codegen helper to upcast arguments to float32, depending on the config and dtype.
@@ -759,25 +767,15 @@ def maybe_upcast_float32(convert_output: bool = True):
             upcast_args = [maybe_upcast_arg(arg) for arg in args]
             upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
-            # Infer the output dtype from the inputs.
-            # This promotes to the largest input type.
-            all_args = args + tuple(kwargs.values())
-            input_dtypes = [
-                var.dtype
-                for var in all_args
-                if isinstance(var, CSEVariable) and var.dtype is not None
-            ]
-            result_dtype = (
-                functools.reduce(torch.promote_types, input_dtypes)
-                if len(input_dtypes) > 0
-                else None
-            )
+            result_dtype = getattr(get_dtype_handler(), func.__name__)(*args, **kwargs)
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
             needs_downcast = (
                 convert_output
-                and any(needs_upcast(var) for var in all_args)
+                and any(
+                    needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+                )
                 and result_dtype not in {torch.float32, None}
             )
             downcast_string = (
@@ -901,6 +899,25 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
+
+    # TODO - register these ops as having divergent dtype
+    # output if doing graph pass to remove consecutive casts
+
+    @staticmethod
+    def truediv(x, y):
+        out = f"({x} / {y})"
+        out_dtype = get_dtype_handler().truediv(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
+
+    @staticmethod
+    def mod(x, y):
+        out = f"({x} % {y})"
+        out_dtype = get_dtype_handler().mod(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
 
     @staticmethod
     @maybe_upcast_float32()
@@ -3471,6 +3488,9 @@ class TritonKernel(SIMDKernel):
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
 
+        # can be added as an override_mask
+        mask_vars.discard("None")
+
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -3618,7 +3638,7 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes):
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
         with preserve_rng_state(), torch.cuda.device(
             V.graph.get_current_device_or_throw()
         ):
@@ -3671,7 +3691,9 @@ class TritonScheduling(SIMDScheduling):
 
             launchers = wrapped_jit_function.launchers
             assert len(launchers) == 1
-            if launchers[0].n_spills > 0:
+            # n_spills does not necessarily mean it's not profitable to fuse,
+            # and sometimes it can be inaccurate
+            if launchers[0].n_spills > n_spills_threshold:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:

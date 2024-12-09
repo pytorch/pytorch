@@ -86,30 +86,35 @@ mm_template = TritonTemplate(
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
     else:
-        ram = rm % M
+        offs_a_m = rm % M
     if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
     else:
-        rbn = rn % N
-    rk = tl.arange(0, BLOCK_K)
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
-
+        offs_b_n = rn % N
+    offs_k = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
-        if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
-        else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        if B_PROLOGUE_CAST_TYPE is not None:
-            b = b.to(B_PROLOGUE_CAST_TYPE)
+
+    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
+        {% if not EVEN_K %}
+        a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
+        b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
+        {% endif %}
+        a_k_idx_vals = offs_k[None, :] + (k_idx * BLOCK_K)
+        b_k_idx_vals = offs_k[:, None] + (k_idx * BLOCK_K)
+
+        idx_m = offs_a_m[:, None]
+        idx_n = a_k_idx_vals
+        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask", indent_width=8)}}
+
+        idx_m = b_k_idx_vals
+        idx_n = offs_b_n[None, :]
+        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask", indent_width=8)}}
+        {% if B_PROLOGUE_CAST_TYPE %} # TODO - replace with prologue fusion
+        b = b.to(B_PROLOGUE_CAST_TYPE)
+        {% endif %}
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
