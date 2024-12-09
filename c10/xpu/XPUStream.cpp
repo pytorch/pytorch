@@ -76,10 +76,10 @@ enum class StreamIdType : uint8_t {
   // The higher the type number, the higher the priority for the native stream.
   LOW = 0x0,
   NORMAL = 0x1,
-  HIGH = 0X2,
+  HIGH = 0x2,
   // For an external stream, the last bit of StreamId is 0, whose priority is
   // queried at runtime.
-  EXT = 0X7,
+  EXT = 0x7,
 };
 
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
