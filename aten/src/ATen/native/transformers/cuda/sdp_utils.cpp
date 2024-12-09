@@ -234,15 +234,6 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
         }
         return false;
     }
-    c10::string_view arch(dprops->gcnArchName);
-    if (arch == "gfx1100") {
-      static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
-      if (!enable_navi3x) {
-        TORCH_WARN_ONCE("Flash attention support on Navi31 GPU is still experimental."
-                        " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
-        return false;
-      }
-      return false;
   }
 #else
   return false;
