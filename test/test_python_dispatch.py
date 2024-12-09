@@ -201,6 +201,28 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
+        # This tests that if meta is included in TlS dispatch key set,
+        # then a meta kernel should be called regardless if a dense
+        # backend has a fallthrough kernel
+
+        a = torch.randn((3, 3))
+        with _scoped_library("custom", "DEF") as my_lib:
+            my_lib.define("sum(Tensor self) -> Tensor")
+            meta_is_called = False
+
+            def sum_meta(*args, **kwargs):
+                nonlocal meta_is_called
+                meta_is_called = True
+                return args[0]
+
+            my_lib.impl("sum", fallthrough_kernel, "CPU")
+            my_lib.impl("sum", sum_meta, "Meta")
+
+            with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
+                torch.ops.custom.sum.default(a)
+                self.assertTrue(meta_is_called)
+
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
         with _scoped_library("aten", "IMPL") as my_lib2:
