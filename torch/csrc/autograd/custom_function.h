@@ -271,7 +271,8 @@ struct CppNode : public Node {
         stack,
         num_outputs(),
         name(),
-        schema);
+        schema,
+        /*builtin*/ false);
     return results;
   }
 

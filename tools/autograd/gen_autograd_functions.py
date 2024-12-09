@@ -132,13 +132,16 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
         state,
         num_outputs(),
         name(),
-        schema);
+        schema,
+        /*builtin*/true);
     ${apply_with_saved_after}
     return result;
 }
 ivalue_list ${op}::get_state() {
   SavedState saved_state;
   ${unpacks}
+  ${compute_needs_input_grad}
+  saved_state.enqueue(needs_input_grad);
   ${get_state}
   return saved_state.stack;
 }
@@ -150,10 +153,11 @@ ivalue_list ${op}::retrieve_saved(SwapSavedVariables& saved) {
 }
 
 c10::optional<functional_apply_t> ${op}::get_functional() {
-  ${compute_needs_input_grad}
-  return [needs_input_grad](const variable_list& inputs, const std::vector<c10::IValue>& saved) {
+  return [](const variable_list& inputs, const std::vector<c10::IValue>& saved) {
     SavedState state;
     state.stack = saved;
+    std::array<bool, ${num_vars}> needs_input_grad;
+    state.dequeue(needs_input_grad);
     ${saved_var_dequeues}
     return ${op}_apply_functional(variable_list(inputs), needs_input_grad${,unpacked_saved_vars});
   };
@@ -1031,7 +1035,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         saved_var_dequeues.append(f"{typ} {name};")
         saved_var_dequeues.append(f"state.dequeue({name});")
 
-    schema_args = []
+    schema_args = [f"std::array<bool, {len(var_name_map)}>"]
     for typ in unpacked_saved_vars_ref_type:
         if typ.endswith("&"):
             typ = typ[:-1]

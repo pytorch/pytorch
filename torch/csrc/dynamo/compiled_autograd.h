@@ -1178,6 +1178,25 @@ struct IValuePacker<c10::List<T>> {
   }
 };
 
+template <size_t N>
+struct IValuePacker<std::array<bool, N>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::vector<bool>>::packed_type();
+  }
+  static at::IValue pack(const std::array<bool, N>& t) {
+    std::vector<bool> result(t.begin(), t.end());
+    return IValuePacker<std::vector<bool>>::pack(result);
+  }
+  static std::array<bool, N> unpack(const at::IValue& t) {
+    std::array<bool, N> result;
+    auto packed = IValuePacker<std::vector<bool>>::unpack(t);
+    for (size_t i = 0; i < packed.size(); i++) {
+      result[i] = packed[i];
+    }
+    return result;
+  }
+};
+
 template <>
 struct IValuePacker<at::TensorGeometry> {
   static at::TypePtr packed_type() {
@@ -1330,7 +1349,8 @@ struct TORCH_API PyCompilerInterface {
       const ivalue_list& saved_state,
       int64_t num_outputs,
       const std::string& debug,
-      const std::vector<at::TypePtr>& saved_state_schema) {
+      const std::vector<at::TypePtr>& saved_state_schema,
+      bool builtin) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(

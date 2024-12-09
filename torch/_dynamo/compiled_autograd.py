@@ -97,12 +97,17 @@ class OpNamespace:
     def __init__(self):
         self.next_id = {}
 
-    def add(self, base_name, fn):
-        if base_name not in self.next_id:
-            self.next_id[base_name] = 0
-        nid = self.next_id[base_name]
-        name = f"{base_name}_{nid}"
-        self.next_id[base_name] += 1
+    def add(self, base_name, fn, builtin):
+        if builtin and hasattr(self, base_name):
+            return getattr(self, base_name)
+
+        name = base_name
+        if not builtin:
+            if base_name not in self.next_id:
+                self.next_id[base_name] = 0
+            nid = self.next_id[base_name]
+            name = f"{base_name}_{nid}"
+            self.next_id[base_name] += 1
         result = Op(name, fn)
         torch._dynamo.allow_in_graph(result)
         setattr(self, name, result)
@@ -377,7 +382,7 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             return torch.zeros(0)
 
-    def apply_functional(self, fn, inputs, stack, num_outputs, debug_name):
+    def apply_functional(self, fn, inputs, stack, num_outputs, debug_name, builtin):
         if self.old_inline_behavior:
             result = fn(inputs, *stack)
             return result
@@ -388,7 +393,7 @@ class AutogradCompilerInstance:
             lambda e: self.to_proxy(e),
             (inputs, stack),
         )
-        op = ops.add(debug_name, fn)
+        op = ops.add(debug_name, fn, builtin)
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
         )
@@ -406,7 +411,7 @@ class AutogradCompilerInstance:
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
 
-    def validate_outputs(self, fn, outputs, stack, _0, _1):
+    def validate_outputs(self, fn, outputs, stack, _0, _1, _2):
         if self.old_inline_behavior:
             # print("start validate outputs")
             # print(outputs)
@@ -419,7 +424,7 @@ class AutogradCompilerInstance:
             lambda e: self.to_proxy(e),
             (outputs, stack),
         )
-        op = ops.add("validate_outputs", fn)
+        op = ops.add("validate_outputs", fn, True)
         new_proxy_outputs = self.fx_tracer.create_proxy(
             "call_function", op, args=(proxy_outputs, *proxy_stack), kwargs={}
         )

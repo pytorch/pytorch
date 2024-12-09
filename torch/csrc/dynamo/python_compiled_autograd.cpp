@@ -67,7 +67,8 @@ static variable_list call_function(
     const ivalue_list& saved_state,
     int64_t num_outputs,
     const std::string& debug,
-    const std::vector<TypePtr>& schema) {
+    const std::vector<TypePtr>& schema,
+    bool builtin) {
   TORCH_INTERNAL_ASSERT(schema.size() == saved_state.size());
   // // Need this to do PyObject* -> IValue conversion
   // std::vector<at::TypePtr> schema;
@@ -120,7 +121,7 @@ static variable_list call_function(
   // (it can either inline it or plop it straight into the FX graph).
   py::handle handle(py_compiler);
   py::object stuff = handle.attr(name)(
-      py_func, inputs, py::handle(py_saved_state), num_outputs, debug);
+      py_func, inputs, py::handle(py_saved_state), num_outputs, debug, builtin);
 
   // Convert the output from PyObject* to vector<Tensor>
   auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
@@ -144,7 +145,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const ivalue_list& saved_state,
       int64_t num_outputs,
       const std::string& debug,
-      const std::vector<at::TypePtr>& saved_state_schema) override {
+      const std::vector<at::TypePtr>& saved_state_schema,
+      bool builtin) override {
     return torch::dynamo::autograd::call_function(
         py_compiler,
         name,
@@ -153,7 +155,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
         saved_state,
         num_outputs,
         debug,
-        saved_state_schema);
+        saved_state_schema,
+        builtin);
   }
   variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
@@ -943,7 +946,8 @@ CacheNode* _compiled_autograd_impl(
           outputs.size(),
           "validate_outputs",
           {IValuePacker<
-              std::vector<c10::optional<InputMetadata>>>::packed_type()});
+              std::vector<c10::optional<InputMetadata>>>::packed_type()},
+          /*builtin*/ true);
 
       saved.after(call.node->next_edges());
       saved.debug_asserts();
