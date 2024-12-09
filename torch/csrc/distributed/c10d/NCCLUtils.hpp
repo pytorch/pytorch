@@ -43,15 +43,6 @@ static_assert(
     (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
     "NCCL version must be 2.7 or later");
 
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
-#define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
-#endif
-
 // P2P is enabled only for NCCL versions 2.7+ since ncclSend()
 // and ncclRecv() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
