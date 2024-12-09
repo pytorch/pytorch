@@ -22,6 +22,7 @@ import warnings
 import types
 import pickle
 import textwrap
+import shutil
 import subprocess
 import weakref
 import sys
@@ -10861,6 +10862,25 @@ def add_neg_dim_tests():
 
         assert not hasattr(TestTorch, test_name), "Duplicated test name: " + test_name
         setattr(TestTorch, test_name, make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim))
+
+class TestRPATH(TestCase):
+    @unittest.skipIf(not shutil.which('objdump'), "Required tool 'objdump' not available")
+    def test_cuda_stubs_not_in_rpath(self):
+        """
+        Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda stubs directory
+        issue gh-35418
+        """
+        libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
+        caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    # Catch paths like:
+                    # $ORIGIN:/usr/local/cuda-10.2/lib64/stubs:/usr/local/cuda-10.2/lib64
+                    self.assertFalse(b'/stubs:' in line)
+                    # $ORIGIN:/usr/local/cuda-10.2/lib64:/usr/local/cuda-10.2/lib64/stubs
+                    self.assertFalse(line.endswith(b'/stubs'))
 
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
