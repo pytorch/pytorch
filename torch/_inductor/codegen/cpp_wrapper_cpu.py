@@ -257,11 +257,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_symbol_assignment(
         self,
-        code: IndentedBuffer,
         name: str,
         value: ir.TensorBox,
         bound_vars: Set[sympy.Symbol],
     ):
+        code = self.prefix
+
         @functools.lru_cache(None)
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
@@ -522,7 +523,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
