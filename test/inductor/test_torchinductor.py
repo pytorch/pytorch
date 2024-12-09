@@ -12563,6 +12563,25 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
 
+        @config.patch("triton.skip_l1_cache", True)
+        def test_skip_l1_cache(self):
+            @torch.compile
+            def f(a, b):
+                return a+b
+            N = 512
+            inps = (
+                torch.randn(N, device=GPU_TYPE),
+                torch.randn(N, device=GPU_TYPE)
+            )
+            code = run_and_get_triton_code(f, *inps)
+            lines = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertExpectedInline(
+                    "\n".join(lines),
+                    """\
+    tmp0 = tl.load(in_ptr0 + (x0), xmask, cache_modifier='.cg')
+    tmp1 = tl.load(in_ptr1 + (x0), xmask, cache_modifier='.cg')""")
+
+
         @config.patch("triton.use_block_ptr", True)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile

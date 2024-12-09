@@ -285,6 +285,7 @@ class CommonTemplate:
         result, (triton_code,) = run_and_compare(self, foo, x, y)
 
     @parametrize("prefer_nd_tiling", [False, True])
+    @config.patch("triton.skip_l1_cache", False)
     def test_pointwise_broadcast_nonzero_strides(self, prefer_nd_tiling: bool):
         """
         Test that we emit tl.broadcast_to instead of using strides of 0.
