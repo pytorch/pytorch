@@ -19,7 +19,6 @@ from torch.optim.optimizer import (
     register_optimizer_step_post_hook,
     register_optimizer_step_pre_hook,
 )
-from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2182,32 +2181,18 @@ class TestOptimRenewed(TestCase):
                 "betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0
             )
             if beta1_zero or optim_input.desc == "default":
-                activities = (
-                    [ProfilerActivity.CUDA]
-                    if device == "cuda"
-                    else [ProfilerActivity.CPU]
-                )
+                optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
+                optim.zero_grad()
+                output = model(inpt)
+                loss = output.sum()
+                loss.backward()
 
-                with profile(
-                    activities=activities, profile_memory=True, record_shapes=True
-                ) as prof:
-                    optim = optim_info.optim_cls(
-                        model.parameters(), **optim_input.kwargs
-                    )
-                    optim.zero_grad()
-                    output = model(inpt)
-                    loss = output.sum()
-                    loss.backward()
-
-                    optim.step()
+                optim.step()
 
                 case_to_mem_usage["beta1-zero" if beta1_zero else "default"] = sum(
-                    [
-                        item.cuda_memory_usage
-                        if device == "cuda"
-                        else item.cpu_memory_usage
-                        for item in prof.key_averages()
-                    ]
+                    optim.state[p]["exp_avg"].element_size()
+                    * optim.state[p]["exp_avg"].numel()
+                    for p in model.parameters()
                 )
 
         self.assertGreater(
