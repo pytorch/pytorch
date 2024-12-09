@@ -13,9 +13,6 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
-#ifdef USE_XPU
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
-#endif
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
@@ -89,15 +86,7 @@ std::vector<at::Tensor> unpack_tensors(
 bool is_default_value(
     const c10::Argument& argument,
     const c10::IValue& ivalue) {
-  if (!argument.default_value().has_value()) {
-    return false;
-  }
-  const auto& default_ivalue = *argument.default_value();
-  if (default_ivalue != ivalue) {
-    return false;
-  }
-
-  return true;
+  return argument.default_value() == ivalue;
 }
 
 std::vector<ParameterMetadata> unpack_input_parameters(
@@ -128,18 +117,19 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       // optional tensor list: std::vector<std::optional<at::Tensor>>
       std::vector<at::Tensor> tensor_list;
       for (const auto& item : stack[idx].toListRef()) {
-        if (item.toOptional<at::Tensor>().has_value()) {
-          tensor_list.push_back(item.toOptional<at::Tensor>().value());
+        auto e = item.toOptional<at::Tensor>();
+        if (e.has_value()) {
+          tensor_list.emplace_back(std::move(e.value()));
         }
       }
-      inputs_metadata.emplace_back(tensor_list, arg_order);
+      inputs_metadata.emplace_back(std::move(tensor_list), arg_order);
     } else if (
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
-      if (stack[idx].toOptional<at::Tensor>().has_value()) {
-        inputs_metadata.emplace_back(
-            stack[idx].toOptional<at::Tensor>().value(), arg_order);
+      auto t = stack[idx].toOptional<at::Tensor>();
+      if (t.has_value()) {
+        inputs_metadata.emplace_back(std::move(t.value()), arg_order);
       }
     } else if (stack[idx].isTensor()) {
       inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);
@@ -180,7 +170,6 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
   auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
-          device_.type() == c10::DeviceType::XPU ||
           device_.type() == c10::DeviceType::CPU ||
           registered_aoti_runner.find(device_name) !=
               registered_aoti_runner.end(),
@@ -421,7 +410,6 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
-          device_.type() == c10::DeviceType::XPU ||
           device_.type() == c10::DeviceType::CPU ||
           registered_aoti_runner.find(device_name) !=
               registered_aoti_runner.end(),
@@ -431,12 +419,6 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
     return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
-#else
-    return nullptr;
-#endif
-  } else if (device_.type() == c10::DeviceType::XPU) {
-#ifdef USE_XPU
-    return std::make_shared<AOTIModelContainerRunnerXpu>(so_path);
 #else
     return nullptr;
 #endif
