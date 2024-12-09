@@ -15,7 +15,10 @@ from torch.distributed.fsdp.api import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -40,8 +43,8 @@ class TestDummyModel(torch.nn.Module):
     def forward(self, x):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
-    def get_input(self, device):
-        return torch.rand(8, 8, device=device)
+    def get_input(self):
+        return torch.rand(8, 8, device=device_type.type)
 
 
 class TestDummyModelUneven(torch.nn.Module):
@@ -56,8 +59,8 @@ class TestDummyModelUneven(torch.nn.Module):
     def forward(self, x):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
-    def get_input(self, device):
-        return torch.rand(5, 5, device=device)
+    def get_input(self):
+        return torch.rand(5, 5, device=device_type.type)
 
 
 class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
@@ -67,17 +70,16 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         )
         model = FSDP(dummy_model.to(device_type), device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
-        model(model.get_input(device_type)).sum().backward()
+        model(model.get_input()).sum().backward()
         optim.step()
         return model, optim
 
     @with_comms
     @skip_if_lt_x_gpu(2)
     @parametrize("is_even_sharded_model", [True, False])
-    def test_fsdp_init_with_device_mesh(self, device, is_even_sharded_model):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(
-            device_type, is_even_sharded_model, device_mesh
+    def test_fsdp_init_with_device_mesh(self, is_even_sharded_model):
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, optim = self._create_model(is_even_sharded_model, device_mesh
         )
         FSDP.set_state_dict_type(
             model,
@@ -108,11 +110,10 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(
-        self, device, offload_to_cpu, is_even_sharded_model
+        self, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(
-            device_type, is_even_sharded_model, device_mesh
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, optim = self._create_model(is_even_sharded_model, device_mesh
         )
         FSDP.set_state_dict_type(
             model,
@@ -124,7 +125,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         )
         dtensor_sd = model.state_dict()
         dtensor_osd = FSDP.optim_state_dict(model, optim)
-        ref_model, ref_optim = self._create_model(device_type, is_even_sharded_model)
+        ref_model, ref_optim = self._create_model(is_even_sharded_model)
         FSDP.set_state_dict_type(
             ref_model,
             StateDictType.SHARDED_STATE_DICT,
@@ -186,11 +187,10 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(
-        self, device, offload_to_cpu, is_even_sharded_model
+        self, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(
-            device_type, is_even_sharded_model, device_mesh
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, optim = self._create_model(is_even_sharded_model, device_mesh
         )
         FSDP.set_state_dict_type(
             model,
@@ -204,7 +204,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         # Deepcopy to save current optim_state_dict to compare with the optim_state_dict loaded back below.
         ref_optim_state_dict = deepcopy(FSDP.optim_state_dict(model, optim))
         # Update the parameters so FSDP.optim_state_dict() will be different from ref_optim_state_dict.
-        model(model.get_input(device_type)).sum().backward()
+        model(model.get_input()).sum().backward()
         optim.step()
         # Load ref_optim_state_dict back.
         checkpoint.seek(0)
@@ -239,11 +239,10 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
     def test_dtensor_sharded_model_load_state_dict(
-        self, device, offload_to_cpu, is_even_sharded_model
+        self, offload_to_cpu, is_even_sharded_model
     ):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(
-            device_type, is_even_sharded_model, device_mesh
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, optim = self._create_model(is_even_sharded_model, device_mesh
         )
         FSDP.set_state_dict_type(
             model,
@@ -255,7 +254,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         # Deepcopy to save current state_dict to compare with the state_dict loaded back below.
         ref_state_dict = deepcopy(model.state_dict())
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
-        model(model.get_input(device_type)).sum().backward()
+        model(model.get_input()).sum().backward()
         optim.step()
         # Load ref_state_dict back.
         checkpoint.seek(0)
@@ -273,13 +272,12 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_raises_warning_or_errors(self, device):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(
-            device_type, is_even_sharded_model=True, device_mesh=device_type
+    def test_raises_warning_or_errors(self):
+        device_mesh = init_device_mesh(device_type.type, (self.world_size,))
+        model, optim = self._create_model(is_even_sharded_model=True, device_mesh=device_mesh
         )
         # initialize optim
-        model(model.get_input(device_type)).sum().backward()
+        model(model.get_input()).sum().backward()
         optim.step()
         with self.assertRaisesRegex(
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
