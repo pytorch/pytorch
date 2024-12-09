@@ -192,14 +192,19 @@ class SIMDKernelFeatures:
         else:
             return node.node.data.reduction_hint
 
-    def memory_stats(self, groups: Optional[List[sympy.Expr]] = None) -> MemoryStats:
+    def memory_stats(
+        self, groups_dict: Optional[Dict[str, sympy.Expr]] = None
+    ) -> MemoryStats:
         """Analysis to generate features that can be used in heuristics"""
-        if groups is None:
-            groups = [self.numel, self.reduction_numel]
-        key = tuple(groups)
-        result = self._stats_cache.get(key)
+        if groups_dict is None:
+            groups = (self.numel, self.reduction_numel)
+        elif groups_dict.keys() == {"x", "r"}:
+            groups = (groups_dict["x"], groups_dict["r"])
+        else:
+            raise NotImplementedError(f"groups_dict={groups_dict!r}")
+        result = self._stats_cache.get(groups)
         if result is None:
-            self._stats_cache[key] = result = MemoryStats.compute(
+            self._stats_cache[groups] = result = MemoryStats.compute(
                 MemoryEstimator(self, groups)
             )
         return result
@@ -382,6 +387,25 @@ class StatsForDim:
     bytes_contiguous_or_broadcast: sympy.Expr = sympy.S.Zero
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
 
+    def __add__(self, other: typing.Self) -> StatsForDim:
+        return StatsForDim(
+            count_per_thread_contiguous=self.count_per_thread_contiguous
+            + other.count_per_thread_contiguous,
+            count_per_thread_broadcast=self.count_per_thread_broadcast
+            + other.count_per_thread_broadcast,
+            count_per_thread_non_contiguous=self.count_per_thread_non_contiguous
+            + other.count_per_thread_non_contiguous,
+            bytes_per_thread_contiguous=self.bytes_per_thread_contiguous
+            + other.bytes_per_thread_contiguous,
+            bytes_per_thread_broadcast=self.bytes_per_thread_broadcast
+            + other.bytes_per_thread_broadcast,
+            bytes_per_thread_non_contiguous=self.bytes_per_thread_non_contiguous
+            + other.bytes_per_thread_non_contiguous,
+            bytes_contiguous_or_broadcast=self.bytes_contiguous_or_broadcast
+            + other.bytes_contiguous_or_broadcast,
+            bytes_non_contiguous=self.bytes_non_contiguous + other.bytes_non_contiguous,
+        )
+
     @property
     def count_per_thread(self) -> int:
         return (
@@ -408,23 +432,19 @@ class StatsForDim:
             self.count_per_thread, 1
         )
 
-    def __add__(self, other: typing.Self) -> StatsForDim:
-        return StatsForDim(
-            count_per_thread_contiguous=self.count_per_thread_contiguous
-            + other.count_per_thread_contiguous,
-            count_per_thread_broadcast=self.count_per_thread_broadcast
-            + other.count_per_thread_broadcast,
-            count_per_thread_non_contiguous=self.count_per_thread_non_contiguous
-            + other.count_per_thread_non_contiguous,
-            bytes_per_thread_contiguous=self.bytes_per_thread_contiguous
-            + other.bytes_per_thread_contiguous,
-            bytes_per_thread_broadcast=self.bytes_per_thread_broadcast
-            + other.bytes_per_thread_broadcast,
-            bytes_per_thread_non_contiguous=self.bytes_per_thread_non_contiguous
-            + other.bytes_per_thread_non_contiguous,
-            bytes_contiguous_or_broadcast=self.bytes_contiguous_or_broadcast
-            + other.bytes_contiguous_or_broadcast,
-            bytes_non_contiguous=self.bytes_non_contiguous + other.bytes_non_contiguous,
+
+@dataclasses.dataclass
+class StatsForLoop:
+    """Memory usage stats for single loop in the generated kernel"""
+
+    # load/store ops
+    count_per_thread: int = 0
+    bytes_per_thread: int = 0
+
+    def __add__(self, other: typing.Self) -> StatsForLoop:
+        return StatsForLoop(
+            count_per_thread=self.count_per_thread + other.count_per_thread,
+            bytes_per_thread=self.bytes_per_thread + other.bytes_per_thread,
         )
 
 
@@ -433,9 +453,21 @@ class StatsForReadsOrWrites:
     """Memory usage stats that are collected for reads/writes/both"""
 
     dim: List[StatsForDim]
+    loop: List[StatsForLoop]
     # total bytes contiguous in any dimension
     bytes_contiguous_or_broadcast: sympy.Expr = sympy.S.Zero
     bytes_non_contiguous: sympy.Expr = sympy.S.Zero
+
+    def __add__(self, other: typing.Self) -> StatsForReadsOrWrites:
+        assert len(self.dim) == len(other.dim)
+        assert len(self.loop) == len(other.loop)
+        return StatsForReadsOrWrites(
+            dim=[a + b for a, b in zip(self.dim, other.dim)],
+            loop=[a + b for a, b in zip(self.loop, other.loop)],
+            bytes_contiguous_or_broadcast=self.bytes_contiguous_or_broadcast
+            + self.bytes_contiguous_or_broadcast,
+            bytes_non_contiguous=self.bytes_non_contiguous + other.bytes_non_contiguous,
+        )
 
     @property
     def count_per_thread(self) -> int:
@@ -449,15 +481,6 @@ class StatsForReadsOrWrites:
     def bytes(self) -> sympy.Expr:
         return self.bytes_contiguous_or_broadcast + self.bytes_non_contiguous
 
-    def __add__(self, other: typing.Self) -> StatsForReadsOrWrites:
-        assert len(self.dim) == len(other.dim)
-        return StatsForReadsOrWrites(
-            dim=[a + b for a, b in zip(self.dim, other.dim)],
-            bytes_contiguous_or_broadcast=self.bytes_contiguous_or_broadcast
-            + self.bytes_contiguous_or_broadcast,
-            bytes_non_contiguous=self.bytes_non_contiguous + other.bytes_non_contiguous,
-        )
-
     @classmethod
     def compute(
         cls,
@@ -465,13 +488,16 @@ class StatsForReadsOrWrites:
         index_symbols: List[sympy.Symbol],
     ) -> typing.Self:
         ndim = len(index_symbols)
-        result = cls(dim := [StatsForDim() for _ in range(ndim)])
+        result = cls(dim := [StatsForDim() for _ in range(ndim)], [])
         for dep_group in loop_deps:
+            result.loop.append(loop_stats := StatsForLoop())
             for name, deps in dep_group.items():
                 assert deps
-                contiguous_or_broadcast = [True for _ in range(ndim)]
+                contiguous_or_broadcast = [True] * ndim
                 numel = sympy.S.Zero
                 itemsize = V.graph.get_dtype(name).itemsize
+                loop_stats.count_per_thread += len(deps)
+                loop_stats.bytes_per_thread += itemsize * len(deps)
                 for dep in deps:
                     strides: List[sympy.Expr] = V.graph.sizevars.stride_vars(
                         dep.index, index_symbols
@@ -504,6 +530,9 @@ class StatsForReadsOrWrites:
                     result.bytes_contiguous_or_broadcast += nbytes
                 else:
                     result.bytes_non_contiguous += nbytes
+        if len(result.loop) > 1:
+            # the first loop represent the "outside of the loop" compute which could be long lived
+            result.loop = [result.loop[0] + x for x in result.loop[1:]]
         return result
 
 

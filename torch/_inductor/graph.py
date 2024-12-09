@@ -346,6 +346,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
+        inputs_to_check: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -360,6 +361,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_const_graph = is_const_graph
         self.const_code = const_code
         self.const_module = const_module
+        self.inputs_to_check = inputs_to_check
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
