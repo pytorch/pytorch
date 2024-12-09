@@ -159,7 +159,6 @@ if RUN_GPU:
         BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_avg_pool2d_backward3"),
         BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bernoulli1"),
         BaseTest("test_bitwise"),  # int32
@@ -269,7 +268,7 @@ if RUN_GPU:
 
     from torch._inductor.utils import is_big_gpu
 
-    if GPU_TYPE == "cuda" and is_big_gpu(0):
+    if GPU_TYPE == "cuda" and is_big_gpu():
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
