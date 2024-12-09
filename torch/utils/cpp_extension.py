@@ -145,6 +145,8 @@ def _find_sycl_home() -> Optional[str]:
     """Find the OneAPI install path."""
     # Guess #1
     sycl_home = os.environ.get('ONEAPI_ROOT')
+    if sycl_home is not None:
+        sycl_home = os.path.join(sycl_home, "compiler", "latest")
     if sycl_home is None:
         # Guess #2
         icpx_path = shutil.which('icpx')
