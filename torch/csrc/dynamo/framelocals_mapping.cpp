@@ -3,7 +3,6 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
-#include <torch/csrc/utils/pybind.h>
 
 #include <internal/pycore_code.h>
 
@@ -22,13 +21,13 @@
 // frame_get_var fetches the variable value from the frame given the index
 // NOTE: hidden variables are not included.
 // Returns a new reference.
-PyObject* get_framelocals_mapping(_PyInterpreterFrame* frame) {
+FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
   if (!frame->stacktop) {
-    return py::dict().release().ptr();
+    return new FrameLocalsMapping();
   }
 
   PyCodeObject* co = F_CODE(frame);
-  py::dict mapping;
+  FrameLocalsMapping* map = new FrameLocalsMapping();
 
   auto update_mapping = [&](int i, PyObject* value) {
     _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
@@ -49,9 +48,8 @@ PyObject* get_framelocals_mapping(_PyInterpreterFrame* frame) {
     }
 
     if (value != nullptr) {
-      py::str name =
-          py::cast<py::str>(PyTuple_GET_ITEM(co->co_localsplusnames, i));
-      mapping[name] = py::cast<py::object>(value);
+      auto name = PyUnicode_AsUTF8(PyTuple_GET_ITEM(co->co_localsplusnames, i));
+      map->set(name, value);
     }
   };
 
@@ -69,28 +67,28 @@ PyObject* get_framelocals_mapping(_PyInterpreterFrame* frame) {
   // since we don't actually copy free vars from the closure to the frame
   // localsplus.
 
-  return mapping.release().ptr();
+  return map;
 }
 
 #else
 
 // Based on
 // https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1016
-PyObject* get_framelocals_mapping(PyFrameObject* frame) {
+FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
   PyCodeObject* co = F_CODE(frame);
-  py::dict mapping;
+  FrameLocalsMapping* map = new FrameLocalsMapping();
 
   auto update_mapping =
       [&](PyObject* names, int i, PyObject* value, bool deref) {
-        py::str name = py::cast<py::str>(PyTuple_GET_ITEM(names, i));
+        auto name = PyUnicode_AsUTF8(PyTuple_GET_ITEM(names, i));
         if (deref) {
           CHECK(value != nullptr && PyCell_Check(value));
           value = PyCell_GET(value);
         }
         if (value == nullptr) {
-          mapping.attr("pop")(name, py::none());
+          map->erase(name);
         } else {
-          mapping[name] = py::cast<py::object>(value);
+          map->set(name, value);
         }
       };
 
@@ -122,7 +120,15 @@ PyObject* get_framelocals_mapping(PyFrameObject* frame) {
     }
   }
 
-  return mapping.release().ptr();
+  return map;
 }
 
 #endif
+
+void framelocals_mapping_free(FrameLocalsMapping* map) {
+  delete map;
+}
+
+PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map) {
+  return map->to_dict();
+}

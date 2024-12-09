@@ -4715,12 +4715,13 @@ void* convert_to_root_guard_manager(py::object root) {
   return (void*)root_mgr;
 }
 
-bool run_root_guard_manager(void* root, PyObject* f_locals) {
+bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   // for invalidated guards, return false
   if (root == nullptr) {
     return false;
   }
-  return ((RootGuardManager*)root)->check_nopybind(f_locals);
+  return ((RootGuardManager*)root)
+      ->check_nopybind((PyObject*)framelocals_mapping_to_dict(f_locals));
 }
 
 PyObject* torch_c_dynamo_guards_init() {
