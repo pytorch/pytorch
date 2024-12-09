@@ -99,10 +99,8 @@ inline void parse_device_str(
 
   if (sm[1].str() == "cpu") {
     device_type = aoti_torch_device_type_cpu();
-#ifdef USE_CUDA
   } else if (sm[1].str() == "cuda") {
     device_type = aoti_torch_device_type_cuda();
-#endif
 #ifdef USE_XPU
   } else if (sm[1].str() == "xpu") {
     device_type = aoti_torch_device_type_xpu();
