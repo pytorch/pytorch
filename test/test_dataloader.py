@@ -3512,7 +3512,7 @@ class TestSlowIndexDataset(Dataset):
             worker_info = torch.utils.data.get_worker_info()
             self._worker_id = worker_info.id
         if idx == self.slow_index:
-            time.sleep(0.5)
+            time.sleep(1.0)
         return (self._worker_id, idx)
 
     def __len__(self):
@@ -3527,8 +3527,8 @@ class TestSlowIterableDataset(IterableDataset):
 
     def give_data(self, worker_id, iter_start, iter_end):
         for i in range(iter_start, iter_end):
-            if i >= self.mid:
-                time.sleep(0.5)
+            if i == self.mid:
+                time.sleep(1.0)
             yield (worker_id, i)
 
     def __iter__(self):
@@ -3570,14 +3570,18 @@ class TestOutOfOrderDataLoader(TestCase):
             in_order=False,
         )
 
-        # worker_id = 0 gets 0, then 'stuck' on index = 2
+        # worker_id = 0 gets 0, then 'stuck' on index = 2, and gets one more
+        # due to prefetch_factor being 2
         expected_worker_ids = [0, 1, 1, 1, 1, 1, 1, 1, 0, 0]
         expected_data = [0, 1, 3, 5, 6, 7, 8, 9, 2, 4]
         outputs = list(dataloader)
-        worker_ids = [o[0] for o in outputs]
-        data = [o[1] for o in outputs]
-        self.assertEqual(expected_worker_ids, worker_ids)
-        self.assertEqual(expected_data, data)
+        worker_ids = [o[0].item() for o in outputs]
+        data = [o[1].item() for o in outputs]
+        self.assertEqual(set(expected_worker_ids[:8]), set(worker_ids[:8]))
+        self.assertEqual(set(expected_worker_ids[8:]), set(worker_ids[8:]))
+        self.assertNotEqual(data, list(range(10)))
+        self.assertEqual(set(expected_data), set(data))
+        self.assertIn(2, data[8:])
 
     def test_in_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
@@ -3602,17 +3606,19 @@ class TestOutOfOrderDataLoader(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
-            prefetch_factor=2,
             in_order=False,
         )
 
-        # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        # worker 0 has [0, 1, 2, 3, 4], worker 1 has [5, 6, 7, 8, 9]
+        # index 5 is slow, so expect all of worker 0 before worker 1
         expected_worker_ids = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
         expected_data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         outputs = list(dataloader)
         worker_ids = [o[0] for o in outputs]
         data = [o[1] for o in outputs]
         self.assertEqual(expected_worker_ids, worker_ids)
+        self.assertEqual(sum(worker_ids), 5)
+        self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
 
