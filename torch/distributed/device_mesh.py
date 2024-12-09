@@ -712,9 +712,19 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
-                submesh = _mesh_resources.create_sub_mesh(
-                    self, mesh_dim_names, slice_mesh_dims
-                )
+                # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
+                # fail as it will require a real tensor to manipulate.
+                # `unset_fake_temporarily()` will allow us to materialize the tensors
+                # within `_mesh_resources`, which should not affect modling.
+                #
+                # Note that this should be orthogonal to torch.compile(). But whether
+                # we can compile device_mesh `slicing` (no graph break) is not verified
+                # yet and need a follow-up,
+                # TODO: compiler + device_mesh slicing.
+                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                    submesh = _mesh_resources.create_sub_mesh(
+                        self, mesh_dim_names, slice_mesh_dims
+                    )
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
