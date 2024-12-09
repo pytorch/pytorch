@@ -459,9 +459,8 @@ AOTIModelContainerRunner* AOTIModelPackageLoader::get_runner() {
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::run(
-    const std::vector<at::Tensor>& inputs,
-    void* stream_handle) {
-  return runner_->run(inputs, stream_handle);
+    const std::vector<at::Tensor>& inputs) {
+  return runner_->run(inputs);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
