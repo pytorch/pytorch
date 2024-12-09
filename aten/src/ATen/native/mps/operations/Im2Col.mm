@@ -27,11 +27,8 @@ static void im2col_out_mps_template(Tensor& output,
                                     IntArrayRef padding,
                                     IntArrayRef stride) {
   TORCH_CHECK(kernel_size.size() == 2, "It is expected kernel_size equals to 2, but got size ", kernel_size.size());
-
   TORCH_CHECK(dilation.size() == 2, "It is expected dilation equals to 2, but got size ", dilation.size());
-
   TORCH_CHECK(padding.size() == 2, "It is expected padding equals to 2, but got size ", padding.size());
-
   TORCH_CHECK(stride.size() == 2, "It is expected stride equals to 2, but got size ", stride.size());
 
   const auto kernel_height = kernel_size[0];
@@ -65,7 +62,6 @@ static void im2col_out_mps_template(Tensor& output,
 
   output.resize_({batch_size, n_output_plane, output_length});
   auto stream = getCurrentMPSStream();
-  auto device = MPSDevice::getInstance()->device();
   auto im2colPSO = lib.getPipelineStateForFunc("im2col_" + mps::scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -79,7 +75,7 @@ static void im2col_out_mps_template(Tensor& output,
                                                static_cast<int32_t>(stride_height)};
       std::array<int64_t, 4> input_sizes = {input_width, input_height, n_input_plane, batch_size};
       std::array<int64_t, 4> input_strides = {input.stride(3), input.stride(2), input.stride(1), input.stride(0)};
-      std::array<int64_t, 4> output_strides = {output.stride(2), output.stride(1), output.stride(0), output_width};
+      std::array<int64_t, 4> output_strides = {output.stride(3), output.stride(2), output.stride(1), output.stride(0)};
       getMPSProfiler().beginProfileKernel(im2colPSO, "im2col", {input, output});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:im2colPSO];
@@ -95,7 +91,82 @@ static void im2col_out_mps_template(Tensor& output,
   }
 }
 
+void col2im_out_mps_template(Tensor& output,
+                             const Tensor& input_,
+                             IntArrayRef output_size,
+                             IntArrayRef kernel_size,
+                             IntArrayRef dilation,
+                             IntArrayRef padding,
+                             IntArrayRef stride) {
+  TensorArg input_arg{input_, "input", 1};
+  TensorArg output_arg{output, "output", 2};
+  checkAllSameGPU(__func__, {input_arg, output_arg});
+
+  TORCH_CHECK(output_size.size() == 2, "It is expected output_size equals to 2, but got size ", output_size.size());
+  TORCH_CHECK(kernel_size.size() == 2, "It is expected kernel_size equals to 2, but got size ", kernel_size.size());
+  TORCH_CHECK(dilation.size() == 2, "It is expected dilation equals to 2, but got size ", dilation.size());
+  TORCH_CHECK(padding.size() == 2, "It is expected padding equals to 2, but got size ", padding.size());
+  TORCH_CHECK(stride.size() == 2, "It is expected stride equals to 2, but got size ", stride.size());
+
+  int64_t output_height = output_size[0];
+  int64_t output_width = output_size[1];
+  int64_t kernel_height = kernel_size[0];
+  int64_t kernel_width = kernel_size[1];
+  int64_t dilation_height = dilation[0];
+  int64_t dilation_width = dilation[1];
+  int64_t pad_height = padding[0];
+  int64_t pad_width = padding[1];
+  int64_t stride_height = stride[0];
+  int64_t stride_width = stride[1];
+
+  Tensor input = input_.contiguous();
+
+  bool batched_input = true;
+  if (input.dim() == 2) {
+    // Force batch
+    batched_input = false;
+    input = input.unsqueeze(0);
+  }
+
+  int64_t batch_size = input.size(0);
+  int64_t n_input_plane = input.size(1);
+  int64_t input_width = input.size(2);
+  int64_t n_output_plane = n_input_plane / (kernel_width * kernel_height);
+  int64_t input_batch_stride = input.stride(0);
+
+  output.resize_({batch_size, n_output_plane, output_height, output_width});
+  auto stream = getCurrentMPSStream();
+  auto col2imPSO = lib.getPipelineStateForFunc("col2im_" + mps::scalarToMetalTypeString(input));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width),
+                                                static_cast<int32_t>(kernel_height),
+                                                static_cast<int32_t>(dilation_width),
+                                                static_cast<int32_t>(dilation_height)};
+      std::array<int32_t, 4> padding_stride = {static_cast<int32_t>(pad_width),
+                                               static_cast<int32_t>(pad_height),
+                                               static_cast<int32_t>(stride_width),
+                                               static_cast<int32_t>(stride_height)};
+      std::array<int64_t, 4> input_sizes = {output_height, input_width, n_input_plane, batch_size};
+      std::array<int64_t, 4> input_strides = {output_width, input.stride(2), input.stride(1), input.stride(0)};
+      std::array<int64_t, 4> output_strides = {output.stride(3), output.stride(2), output.stride(1), output.stride(0)};
+      getMPSProfiler().beginProfileKernel(col2imPSO, "col2im", {input, output});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:col2imPSO];
+      mtl_setArgs(
+          computeEncoder, input, output, kernel_dilation, padding_stride, input_strides, output_strides, input_sizes);
+      [computeEncoder dispatchThreads:MTLSizeMake(output_width * output_height, n_output_plane, batch_size)
+                threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      getMPSProfiler().endProfileKernel(col2imPSO);
+    }
+  });
+  if (!batched_input) {
+    output = output.squeeze(0);
+  }
+}
+
 } // anonymous namespace
+
 Tensor& im2col_out_mps(const Tensor& input,
                        IntArrayRef kernel_size,
                        IntArrayRef dilation,
@@ -115,4 +186,28 @@ Tensor im2col_mps(const Tensor& input,
   im2col_out_mps_template(output, input, kernel_size, dilation, padding, stride);
   return output;
 }
+
+Tensor& col2im_out_mps(const Tensor& input,
+                       IntArrayRef output_size,
+                       IntArrayRef kernel_size,
+                       IntArrayRef dilation,
+                       IntArrayRef padding,
+                       IntArrayRef stride,
+                       Tensor& output) {
+  col2im_out_mps_template(output, input, output_size, kernel_size, dilation, padding, stride);
+  return output;
+}
+
+Tensor col2im_mps(const Tensor& input,
+                  IntArrayRef output_size,
+                  IntArrayRef kernel_size,
+                  IntArrayRef dilation,
+                  IntArrayRef padding,
+                  IntArrayRef stride) {
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  col2im_out_mps_template(output, input, output_size, kernel_size, dilation, padding, stride);
+  return output;
+}
+
 } // namespace at::native
