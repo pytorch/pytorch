@@ -994,7 +994,7 @@ def return_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.Device:
             return "_device"
         elif t.name == BaseTy.Dimname:
-            ret = "Optional[str]"
+            return "Optional[str]"
         else:
             return argument_type_str_pyi(t)
 
