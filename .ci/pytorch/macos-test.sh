@@ -18,6 +18,10 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
+if [[ "${TEST_CONFIG}" == "default" ]]; then
+  export CONTINUE_THROUGH_ERROR=True
+fi
+
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
