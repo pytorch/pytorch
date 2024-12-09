@@ -26,12 +26,9 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     set_default_tensor_type,
     TEST_SCIPY,
-    IS_PPC,
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
-    IS_S390X,
-    IS_ARM64,
     parametrize,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
@@ -1049,53 +1046,92 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.uint64,
+        torch.int64,
+    )
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
         max = torch.finfo(torch.float).max
 
         # Note: CUDA max float -> integer conversion is divergent on some dtypes
-        vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2, max)
+        vals = (-2, -1.5, -0.5, 0, 0.5, 1.5, 2)
         refs = None
-        if self.device_type == 'cuda':
-            if torch.version.hip:
-                # HIP min float -> int64 conversion is divergent
-                vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
-            else:
-                vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
-        elif dtype == torch.uint8:
-            # Note: CPU max float -> uint8 conversion is divergent
-            vals = (min, -2, -1.5, -.5, 0, .5, 1.5, 2)
+        if dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
-            refs = (0, 254, 255, 0, 0, 0, 1, 2)
-        elif dtype == torch.int16:
-            # CPU min and max float -> int16 conversion is divergent.
-            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
+            refs = (0, 0, 0, 0, 0, 1, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
+        if dtype != torch.bool:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        if dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            refs = (0, torch.iinfo(dtype).max)
 
-    # Note: CUDA will fail this test on most dtypes, often dramatically.
-    # Note: This test validates undefined behavior consistency in float-to-ints casts
-    # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
-    # nondeterministically fails, warning "invalid value encountered in cast"
-    @onlyCPU
-    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+        self._float_to_int_conversion_helper((min, max), device, dtype, refs)
+
+    @onlyNativeDeviceTypes
+    @dtypes(
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.uint64,
+        torch.int64,
+    )
+    def test_bfloat16_to_int_conversion_finite(self, device, dtype):
+        min = torch.finfo(torch.bfloat16).min
+        max = torch.finfo(torch.bfloat16).max
+
+        # Note: CUDA max float -> integer conversion is divergent on some dtypes
+        vals = (-2, -1.5, -0.5, 0, 0.5, 1.5, 2)
+        refs = None
+        if dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
+            #       see https://github.com/pytorch/pytorch/issues/97794
+            refs = (0, 0, 0, 0, 0, 1, 2)
+
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
+        if dtype != torch.bool:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+        if dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
+            refs = (0, torch.iinfo(dtype).max)
+
+        self._float_to_int_conversion_helper((min, max), device, dtype, refs)
+
+
+    @dtypes(
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.uint64,
+        torch.int64,
+    )
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
-        vals = (float('-inf'), float('inf'), float('nan'))
+        vals = (float('-inf'), float('inf'))
 
-        if dtype == torch.bool:
-            refs = (True, True, True)
-        elif IS_ARM64:
-            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
-            if dtype in (torch.int8, torch.int16):
-                refs = (0, -1, 0)
-        else:
-            refs = (0, 0, 0)
-            if dtype in (torch.int32, torch.int64):
-                refs = (torch.iinfo(dtype).min, ) * 3
+        refs = None
+        if dtype != torch.bool:
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
+
+        self._float_to_int_conversion_helper(vals, device, dtype, refs)
+        vals = (float('nan'), )
+
+        refs = None
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
