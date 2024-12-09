@@ -13,6 +13,9 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#ifdef USE_XPU
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
+#endif
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
@@ -177,6 +180,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
   auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
+          device_.type() == c10::DeviceType::XPU ||
           device_.type() == c10::DeviceType::CPU ||
           registered_aoti_runner.find(device_name) !=
               registered_aoti_runner.end(),
@@ -417,6 +421,7 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   auto registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
+          device_.type() == c10::DeviceType::XPU ||
           device_.type() == c10::DeviceType::CPU ||
           registered_aoti_runner.find(device_name) !=
               registered_aoti_runner.end(),
@@ -426,6 +431,12 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   if (device_.type() == c10::DeviceType::CUDA) {
 #ifdef USE_CUDA
     return std::make_shared<AOTIModelContainerRunnerCuda>(so_path);
+#else
+    return nullptr;
+#endif
+  } else if (device_.type() == c10::DeviceType::XPU) {
+#ifdef USE_XPU
+    return std::make_shared<AOTIModelContainerRunnerXpu>(so_path);
 #else
     return nullptr;
 #endif
