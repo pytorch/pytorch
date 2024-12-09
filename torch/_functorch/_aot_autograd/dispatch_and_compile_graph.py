@@ -8,8 +8,8 @@ import dataclasses
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-import torch.utils._pytree as pytree
 import torch.utils.dlpack
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
