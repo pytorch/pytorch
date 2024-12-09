@@ -2086,6 +2086,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
+        assert self.call_ranges is not None
         return V.graph.sizevars.size_hint(
             sympy_product(self.call_ranges), fallback=8192
         )
