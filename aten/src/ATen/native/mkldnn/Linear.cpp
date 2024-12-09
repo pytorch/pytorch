@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <torch/library.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,6 +45,18 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     const Tensor& input, const Tensor& grad_output_t,
     const Tensor& weight, std::array<bool,3> output_mask) {
   TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
+}
+
+Tensor&
+mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
+          const Tensor& scale_a,
+          const Tensor& scale_b,
+          const std::optional<at::Tensor>& bias,
+          const std::optional<at::Tensor>& scale_result,
+          std::optional<c10::ScalarType> out_dtype,
+          bool use_fast_accum,
+          Tensor& out) {
+  TORCH_INTERNAL_ASSERT(false, "mkldnn_scaled_mm: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -442,6 +455,119 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
       TORCH_FN(mkldnn_linear_pointwise_binary));
+}
+
+Tensor&
+mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
+          const Tensor& scale_a,
+          const Tensor& scale_b,
+          const std::optional<at::Tensor>& bias,
+          const std::optional<at::Tensor>& scale_result,
+          std::optional<c10::ScalarType> out_dtype,
+          bool use_fast_accum,
+          Tensor& out) {
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
+  TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
+  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
+       " but got ", bias->numel());
+
+  // Check types
+  TORCH_CHECK(!out_dtype || *out_dtype == out.scalar_type(), "out_dtype must match output matrix type");
+  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
+  // TODO: This check of mat1 and mat2 must have the same data type will be removed after oneDNN v3.6.
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "Expected mat1 and mat2 must have the same data type");
+
+  // Validation checks have passed lets resize the output to actual size
+  auto mat1_c = mat1.contiguous();
+  auto mat2_c = mat2.contiguous();
+  IntArrayRef mat1_sizes = mat1_c.sizes();
+  IntArrayRef mat2_sizes = mat2_c.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
+
+  float input_scale = scale_a.item<float>();
+  float weight_scale = scale_b.item<float>();
+  auto src = at::native::itensor_view_from_dense(mat1_c);
+  auto weight_t = at::native::itensor_view_from_dense(mat2_c);
+  bool with_bias = bias.has_value();
+  int64_t K = mat1_sizes[1], M = mat1_sizes[0],
+          N = mat2_sizes[1];
+
+  std::vector<int64_t> src_dims = {M, K};
+  std::vector<int64_t> weight_dims = {K, N};
+  std::vector<int64_t> dst_dims = {M, N};
+
+  ideep::tensor dst = at::native::itensor_view_from_dense(out);
+  auto src_desc = ideep::tensor::desc(
+      src_dims,
+      get_mkldnn_dtype(mat1.scalar_type()),
+      ideep::format_tag::any);
+  auto weights_desc = ideep::tensor::desc(
+      weight_dims,
+      get_mkldnn_dtype(mat2.scalar_type()),
+      ideep::format_tag::any);
+  auto dst_desc = ideep::tensor::desc(
+      dst_dims,
+      get_mkldnn_dtype(out.scalar_type()),
+      ideep::format_tag::any);
+  ideep::tensor onednn_bias;
+  if (with_bias) {
+    auto bias_value = bias.value();
+    if (bias_value.dim() == 1) {
+      auto b_reshape = bias_value.reshape({1, bias_value.size(0)});
+      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+    } else {
+      onednn_bias = at::native::itensor_view_from_dense(bias_value);
+    }
+  }
+  auto bias_desc = ideep::tensor::desc();
+  if (with_bias) {
+    bias_desc = ideep::tensor::desc(onednn_bias.get_dims(),
+                        get_mkldnn_dtype(bias.value().scalar_type()),
+                        ideep::format_tag::any);
+  }
+  auto op_attr = ideep::attr_t();
+  if (input_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
+  }
+  if (weight_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, 0);
+  }
+
+  op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+  auto engine = ideep::engine::cpu_engine();
+  dnnl::matmul::primitive_desc primitive_desc = with_bias
+      ? dnnl::matmul::primitive_desc(
+            engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr)
+      : dnnl::matmul::primitive_desc(
+            engine, src_desc, weights_desc, dst_desc, op_attr);
+  auto primitive = dnnl::matmul(primitive_desc);
+
+  // Prepare args and execute primitive
+  ideep::tensor scratchpad(primitive_desc.scratchpad_desc());
+  ideep::exec_args args;
+  args.insert({DNNL_ARG_SRC, src});
+  args.insert({DNNL_ARG_WEIGHTS, weight_t});
+  args.insert({DNNL_ARG_DST, dst});
+  args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
+  if (with_bias) {
+    args.insert({DNNL_ARG_BIAS, onednn_bias});
+  }
+  ideep::tensor src_scales_t = ideep::tensor(ideep::scale_t(1, input_scale));
+  ideep::tensor wei_scales_t = ideep::tensor(ideep::scale_t(1, weight_scale));
+
+  if (input_scale != 1.0f) {
+    args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
+  }
+  args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_scales_t});
+
+  primitive.execute(ideep::stream::default_stream(), args);
+  return out;
 }
 
 } // namespace at
