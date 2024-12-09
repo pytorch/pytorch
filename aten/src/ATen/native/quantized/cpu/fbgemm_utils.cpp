@@ -400,7 +400,7 @@ register_conv_params() {
         },
         // __setstate__ takes c10::IValue because we support parsing historical
         // serialization versions.
-        [](c10::IValue v)
+        [](const c10::IValue& v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
