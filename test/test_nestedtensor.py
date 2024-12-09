@@ -4378,7 +4378,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = func(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            if not torch.compiler.is_compiling:  # if not using torch dynamo
+            if not torch.compiler.is_compiling():  # if not using torch dynamo
                 self.assertEqual(len(out.shape), len(ref_shape))
                 for o, r in zip(out.shape, ref_shape):
                     if r is not None:
