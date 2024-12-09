@@ -27,7 +27,7 @@ namespace c10::xpu {
  * threads as the SYCL specification described.
  */
 
-static constexpr int max_compile_time_stream_priorities = 2;
+static constexpr int max_compile_time_stream_priorities = 3;
 
 /*
  * This serves as a wrapper around c10::Stream and acts as a representation for
@@ -132,7 +132,8 @@ class C10_XPU_API XPUStream {
 
   /// Return the range of priority **supported by PyTorch**.
   static std::tuple<int, int> priority_range() {
-    return std::make_tuple(0, -max_compile_time_stream_priorities + 1);
+    // See Note [XPU Stream priorities]
+    return std::make_tuple(1, -max_compile_time_stream_priorities + 2);
   }
 
  private:
