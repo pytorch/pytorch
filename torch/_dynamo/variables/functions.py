@@ -360,60 +360,33 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         inline_tracer = InliningInstructionTranslator.build_inline_tracer(
             tx,
             self,
-            # [*self.vt.self_args(), *args],
-            [*args],
+            args,
             kwargs,
         )
 
         code = self.vt.get_code()
-        _globals = self.vt.get_globals()
-        _locals = self.vt.bind_args(tx, args, kwargs)
-        fn = types.FunctionType(
-            code,
-            _globals,
-            self.get_name(),  # name
-            # TODO: Correctly place argdefs here!
-            None,  # argdefs
-            tuple(
-                make_cell(None) for _ in range(len(self.get_code().co_freevars))
-            ),  # closure
-        )
-        # gen_obj = fn(*args)
-        # _args = [_locals.get(name) for name in code.co_varnames]
-        _kwargs = _locals.pop(
-            "kwargs", variables.ConstDictVariable({})
-        ).as_python_constant()
-        _args = [
-            _locals.get(name)
-            for name in inspect.signature(fn).parameters.keys()
-            if name != "kwargs"
-        ]
-        # sig = inspect.signature(fn).bind_partial(*args, **kwargs)
-        # _args = sig.args
-        # _kwargs = sig.kwargs
-        gen_obj = fn(*_args)
-
+        f_globals = self.vt.get_globals()
         # calling a generator returns a generator object
-        return GeneratorObjectVariable(gen_obj, inline_tracer, source=self.source)
+        return GeneratorObjectVariable(
+            code, f_globals, inline_tracer, source=self.source
+        )
 
 
 class GeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
-        gen: types.GeneratorType,
+        code: types.CodeType,
+        f_globals,
         inline_tracer: Optional["InstructionTranslator"],
         **kwargs,
     ):
         super().__init__(**kwargs)
-        assert isinstance(gen, types.GeneratorType)
-        self.gen = gen
+        self.code = code
+        self.f_globals = f_globals
         self.inline_tracer = inline_tracer
-        # TODO: find out why generator.gi_frame is not kept in sync with the interpreter
-        # This prevents us from using inspect.getgeneratorstate
-        # self.generatorstate = "GEN_CREATED"
 
     def get_code(self):
-        return self.gen.gi_code
+        return self.code
 
     def get_filename(self):
         return self.get_code().co_filename
@@ -422,7 +395,7 @@ class GeneratorObjectVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_function(self):
-        return self.gen
+        raise NotImplementedError
 
     def has_self(self):
         return False
@@ -460,7 +433,7 @@ class GeneratorObjectVariable(VariableTracker):
         return {}
 
     def get_globals(self):
-        return self.gen.gi_frame.f_globals
+        return self.f_globals
 
     def python_type(self):
         return types.GeneratorType

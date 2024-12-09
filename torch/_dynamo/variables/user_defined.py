@@ -838,7 +838,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 self.value, types.GeneratorType
             ):
                 return variables.GeneratorObjectVariable(
-                    self.value, None, source=self.source
+                    self.value.gi_code,
+                    self.value.gi_frame.f_globals,
+                    None,
+                    source=self.source,
                 ).call_method(tx, name, args, kwargs)
 
             # check for methods implemented in C++
