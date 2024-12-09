@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 from typing import Any, Callable, Optional
-
+import itertools
 import sympy
 
 import torch
@@ -11,10 +11,19 @@ from torch._inductor.index_propagation import SymPyOps, TypedExpr
 
 from .virtualized import StoreMode, V
 
+def construct_symbol(count, dtype) -> sympy.Symbol:
+    real = dtype.is_floating_point
+    integer = not real and not dtype.is_complex
+    return sympy.Symbol(f"unknown_{count}", real=real, integer=integer)
 
 class PreservesZeros(SymPyOps):
+    """
+    For prologue kernels where the loads are masked, does the final store of this kernel preserve 
+    the zeros.
+    """
+
     def __init__(self) -> None:
-        self.count = 0
+        self.count = itertools.count(0)
         self.store_preserves_zeros: Optional[bool] = None
         self.dtype_prop = DtypePropagationOpsHandler()
 
@@ -38,8 +47,8 @@ class PreservesZeros(SymPyOps):
 
     @staticmethod
     def indirect_indexing(*args: Any, **kwargs: Any) -> sympy.Expr:
-        # TODO think about this
-        return sympy.S.Zero
+        self = V.get_ops_handler()
+        return construct_symbol(next(self.count), torch.int32)
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         from torch._inductor.codegen.common import OpDecompositions
@@ -47,13 +56,10 @@ class PreservesZeros(SymPyOps):
         def inner(*args: Any, **kwargs: Any) -> TypedExpr:
             if hasattr(OpDecompositions, name):
                 return getattr(OpDecompositions, name)(*args, **kwargs).value
-
+                
             nonlocal self
-            count = self.count
-            self.count += 1
-
             dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
-            return TypedExpr(sympy.Symbol(f"unknown_{count}"), dtype)
+            return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
 
         return inner
 
