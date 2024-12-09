@@ -291,7 +291,7 @@ def meta_fft_c2c(self, dim, normalization, forward):
     return output
 
 
-# fft_r2c meta fix by Juan Cesera and Julian Mueller
+# fft_r2c meta fix by Juan Ceresa and Julian Mueller
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
 @out_wrapper()
 def meta_fft_r2c(self, dim, normalization, onesided):
@@ -304,7 +304,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         last_dim_halfsize = (output_sizes[last_dim] // 2) + 1
         output_sizes[last_dim] = last_dim_halfsize
 
-    complex_dtype = utils.corresponding_complex_dtype(self.dtype)
+    complex_dtype = self.dtype.to_complex()
 
     input_strides = self.stride()
     output_strides = list(input_strides)
