@@ -1724,10 +1724,12 @@ command = [
     'python3',
     'tools/linter/adapters/docstring_linter.py',
     '--lintrunner',
+    '--max-class=1894',
+    '--max-def=1078',
     '--',
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-   'torch/**/not-exist.py'
+   'torch/_inductor/**.py'
 ]
 is_formatter = false
