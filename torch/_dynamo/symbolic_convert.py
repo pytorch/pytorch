@@ -26,6 +26,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -138,6 +139,11 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
+
+
+@functools.lru_cache(None)
+def _import_module(name: str) -> types.ModuleType:
+    return importlib.import_module(name)
 
 
 @dataclasses.dataclass
@@ -1176,7 +1182,7 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
@@ -1199,6 +1205,7 @@ class InstructionTranslatorBase(
             unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
+    @cache_method
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
@@ -1209,7 +1216,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = importlib.import_module(module_name)
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
@@ -3298,7 +3305,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if "torch_package" in module_name:
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
