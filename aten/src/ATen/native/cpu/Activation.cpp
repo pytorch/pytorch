@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Gelu.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
 
@@ -343,96 +344,35 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
   if (approximate == GeluType::Tanh) {
     if (at::isReducedFloatingType(it.common_dtype())) {
       AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "GeluKernelImpl", [&]() {
-        auto kBetaVec = Vectorized<float>((float)(M_SQRT2 * M_2_SQRTPI * 0.5));
-        auto kKappaVec = Vectorized<float>((float)(0.044715));
-        auto kOneVec = Vectorized<float>((float)(1));
-        auto kPointFiveVec = Vectorized<float>((float)(0.5));
         cpu_kernel_vec(
             it,
-            [](scalar_t x) -> scalar_t {
-              const float kBeta = float(M_SQRT2 * M_2_SQRTPI * 0.5);
-              const float kKappa = float(0.044715);
-              float x_cube = float(x) * float(x) * float(x);
-              float inner = kBeta * (float(x) + kKappa * x_cube);
-              return float(0.5) * float(x) * (float(1) + std::tanh(inner));
-            },
-            [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
-              auto [x0, x1] = convert_to_float<scalar_t>(x);
-              auto x0_cube = x0 * x0 * x0;
-              auto x1_cube = x1 * x1 * x1;
-              auto inner_vec0 = kBetaVec * (x0 + kKappaVec * x0_cube);
-              auto inner_vec1 = kBetaVec * (x1 + kKappaVec * x1_cube);
-              auto res0 = kPointFiveVec * x0 * (kOneVec + inner_vec0.tanh());
-              auto res1 = kPointFiveVec * x1 * (kOneVec + inner_vec1.tanh());
-              return convert_from_float<scalar_t>(res0, res1);
-            },
+            scalar_gelu_approximated_with_tanh<scalar_t>,
+            vectorized_gelu_approximated_with_tanh<scalar_t>,
             grain_size);
       });
     } else {
       AT_DISPATCH_FLOATING_TYPES(
           it.dtype(), "GeluKernelImpl", [&]() {
-        using Vec = vec::Vectorized<scalar_t>;
-        const Vec kBetaVec(scalar_t(M_SQRT2 * M_2_SQRTPI * 0.5));
-        const Vec kKappaVec(scalar_t(0.044715));
-        const Vec kOneVec(scalar_t(1));
-        const Vec kPointFiveVec(scalar_t(0.5));
         cpu_kernel_vec(
             it,
-            [](scalar_t x) {
-              const scalar_t kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-              const scalar_t kKappa = 0.044715;
-              auto x_cube = x * x * x;
-              auto inner = kBeta * (x + kKappa * x_cube);
-              return scalar_t(0.5) * x * (scalar_t(1) + std::tanh(inner));
-            },
-            [&](Vec x_vec) {
-              auto x_cube = x_vec * x_vec * x_vec;
-              auto inner_vec = kBetaVec * (x_vec + kKappaVec * x_cube);
-              return kPointFiveVec * x_vec * (kOneVec + inner_vec.tanh());
-            },
+            scalar_gelu_approximated_with_tanh<scalar_t>,
+            vectorized_gelu_approximated_with_tanh<scalar_t>,
             grain_size);
       });
     }
   } else {
-    if (at::isReducedFloatingType(it.common_dtype())) {
-      AT_DISPATCH_REDUCED_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
-        auto kAlphaVec = Vectorized<float>((float)(M_SQRT1_2));
-        auto kOneVec = Vectorized<float>((float)(1));
-        auto kPointFiveVec = Vectorized<float>((float)(0.5));
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        it.dtype(),
+        "GeluKernelImpl",
+        [&]() {
         cpu_kernel_vec(
             it,
-            [](scalar_t x) -> scalar_t {
-              const float kAlpha = float(M_SQRT1_2);
-              return float(x) * float(0.5) * (float(1) + std::erf(float(x) * kAlpha));
-            },
-            [&](Vectorized<scalar_t> x) -> Vectorized<scalar_t> {
-              auto [x0, x1] = convert_to_float<scalar_t>(x);
-              auto res0 = x0 * kPointFiveVec * (kOneVec + (x0 * kAlphaVec).erf());
-              auto res1 = x1 * kPointFiveVec * (kOneVec + (x1 * kAlphaVec).erf());
-              return convert_from_float<scalar_t>(res0, res1);
-            },
+            scalar_gelu<scalar_t>,
+            vectorized_gelu<scalar_t>,
             grain_size);
       });
-    } else {
-      AT_DISPATCH_FLOATING_TYPES(
-          it.dtype(), "GeluKernelImpl", [&]() {
-        using Vec = vec::Vectorized<scalar_t>;
-        const Vec kAlphaVec(scalar_t(M_SQRT1_2));
-        const Vec kOneVec(scalar_t(1));
-        const Vec kPointFiveVec(scalar_t(0.5));
-        cpu_kernel_vec(
-            it,
-            [](scalar_t x) {
-              const scalar_t kAlpha = scalar_t(M_SQRT1_2);
-              return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
-            },
-            [&](Vec x_vec) {
-              return x_vec * kPointFiveVec *
-                  (kOneVec + (x_vec * kAlphaVec).erf());
-            },
-            grain_size);
-      });
-    }
   }
 }
 
@@ -741,12 +681,17 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
-        return float(a) > lambd_val ? a - lambd_val : (float(a) < -lambd_val ? a + lambd_val : float(0));
+        return float(a) > lambd_val ? a - lambd_val
+                : (float(a) < -lambd_val ? a + lambd_val : float(a) * float(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
-          auto self_val_t0 = convert_from_float<scalar_t>((self_val0 > lambdVec) & (self_val0 - lambdVec), (self_val1 > lambdVec) & (self_val1 - lambdVec));
-          auto self_val_t1 = convert_from_float<scalar_t>((self_val0 < -lambd_val) & (self_val0 + lambdVec), (self_val1 < -lambd_val) & (self_val1 + lambdVec));
+          auto self_val_t0 = convert_from_float<scalar_t>(
+              ((self_val0 > lambdVec) | (self_val0.isnan())) & (self_val0 - lambdVec),
+              ((self_val1 > lambdVec) | (self_val1.isnan())) & (self_val1 - lambdVec));
+          auto self_val_t1 = convert_from_float<scalar_t>(
+              ((self_val0 < -lambd_val) | (self_val0.isnan())) & (self_val0 + lambdVec),
+              ((self_val1 < -lambd_val) | (self_val1.isnan())) & (self_val1 + lambdVec));
           return (self_val_t0 | self_val_t1);
       });
     });
@@ -757,12 +702,12 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     cpu_kernel_vec(
       iter,
       [=](scalar_t a) -> scalar_t {
-        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
+        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : a * scalar_t(0));
       },
       [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<scalar_t> self_val_t0, self_val_t1;
-          self_val_t0 = (self_val > lambdVec) & (self_val - lambdVec);
-          self_val_t1 = (self_val < -lambd_val) & (self_val + lambdVec);
+          self_val_t0 = ((self_val > lambdVec) | (self_val.isnan())) & (self_val - lambdVec);
+          self_val_t1 = ((self_val < -lambd_val) | (self_val.isnan())) & (self_val + lambdVec);
           return (self_val_t0 | self_val_t1);
       });
   });

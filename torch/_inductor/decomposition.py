@@ -76,6 +76,7 @@ inductor_decompositions = get_decompositions(
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
+        aten.rrelu_with_noise_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -107,6 +108,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -442,16 +444,6 @@ def lift(self: torch.Tensor) -> torch.Tensor:
     return self
 
 
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(
-    self: torch.Tensor,
-    *,
-    generator: Optional[torch.Generator] = None,
-) -> torch.Tensor:
-    assert generator is None
-    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
-
-
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return torch.where(torch.isnan(other) | (other > self), self, other)
@@ -749,6 +741,20 @@ def _foreach_lerp_scalar(
     )
 
 
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: List[torch.Tensor],
+    end_tensors: List[torch.Tensor],
+    scalars: List[torch.types.Number],
+) -> List[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
+        ),
+    )
+
+
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
 @register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
@@ -1017,3 +1023,23 @@ def searchsorted_scalar(
         side=side,
         sorter=sorter,
     )[0]
+
+
+@register_decomposition(aten.rrelu_with_noise_functional)
+def rrelu_with_noise_functional(
+    self: torch.Tensor,
+    noise: torch.Tensor,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper, generator=generator)
+        output = torch.where(not_positive, self * r, self)
+        noise_out = torch.where(not_positive, r, 1)
+        return output, noise_out
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope), torch.Tensor()

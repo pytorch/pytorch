@@ -3,7 +3,19 @@ import builtins
 import inspect
 import types
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 from torch._C import _NodeBase
@@ -45,9 +57,9 @@ Target = Union[Callable[..., Any], str]
 
 Argument = Optional[
     Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
+        Tuple["Argument", ...],
+        Sequence["Argument"],
+        Mapping[str, "Argument"],
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "Node",
@@ -80,6 +92,7 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert_async,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
+    _ops.aten._assert_tensor_metadata.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
@@ -730,8 +743,9 @@ class Node(_NodeBase):
                 else:
                     return n
 
-            if getattr(m, "_replace_hook", None):
-                m._replace_hook(old=self, new=replace_with.name, user=use_node)
+            if getattr(m, "_replace_hooks", None):
+                for replace_hook in m._replace_hooks:
+                    replace_hook(old=self, new=replace_with.name, user=use_node)
 
             new_args = map_arg(use_node.args, maybe_replace_node)
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
@@ -835,8 +849,9 @@ class Node(_NodeBase):
             return new_input if n == old_input else n
 
         m = self.graph.owning_module
-        if getattr(m, "_replace_hook", None):
-            m._replace_hook(old=old_input, new=new_input.name, user=self)
+        if getattr(m, "_replace_hooks", None):
+            for replace_hook in m._replace_hooks:
+                replace_hook(old=old_input, new=new_input.name, user=self)
 
         new_args = map_arg(self.args, maybe_replace_node)
         new_kwargs = map_arg(self.kwargs, maybe_replace_node)
@@ -854,10 +869,11 @@ class Node(_NodeBase):
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "name" and hasattr(self, "name"):
             m = self.graph.owning_module
-            if getattr(m, "_replace_hook", None):
+            if getattr(m, "_replace_hooks", None):
                 assert isinstance(value, str)
                 for user in self.users:
-                    m._replace_hook(old=self, new=value, user=user)
+                    for replace_hook in m._replace_hooks:
+                        replace_hook(old=self, new=value, user=user)
         update = False
         if (
             hasattr(self, name)
