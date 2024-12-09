@@ -15,9 +15,7 @@ if TYPE_CHECKING:
 
 
 def construct_symbol(count: int, dtype: torch.dtype) -> sympy.Symbol:
-    real = dtype.is_floating_point
-    integer = not real and not dtype.is_complex
-    return sympy.Symbol(f"unknown_{count}", real=real, integer=integer)
+    return sympy.Symbol(f"unknown_{count}")
 
 
 class PreservesZeros(SymPyOps):
