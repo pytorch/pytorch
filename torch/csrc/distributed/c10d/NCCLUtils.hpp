@@ -329,7 +329,13 @@ class NCCLComm {
   // Wait for the communicator to be ready. This is a blocking function.
   // Useful in nonblocking mode: NCCL requires the communicator to be ready
   // before issuing a second command.
-  void waitReady();
+  // Arguments:
+  //   longInterval: if true, wait with sleep of an interval; otherwise, wait
+  //   with `sched_yield` which is faster (but acquires CPU more frequently).
+  //   Use `longInterval=true` when waiting for initialization or finalize to
+  //   complete. Use `longInterval=false` when waiting collective call to return
+  //   ncclSuccess.
+  void waitReady(bool longInterval);
 
   std::optional<std::string> getNcclCommFailureReason() const {
     LockType lock(mutex_);
