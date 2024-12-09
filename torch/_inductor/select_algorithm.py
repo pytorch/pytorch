@@ -88,9 +88,7 @@ PRINT_AUTOTUNE = True
 DEBUG = False
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.common import CSEVariable
     from torch._inductor.codegen.simd import IterationRangesRoot
-    from torch._inductor.ops_handler import StoreMode
 
 
 class KernelNamespace:
