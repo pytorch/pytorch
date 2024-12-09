@@ -712,10 +712,7 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
-                # Cannot import it too early because it is going to cause a
-                # circular dependency.
-                from torch.utils._mode_utils import no_dispatch
-                with no_dispatch():
+                with torch._subclasses.fake_tensor.unset_fake_temporarily():
                     submesh = _mesh_resources.create_sub_mesh(
                         self, mesh_dim_names, slice_mesh_dims
                     )
