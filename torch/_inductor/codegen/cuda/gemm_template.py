@@ -1375,7 +1375,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             return False
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
-        K = max(A_size[0], B_size[1])
+        K = max(A_size[1], B_size[0])
         return (K == A_size[1] or K == 2 * A_size[0]) and K == B_size[0]
 
     def _shape_match(
