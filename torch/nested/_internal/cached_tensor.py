@@ -8,13 +8,20 @@ from torch.utils import _pytree as pytree
 class CachedTensor(torch.Tensor):
     # Tensor subclass wrapping a dict of tensors, whose shape, dtype, device, etc.
     # is determined by a "source" tensor in the dict (specified by the user
-    # during construction). By default, performing any operations on it will be
-    # as if you were performing the operation on the source tensor. To leverage
-    # the extra metadata, you can register a torch dispatch function to perform
-    # the special behavior you want. For example, see NestedTensor's usage.
-    # This is a convenient way to keep around metadata related to a tensor, without
-    # having to laboriously thread those extra metadata around, e.g. through aten
-    # signatures.
+    # during construction).
+    #
+    # This class is not super useful on its own because by default, performing any
+    # operations on it will be as if you first unwrapped the CachedTensor and then
+    # performed the operation on the plain source tensor (a plain tensor is also returned).
+    # To leverage the extra metadata, you must register an op to perform the special logic
+    # you want via register_cached_tensor_func.
+    #
+    # When used this way (1) it is a convenient way to keep around metadata
+    # related to a tensor, without having to laboriously thread those extra metadata
+    # around, e.g. through aten signatures. (2) allows one to trigger custom
+    # __torch_dispatch__ logic to construct tensor subclasses (which can be tricky to do
+    # otherwise because the subclass constructor op itself usually does not take the
+    # subclass itself as input!). See NestedTensor for an example.
     @staticmethod
     def __new__(
         cls,
