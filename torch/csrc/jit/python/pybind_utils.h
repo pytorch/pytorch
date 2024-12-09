@@ -638,7 +638,7 @@ inline InferredType tryToInferContainerType(
       // used from a bunch of circumstances unrelated to tracing. We can re-use
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
-          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",
           "are supported ",
           "as inputs or outputs of traced functions",
           ", but instead got value of type ",
