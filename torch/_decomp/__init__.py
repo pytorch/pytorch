@@ -11,11 +11,12 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    TYPE_CHECKING,
     TypeVar,
     Union,
-    TYPE_CHECKING,
 )
 from typing_extensions import ParamSpec
+
 
 if TYPE_CHECKING:
     from torch.export.decomp_utils import CustomDecompTable
@@ -286,8 +287,9 @@ import torch._refs
 
 def core_aten_decompositions() -> "CustomDecompTable":
     from torch.export.exported_program import default_decompositions
+
     return default_decompositions()
-    
+
 
 # See NOTE [Core ATen Ops]
 #
