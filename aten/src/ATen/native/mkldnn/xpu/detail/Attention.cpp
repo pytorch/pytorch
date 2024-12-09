@@ -162,7 +162,7 @@ partition create_sdpa_graph_partition(
 } // namespace
 
 namespace at::native::onednn::graph {
-TORCH_API void gpu_float_sdpa(
+void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_k,
@@ -260,9 +260,9 @@ TORCH_API void gpu_float_sdpa(
       partition_ = cache.insert_partition_cache(patternID, sdp_partition);
     }
     cp_entry sdp_cp_entry{
-        .partition_ = partition_->get(),
-        .input_logical_tensors = logical_params.get_input(),
-        .output_logical_tensors = logical_params.get_output(),
+        /*.partition_ = */ partition_->get(),
+        /*.input_logical_tensors = */ logical_params.get_input(),
+        /*.output_logical_tensors = */ logical_params.get_output(),
     };
     // partition compilation
     sdp_cp_entry.cp = sdp_cp_entry.partition_.compile(

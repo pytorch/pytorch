@@ -1,5 +1,5 @@
-#include <ATen/native/mkldnn/xpu/detail/Attr.h>
-#include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#pragma once
+
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_graph.hpp>
@@ -20,8 +20,8 @@ using engine = dnnl::engine;
 // Compiled Partition entry
 struct cp_entry {
   partition partition_;
-  std::vector<logical_tensor> input_logical_tensors;
-  std::vector<logical_tensor> output_logical_tensors;
+  std::vector<logical_tensor> input_logical_tensors{};
+  std::vector<logical_tensor> output_logical_tensors{};
   compiled_partition cp;
 };
 struct GraphCache {
@@ -40,13 +40,13 @@ struct GraphCache {
     }
   };
 
-  std::unordered_map<std::bitset<32>, dnnl::graph::partition> partition_map_;
-  std::list<key_value_pair_t> cache_items_list_;
+  std::unordered_map<std::bitset<32>, dnnl::graph::partition> partition_map_{};
+  std::list<key_value_pair_t> cache_items_list_{};
   std::unordered_map<
       std::vector<int64_t>,
       list_iterator_t,
       CompiledPartitionKeyHasher>
-      fused_kernel_map_;
+      fused_kernel_map_{};
   size_t capacity_ = 1024;
 
   cp_entry& insert_fused_kernel_cache(
