@@ -255,6 +255,9 @@ class AOTInductorTestsTemplate:
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
+    @unittest.skipIf(
+        IS_MACOS, "See https://github.com/pytorch/pytorch/pull/142270 for context"
+    )
     @make_logging_test(dynamic=logging.DEBUG)
     def test_shape_env_reuse(self, records):
         # make sure ShapeEnv is only created once and reused afterwards

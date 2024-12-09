@@ -5,6 +5,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import IS_MACOS
 
 
 class MatMulModule(torch.nn.Module):
@@ -39,6 +40,9 @@ class TestInductorExternalCallable(TestCase):
         super().tearDown()
         config.load_config(self._saved_config)
 
+    @unittest.skipIf(
+        IS_MACOS, "See https://github.com/pytorch/pytorch/pull/142270 for context"
+    )
     def test_matmul_cpu(self):
         # 2I + 2I == (2I)(2I)
         x = torch.eye(128, 128) * 2
