@@ -226,6 +226,7 @@ def mark_nodes_dislike_padding(
     ops_dislike_padding = {
         aten.convolution,
         aten.convolution_backward,
+        aten._scaled_mm,
     }
     # what's a better way to collect the reduction ops?
     ops_like_padding = {
@@ -346,6 +347,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
+        inputs_to_check: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -360,6 +362,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_const_graph = is_const_graph
         self.const_code = const_code
         self.const_module = const_module
+        self.inputs_to_check = inputs_to_check
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -850,8 +853,12 @@ class GraphLowering(torch.fx.Interpreter):
         device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and device is not None
+            device is not None
+            and not (
+                isinstance(buffer, ir.ComputedBuffer)
+                and buffer.is_zero_elements()
+                and device == torch.device("cpu")
+            )
         ):
             self.add_device_info(device)
 
@@ -1834,17 +1841,17 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen_with_cpp_wrapper(self) -> Tuple[str, List[Tuple[int, Node]]]:
         """
-        For CPU, the cpp wrapper codegen is done in one pass.
-        For GPU, the cpp wrapper codegen is done in two steps: JIT-compile the model with python
-        wrapper code and run it to generate autotuned kernel binaries in the first pass; and then
-        generate cpp wrapper code and compile it to a dynamic library in the second pass.
+        For GPU, Triton kernels are autotuned and stored as cubin files
         """
         if any(device in self.device_types for device in ["cuda", "xpu"]):
-            # first pass
-            self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
-
-            if not config.triton.autotune_at_compile_time:
+            if config.triton.autotune_at_compile_time:
+                # If autotune_at_compile_time is True, we can do the codegen in one-pass
+                # TODO: once autotune_at_compile_time is stable, we should delete the else branch
+                return self.codegen()
+            else:
+                # first pass
+                self.cpp_wrapper = False
+                compiled = self.compile_to_module().call
 
                 def materialize(
                     x: Union[torch.SymInt, torch.SymFloat, torch.Tensor]
@@ -1917,16 +1924,16 @@ class GraphLowering(torch.fx.Interpreter):
                     compiled(real_inputs)
                 del real_inputs
 
-            # second pass
-            self.cpp_wrapper = True
-            self.removed_buffers.clear()
-            self.removed_operations.clear()
-            self.inplaced_to_remove.clear()
-            V.graph.sizevars.precomputed_replacements.clear()
-            V.graph.sizevars.inv_precomputed_replacements.clear()
-            metrics.reset()
-            with config.patch({"triton.autotune_at_compile_time": False}):
-                return self.codegen()
+                # second pass
+                self.cpp_wrapper = True
+                self.removed_buffers.clear()
+                self.removed_operations.clear()
+                self.inplaced_to_remove.clear()
+                V.graph.sizevars.precomputed_replacements.clear()
+                V.graph.sizevars.inv_precomputed_replacements.clear()
+                metrics.reset()
+                with config.patch({"triton.autotune_at_compile_time": False}):
+                    return self.codegen()
         else:
             # cpu
             return self.codegen()
@@ -2008,7 +2015,15 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-
+        if config.triton.autotune_at_compile_time:
+            tuning_code = (
+                '"""\n'
+                + "Compile-time auto-tuning block: \n"
+                + self.wrapper_code.kernel_autotune_defs.getvalue()
+                + self.wrapper_code.kernel_autotune_calls.getvalue()
+                + '"""\n'
+            )
+            code = tuning_code + code
         GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
 
