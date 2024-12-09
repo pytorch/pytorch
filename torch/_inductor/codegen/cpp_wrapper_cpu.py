@@ -20,7 +20,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import get_device_op_overrides, IndentedBuffer, Kernel
+from .common import IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
@@ -66,7 +66,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: Dict[str, Kernel] = {}
-        self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
     def create(
@@ -572,9 +571,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         for kernel in sorted(declare_kernel):
             self.prefix.writeline(
-                maybe_hipify_code_wrapper(
-                    f"    {self.device_codegen.cpp_kernel_type()} {kernel}{{nullptr}};"
-                )
+                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
             )
         for name, kernel in self.initialized_kernels.items():
             assert hasattr(
