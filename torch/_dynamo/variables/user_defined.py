@@ -89,16 +89,7 @@ def is_forbidden_context_manager(ctx):
     except ImportError:
         pass
 
-    try:
-        from torch.testing._internal.jit_utils import (
-            _AssertRaisesRegexWithHighlightContext,
-        )
-
-        f_ctxs.append(_AssertRaisesRegexWithHighlightContext)
-    except ImportError:
-        pass
-
-    return ctx in f_ctxs
+    return ctx.__qualname__ == "_AssertRaisesRegexWithHighlightContext" or ctx in f_ctxs
 
 
 class UserDefinedVariable(VariableTracker):
