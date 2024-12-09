@@ -10,6 +10,8 @@ __all__ = [
     "model_is_exported",
 ]
 
+_EXPORTED_TRAINING_ATTR = "_exported_training"
+
 
 class _WrapperModule(torch.nn.Module):
     """Class to wrap a callable in an :class:`torch.nn.Module`. Use this if you
@@ -195,7 +197,13 @@ def _move_exported_model_to_eval(model: torch.fx.GraphModule):
 
     This is equivalent to model.eval() but only for certain special ops like dropout, batchnorm.
     QAT users should call this before performing inference on the model.
+
+    This call is idempotent; if the model is already in eval mode, nothing will happen.
     """
+    is_training = getattr(model, _EXPORTED_TRAINING_ATTR, True)
+    if not is_training:
+        return model
+    setattr(model, _EXPORTED_TRAINING_ATTR, False)
     _replace_dropout(model, train_to_eval=True)
     _replace_batchnorm(model, train_to_eval=True)
     return model
@@ -207,7 +215,13 @@ def _move_exported_model_to_train(model: torch.fx.GraphModule):
 
     This is equivalent to model.train() but only for certain special ops like dropout, batchnorm.
     QAT users should call this before performing training on the model.
+
+    This call is idempotent; if the model is already in train mode, nothing will happen.
     """
+    is_training = getattr(model, _EXPORTED_TRAINING_ATTR, False)
+    if is_training:
+        return model
+    setattr(model, _EXPORTED_TRAINING_ATTR, True)
     _replace_dropout(model, train_to_eval=False)
     _replace_batchnorm(model, train_to_eval=False)
     return model
