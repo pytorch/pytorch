@@ -1,0 +1,29 @@
+leak:pybind11::cpp_function
+leak:PyMem_RawMalloc
+leak:unicode_resize
+leak:PyObject_Malloc
+leak:PyByteArray_Resize
+leak:numpy
+leak:list_append
+leak:unicodeobject
+leak:obmalloc
+leak:gcmodule
+leak:listobject
+leak:bytesobject
+leak:PyThread_allocate_lock
+leak:sccache
+leak:rustc-1.61.0
+leak:gcc/x86_64-linux-gnu/11
+leak:x86_64-linux-gnu-gcc-11
+leak:libbfd
+leak:x86_64-linux-gnu-ld.bfd
+leak:git
+leak:libio
+leak:unknown module
+leak:g++
+leak:conda-linux-gnu-ld
+leak:crypto
+leak:torch::detail::(anonymous namespace)::get_set_cached_attr
+leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
+leak:optree
+leak:torch::tensors::initialize_aten_types

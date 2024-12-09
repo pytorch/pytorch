@@ -227,7 +227,7 @@ static PyObject* THPModule_initExtension(
   END_HANDLE_TH_ERRORS
 }
 
-// The idea behind these two functions is to make it easy to test if we are
+// The idea behind these functions is to make it easy to test if we are
 // built with ASAN: they're designed not to crash if ASAN is not enabled, but
 // to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
 // checks if our build environment is misconfigured.
@@ -244,6 +244,12 @@ static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   return THPUtils_packInt32(x[0]);
   END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_crashIfCsrcLSAN(PyObject* module, PyObject* noarg) {
+  // NOLINTNEXTLINE(*malloc*)
+  auto ptr [[maybe_unused]] = malloc(1024ull * 1024);
+  return THPUtils_packInt32(0);
 }
 
 static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
@@ -1406,6 +1412,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
     {"_abort", THPModule_abort, METH_NOARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
+    {"_crash_if_csrc_lsan", THPModule_crashIfCsrcLSAN, METH_NOARGS, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
     {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
