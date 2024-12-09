@@ -1,11 +1,14 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from collections.abc import Sequence
+from typing import Any, Callable
 from unittest.mock import patch
 
 import sympy
@@ -181,11 +184,11 @@ class CppCSEVariable(CSEVariable):
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dependent_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars: set[sympy.Symbol] = set()
 
     def __repr__(self) -> str:
         return (
@@ -262,7 +265,7 @@ def value_to_cpp(value, cpp_type):
 
 
 def rewrite_index_for_function(
-    localize_buffer_handler: "LocalizeBufferHandler",
+    localize_buffer_handler: LocalizeBufferHandler,
     index: sympy.Expr,
     global_buf_name: str,
 ):
@@ -289,7 +292,7 @@ def rewrite_index_for_function(
 
 
 def rewrite_index_for_nodes(
-    localize_buffer_handler: "LocalizeBufferHandler",
+    localize_buffer_handler: LocalizeBufferHandler,
     index: sympy.Expr,
     global_buf_name: str,
 ):
@@ -307,8 +310,8 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
     def __init__(
         self,
         inner,
-        global_to_local: Dict[str, ir.Buffer],
-        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
+        global_to_local: dict[str, ir.Buffer],
+        rewrite_index: Callable[[LocalizeBufferHandler, sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
@@ -355,11 +358,11 @@ class LocalBufferContext:
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
-        self.local_buffers: Dict[str, ir.Buffer] = {}
+        self.local_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to global buffer
-        self.global_buffers: Dict[str, ir.Buffer] = {}
+        self.global_buffers: dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
-        self.global_to_local: Dict[str, ir.Buffer] = {}
+        self.global_to_local: dict[str, ir.Buffer] = {}
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -400,7 +403,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[List[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: list[ir.Buffer] | None = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer
@@ -419,7 +422,7 @@ class LocalBufferContext:
         self,
         fn: Callable[..., Any],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+            [LocalizeBufferHandler, sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_function,
     ):
         def inner(*args, **kwargs):
@@ -436,11 +439,11 @@ class LocalBufferContext:
 
     def localize_nodes(
         self,
-        nodes: List[ir.IRNode],
+        nodes: list[ir.IRNode],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+            [LocalizeBufferHandler, sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
-    ) -> List[ir.IRNode]:
+    ) -> list[ir.IRNode]:
         """
         Given `local_buf` and `global_buf` registered in current `LocalBufferContext`
         though the method of `add_local_buffer`, localizes the `global_buf` to `local_buf`
@@ -477,7 +480,7 @@ class LocalBufferContext:
 
 def unify_mask_base_type(
     buffer: IndentedBuffer,
-    vars: Tuple[CSEVariable, ...],
+    vars: tuple[CSEVariable, ...],
     dtype=torch.float,
 ):
     """
@@ -728,11 +731,11 @@ def _get_dtype_from_loopbodies(loop_bodies):
 
 
 def template_fusion_with_epilogues_supported(
-    template: BaseSchedulerNode, epilogues: List[BaseSchedulerNode]
-) -> Tuple[bool, bool]:
+    template: BaseSchedulerNode, epilogues: list[BaseSchedulerNode]
+) -> tuple[bool, bool]:
     def _get_indexes_of_template_buf_read(
-        epilogue_node: ir.Operation, template_buf_names: List[str]
-    ) -> List[sympy.Expr]:
+        epilogue_node: ir.Operation, template_buf_names: list[str]
+    ) -> list[sympy.Expr]:
         return [
             read.index
             for read in epilogue_node.get_reads()
@@ -742,7 +745,7 @@ def template_fusion_with_epilogues_supported(
     def _check_supported_and_same_indexes(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
-    ) -> Tuple[bool, bool]:
+    ) -> tuple[bool, bool]:
         num_indexes = len(set(index_of_template_buf_read))
 
         if num_indexes > 1:
@@ -763,8 +766,8 @@ def template_fusion_with_epilogues_supported(
         return supported, same_index
 
     def _template_fusion_supported(
-        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: List[ir.Operation]
-    ) -> Tuple[bool, bool]:
+        template_outputs: Sequence[SchedulerBuffer], epilogue_nodes: list[ir.Operation]
+    ) -> tuple[bool, bool]:
         template_buf_names = [x.get_name() for x in template_outputs]
         indexes_of_template_buf_reads = [
             _get_indexes_of_template_buf_read(epilogue_node, template_buf_names)

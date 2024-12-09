@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 import os
 from itertools import chain, count, zip_longest
-from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING
 
 import sympy
 
@@ -38,8 +40,8 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self,
         kernel_name: str,
         line_template: str,
-        keys: Tuple[str, ...],
-        additional_files: List[str],
+        keys: tuple[str, ...],
+        additional_files: list[str],
     ):
         super().__init__(line_template)
         assert not isinstance(line_template, DeferredLineBase)
@@ -81,7 +83,7 @@ class DeferredGpuDefaultGrid:
         self,
         kernel_name: str,
         grid,
-        grid_callable: Optional[Callable[..., Any]] = None,
+        grid_callable: Callable[..., Any] | None = None,
         **grid_extra_kwargs,
     ):
         self.kernel_name = kernel_name
@@ -94,7 +96,7 @@ class DeferredGpuDefaultGrid:
         # to generate the autotune code block, and thus we need this iterator
         return iter(self.grid)
 
-    def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
+    def _process_grid(self, grid: list[Any] | tuple[Any, ...]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
         else:
@@ -258,7 +260,7 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         kernel_body: str,
-        metadata: Optional[str] = None,
+        metadata: str | None = None,
         gpu=True,
     ):
         if gpu:
@@ -293,8 +295,8 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_user_defined_triton_kernel(
         self,
         kernel_name: str,
-        raw_args: List[Any],
-        grid: List[Any],
+        raw_args: list[Any],
+        grid: list[Any],
         configs,
         triton_meta,
         constexprs,
@@ -368,7 +370,7 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_load_kernel_once(
         self,
         kernel_name: str,
-        graph: "GraphLowering",  # for per-graph caching
+        graph: GraphLowering,  # for per-graph caching
     ):
         keys = (get_cpp_wrapper_cubin_path_name(), "mangled_name", "shared_mem")
         kernel_var_name = f"kernels.{kernel_name}" if V.graph.aot_mode else kernel_name
@@ -448,9 +450,9 @@ class CppWrapperGpu(CppWrapperCpu):
     def generate_default_grid(
         self,
         kernel_name: str,
-        grid_args: List[Any],
+        grid_args: list[Any],
         gpu: bool = True,
-        grid_callable: Optional[Callable[..., Any]] = default_grid_fn,
+        grid_callable: Callable[..., Any] | None = default_grid_fn,
         **grid_extra_kwargs,
     ):
         """

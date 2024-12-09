@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+from typing import Any, Callable, cast
 from unittest.mock import patch
 
 import torch
@@ -298,9 +300,7 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
-def transpose_w(
-    W: Union[ir.IRNode, torch.Tensor], trans_w: bool
-) -> Union[ir.IRNode, torch.Tensor]:
+def transpose_w(W: ir.IRNode | torch.Tensor, trans_w: bool) -> ir.IRNode | torch.Tensor:
     """
     Transpose W based on the trans_w flag.
     """
@@ -317,8 +317,8 @@ def transpose_w(
 
 
 def expand_bias(
-    B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
-) -> Optional[Union[ir.IRNode, torch.Tensor]]:
+    B: ir.IRNode | torch.Tensor | None, X: ir.IRNode | torch.Tensor
+) -> ir.IRNode | torch.Tensor | None:
     """
     Expand Bias to the same size of X.
     """
@@ -335,7 +335,7 @@ def expand_bias(
     return B
 
 
-def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
+def prune_tensors(input_nodes: list[ir.TensorBox], new_input_nodes: list[ir.TensorBox]):
     """
     Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
     """
@@ -407,12 +407,12 @@ def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.Tens
 def gen_2d_view_of_epilogue_buf(
     Y: ir.Buffer,
     template_buffer: ir.Buffer,
-    epilogue_nodes: List[ir.IRNode],
-    reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-    default_reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+    epilogue_nodes: list[ir.IRNode],
+    reindexers: list[Callable[[list[Any]], list[Any]] | None],
+    default_reindexers: list[Callable[[list[Any]], list[Any]] | None],
 ) -> tuple[
-    Union[ir.Buffer, ir.ReinterpretView],
-    List[Optional[Callable[[List[Any]], List[Any]]]],
+    ir.Buffer | ir.ReinterpretView,
+    list[Callable[[list[Any]], list[Any]] | None],
 ]:
     """
     The dimension and the indexing could be different between the GEMM output, i.e. `template_buffer`, which is
@@ -422,7 +422,7 @@ def gen_2d_view_of_epilogue_buf(
     In this function, we return a 2D buffer (`Y_2d`) according to GEMM output (reinterpreted from `Y` if needed) and
     build a reindexer that converts the indexing of `Y` into `Y_2d`.
     """
-    Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+    Y_2d: ir.Buffer | ir.ReinterpretView = Y
     if (
         Y.get_size() == template_buffer.get_size()
         and Y.get_stride() == template_buffer.get_stride()
@@ -498,7 +498,7 @@ class CppGemmTemplate(CppTemplate):
         beta=1,
         alpha=1,
         has_bias=False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:
@@ -524,7 +524,7 @@ class CppGemmTemplate(CppTemplate):
         self.cache_blocking = self.make_cache_blocking_cache()
 
     def make_thread_blocking_cache(self):
-        cache = lru_cache()(self._thread_blocking)
+        cache = lru_cache(self._thread_blocking)
 
         def thread_blocking(num_threads: int) -> GemmBlocking:
             return cache(num_threads)
@@ -635,7 +635,7 @@ class CppGemmTemplate(CppTemplate):
         return best_blocking
 
     def make_cache_blocking_cache(self):
-        cache = lru_cache()(self._cache_blocking)
+        cache = lru_cache(self._cache_blocking)
 
         def cache_blocking(num_threads: int) -> GemmBlocking:
             return cache(num_threads)
@@ -796,7 +796,7 @@ class CppGemmTemplate(CppTemplate):
         has_bias=False,
         trans_w=False,
         input_indices=None,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -1129,10 +1129,10 @@ class CppGemmTemplate(CppTemplate):
     def get_options(
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-    ) -> Dict[str, Any]:
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+    ) -> dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
         int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
@@ -1167,11 +1167,11 @@ class CppGemmTemplate(CppTemplate):
         template_buffer = Y
         gemm_output_buffer = template_buffer
 
-        epilogues: List[ir.IRNode] = []
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
-        epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
-        fake_buffers: List[ir.Buffer] = []
-        Y_aliases: Set[str] = set()
+        epilogues: list[ir.IRNode] = []
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] = []
+        epilogue_creators: list[Callable[[ir.Buffer], ir.Pointwise]] = []
+        fake_buffers: list[ir.Buffer] = []
+        Y_aliases: set[str] = set()
 
         use_local_acc = (
             self.layout.dtype != torch.float
@@ -1276,7 +1276,7 @@ class CppGemmTemplate(CppTemplate):
                         name=buffer_name, layout=template_buffer.layout
                     )
 
-        Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+        Y_2d: ir.Buffer | ir.ReinterpretView = Y
 
         if epilogue_nodes:
             if not template_buffer_has_other_users:
@@ -1360,9 +1360,9 @@ class CppGemmTemplate(CppTemplate):
     def render(  # type: ignore[override, return]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         options = self.get_options(

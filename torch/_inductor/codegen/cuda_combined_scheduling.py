@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Sequence, Union
+from __future__ import annotations
+
+from collections.abc import Sequence
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -76,7 +78,7 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes
             )
 
-    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
+    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode):
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self):

@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
 
 import sympy
 
@@ -23,7 +25,7 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -77,12 +79,12 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
 
 
 def signature_to_meta(
-    signature: List[KernelArgType],
+    signature: list[KernelArgType],
     *,
-    size_dtype: Optional[str],
-    argdefs: List[str],
-    indices: Optional[List[int]] = None,
-) -> Dict[str, str]:
+    size_dtype: str | None,
+    argdefs: list[str],
+    indices: list[int] | None = None,
+) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
     return {
@@ -119,9 +121,9 @@ def is_unaligned_buffer(arg: TensorArg):
 
 
 def config_of(
-    args: List[KernelArgType],
+    args: list[KernelArgType],
     *,
-    indices: Optional[List[int]] = None,
+    indices: list[int] | None = None,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))

@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import dataclasses
 import sys
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable
 
 import sympy
 
@@ -181,12 +183,12 @@ class CppMicroGemmConfig:
     input2_dtype: torch.dtype
     output_dtype: torch.dtype
     compute_dtype: torch.dtype
-    vec_isa_cls: Type[VecISA]
+    vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
-    extra_check: Optional[Callable[..., bool]] = None
+    extra_check: Callable[..., bool] | None = None
 
 
-micro_gemm_configs: Dict[Type[CppMicroGemm], List[CppMicroGemmConfig]] = {}
+micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
 
 
 def register_micro_gemm(*configs):
@@ -851,7 +853,7 @@ def create_micro_gemm(
     alpha=1,
     num_threads=-1,
     use_ref=True,
-) -> Optional[CppMicroGemm]:
+) -> CppMicroGemm | None:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
             name,
