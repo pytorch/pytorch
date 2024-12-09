@@ -11,6 +11,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from .. import config
@@ -167,7 +168,7 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
     pw_subgraph = PointwiseSubgraphLowering(
         subgraph.graph_module,
         root_graph_lowering=V.graph,
-        allowed_mutations=(torch.ops.flex_lib.zeros_and_scatter.default,),
+        allowed_mutations=OrderedSet([torch.ops.flex_lib.zeros_and_scatter.default]),
         additional_lowerings={
             torch.ops.flex_lib.zeros_and_scatter.default: zeros_and_scatter_lowering
         },
