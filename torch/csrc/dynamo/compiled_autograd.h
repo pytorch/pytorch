@@ -902,6 +902,27 @@ class SwapSavedVariables {
 template <class T>
 struct dependent_false : std::false_type {};
 
+// NOTE: [Compiled Autograd and backward functions]
+// Built-in autograd nodes have functional apply variants
+// (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
+// capture wants to take a variant of this function and proxy it into the graph.
+// Every autograd node defines an apply_with_saved function, that when invoked,
+// proxys a call to a function into the Compiled Autograd graph.
+//
+// Some requirements that we have are:
+// - The proxy'ed function must have inputs that are FX-graphable types.
+// - Windows has a DLL symbol limit of 65536.
+// - Node::apply_with_saved is in libtorch_cpu which does not have direct access
+// to Python
+//
+// There were multiple ways to skin the cat, but what we end up doing is:
+// - for e.g. MulBackward0_apply_functional, we create a new C++ function
+// MulBackward0_apply_functional_ivalue that accepts IValues.
+// - We define how to pack and unpack arbitrary C++ types into IValues.
+// - apply_with_saved passes MulBackward0_apply_functional_ivalue and
+// the IValue arguments to Python via an indirection.
+// In Python, these get proxy'ed into a graph.
+
 // Helper struct for packing/unpacking an arbitrary C++ type into a single
 // IValue. There are various full and partial specializations for IValuePacker
 // to handle packing specific types (like TensorOptions) into an IValue.
@@ -946,7 +967,12 @@ struct IValuePacker {
     } else if constexpr (std::is_same_v<T, at::ScalarType>) {
       return at::ScalarTypeType::get();
     } else {
-      // TODO(rzou): add comment here
+      // If you got here, you have probably added a member of a new type
+      // to a built-in C++ autograd node.
+      // To get this new type to work with Compiled Autograd, please
+      // either change it to be an IValue-constructible type, or
+      // define how to pack and unpack an object of this time into an IValue.
+      // See NOTE: [Compiled Autograd and backward functions] for context.
       static_assert(dependent_false<T>::value);
     }
   }

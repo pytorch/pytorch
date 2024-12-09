@@ -104,7 +104,7 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
-static variable_list ${op}_apply_functional_boxed(const variable_list& grads, const ivalue_list& stack)
+static variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& stack)
 {
   auto state = SavedState(stack);
   auto needs_input_grad = state.unpack<std::array<bool, ${num_vars}>>();
@@ -132,7 +132,7 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
     variable_list result = interface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
-        ${op}_apply_functional_boxed,
+        ${op}_apply_functional_ivalue,
         grads,
         state,
         num_outputs(),
@@ -980,7 +980,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     masks = []
 
     need_any_grad_defined_var = False
-    for idx, derivative in enumerate(info.derivatives):
+    for derivative in enumerate(info.derivatives):
         checks_any_grad_defined, derivative_text = emit_derivative(
             derivative, info.args_with_derivatives
         )
