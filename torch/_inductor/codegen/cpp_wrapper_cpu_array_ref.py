@@ -353,7 +353,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:

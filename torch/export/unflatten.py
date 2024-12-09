@@ -1330,7 +1330,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         "",
         {
             entry.fqn: entry.signature
-            for entry in root_module.module_call_graph  # type: ignore[union-attr]
+            for entry in root_module.module_call_graph
             if entry.signature
         },
         module=root_module,
@@ -1497,7 +1497,7 @@ def _deduplicate_modules(partitions):
                         seen_target = _compute_accessor(
                             entry.parent_fqn, seen_child_fqn
                         )
-                        entry.parent_call_module.target = seen_target  # type: ignore[union-attr]
+                        entry.parent_call_module.target = seen_target
                         redirected_call_indices[child_fqn] = seen_child_fqn
                         break
                     elif not deduplicated:
