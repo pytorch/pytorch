@@ -1,4 +1,7 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
@@ -11,7 +14,11 @@ from .replace_with_hop_pass_util import (
 )
 
 
-def _is_set_grad_enabled_node(node: torch.fx.Node):
+if TYPE_CHECKING:
+    from torch.export.graph_signature import ExportGraphSignature
+
+
+def _is_set_grad_enabled_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     return (
         node
         and node.op == "call_function"
@@ -19,7 +26,9 @@ def _is_set_grad_enabled_node(node: torch.fx.Node):
     )
 
 
-def _is_set_grad_enabled_sub_mod(node: torch.fx.Node, omit_if_same_with_ambient=False):
+def _is_set_grad_enabled_sub_mod(
+    node: torch.fx.Node, omit_if_same_with_ambient: bool = False
+) -> Union[bool, torch.Tensor]:
     if node.op == "call_module":
         assert isinstance(node.target, str)
         subgm = getattr(node.graph.owning_module, node.target)
@@ -39,9 +48,10 @@ def _is_set_grad_enabled_sub_mod(node: torch.fx.Node, omit_if_same_with_ambient=
     return False
 
 
-def _replace_with_hop(node: torch.fx.Node):
+def _replace_with_hop(node: torch.fx.Node) -> None:
     assert node.op == "call_module"
     graph: torch.fx.Graph = node.graph
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
     assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
@@ -50,15 +60,14 @@ def _replace_with_hop(node: torch.fx.Node):
     if len(set_grad_nodes) > 0:
         assert len(set_grad_nodes) == 1
         set_grad_node = set_grad_nodes[0]
-        _replace_with_hop_helper(
-            node, set_grad_node, _is_set_grad_enabled_node, wrap_with_set_grad_enabled
-        )
+        _replace_with_hop_helper(node, set_grad_node, wrap_with_set_grad_enabled)
         sub_graph.erase_node(set_grad_node)
 
 
-def _remove_set_grad_and_inline(node: torch.fx.Node):
+def _remove_set_grad_and_inline(node: torch.fx.Node) -> None:
     assert node.op == "call_module"
     graph: torch.fx.Graph = node.graph
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
     assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
@@ -71,8 +80,8 @@ def _remove_set_grad_and_inline(node: torch.fx.Node):
 
 
 def _sequential_split_and_maybe_inline_subgraphs(
-    gm: torch.fx.GraphModule, graph_signature
-):
+    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
+) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Helper function for replace_set_grad_with_hop_pass().
     Split the graph module into multiple subgraphs based on the set_grad_enabled nodes.
@@ -98,7 +107,9 @@ def _sequential_split_and_maybe_inline_subgraphs(
     )
 
 
-def replace_set_grad_with_hop_pass(gm: torch.fx.GraphModule, graph_signature):
+def replace_set_grad_with_hop_pass(
+    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
+) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.
