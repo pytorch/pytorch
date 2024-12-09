@@ -92,12 +92,11 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            if device == "cpu":
-                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-            elif device == "xpu":
-                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
-            else:
-                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+            return (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+                if device == "cpu"
+                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
+            )
 
     @staticmethod
     def load(device, so_path):

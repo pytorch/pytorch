@@ -13,9 +13,8 @@ AOTIModelContainerRunnerCpu::AOTIModelContainerRunnerCpu(
 AOTIModelContainerRunnerCpu::~AOTIModelContainerRunnerCpu() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
-    const std::vector<at::Tensor>& inputs,
-    void* stream_handle) {
-  return AOTIModelContainerRunner::run(inputs, stream_handle);
+    const std::vector<at::Tensor>& inputs) {
+  return AOTIModelContainerRunner::run(inputs);
 }
 
 namespace {
