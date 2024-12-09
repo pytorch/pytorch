@@ -4753,9 +4753,9 @@ class TestLinalg(TestCase):
                 self.assertTrue(os.path.exists(result_filename))
 
             # Check the full results files was written, one per gpu
-            # for i in range(total_gpus):
-            #     result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-            #     self.assertTrue(os.path.exists(result_full_filename))
+            for i in range(total_gpus):
+                result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
+                self.assertTrue(os.path.exists(result_full_filename))
 
         finally:
             # disables TunableOp

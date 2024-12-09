@@ -20,7 +20,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer, Kernel
+from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
@@ -66,6 +66,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: Dict[str, Kernel] = {}
+        self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
     def create(
@@ -256,11 +257,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_symbol_assignment(
         self,
-        code: IndentedBuffer,
         name: str,
         value: ir.TensorBox,
         bound_vars: Set[sympy.Symbol],
     ):
+        code = self.prefix
+
         @functools.lru_cache(None)
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
@@ -521,7 +523,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
@@ -538,10 +540,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"auto {name}_size = {name}.sizes();")
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"auto {name}_stride = {name}.strides();")
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -570,7 +572,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         for kernel in sorted(declare_kernel):
             self.prefix.writeline(
-                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
+                maybe_hipify_code_wrapper(
+                    f"    {self.device_codegen.cpp_kernel_type()} {kernel}{{nullptr}};"
+                )
             )
         for name, kernel in self.initialized_kernels.items():
             assert hasattr(
