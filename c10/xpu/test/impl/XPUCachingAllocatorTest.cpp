@@ -2,6 +2,7 @@
 
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUException.h>
 
 bool has_xpu() {
   return c10::xpu::device_count() > 0;
@@ -81,13 +82,13 @@ TEST(XPUCachingAllocatorTest, AllocateMemory) {
 TEST(XPUCachingAllocatorTest, DeviceCachingAllocateByExternalStream) {
   c10::xpu::XPUCachingAllocator::emptyCache();
   auto* allocator = c10::xpu::XPUCachingAllocator::get();
+  sycl::queue* ext_queue = new sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
+      {sycl::property::queue::in_order()});
   // 500M memory is reserved, can be reused later.
   {
-    sycl::queue* ext_queue = new (sycl::queue(
-        c10::xpu::get_device_context(),
-        c10::xpu::get_raw_device(0),
-        c10::xpu::asyncHandler,
-        {sycl::property::queue::in_order()}));
     c10::xpu::XPUStream ext_stream =
         c10::xpu::getStreamFromExternal(ext_queue, 0);
     c10::xpu::setCurrentXPUStream(ext_stream);
