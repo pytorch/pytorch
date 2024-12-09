@@ -1961,6 +1961,17 @@ inline T IValue::to() && {
   return generic_to(std::move(*this), _fake_type<T>{});
 }
 
+
+template <>
+inline std::vector<c10::SymInt> IValue::to<std::vector<c10::SymInt>>() && {
+  return toSymIntVector();
+}
+
+template <>
+inline List<c10::SymInt> IValue::to<List<c10::SymInt>>() && {
+  return toSymIntList();
+}
+
 template <>
 inline std::optional<c10::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
@@ -1989,6 +2000,16 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::SymInt> IValue::toSymIntList() const& {
+  AT_ASSERT(
+      isSymIntList() || isIntList(),
+      "Expected SymIntList or IntList but got ",
+      tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toSymIntVector on null intrusive_ptr IValue");
+  return c10::List<c10::SymInt>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
   AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());

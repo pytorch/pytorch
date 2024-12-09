@@ -249,8 +249,19 @@ struct CppNode : public Node {
     // saved.after(output_info_);
     // return results;
 
-    // TODO(rzou): following is problematic
     auto stack = retrieve_saved(saved);
+
+    std::vector<at::TypePtr> schema;
+    schema.reserve(stack.size());
+    for (const auto& ivalue : stack) {
+      if (ivalue.isTensor()) {
+        // special case: ivalue.type() for an undefined tensor doesn't work.
+        schema.emplace_back(at::TensorType::get());
+      } else {
+        schema.emplace_back(ivalue.type());
+      }
+    }
+
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
     variable_list results = interface->call_function(
         saved.get_py_compiler(),
@@ -259,7 +270,8 @@ struct CppNode : public Node {
         inputs,
         stack,
         num_outputs(),
-        name());
+        name(),
+        schema);
     return results;
   }
 

@@ -66,18 +66,20 @@ static variable_list call_function(
     const variable_list& inputs,
     const ivalue_list& saved_state,
     int64_t num_outputs,
-    const std::string& debug) {
-  // Need this to do PyObject* -> IValue conversion
-  std::vector<at::TypePtr> schema;
-  schema.reserve(saved_state.size());
-  for (const auto& ivalue : saved_state) {
-    if (ivalue.isTensor()) {
-      // special case: ivalue.type() for an undefined tensor doesn't work.
-      schema.emplace_back(at::TensorType::get());
-    } else {
-      schema.emplace_back(ivalue.type());
-    }
-  }
+    const std::string& debug,
+    const std::vector<TypePtr>& schema) {
+  TORCH_INTERNAL_ASSERT(schema.size() == saved_state.size());
+  // // Need this to do PyObject* -> IValue conversion
+  // std::vector<at::TypePtr> schema;
+  // schema.reserve(saved_state.size());
+  // for (const auto& ivalue : saved_state) {
+  //   if (ivalue.isTensor()) {
+  //     // special case: ivalue.type() for an undefined tensor doesn't work.
+  //     schema.emplace_back(at::TensorType::get());
+  //   } else {
+  //     schema.emplace_back(ivalue.type());
+  //   }
+  // }
 
   // We are going to bind the following function to Python
   auto py_func = py::cpp_function(
@@ -141,9 +143,17 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const variable_list& inputs,
       const ivalue_list& saved_state,
       int64_t num_outputs,
-      const std::string& debug) override {
+      const std::string& debug,
+      const std::vector<at::TypePtr>& saved_state_schema) override {
     return torch::dynamo::autograd::call_function(
-        py_compiler, name, fn, inputs, saved_state, num_outputs, debug);
+        py_compiler,
+        name,
+        fn,
+        inputs,
+        saved_state,
+        num_outputs,
+        debug,
+        saved_state_schema);
   }
   variable_list call_copy_slices_prologue(
       PyObject* py_compiler,
@@ -151,7 +161,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const at::TensorGeometry& base,
       const at::TensorGeometry& view) override {
     py::handle handle(py_compiler);
-    py::object stuff = handle.attr("call_copy_slices_prologue")(inputs, base, view);
+    py::object stuff =
+        handle.attr("call_copy_slices_prologue")(inputs, base, view);
     return py::cast<std::vector<at::Tensor>>(stuff);
   }
   virtual variable_list call_copy_slices_epilogue(
@@ -161,7 +172,8 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
       const variable_list& res,
       const at::Tensor& grad_slice) override {
     py::handle handle(py_compiler);
-    py::object stuff = handle.attr("call_copy_slices_epilogue")(needs_input_grad, result, res, grad_slice);
+    py::object stuff = handle.attr("call_copy_slices_epilogue")(
+        needs_input_grad, result, res, grad_slice);
     return py::cast<std::vector<at::Tensor>>(stuff);
   }
 };
@@ -929,7 +941,9 @@ CacheNode* _compiled_autograd_impl(
           outputs,
           input_metadata_state,
           outputs.size(),
-          "validate_outputs");
+          "validate_outputs",
+          {IValuePacker<
+              std::vector<c10::optional<InputMetadata>>>::packed_type()});
 
       saved.after(call.node->next_edges());
       saved.debug_asserts();

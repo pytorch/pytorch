@@ -899,127 +899,391 @@ class SwapSavedVariables {
   StashedVars<at::IValue> stashed_ivalues;
 };
 
+template <class T>
+struct dependent_false : std::false_type {};
+
+template <typename T>
+struct IValuePacker {
+  static at::TypePtr packed_type() {
+    if constexpr (std::is_same_v<T, at::Tensor>) {
+      return at::TensorType::get();
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      return at::IntType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
+      return at::SymIntType::get();
+    } else if constexpr (std::is_same_v<T, bool>) {
+      return at::BoolType::get();
+    } else if constexpr (std::is_same_v<T, double>) {
+      return at::FloatType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymFloat>) {
+      return at::SymFloatType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymBool>) {
+      return at::SymBoolType::get();
+    } else if constexpr (std::is_same_v<T, c10::Layout>) {
+      return at::LayoutType::get();
+    } else if constexpr (std::is_same_v<T, std::string>) {
+      return at::StringType::get();
+    } else if constexpr (std::is_same_v<T, at::Device>) {
+      return at::DeviceObjType::get();
+    } else if constexpr (std::is_same_v<T, at::Scalar>) {
+      return at::NumberType::get();
+    } else if constexpr (std::is_same_v<T, at::MemoryFormat>) {
+      return at::MemoryFormatType::get();
+    } else if constexpr (std::is_same_v<T, at::ScalarType>) {
+      return at::ScalarTypeType::get();
+    } else {
+      static_assert(dependent_false<T>::value);
+    }
+  }
+  static at::IValue pack(const T& t) {
+    return t;
+  }
+  static T unpack(const at::IValue& t) {
+    return t.to<T>();
+  }
+};
+
+template <>
+struct IValuePacker<uint64_t> {
+  static at::TypePtr packed_type() {
+    return at::IntType::get();
+  }
+  static at::IValue pack(const uint64_t& t) {
+    return static_cast<int64_t>(t);
+  }
+  static uint64_t unpack(const at::IValue& t) {
+    return static_cast<uint64_t>(t.toInt());
+  }
+};
+
+template <>
+struct IValuePacker<std::vector<at::SymInt>> {
+  static at::TypePtr packed_type() {
+    return at::ListType::create(at::SymIntType::get());
+  }
+  static at::IValue pack(const std::vector<at::SymInt>& t) {
+    return t;
+  }
+  static std::vector<at::SymInt> unpack(const at::IValue& t) {
+    return t.toSymIntVector();
+  }
+};
+
+template <>
+struct IValuePacker<VariableInfo> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create({
+        at::LayoutType::get(),
+        at::DeviceObjType::get(),
+        at::ScalarTypeType::get(),
+        at::ListType::create(at::SymIntType::get()),
+        at::BoolType::get(),
+        at::BoolType::get(),
+    });
+  }
+  static at::IValue pack(const VariableInfo& t) {
+    auto tuple = std::make_tuple(
+        t.layout, t.device, t.scalar_type, t.size, t.requires_grad, t.is_empty);
+    return tuple;
+  }
+  static VariableInfo unpack(const at::IValue& t) {
+    auto tuple = t.to<std::tuple<
+        at::Layout,
+        at::Device,
+        at::ScalarType,
+        std::vector<at::SymInt>,
+        bool,
+        bool>>();
+    VariableInfo v;
+    v.layout = std::get<0>(tuple);
+    v.device = std::get<1>(tuple);
+    v.scalar_type = std::get<2>(tuple);
+    v.size = std::get<3>(tuple);
+    v.requires_grad = std::get<4>(tuple);
+    v.is_empty = std::get<5>(tuple);
+    return v;
+  }
+};
+
+template <>
+struct IValuePacker<caffe2::TypeMeta> {
+  static at::TypePtr packed_type() {
+    return at::ScalarTypeType::get();
+  }
+  static at::IValue pack(const caffe2::TypeMeta& t) {
+    return at::typeMetaToScalarType(t);
+  }
+  static caffe2::TypeMeta unpack(const at::IValue& t) {
+    return caffe2::TypeMeta::fromScalarType(t.to<at::ScalarType>());
+  }
+};
+
+inline std::optional<at::ScalarType> optTypeMetaToScalarType(
+    const std::optional<caffe2::TypeMeta>& t) {
+  if (t.has_value()) {
+    return at::typeMetaToScalarType(t.value());
+  } else {
+    return std::nullopt;
+  }
+}
+
+using packed_tensoroptions_t = std::tuple<
+    std::optional<bool>,
+    std::optional<at::MemoryFormat>,
+    std::optional<at::Device>,
+    std::optional<at::ScalarType>,
+    std::optional<at::Layout>,
+    std::optional<bool>>;
+
+inline packed_tensoroptions_t pack_TensorOptions(const at::TensorOptions& t) {
+  auto tuple = std::make_tuple(
+      t.requires_grad_opt(),
+      t.memory_format_opt(),
+      t.device_opt(),
+      optTypeMetaToScalarType(t.dtype_opt()),
+      t.layout_opt(),
+      t.pinned_memory_opt());
+  return tuple;
+}
+inline at::TensorOptions unpack_TensorOptions(
+    const packed_tensoroptions_t& tuple) {
+  at::TensorOptions result;
+  if (std::get<0>(tuple).has_value()) {
+    result = result.requires_grad(std::get<0>(tuple).value());
+  }
+  if (std::get<1>(tuple).has_value()) {
+    result = result.memory_format(std::get<1>(tuple).value());
+  }
+  if (std::get<2>(tuple).has_value()) {
+    result = result.device(std::get<2>(tuple).value());
+  }
+  if (std::get<3>(tuple).has_value()) {
+    result = result.dtype(
+        caffe2::TypeMeta::fromScalarType(std::get<3>(tuple).value()));
+  }
+  if (std::get<4>(tuple).has_value()) {
+    result = result.layout(std::get<4>(tuple).value());
+  }
+  if (std::get<5>(tuple).has_value()) {
+    result = result.pinned_memory(std::get<5>(tuple).value());
+  }
+  return result;
+}
+
+template <>
+struct IValuePacker<at::TensorOptions> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {at::OptionalType::create(at::BoolType::get()),
+         at::OptionalType::create(at::MemoryFormatType::get()),
+         at::OptionalType::create(at::DeviceObjType::get()),
+         at::OptionalType::create(at::ScalarTypeType::get()),
+         at::OptionalType::create(at::LayoutType::get()),
+         at::OptionalType::create(at::BoolType::get())});
+  }
+  static at::IValue pack(const at::TensorOptions& t) {
+    return pack_TensorOptions(t);
+  }
+  static at::TensorOptions unpack(const at::IValue& t) {
+    auto tuple = t.to<packed_tensoroptions_t>();
+    return unpack_TensorOptions(tuple);
+  }
+};
+
+template <>
+struct IValuePacker<TypeAndSize> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         IValuePacker<at::TensorOptions>::packed_type()});
+  }
+  static at::IValue pack(const TypeAndSize& t) {
+    auto tuple = std::make_tuple(t.sym_sizes, pack_TensorOptions(t.options));
+    return tuple;
+  }
+  static TypeAndSize unpack(const at::IValue& t) {
+    auto tuple =
+        t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
+    TypeAndSize result;
+    result.sym_sizes = std::get<0>(tuple);
+    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    return result;
+  }
+};
+
+template <typename T>
+struct IValuePacker<std::optional<T>> {
+  static at::TypePtr packed_type() {
+    return at::OptionalType::create(IValuePacker<T>::packed_type());
+  }
+  static at::IValue pack(const std::optional<T>& t) {
+    if (t.has_value()) {
+      return IValuePacker<T>::pack(t.value());
+    } else {
+      return std::nullopt;
+    }
+  }
+  static std::optional<T> unpack(const at::IValue& t) {
+    if (t.isNone()) {
+      return std::nullopt;
+    } else {
+      return IValuePacker<T>::unpack(t);
+    }
+  }
+};
+
+template <typename T>
+struct IValuePacker<std::vector<T>> {
+  static at::TypePtr packed_type() {
+    return at::ListType::create(IValuePacker<T>::packed_type());
+  }
+  static at::IValue pack(const std::vector<T>& t) {
+    if constexpr (std::is_constructible_v<at::IValue, T>) {
+      return t;
+    }
+    if (t.empty()) {
+      auto lst = c10::impl::GenericList(at::AnyType::get());
+      return lst;
+    }
+    auto type_ptr = IValuePacker<T>::pack(t[0]).type();
+    auto lst = c10::impl::GenericList(type_ptr);
+    for (const auto& elt : t) {
+      lst.emplace_back(IValuePacker<T>::pack(elt));
+    }
+    return lst;
+  }
+  static std::vector<T> unpack(const at::IValue& t) {
+    if constexpr (std::is_constructible_v<at::IValue, T>) {
+      return t.to<std::vector<T>>();
+    }
+    std::vector<T> result;
+    auto lst = t.toList();
+    for (const at::IValue& elt : lst) {
+      result.emplace_back(IValuePacker<T>::unpack(elt));
+    }
+    return result;
+  }
+};
+
+template <typename T>
+struct IValuePacker<c10::List<T>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::vector<T>>::packed_type();
+  }
+  static at::IValue pack(const c10::List<T>& t) {
+    return IValuePacker<std::vector<T>>::pack(t.vec());
+  }
+  static c10::List<T> unpack(const at::IValue& t) {
+    return c10::List<T>(IValuePacker<std::vector<T>>::unpack(t));
+  }
+};
+
+template <>
+struct IValuePacker<at::TensorGeometry> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         at::SymIntType::get()});
+  }
+  static at::IValue pack(const at::TensorGeometry& t) {
+    auto tuple = std::make_tuple(
+        t.sym_sizes().vec(), t.sym_strides().vec(), t.sym_storage_offset());
+    return tuple;
+  }
+  static at::TensorGeometry unpack(const at::IValue& t) {
+    auto tuple = t.to<std::tuple<
+        std::vector<at::SymInt>,
+        std::vector<at::SymInt>,
+        at::SymInt>>();
+    return at::TensorGeometry(
+        std::get<0>(tuple), std::get<1>(tuple), std::get<2>(tuple));
+  }
+};
+
+template <>
+struct IValuePacker<InputMetadata> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<at::TensorOptions>::packed_type(),
+         IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         at::BoolType::get()});
+  }
+  static at::IValue pack(const InputMetadata& t) {
+    TORCH_INTERNAL_ASSERT(!t.is_nested_tensor());
+    auto tuple = std::make_tuple(
+        pack_TensorOptions(t.options()),
+        t.shape_as_dim_vector().vec(),
+        t.is_tensor_subclass());
+    return tuple;
+  }
+  static InputMetadata unpack(const at::IValue& t) {
+    auto tuple = t.to<
+        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+
+    return InputMetadata(
+        unpack_TensorOptions(std::get<0>(tuple)),
+        SymIntSmallVec(std::get<1>(tuple)),
+        std::get<2>(tuple),
+        false);
+  }
+};
+
+template <typename T>
+struct IValuePacker<at::OptionalArray<T>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::optional<std::vector<T>>>::packed_type();
+  }
+  static at::IValue pack(const at::OptionalArray<T>& t) {
+    return IValuePacker<std::optional<std::vector<T>>>::pack(t.list);
+  }
+  static at::OptionalArray<T> unpack(const at::IValue& t) {
+    auto result = IValuePacker<std::optional<std::vector<T>>>::unpack(t);
+    if (result.has_value()) {
+      return {result.value()};
+    } else {
+      return {};
+    }
+  }
+};
+
+template <>
+struct IValuePacker<ska::flat_hash_map<std::string, at::IValue>> {
+  static at::TypePtr packed_type() {
+    return at::DictType::create(at::StringType::get(), at::AnyType::get());
+  }
+  static at::IValue pack(const ska::flat_hash_map<std::string, at::IValue>& t) {
+    auto result =
+        c10::impl::GenericDict(at::StringType::get(), at::AnyType::get());
+    for (const auto& [key, value] : t) {
+      result.insert(key, value);
+    }
+    return result;
+  }
+  static ska::flat_hash_map<std::string, at::IValue> unpack(
+      const at::IValue& t) {
+    auto dct = t.toGenericDict();
+    auto result = ska::flat_hash_map<std::string, at::IValue>();
+    for (const auto& entry : dct) {
+      result.insert({entry.key().to<std::string>(), entry.value()});
+    }
+    return result;
+  }
+};
+
 struct SavedState {
   std::vector<at::IValue> stack;
   int64_t idx = 0;
 
-  // template <class ivalue_t>
-  // void enqueue(const ivalue_t& t) {
-  //   stack.emplace_back(t);
-  // }
-  // template <class ivalue_t>
-  // void dequeue(ivalue_t& value) {
-  //   value = stack[idx++].to<ivalue_t>();
-  // }
-
-  // void enqueue(
-  //     const SavedVariable& sv,
-  //     const std::shared_ptr<Node>& saved_for) {
-  //   stack.emplace_back(sv.unpack(saved_for));
-  // }
-  // void dequeue(SavedVariable& sv) {
-  //   sv = SavedVariable(stack[idx++].toTensor(), /*is_output*/ true);
-  // }
-
-  // void enqueue(
-  //     const std::vector<SavedVariable>& sv,
-  //     const std::shared_ptr<Node>& saved_for) {
-  //   std::vector<at::Tensor> lst;
-  //   for (const auto& v : sv) {
-  //     lst.emplace_back(v.unpack(saved_for));
-  //   }
-  //   enqueue(lst);
-  // }
-  // void dequeue(std::vector<SavedVariable>& sv) {
-  //   std::vector<at::Tensor> lst;
-  //   dequeue(lst);
-  //   sv.clear();
-  //   for (const at::Tensor& v : lst) {
-  //     sv.emplace_back(v, /*is_output*/true);
-  //   }
-  // }
-
-  /*
-  void enqueue(const PyObject*& t) {
-    enqueue_ivalue(t);
+  template <typename T>
+  void enqueue(const T& t) {
+    enqueue_ivalue(IValuePacker<T>::pack(t));
   }
-  void dequeue(PyObject*& t) {
-    dequeue_ivalue(t);
-  }
-  */
-
-  void enqueue(const VariableInfo& t) {
-    enqueue(t.layout);
-    enqueue(t.device);
-    enqueue(t.scalar_type);
-    enqueue(t.size);
-    enqueue(t.requires_grad);
-    enqueue(t.is_empty);
-  }
-  void dequeue(VariableInfo& t) {
-    dequeue(t.layout);
-    dequeue(t.device);
-    dequeue(t.scalar_type);
-    dequeue(t.size);
-    dequeue(t.requires_grad);
-    dequeue(t.is_empty);
+  template <typename T>
+  void dequeue(T& t) {
+    t = IValuePacker<T>::unpack(stack[idx++]);
   }
 
-  void enqueue(size_t t) {
-    enqueue(static_cast<int64_t>(t));
-  }
-  void dequeue(size_t& t) {
-    int64_t tmp = 0;
-    dequeue(tmp);
-    t = static_cast<size_t>(tmp);
-  }
-
-  void enqueue(const c10::List<at::optional<at::Tensor>> t) {
-    enqueue_ivalue<c10::List<at::optional<at::Tensor>>>(t);
-  }
-  void dequeue(c10::List<at::optional<at::Tensor>>& t) {
-    t = stack[idx++].toOptionalTensorList();
-  }
-
-  void enqueue(const TypeAndSize& value) {
-    enqueue(value.sym_sizes);
-    enqueue(value.options);
-  }
-  void dequeue(TypeAndSize& value) {
-    dequeue(value.sym_sizes);
-    dequeue(value.options);
-  }
-
-  void enqueue(const InputMetadata& value) {
-    enqueue(value.options());
-    // std::cout << "enqueue: " << value.shape_as_dim_vector() << std::endl;
-    enqueue(value.shape_as_dim_vector().vec());
-    enqueue(value.is_tensor_subclass());
-    TORCH_INTERNAL_ASSERT(!value.is_nested_tensor());
-  }
-  // Special case: InputMetadata has no copy ctor
-  // TODO(rzou): ??
-  void dequeue(InputMetadata& value) {
-    at::TensorOptions options;
-    dequeue(options);
-    std::vector<at::SymInt> shape;
-    dequeue(shape);
-    // std::cout << "dequeue: " << shape << std::endl;
-    bool is_tensor_subclass = false;
-    dequeue(is_tensor_subclass);
-    SymIntSmallVec sym_shape;
-    for (const auto& s : shape) {
-      sym_shape.emplace_back(s);
-    }
-    value = InputMetadata(options, sym_shape, is_tensor_subclass, false);
-  }
-
-  void enqueue(const at::IValue& iv) {
-    stack.emplace_back(iv);
-  }
-  void dequeue(at::IValue& iv) {
-    iv = stack[idx++];
-  }
   void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
     std::vector<std::string> keys;
     std::vector<at::IValue> values;
@@ -1045,224 +1309,6 @@ struct SavedState {
       dct.insert({keys[i], values[i]});
     }
   }
-  // void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
-  //   auto result = c10::impl::GenericDict(at::StringType::get(), at::AnyType::get());
-  //   for (const auto& [key, value] : dct) {
-  //     result.insert(key, value);
-  //   }
-  //   enqueue_ivalue(result);
-  // }
-  // void dequeue(ska::flat_hash_map<std::string, at::IValue>& dct) {
-  //   auto saved = stack[idx++].toGenericDict();
-  //   dct.clear();
-
-  //   for (const auto& entry : saved) {
-  //     dct.insert({entry.key().to<std::string>(), entry.value()});
-  //   }
-  // }
-
-  void enqueue(const at::TensorOptions& value) {
-    enqueue(value.requires_grad_opt());
-    enqueue(value.memory_format_opt());
-    enqueue(value.device_opt());
-    enqueue(value.dtype_opt());
-    enqueue(value.layout_opt());
-    enqueue(value.pinned_memory_opt());
-  }
-  void dequeue(at::TensorOptions& value) {
-    auto result = at::TensorOptions();
-    c10::optional<bool> requires_grad_opt;
-    dequeue(requires_grad_opt);
-    if (requires_grad_opt) {
-      result = result.requires_grad(*requires_grad_opt);
-    }
-    c10::optional<c10::MemoryFormat> memory_format_opt;
-    dequeue(memory_format_opt);
-    if (memory_format_opt) {
-      result = result.memory_format(*memory_format_opt);
-    }
-    c10::optional<c10::Device> device_opt;
-    dequeue(device_opt);
-    if (device_opt) {
-      result = result.device(*device_opt);
-    }
-    c10::optional<caffe2::TypeMeta> dtype_opt;
-    dequeue(dtype_opt);
-    if (dtype_opt) {
-      result = result.dtype(*dtype_opt);
-    }
-    c10::optional<c10::Layout> layout_opt;
-    dequeue(layout_opt);
-    if (layout_opt) {
-      result = result.layout(*layout_opt);
-    }
-    c10::optional<bool> pinned_memory_opt;
-    dequeue(pinned_memory_opt);
-    if (pinned_memory_opt) {
-      result = result.pinned_memory(*pinned_memory_opt);
-    }
-    value = result;
-  }
-
-  void enqueue(const caffe2::TypeMeta& value) {
-    enqueue(at::typeMetaToScalarType(value));
-  }
-  void dequeue(caffe2::TypeMeta& value) {
-    at::ScalarType result = at::kFloat;
-    dequeue(result);
-    value = caffe2::TypeMeta::fromScalarType(result);
-  }
-
-  template <typename T>
-  void enqueue(const c10::OptionalArray<T>& t) {
-    enqueue(t.list);
-  }
-  template <typename T>
-  void dequeue(c10::OptionalArray<T>& t) {
-    dequeue(t.list);
-  }
-  void enqueue(const std::optional<caffe2::TypeMeta>& t) {
-    std::optional<at::ScalarType> new_t;
-    if (t.has_value()) {
-      new_t = at::typeMetaToScalarType(t.value());
-      enqueue_ivalue(new_t);
-    } else {
-      enqueue(at::IValue());
-    }
-  }
-  void dequeue(c10::optional<caffe2::TypeMeta>& value) {
-    auto opt_scalar_type = stack[idx++].toOptional<at::ScalarType>();
-    if (opt_scalar_type.has_value()) {
-      value = caffe2::TypeMeta::fromScalarType(opt_scalar_type.value());
-    } else {
-      value = at::nullopt;
-    }
-  }
-
-  // TODO: is vector<optional<inputmetadata> the only problem?
-  void enqueue(const std::optional<InputMetadata>& t) {
-    enqueue(t.has_value());
-    if (t.has_value()) {
-      enqueue(t.value());
-    }
-  }
-  void dequeue(c10::optional<InputMetadata>& value) {
-    bool has_value = false;
-    dequeue(has_value);
-    if (has_value) {
-      InputMetadata tmp;
-      dequeue(tmp);
-      value = tmp;
-    } else {
-      value = c10::nullopt;
-    }
-  }
-
-  template <typename T>
-  void enqueue(const std::optional<T>& t) {
-    if (t.has_value()) {
-      enqueue_ivalue<T>(t.value());
-    } else {
-      stack.emplace_back();
-    }
-  }
-  template <typename T>
-  void dequeue(c10::optional<T>& value) {
-    value = stack[idx++].toOptional<T>();
-  }
-
-  void enqueue(const at::TensorGeometry& t) {
-    enqueue(t.sym_sizes().vec());
-    enqueue(t.sym_strides().vec());
-    enqueue(t.sym_storage_offset());
-  }
-  void dequeue(at::TensorGeometry& t) {
-    std::vector<at::SymInt> sym_sizes;
-    std::vector<at::SymInt> sym_strides;
-    at::SymInt sym_storage_offset;
-    dequeue(sym_sizes);
-    dequeue(sym_strides);
-    dequeue(sym_storage_offset);
-    t = at::TensorGeometry(sym_sizes, sym_strides, sym_storage_offset);
-  }
-
-  template <typename T>
-  void enqueue(const std::vector<T>& t) {
-    c10::List<T> lst;
-    for (const auto& elt : t) {
-      lst.emplace_back(elt);
-    }
-    enqueue_ivalue(t);
-  }
-  template <typename T>
-  void dequeue(std::vector<T>& t) {
-    const auto& lst = stack[idx++].toList();
-    t.clear();
-    for (const at::IValue& elt : lst) {
-      t.emplace_back(elt.to<T>());
-    }
-  }
-
-  // todo: vector<optional<inputmetadata>>
-  void enqueue(const std::vector<std::optional<InputMetadata>>& t) {
-    enqueue(static_cast<int64_t>(t.size()));
-    for (const auto& i : t) {
-      enqueue(i);
-    }
-  }
-  void dequeue(std::vector<std::optional<InputMetadata>>& t) {
-    int64_t size = 0;
-    dequeue(size);
-    t.clear();
-    for (int64_t idx = 0; idx < size; idx++) {
-      t.emplace_back();
-      dequeue(t.back());
-    }
-  }
-
-  void enqueue(const std::vector<VariableInfo>& t) {
-    enqueue(static_cast<int64_t>(t.size()));
-    for (const auto& i : t) {
-      enqueue(i);
-    }
-  }
-  void dequeue(std::vector<VariableInfo>& t) {
-    int64_t size = 0;
-    dequeue(size);
-    t.clear();
-    for (int64_t idx = 0; idx < size; idx++) {
-      t.emplace_back();
-      dequeue(t.back());
-    }
-  }
-
-  void enqueue(const c10::SymInt& t) {
-    stack.emplace_back(t);
-  }
-  void dequeue(c10::SymInt& t) {
-    t = stack[idx++].toSymInt();
-  }
-
-  void enqueue(int64_t t) {
-    stack.emplace_back(t);
-  }
-  void dequeue(int64_t& t) {
-    t = stack[idx++].toInt();
-  }
-
-  void enqueue(const std::vector<c10::SymInt>& t) {
-    enqueue_ivalue(t);
-  }
-  void dequeue(std::vector<c10::SymInt>& t) {
-    t = stack[idx++].toSymIntVector();
-  }
-
-  void enqueue(const std::vector<int64_t>& t) {
-    enqueue_ivalue(t);
-  }
-  void dequeue(std::vector<int64_t>& t) {
-    t = stack[idx++].toIntVector();
-  }
 
   template <class ivalue_t>
   void enqueue_ivalue(const ivalue_t& t) {
@@ -1272,35 +1318,6 @@ struct SavedState {
   void dequeue_ivalue(ivalue_t& value) {
     value = stack[idx++].to<ivalue_t>();
   }
-#define HANDLE_IVALUE(ivalue_t)                            \
-  void enqueue(const ivalue_t& value) {                    \
-    return enqueue_ivalue<ivalue_t>(value);                \
-  }                                                        \
-  void enqueue(const std::vector<ivalue_t>& value) {       \
-    return enqueue_ivalue<std::vector<ivalue_t>>(value);   \
-  }                                                        \
-  void enqueue(const c10::optional<ivalue_t>& value) {     \
-    return enqueue_ivalue<c10::optional<ivalue_t>>(value); \
-  }                                                        \
-  void dequeue(ivalue_t& value) {                          \
-    return dequeue_ivalue<ivalue_t>(value);                \
-  }                                                        \
-  void dequeue(std::vector<ivalue_t>& value) {             \
-    return dequeue_ivalue<std::vector<ivalue_t>>(value);   \
-  }                                                        \
-  void dequeue(c10::optional<ivalue_t>& value) {           \
-    return dequeue_ivalue<c10::optional<ivalue_t>>(value); \
-  }
-  HANDLE_IVALUE(at::Tensor)
-  HANDLE_IVALUE(c10::ScalarType)
-  HANDLE_IVALUE(c10::Scalar)
-  HANDLE_IVALUE(c10::Layout)
-  HANDLE_IVALUE(c10::Device)
-  HANDLE_IVALUE(c10::MemoryFormat)
-  HANDLE_IVALUE(bool)
-  HANDLE_IVALUE(double)
-  HANDLE_IVALUE(std::string)
-#undef HANDLE_IVALUE
 };
 
 struct TORCH_API PyCompilerInterface {
@@ -1312,7 +1329,8 @@ struct TORCH_API PyCompilerInterface {
       const variable_list& inputs,
       const ivalue_list& saved_state,
       int64_t num_outputs,
-      const std::string& debug) {
+      const std::string& debug,
+      const std::vector<at::TypePtr>& saved_state_schema) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(

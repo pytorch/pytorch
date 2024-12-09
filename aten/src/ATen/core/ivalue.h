@@ -684,6 +684,7 @@ struct TORCH_API IValue final {
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
   std::vector<c10::SymInt> toSymIntVector() const;
+  c10::List<c10::SymInt> toSymIntList() const&;
   at::DimVector toDimVector() const;
 
   // ConstantString

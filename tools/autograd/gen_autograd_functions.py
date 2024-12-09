@@ -122,6 +122,7 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
     ${apply_with_saved_before}
     // variable_list result = apply(variable_list(grads));
     auto state = get_state();
+    ${compute_schema}
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
     variable_list result = interface->call_function(
         saved.get_py_compiler(),
@@ -130,7 +131,8 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
         grads,
         state,
         num_outputs(),
-        name());
+        name(),
+        schema);
     ${apply_with_saved_after}
     return result;
 }
@@ -1029,9 +1031,24 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         saved_var_dequeues.append(f"{typ} {name};")
         saved_var_dequeues.append(f"state.dequeue({name});")
 
+    schema_args = []
+    for typ in unpacked_saved_vars_ref_type:
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        if typ.startswith("const"):
+            typ = typ[5:]
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{arg}>::packed_type(),"
+        )
+    compute_schema.append("};")
+
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
+        compute_schema="\n".join(compute_schema),
         unpacked_saved_vars=unpacked_saved_vars,
         unpacked_saved_vars_signature=unpacked_saved_vars_signature,
         compute_needs_input_grad=compute_needs_input_grad,
