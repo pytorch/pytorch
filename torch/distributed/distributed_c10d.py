@@ -1542,15 +1542,22 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
-            and ``nccl`` backend will be created, see notes below for how multiple
-            backends are managed. This field can be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
-            multiple processes per machine with ``nccl`` backend, each process
-            must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks. ``ucc`` backend is
-            experimental.
+            ``nccl``, ``ucc``, or one that is registered by a third-party
+            plugin.
+            Since 2.6, if ``backend`` is not provided, c10d will use a backend
+            registered for the device type indicated by the `device_id` kwarg
+            (if provided). The known default registrations today are: ``nccl``
+            for ``cuda``, ``gloo`` for ``cpu``.
+            If neither ``backend`` nor ``device_id`` is provided, c10d will
+            detect the accelerator on the run-time machine and use a backend
+            registered for that detected accelerator (or ``cpu``).
+            This field can be given as a lowercase string (e.g., ``"gloo"``),
+            which can also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``).
+            If using multiple processes per machine with ``nccl`` backend, each
+            process must have exclusive access to every GPU it uses, as sharing
+            GPUs between processes can result in deadlock or NCCL invalid usage.
+            ``ucc`` backend is experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
