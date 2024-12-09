@@ -163,6 +163,8 @@ def compute_pass_rate(eager_dir, dynamo_dir):
     eager_pass_keys = tmp_eager_pass_keys - set(excluded)
 
     subset = eager_pass_keys.intersection(dynamo_pass_keys)
+    print(f"pass_subset:{subset}")
+    print(f"base_subset:{eager_pass_keys}")
     total_subset = len(subset)
     total_tests = len(eager_pass_keys)
     print("pass rate", total_subset / total_tests, total_subset, total_tests)
@@ -177,4 +179,47 @@ def compute_pass_rate(eager_dir, dynamo_dir):
             not_there_keys.add(key_)
 
     fail_keys = eager_pass_keys - subset
+    return fail_keys
+
+
+def compute_pass_rate_aot_eager_subclasses(control_dir, test_dir):
+    print("parsing xmls")
+    control_xmls = open_test_results(control_dir)
+    test_xmls = open_test_results(test_dir)
+
+    print("computing pass rate")
+    control_passed = get_passed_testcases(control_xmls)
+    print(f"CONTROL passed:{control_passed}")
+    test_passed = get_passed_testcases(test_xmls)
+    print(f"TEST passed:{test_passed}")
+    test_pass_keys = {key(testcase) for testcase in test_passed}
+    print(f"TEST test_pass_keys:{test_pass_keys}")
+    # test_pass_keys = {key_ for key_ in test_pass_keys if not should_exclude(key_)}
+    tmp_control_pass_keys = {key(testcase) for testcase in control_passed}
+    print(f"CONTROL tmp_control_pass_keys:{tmp_control_pass_keys}")
+    # tmp_control_pass_keys = {
+    #     key_ for key_ in tmp_control_pass_keys if not should_exclude(key_)
+    # }
+    excluded = [key(t) for t in get_excluded_testcases(test_xmls)]
+    print(f"EXCLUDED testcases:{excluded}")
+    control_pass_keys = tmp_control_pass_keys - set(excluded)
+    print(f"CONTROL PASS KEYS(without EXCLUDED):{control_pass_keys}")
+
+    subset = control_pass_keys.intersection(test_pass_keys)
+    print(f"pass_subset:{subset}")
+    print(f"base_subset:{control_pass_keys}")
+    total_subset = len(subset)
+    total_tests = len(control_pass_keys)
+    print("pass rate", total_subset / total_tests, total_subset, total_tests)
+
+    test_testcases = get_testcases(test_xmls)
+    tc = {key(t): t for t in test_testcases}
+
+    # Useful for debugging
+    not_there_keys = set()
+    for key_ in control_pass_keys:
+        if key_ not in tc:
+            not_there_keys.add(key_)
+
+    fail_keys = control_pass_keys - subset
     return fail_keys

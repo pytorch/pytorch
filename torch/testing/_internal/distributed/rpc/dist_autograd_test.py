@@ -714,15 +714,13 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
 
         # kick off forward and backward pass on three other workers (trainers)
         rank_diffs = [1, 2, 3]
-        futures = []
-        for rank_diff in rank_diffs:
-            futures.append(
-                rpc.rpc_async(
-                    worker_name((self.rank + rank_diff) % self.world_size),
-                    trainer_fn,
-                    args=(rref_t1, t2, worker_name(self.rank), rank_diff, sparse),
-                )
-            )
+        futures = [
+            rpc.rpc_async(
+                worker_name((self.rank + rank_diff) % self.world_size),
+                trainer_fn,
+                args=(rref_t1, t2, worker_name(self.rank), rank_diff, sparse),
+            ) for rank_diff in rank_diffs
+        ]
 
         # check if the trainers have done with their backward pass
         for rank_diff in rank_diffs:
@@ -2747,13 +2745,13 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             # this is master
             layers = [nn.Linear(2000, 2000) for _ in range(self.world_size - 1)]
             local_layers = [l.to(0) for l in layers]
-            remote_layers = []
-            for rank in range(1, self.world_size):
-                remote_layers.append(rpc.remote(
+            remote_layers = [
+                rpc.remote(
                     worker_name(rank),
                     WrapperModule,
                     args=(layers[rank - 1], rank)
-                ))
+                ) for rank in range(1, self.world_size)
+            ]
 
             x = torch.randn(5000, 2000).to(0)
             # local iteration

@@ -10,7 +10,8 @@ import random
 import sys
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, Dict, Generic, List, TypeVar
+from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -38,6 +39,8 @@ from torch.testing._internal.common_utils import (
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
 
+
+T = TypeVar("T")
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -982,7 +985,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             x_inference = torch.randn(2, 2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         x = torch.randn(2, 2)
 
@@ -1802,7 +1805,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_list_sorted1(x):
         tmp = [1, 10, 3, 0]
-        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+        return (
+            x + 1,
+            sorted(tmp),
+            sorted(tmp, key=None),
+            sorted(tmp, reverse=True),
+            sorted(tmp, key=None, reverse=True),
+        )
 
     @make_test
     def test_list_sorted2(x):
@@ -1814,6 +1823,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return (
             x + 1,
             sorted(y),
+            sorted(y, key=None),
+            sorted(y, reverse=True),
+            sorted(y, key=None, reverse=True),
             sorted(y, key=lambda student: student[2]),
             sorted(y, key=lambda student: student[2], reverse=True),
         )
@@ -1821,12 +1833,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_tuple_sorted(x):
         tmp = (1, 10, 3, 0)
-        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+        return (
+            x + 1,
+            sorted(tmp),
+            sorted(tmp, key=None),
+            sorted(tmp, reverse=True),
+            sorted(tmp, key=None, reverse=True),
+        )
 
     @make_test
     def test_dict_sorted(x):
         tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
-        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+        return (
+            x + 1,
+            sorted(tmp),
+            sorted(tmp, key=None),
+            sorted(tmp, reverse=True),
+            sorted(tmp, key=None, reverse=True),
+        )
+
+    @make_test
+    def test_dict_items_sorted(x):
+        tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
+        return (
+            x + 1,
+            # ordered by (key, value) pair
+            sorted(tmp.items()),
+            sorted(tmp.items(), key=None),
+            sorted(tmp.items(), reverse=True),
+            sorted(tmp.items(), key=None, reverse=True),
+            # ordered by key
+            sorted(tmp.items(), key=operator.itemgetter(0)),
+            sorted(tmp.items(), key=operator.itemgetter(0), reverse=True),
+            # ordered by value
+            sorted(tmp.items(), key=operator.itemgetter(1)),
+            sorted(tmp.items(), key=operator.itemgetter(1), reverse=True),
+        )
+
+    @make_test
+    def test_sorted_const_key_non_const_items(x, y):
+        tmp = {1: x, 10: x - 1, 3: 2 * x, -1: y + 2, 0: torch.ones(3, 4)}
+        return (
+            sorted(tmp),
+            sorted(tmp.items(), key=operator.itemgetter(0)),
+            sorted(tmp.items(), key=operator.itemgetter(0), reverse=True),
+        )
 
     def test_dict_hasattr(self):
         def fn(x):
@@ -1892,9 +1943,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         def class_method(cls) -> str:
             return cls.__name__
 
+    class MyGenericNamedTuple(NamedTuple, Generic[T]):
+        first: T
+        second: T
+
+        def add(self) -> T:
+            return self.first + self.second
+
+        @staticmethod
+        def static_method() -> int:
+            return 1
+
+        @classmethod
+        def class_method(cls) -> str:
+            return cls.__name__
+
+    class MyNamedTupleSubclass(MyNamedTuple):
+        pass
+
+    class MyGenericNamedTupleSubclass(MyGenericNamedTuple[T]):
+        pass
+
     @make_test
     def test_namedtuple_user_methods(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
+        return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
+    @make_test
+    def test_generic_namedtuple_user_methods(a, b):
+        mytuple = FunctionTests.MyGenericNamedTuple(a, b)
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
@@ -1912,6 +1989,40 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return a + b
         else:
             return a - b
+
+    @make_test
+    def test_generic_namedtuple_hasattr(a, b):
+        mytuple = FunctionTests.MyGenericNamedTuple(a, b)
+
+        def isinstance_namedtuple(obj) -> bool:
+            return (
+                isinstance(obj, tuple)
+                and hasattr(obj, "_asdict")
+                and hasattr(obj, "_fields")
+            )
+
+        if isinstance_namedtuple(mytuple):
+            return a + b
+        else:
+            return a - b
+
+    @make_test
+    def test_namedtuple_subclass(a, b):
+        mytuple = FunctionTests.MyNamedTupleSubclass(a, b)
+        mytuple.x = a
+        mytuple.y = b
+        mytuple.z = b
+        mytuple.z = a
+        return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
+
+    @make_test
+    def test_generic_namedtuple_subclass(a, b):
+        mytuple = FunctionTests.MyGenericNamedTupleSubclass(a, b)
+        mytuple.x = a
+        mytuple.y = b
+        mytuple.z = b
+        mytuple.z = a
+        return hasattr(mytuple, "x"), mytuple.x + mytuple.y, mytuple.z
 
     @make_test
     def test_torch_size_hasattr(x):
@@ -2387,6 +2498,89 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             opt_fn = torch.compile(fullgraph=True)(fn)
             opt_fn(inputs)
 
+    def test_filter_infinite_iterator(self):
+        def fn(x):
+            x = x + 1
+            return (
+                x,
+                list(zip(range(3), filter(lambda y: y < 10, itertools.count()))),
+                list(zip(range(10, 12), filter(lambda y: y > 10, itertools.count()))),
+            )
+
+        inputs = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTupleEqual(opt_fn(inputs), fn(inputs))
+
+    def test_filter_reconstruct(self):
+        def fn(a):
+            return filter(lambda x: x[0] + x[1] < 10, zip([1, 2, 3], [1, 2, 3])), a + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        m = opt_fn(torch.ones(3, 3))[0]
+        n = fn(torch.ones(3, 3))[0]
+        self.assertIsInstance(m, filter)
+        self.assertEqual(list(m), list(n))
+
+    def test_filter_graph_break_reconstruct(self):
+        def fn(x, y):
+            if x.sum() > 0:
+                return x + y
+            return x * y
+
+        backend = EagerAndRecordGraphs()
+        cnts = CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnts)
+        a = torch.zeros(3)
+        b = torch.ones(3)
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+        else:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s0: "Sym(s0)", L_x_: "f32[s0]"):
+        l_x_ = L_x_
+
+        sum_1: "f32[]" = l_x_.sum();  l_x_ = None
+        gt: "b8[]" = sum_1 > 0;  sum_1 = None
+        return (gt,)
+""",
+            )
+
+    def test_filter_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x):
+                nonlocal a
+                a += 1
+                return x > 0
+
+            m = filter(g, [1, 2, 3, 4, 5])
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
@@ -2414,7 +2608,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         lambda1 = functools.partial(multiply, y=2)
 
         cnts = torch._dynamo.testing.CompileCounter()
-        torch._dynamo.optimize(cnts, nopython=True)(fn)(
+        torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, torch.randn(2, 2)
         )
         self.assertEqual(cnts.frame_count, 1)
@@ -2428,7 +2622,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+        dynamo_result = torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, x
         )
         self.assertEqual(cnts.frame_count, 1)
@@ -2445,7 +2639,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+        dynamo_result = torch.compile(fn, backend=cnts, fullgraph=True)(
             lambda0, lambda1, x
         )
         self.assertEqual(cnts.frame_count, 1)
@@ -2464,7 +2658,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         backend = EagerAndRecordGraphs()
         cnts = CompileCounterWithBackend(backend)
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_mul, x)
+        dynamo_result = torch.compile(fn, backend=cnts)(udf_mul, udf_mul, x)
 
         eager_result = fn(udf_mul, udf_mul, x)
         gm = backend.graphs[0]
@@ -2511,7 +2705,7 @@ class GraphModule(torch.nn.Module):
         backend = EagerAndRecordGraphs()
         cnts = CompileCounterWithBackend(backend)
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, udf_add, x)
+        dynamo_result = torch.compile(fn, backend=cnts)(udf_mul, udf_add, x)
 
         eager_result = fn(udf_mul, udf_add, x)
         gm = backend.graphs[0]
@@ -2562,7 +2756,7 @@ class GraphModule(torch.nn.Module):
         backend = EagerAndRecordGraphs()
         cnts = CompileCounterWithBackend(backend)
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul, x)
+        dynamo_result = torch.compile(fn, backend=cnts)(udf_mul, x)
 
         eager_result = fn(udf_mul, x)
         gm = backend.graphs[0]
@@ -2610,7 +2804,7 @@ class GraphModule(torch.nn.Module):
         backend = EagerAndRecordGraphs()
         cnts = CompileCounterWithBackend(backend)
         x = torch.randn(2, 2)
-        dynamo_result = torch._dynamo.optimize(cnts)(fn)(udf_mul2, x)
+        dynamo_result = torch.compile(fn, backend=cnts)(udf_mul2, x)
 
         eager_result = fn(udf_mul2, x)
         gm = backend.graphs[0]
@@ -2658,7 +2852,7 @@ class GraphModule(torch.nn.Module):
         cnts = torch._dynamo.testing.CompileCounter()
 
         x = torch.randn(2, 2)
-        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        fn = torch.compile(fn, backend=cnts, fullgraph=True)
         dynamo_result = fn(lambda0, lambda1, x)
         self.assertEqual(cnts.frame_count, 1)
 
@@ -2685,7 +2879,7 @@ class GraphModule(torch.nn.Module):
         cnts = torch._dynamo.testing.CompileCounter()
 
         x = torch.randn(2, 2)
-        fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
         dynamo_result = fn2(lambda0, lambda1, [x])
         self.assertEqual(cnts.frame_count, 1)  # start over
 
@@ -2743,7 +2937,7 @@ class GraphModule(torch.nn.Module):
             return g(torch.rand([1]))
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(forward)
+        opt_fn = torch.compile(forward, backend=cnts)
 
         input = torch.rand([2])
         _ = opt_fn(input)
@@ -2759,7 +2953,7 @@ class GraphModule(torch.nn.Module):
             return g(torch.rand([1]))
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(forward)
+        opt_fn = torch.compile(forward, backend=cnts)
 
         input = torch.rand([2])
         _ = opt_fn(input)
@@ -2850,7 +3044,7 @@ class GraphModule(torch.nn.Module):
             np.dtype(typ.__name__),
         ]
         cnts_1 = torch._dynamo.testing.CompileCounter()
-        opt_fn_dtype = torch._dynamo.optimize(cnts_1)(func_dtype)
+        opt_fn_dtype = torch.compile(func_dtype, backend=cnts_1)
         a = torch.zeros(3, dtype=typ)
         for arg in dt_args:
             r = opt_fn_dtype(a, arg)
@@ -2858,7 +3052,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts_1.frame_count, 1)
 
         cnts_2 = torch._dynamo.testing.CompileCounter()
-        opt_fn_info = torch._dynamo.optimize(cnts_2)(func_info)
+        opt_fn_info = torch.compile(func_info, backend=cnts_2)
         info_args = [info_func(dt) for dt in dt_args]
         for arg in info_args:
             r = opt_fn_info(a, arg)
@@ -2929,7 +3123,7 @@ class GraphModule(torch.nn.Module):
 
         for dynamic in [True, False]:
             torch._dynamo.reset()
-            opt_fn = torch._dynamo.optimize(dynamic=dynamic)(fn)
+            opt_fn = torch.compile(fn, dynamic=dynamic)
             t = torch.ones(1)
             test(10, t)
             test(-100, t)
@@ -2962,7 +3156,7 @@ class GraphModule(torch.nn.Module):
                     a = range(-10, 10)
                     return list(map(op, a))
 
-                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                opt_fn = torch.compile(fn, fullgraph=True)
                 self.assertEqual(opt_fn(), fn())
 
     def test_unary_fold_op_seq(self):
@@ -2973,8 +3167,65 @@ class GraphModule(torch.nn.Module):
                     a = [tuple(range(-10, i)) for i in range(10)]
                     return tuple(map(op, a))
 
-                opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+                opt_fn = torch.compile(fn, fullgraph=True)
                 self.assertEqual(opt_fn(), fn())
+
+    def test_attrgetter(self):
+        for attrs in (
+            ("shape",),
+            ("data.shape",),
+            ("device", "shape"),
+            ("device", "shape", "data.shape"),
+        ):
+            with self.subTest(attrs=attrs):
+
+                def fn(x, y):
+                    getter = operator.attrgetter(*attrs)
+                    return getter(x), getter(y)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(3, 4)
+                y = torch.randn(3, 4)
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_itemgetter(self):
+        for items in (
+            (0,),
+            (slice(1, 3),),
+            (0, 1),
+            (slice(1, 3), 0, 1),
+        ):
+            with self.subTest(items=items):
+
+                def fn(x, y):
+                    getter = operator.itemgetter(*items)
+                    return getter(x), getter(y)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(3, 4)
+                y = torch.randn(3, 4)
+                self.assertEqual(opt_fn(x, y), fn(x, y))
+
+    def test_methodcaller(self):
+        for name, args, kwargs in (
+            ("size", (), {}),
+            ("size", (0,), {}),
+            ("add", (torch.randn(3, 4),), {}),
+            ("add", (torch.randn(3, 4),), {"alpha": 2.0}),
+        ):
+            with self.subTest(name=name, args=args, kwargs=kwargs):
+
+                def fn(x, y):
+                    caller = operator.methodcaller(name, *args, **kwargs)
+                    return caller(x), caller(y)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(3, 4)
+                y = torch.randn(3, 4)
+                self.assertEqual(opt_fn(x, y), fn(x, y))
 
     def gen_random_range_args(self):
         args_count = random.randint(1, 3)
@@ -3394,6 +3645,18 @@ class GraphModule(torch.nn.Module):
         it2 = opt_fn(*inps)
         self.assertIsInstance(it2, enumerate)
         self.assertEqual(list(it1), list(it2))
+
+    def test_returning_recursive_func(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            def f():
+                return f
+
+            return x + 1, f
+
+        res, f = run(torch.zeros(1))
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertTrue(f is f())
 
 
 def udf_mul(x, y):
@@ -3877,7 +4140,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return param in tensor_list
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn(param, param2), fn(param, param2))
         self.assertEqual(cnts.frame_count, 1)
         # Test aliased
@@ -3899,7 +4162,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return y in tensor_list and z in tensor_list
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(opt_fn(param, param2), fn(param, param2))
         self.assertEqual(cnts.frame_count, 1)
         # Test aliased
@@ -3920,7 +4183,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             disallowed(g)
 
         f_opt = torch._dynamo
-        opt_f = torch._dynamo.optimize(backend="eager")(f)
+        opt_f = torch.compile(f, backend="eager")
         opt_f()
         f()
         self.assertEqual(len(lst), 2)
@@ -3937,8 +4200,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
                 x += y * z
             return x
 
-        opt_fn = torch._dynamo.optimize(backend="eager")(fn)
-        nopython_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager")
+        nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
 
         x = torch.ones(3)
         ys = [1.0, 2.0, 3.0]
@@ -4053,6 +4316,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(False, ["a==1"], 1)
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
+    def test_tree_map(self):
+        def fn(a, b, index):
+            def call(index):
+                mapped_attributes = torch.utils._pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda x: x[index],
+                    (a, b),
+                )
+                return mapped_attributes
+
+            return call(index)
+
+        a = torch.randn(4, 2, 5)
+        b = torch.randn(4, 2, 5, 5)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_res = compiled_fn(a, b, torch.tensor([2]))
+        reference_res = fn(a, b, torch.tensor([2]))
+        self.assertTrue(same(compiled_res, reference_res))
 
 
 instantiate_parametrized_tests(FunctionTests)

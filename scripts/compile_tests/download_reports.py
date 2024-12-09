@@ -13,6 +13,16 @@ CONFIGS = {
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
+    "aot_eager39": {
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
+    },
+    "subclasses39": {
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
+    },
     "dynamo311": {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
@@ -23,15 +33,15 @@ CONFIGS = {
         "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
     },
-    "aot_eager311": {  # Checking aot_eager compilation pass rate
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, lf.linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, lf.linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, lf.linux.2xlarge)",
+    "aot_eager311": {
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
     },
-    "subclasses311": {  # Checking aot_eager compilation pass rate
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.2xlarge)",
+    "subclasses311": {
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
     },
 }
 
@@ -83,27 +93,20 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     ).json()
 
     def download_report(job_name, subdir):
-        print(f"XXX DOWNLOAD_REPORT job_name:{job_name}")
         job_id = workflow_jobs[job_name]
 
-        print(f"XXX DOWNLOAD_REPORT job_id:{job_id}")
-        print(f"XXX DOWNLOAD_REPORT listings:{listings}")
         for listing in listings:
             name = listing["name"]
-            print(f"XXX LISTING name:{listing['name']}")
             if not name.startswith("test-reports-"):
                 continue
-            # if name.endswith(f"_{job_id}.zip"):
-            print(f"XXX PASSED test-reports- and _{job_id}.zip")
-            url = listing["url"]
-            subprocess.run(["wget", "-P", subdir, url], check=True)
-            path_to_zip = f"{subdir}/{name}"
-            print(f"XXX path_to_zip:{path_to_zip}")
-            dir_name = path_to_zip[:-4]
-            print(f"XXX dir_name:{dir_name}")
-            subprocess.run(["unzip", path_to_zip, "-d", dir_name], check=True)
-            return
-        # raise AssertionError("should not be hit")
+            if name.endswith(f"_{job_id}.zip"):
+                url = listing["url"]
+                subprocess.run(["wget", "-P", subdir, url], check=True)
+                path_to_zip = f"{subdir}/{name}"
+                dir_name = path_to_zip[:-4]
+                subprocess.run(["unzip", path_to_zip, "-d", dir_name], check=True)
+                return
+        raise AssertionError("should not be hit")
 
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)

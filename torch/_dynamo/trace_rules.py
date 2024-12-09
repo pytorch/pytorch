@@ -190,6 +190,7 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.sym_sum": TorchInGraphFunctionVariable,
+    "torch.sym_fresh_size": UserFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
@@ -1347,6 +1348,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._convert_indices_from_coo_to_csr",
         "torch._convert_indices_from_csr_to_coo",
         "torch._convert_weight_to_int4pack",
+        "torch._convert_weight_to_int4pack_for_cpu",
         "torch._convolution_mode",
         "torch._convolution",
         "torch._copy_from_and_resize",
@@ -1451,6 +1453,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._foreach_round",
         "torch._foreach_sigmoid_",
         "torch._foreach_sigmoid",
+        "torch._foreach_rsqrt_",
+        "torch._foreach_rsqrt",
         "torch._foreach_sign_",
         "torch._foreach_sign",
         "torch._foreach_sin_",
@@ -1605,6 +1609,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._use_cudnn_rnn_flatten_weight",
         "torch._values_copy",
         "torch._weight_int4pack_mm",
+        "torch._weight_int4pack_mm_for_cpu",
         "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
@@ -2265,10 +2270,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
-        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2519,6 +2521,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.current_stream",
         "torch.cuda.default_stream",
         "torch.cuda.device_count",
+        "torch.cuda.device_memory_used",
         "torch.cuda.get_arch_list",
         "torch.cuda.get_device_capability",
         "torch.cuda.get_device_name",
@@ -2553,6 +2556,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
+        "torch.cuda.memory.get_per_process_memory_fraction",
         "torch.cuda.memory.list_gpu_processes",
         "torch.cuda.memory.max_memory_allocated",
         "torch.cuda.memory.max_memory_cached",
@@ -3029,16 +3033,35 @@ def _polyfilled_function_ids() -> Set[int]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
+    unsupported_funcs = {
+        "seed",
+        "ranf",
+        "get_bit_generator",
+        "RandomState",
+        "set_bit_generator",
+        "sample",
+    }
+
+    def is_supported(k, v, mod):
+        if not callable(v):
+            return False
+        if not getattr(v, "__module__", None):
+            return True
+        if v.__module__ == mod.__name__:
+            return True
+        if (
+            v.__module__ == "numpy.random.mtrand"
+            and mod.__name__ == "numpy.random"
+            and k not in unsupported_funcs
+        ):
+            return True
+        return False
+
     rv = {}
     for mod in NP_SUPPORTED_MODULES:
-        rv.update(
-            {
-                id(v): f"{mod.__name__}.{k}"
-                for k, v in mod.__dict__.items()
-                if callable(v)
-                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-            }
-        )
+        for k, v in mod.__dict__.items():
+            if is_supported(k, v, mod):
+                rv[id(v)] = f"{mod.__name__}.{k}"
     return rv
 
 
@@ -3131,7 +3154,6 @@ BUILTIN_SKIPLIST = (
     contextlib,
     copy,
     copyreg,
-    dataclasses,
     enum,
     functools,
     importlib,
@@ -3241,7 +3263,7 @@ if torch.distributed.is_available():
         "torch.distributed._composable.replicate",
     }
     if not torch._dynamo.config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3252,6 +3274,7 @@ MOD_INLINELIST = [
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
@@ -3286,6 +3309,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
@@ -3299,7 +3323,7 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     if not torch._dynamo.config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 @functools.lru_cache(None)
