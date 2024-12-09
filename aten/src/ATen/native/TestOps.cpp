@@ -64,8 +64,8 @@ Tensor _test_optional_floatlist(
 }
 
 // Test default strings can handle escape sequences properly (although commas are broken)
-Tensor _test_string_default(const Tensor& dummy, c10::string_view a, c10::string_view b) {
-  const c10::string_view expect = "\"'\\";
+Tensor _test_string_default(const Tensor& dummy, std::string_view a, std::string_view b) {
+  const std::string_view expect = "\"'\\";
   TORCH_CHECK(a == expect, "Default A failed");
   TORCH_CHECK(b == expect, "Default B failed");
   return dummy;
@@ -82,7 +82,7 @@ Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, int64_t b) {
 }
 
 // Overload b
-Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, c10::string_view b) {
+Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, std::string_view b) {
   TORCH_CHECK(a == 2);
   TORCH_CHECK(b == "2");
   return c10::scalar_to_tensor(2);

@@ -37,6 +37,7 @@ from torch.export.graph_signature import (
     OutputSpec,
     SymIntArgument,
     SymBoolArgument,
+    SymFloatArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
@@ -75,7 +76,7 @@ def capture_pre_autograd_graph_warning():
 def print_export_warning():
     log.warning("Using torch.export.export_for_training(...,strict=True)")
 
-def gm_using_training_ir(graph_module):
+def gm_using_training_ir(graph_module: torch.fx.GraphModule) -> bool:
     """
     Returns true if the graph module is detected to use training IR.
 
@@ -232,7 +233,7 @@ def capture_pre_autograd_graph(
             )
 
             setattr(module, "capture_pre_autograd_graph_tag", True)  # noqa: B010
-            for node in module.graph.nodes:  # type: ignore[union-attr]
+            for node in module.graph.nodes:
                 node.meta["capture_pre_autograd_graph_tag"] = True
 
     error_message = \
@@ -277,8 +278,9 @@ def aot_compile_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning(
-        "torch._export.aot_compile() is being deprecated, please switch to "
-        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
+        "torch._export.aot_compile()/torch._export.aot_load() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export())/"
+        "torch._inductor.aoti_load_package() instead.")
 
 
 def aot_compile(
@@ -365,6 +367,8 @@ def aot_load(so_path: str, device: str) -> Callable:
     Returns:
         A callable
     """
+    aot_compile_warning()
+
     if device == "cpu":
         runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):
