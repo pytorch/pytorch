@@ -699,7 +699,7 @@ class OpDecompositions:
         return ops.to_dtype(ops.round(a), dtype)
 
 
-class OpOverrides:
+class OpOverrides(OpDecompositions):
     def __init__(self, parent):
         super().__init__()
         self._parent = parent
