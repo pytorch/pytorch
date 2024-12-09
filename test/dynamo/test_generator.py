@@ -483,12 +483,13 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             gen = whoo(t)
-            return list(zip(range(3), gen))
+            return zip(range(3), gen)
 
         t = torch.randn(2)
         y = fn(t)
+        self.assertEqual(i, 0)
+        self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
         self.assertEqual(i, 3)
-        self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
     def test_generator_with_side_effects_graph_break(self):
         i = 0

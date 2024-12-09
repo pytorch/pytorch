@@ -3063,6 +3063,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
     def _return(self, inst):
+        self.replace_tos_if_return_is_generator()
+
         if (
             self.output.count_calls() == 0
             and not self.inconsistent_side_effects
@@ -3070,8 +3072,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.export
         ):
             raise exc.SkipFrame("because no content in function call")
-
-        self.replace_tos_if_return_is_generator()
 
         self.instruction_pointer = None
         _step_logger()(
