@@ -74,8 +74,8 @@ class TestMetaDataPorting(QuantizationTestCase):
                         f"from_node metadata is of type {type(from_node_meta)}, but expected list"
                     )
                 for meta in from_node_meta:
-                    node_target = meta[1]
-                    if node_target == from_node:
+                    node_target = meta.target
+                    if node_target == str(from_node):
                         node_tag = n.meta.get("quantization_tag", None)
                         if node_tag is None or tag != node_tag:
                             not_found_nodes += str(n.target) + ", "
