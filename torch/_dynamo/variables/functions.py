@@ -380,8 +380,14 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         )
         # gen_obj = fn(*args)
         # _args = [_locals.get(name) for name in code.co_varnames]
-        _kwargs = _locals.pop("kwargs", variables.ConstDictVariable({})).as_python_constant()
-        _args = [_locals.get(name) for name in inspect.signature(fn).parameters.keys() if name != "kwargs"]
+        _kwargs = _locals.pop(
+            "kwargs", variables.ConstDictVariable({})
+        ).as_python_constant()
+        _args = [
+            _locals.get(name)
+            for name in inspect.signature(fn).parameters.keys()
+            if name != "kwargs"
+        ]
         # sig = inspect.signature(fn).bind_partial(*args, **kwargs)
         # _args = sig.args
         # _kwargs = sig.kwargs
