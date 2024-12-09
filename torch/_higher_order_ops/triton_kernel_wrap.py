@@ -1193,11 +1193,7 @@ class TritonHOPifier:
                 else:
                     return var
 
-            # We only do this for prune_configs_by
-            # We have to eagerly realize kwargs
-            # This is because the dict gets unpacked in prune_configs, so we can't rely on __getitem__
             realizedKwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
-            # set up nargs
             realizedArgs = zip(
                 variable.kernel.arg_names, [realize_var(arg) for arg in args]
             )
