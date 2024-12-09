@@ -223,10 +223,7 @@ static variable_list validate_outputs(
     const ivalue_list& saved) {
   SavedState r;
   r.stack = saved;
-  std::vector<c10::optional<InputMetadata>> value;
-  r.dequeue(value);
-  // std::cout << "dequeue" << std::endl;
-  // dumpimv(value);
+  auto value = r.unpack<std::vector<c10::optional<InputMetadata>>>();
 
   torch::autograd::validate_outputs(
       value, outputs, [&](const std::string& msg) {
@@ -935,7 +932,7 @@ CacheNode* _compiled_autograd_impl(
       // dumpimv(input_metadata);
 
       SavedState state;
-      state.enqueue(input_metadata);
+      state.pack(input_metadata);
       ivalue_list& input_metadata_state = state.stack;
       outputs = call_function(
           py_compiler,

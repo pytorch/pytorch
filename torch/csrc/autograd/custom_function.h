@@ -239,12 +239,12 @@ struct CppNode : public Node {
     // auto results = apply(variable_list(inputs));
 
     SavedState state;
-    state.enqueue(ctx_.saved_data);
+    state.pack_saved_data(ctx_.saved_data);
     variable_list saved_variables = ctx_.get_saved_variables();
-    state.enqueue(saved_variables);
-    state.enqueue(ctx_.materialize_grads_);
-    state.enqueue(output_info_);
-    state.enqueue(is_variable_input_);
+    state.pack(saved_variables);
+    state.pack(ctx_.materialize_grads_);
+    state.pack(output_info_);
+    state.pack(is_variable_input_);
     auto& stack = state.stack;
     std::vector<at::TypePtr> schema;
     schema.reserve(stack.size());
@@ -288,22 +288,17 @@ struct CppNode : public Node {
     return [name](
                const variable_list& inputs,
                const std::vector<c10::IValue>& saved) {
-      SavedState state;
-      state.stack = saved;
+      auto state = SavedState(saved);
       auto ctx = AutogradContext();
       ctx.is_functional_ = true;
-      std::vector<VariableInfo> output_info;
-      std::vector<bool> is_variable_input;
 
-      state.dequeue(ctx.saved_data);
+      ctx.saved_data = state.unpack_saved_data();
+      auto saved_variables = state.unpack<variable_list>();
+      ctx.materialize_grads_ = state.unpack<bool>();
+      auto output_info = state.unpack<std::vector<VariableInfo>>();
+      auto is_variable_input = state.unpack<std::vector<bool>>();
 
-      variable_list saved_variables;
-      state.dequeue(saved_variables);
       ctx.saved_variables_override_ = saved_variables;
-
-      state.dequeue(ctx.materialize_grads_);
-      state.dequeue(output_info);
-      state.dequeue(is_variable_input);
 
       // TODO(rzou): refactor to share code with CppNode<T>::apply
       at::OptionalDeviceGuard _device_guard;

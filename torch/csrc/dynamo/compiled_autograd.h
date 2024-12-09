@@ -902,8 +902,22 @@ class SwapSavedVariables {
 template <class T>
 struct dependent_false : std::false_type {};
 
+// Helper struct for packing/unpacking an arbitrary C++ type into a single
+// IValue. There are various full and partial specializations for IValuePacker
+// to handle packing specific types (like TensorOptions) into an IValue.
 template <typename T>
 struct IValuePacker {
+  // Pack a T into an IValue.
+  static at::IValue pack(const T& t) {
+    return t;
+  }
+  // Unpacks an IValue into a T.
+  static T unpack(const at::IValue& t) {
+    return t.to<T>();
+  }
+  // Returns the TypePtr for the IValue. This is used when
+  // passing the IValue from Python into C++; we use it to
+  // parse the Python object into an IValue.
   static at::TypePtr packed_type() {
     if constexpr (std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
@@ -932,14 +946,9 @@ struct IValuePacker {
     } else if constexpr (std::is_same_v<T, at::ScalarType>) {
       return at::ScalarTypeType::get();
     } else {
+      // TODO(rzou): add comment here
       static_assert(dependent_false<T>::value);
     }
-  }
-  static at::IValue pack(const T& t) {
-    return t;
-  }
-  static T unpack(const at::IValue& t) {
-    return t.to<T>();
   }
 };
 
@@ -1290,52 +1299,46 @@ struct IValuePacker<ska::flat_hash_map<std::string, at::IValue>> {
   }
 };
 
+using saved_data_t = ska::flat_hash_map<std::string, at::IValue>;
+
 struct SavedState {
+  SavedState() = default;
+
+  explicit SavedState(std::vector<at::IValue> stack_)
+      : stack(std::move(stack_)) {}
+
   std::vector<at::IValue> stack;
   int64_t idx = 0;
 
   template <typename T>
-  void enqueue(const T& t) {
-    enqueue_ivalue(IValuePacker<T>::pack(t));
+  void pack(const T& t) {
+    stack.emplace_back(IValuePacker<T>::pack(t));
   }
   template <typename T>
-  void dequeue(T& t) {
-    t = IValuePacker<T>::unpack(stack[idx++]);
+  T unpack() {
+    return IValuePacker<T>::unpack(std::move(stack[idx++]));
   }
 
-  void enqueue(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+  void pack_saved_data(const ska::flat_hash_map<std::string, at::IValue>& dct) {
     std::vector<std::string> keys;
     std::vector<at::IValue> values;
     for (const auto& [key, value] : dct) {
       keys.emplace_back(key);
       values.emplace_back(value);
     }
-    enqueue(keys);
+    pack(keys);
     for (const auto& value : values) {
-      enqueue(value);
-    }
-  }
-  void dequeue(ska::flat_hash_map<std::string, at::IValue>& dct) {
-    std::vector<std::string> keys;
-    dequeue(keys);
-    std::vector<at::IValue> values;
-    for (const auto i : c10::irange(keys.size())) {
-      values.emplace_back();
-      dequeue(values[i]);
-    }
-    dct.clear();
-    for (const auto i : c10::irange(keys.size())) {
-      dct.insert({keys[i], values[i]});
+      pack(value);
     }
   }
 
-  template <class ivalue_t>
-  void enqueue_ivalue(const ivalue_t& t) {
-    stack.emplace_back(t);
-  }
-  template <class ivalue_t>
-  void dequeue_ivalue(ivalue_t& value) {
-    value = stack[idx++].to<ivalue_t>();
+  saved_data_t unpack_saved_data() {
+    ska::flat_hash_map<std::string, at::IValue> dct;
+    auto keys = unpack<std::vector<std::string>>();
+    for (const auto& key : keys) {
+      dct.insert({key, std::move(stack[idx++])});
+    }
+    return dct;
   }
 };
 
