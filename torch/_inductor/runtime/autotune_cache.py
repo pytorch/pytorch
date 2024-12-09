@@ -374,10 +374,6 @@ class AutotuneCacheBundler:
             # we could reconstruct (because it's possible for the caller to
             # customize the path).
             basename = os.path.basename(filename)
-            root, ext = _splitext_nodot(basename)
-            _, _, expected = torch._inductor.codecache.get_path(root, ext)
-            if filename != expected:
-                return
 
             # TODO: check cache_dir() vs filename, then strip dirname
             bundler.put(basename, data)
