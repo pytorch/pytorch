@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import (
     slowTest as slow,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -1013,7 +1013,7 @@ class LstsqCases(LinalgSquareTestCase, LinalgNonsquareTestCase):
 
 @instantiate_parametrized_tests
 class TestLstsq(LstsqCases, TestCase):
-    @xpassIfTorchDynamo  # (reason="Lstsq: we use the future default =None")
+    @xpassIfTorchDynamo_np  # (reason="Lstsq: we use the future default =None")
     def test_future_rcond(self):
         a = np.array(
             [
@@ -1758,7 +1758,7 @@ class TestQR(TestCase):
         assert_(isinstance(r2, a_type))
         assert_almost_equal(r2, r1)
 
-    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
+    @xpassIfTorchDynamo_np  # (reason="torch does not allow qr(..., mode='raw'")
     @parametrize("m, n", [(3, 0), (0, 3), (0, 0)])
     def test_qr_empty(self, m, n):
         k = min(m, n)
@@ -1772,7 +1772,7 @@ class TestQR(TestCase):
         assert_equal(h.shape, (n, m))
         assert_equal(tau.shape, (k,))
 
-    @xpassIfTorchDynamo  # (reason="torch does not allow qr(..., mode='raw'")
+    @xpassIfTorchDynamo_np  # (reason="torch does not allow qr(..., mode='raw'")
     def test_mode_raw(self):
         # The factorization is not unique and varies between libraries,
         # so it is not possible to check against known values. Functional
@@ -1908,7 +1908,7 @@ class TestCholesky(TestCase):
 
 
 class TestMisc(TestCase):
-    @xpassIfTorchDynamo  # (reason="endianness")
+    @xpassIfTorchDynamo_np  # (reason="endianness")
     def test_byteorder_check(self):
         # Byte order check should pass for native order
         if sys.byteorder == "little":
@@ -2244,7 +2244,7 @@ class TestTensorsolve(TestCase):
 
 
 class TestMisc2(TestCase):
-    @xpassIfTorchDynamo  # (reason="TODO")
+    @xpassIfTorchDynamo_np  # (reason="TODO")
     def test_unsupported_commontype(self):
         # linalg gracefully handles unsupported type
         arr = np.array([[1, -2], [2, 5]], dtype="float16")
