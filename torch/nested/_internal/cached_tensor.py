@@ -6,6 +6,15 @@ from torch.utils import _pytree as pytree
 
 
 class CachedTensor(torch.Tensor):
+    # Tensor subclass wrapping a dict of tensors, whose shape, dtype, device, etc.
+    # is determined by a "source" tensor in the dict (specified by the user
+    # during construction). By default, performing any operations on it will be
+    # as if you were performing the operation on the source tensor. To leverage
+    # the extra metadata, you can register a torch dispatch function to perform
+    # the special behavior you want. For example, see NestedTensor's usage.
+    # This is a convenient way to keep around metadata related to a tensor, without
+    # having to laboriously thread those extra metadata around, e.g. through aten
+    # signatures.
     @staticmethod
     def __new__(
         cls,
@@ -95,14 +104,11 @@ _func_registry: Dict[Any, Callable] = {}
 @contextmanager
 def set_func_registry(registry: Dict[Any, Callable]) -> Generator:
     global _func_registry
-    # Save the current registry to restore it later
     old_registry = _func_registry
-    # Set the new registry
     _func_registry = registry
     try:
         yield
     finally:
-        # Restore the old registry
         _func_registry = old_registry
 
 
