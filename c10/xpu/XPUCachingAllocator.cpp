@@ -253,11 +253,7 @@ class DeviceCachingAllocator {
   bool alloc_block(AllocParams& p) {
     auto size = p.alloc_size;
     auto device = p.device();
-    void* ptr = sycl::aligned_alloc_device(
-        kDeviceAlignment,
-        size,
-        xpu::get_raw_device(device),
-        xpu::get_device_context());
+    void* ptr = sycl::aligned_alloc_device(kDeviceAlignment, size, *p.queue());
     if (!ptr) {
       return false;
     }
