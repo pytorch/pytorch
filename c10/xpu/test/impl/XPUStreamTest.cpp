@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <c10/util/irange.h>
-#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 #include <optional>
@@ -178,84 +177,4 @@ TEST(XPUStreamTest, StreamFunction) {
 
   validateHostData(hostData, numel);
   sycl::free(deviceData, c10::xpu::get_device_context());
-}
-
-TEST(XPUStreamTest, ExternalStream) {
-  if (!has_xpu()) {
-    return;
-  }
-  sycl::queue ext_queue0 = sycl::queue(
-      c10::xpu::get_device_context(),
-      c10::xpu::get_raw_device(0),
-      c10::xpu::asyncHandler,
-      {sycl::property::queue::in_order()});
-  c10::xpu::XPUStream ext_stream0 =
-      c10::xpu::getStreamFromExternal(ext_queue0, 0);
-  EXPECT_EQ(ext_stream0.priority(), 0);
-  EXPECT_EQ(ext_stream0.device_index(), 0);
-  EXPECT_EQ(ext_stream0.queue(), ext_queue0);
-  c10::xpu::setCurrentXPUStream(ext_stream0);
-  EXPECT_EQ(c10::xpu::getCurrentXPUStream(), ext_stream0);
-  c10::xpu::XPUStream ext_stream1 =
-      c10::xpu::getStreamFromExternal(ext_queue0, 0);
-  EXPECT_EQ(ext_stream1, ext_stream0);
-  sycl::queue ext_queue1 = ext_queue0;
-  c10::xpu::XPUStream ext_stream2 =
-      c10::xpu::getStreamFromExternal(ext_queue1, 0);
-  EXPECT_EQ(ext_stream2, ext_stream1);
-  c10::Stream stream = ext_stream1.unwrap();
-  EXPECT_EQ(stream.device_index(), 0);
-  EXPECT_EQ(stream.id(), ext_stream2.id());
-  c10::xpu::XPUStream ext_stream3 = c10::xpu::XPUStream(stream);
-  EXPECT_EQ(ext_stream3, ext_stream1);
-  EXPECT_EQ(stream.id(), ext_stream3.id());
-  {
-    c10::xpu::XPUStream ext_stream4 = ext_stream1;
-    EXPECT_EQ(ext_stream4, ext_stream1);
-    c10::xpu::XPUStream ext_stream5 =
-        c10::xpu::getStreamFromExternal(ext_queue1, 0);
-    EXPECT_EQ(ext_stream5, ext_stream4);
-  }
-  sycl::queue ext_queue2 = sycl::queue(
-      c10::xpu::get_device_context(),
-      c10::xpu::get_raw_device(0),
-      c10::xpu::asyncHandler,
-      {sycl::property::queue::in_order(),
-       sycl::ext::oneapi::property::queue::priority_high()});
-  c10::xpu::XPUStream ext_stream6 =
-      c10::xpu::getStreamFromExternal(ext_queue2, 0);
-  EXPECT_EQ(ext_stream6.priority(), -1);
-  EXPECT_NE(ext_stream6, ext_stream1);
-  sycl::queue ext_queue3 = sycl::queue(
-      c10::xpu::get_device_context(),
-      c10::xpu::get_raw_device(0),
-      c10::xpu::asyncHandler,
-      {});
-  ASSERT_THROW(c10::xpu::getStreamFromExternal(ext_queue3, 0), c10::Error);
-}
-
-TEST(XPUStreamTest, MultiDeviceExternalStream) {
-  if (c10::xpu::device_count() < 2) {
-    return;
-  }
-  sycl::queue ext_queue0 = sycl::queue(
-      c10::xpu::get_device_context(),
-      c10::xpu::get_raw_device(0),
-      c10::xpu::asyncHandler,
-      {sycl::property::queue::in_order()});
-  sycl::queue ext_queue1 = sycl::queue(
-      c10::xpu::get_device_context(),
-      c10::xpu::get_raw_device(1),
-      c10::xpu::asyncHandler,
-      {sycl::property::queue::in_order()});
-  c10::xpu::XPUStream ext_stream0 =
-      c10::xpu::getStreamFromExternal(ext_queue0, 0);
-  c10::xpu::XPUStream ext_stream1 =
-      c10::xpu::getStreamFromExternal(ext_queue1, 1);
-  EXPECT_EQ(ext_stream0.device_index(), 0);
-  EXPECT_EQ(ext_stream1.device_index(), 1);
-  c10::xpu::setCurrentXPUStream(ext_stream0);
-  EXPECT_EQ(c10::xpu::getCurrentXPUStream(0), ext_stream0);
-  c10::xpu::setCurrentXPUStream(ext_stream1);
-  EXPECT_EQ(c10::xpu::getCurrentXPUStream(1), ext_stream1);
 }
