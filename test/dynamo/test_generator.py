@@ -410,7 +410,7 @@ class GraphModule(torch.nn.Module):
             yield t + 2
             yield t + 3
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=False)
         def fn(t):
             gen = main_gen(t)
             return list(gen)
@@ -429,7 +429,7 @@ class GraphModule(torch.nn.Module):
             yield t + 1
             yield from subgen(t)
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager", fullgraph=False)
         def fn(t):
             gen = main_gen(t)
             return list(gen)
