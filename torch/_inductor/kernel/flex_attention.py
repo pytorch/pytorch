@@ -807,6 +807,15 @@ from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 from ..codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 
 
+def check_cpu_vectorization_ability():
+    import os
+
+    requires_avx2_on_cpu = (
+        torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
+    return requires_avx2_on_cpu
+
+
 def lower_cpu(
     query,
     key,
@@ -837,6 +846,10 @@ def lower_cpu(
     if kernel_options["OUTPUT_LOGSUMEXP"]:
         raise NotImplementedError(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
+        )
+    if not check_cpu_vectorization_ability():
+        raise NotImplementedError(
+            "torch.compile on CPU currently requires at least `avx2` support."
         )
 
     fake_buffers: List[Buffer] = []  # noqa: F821
