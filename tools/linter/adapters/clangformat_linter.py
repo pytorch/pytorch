@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
-import clang_format
+import clang_format  # type: ignore[import-untyped]
 
 
 IS_WINDOWS: bool = os.name == "nt"
