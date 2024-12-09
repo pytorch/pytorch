@@ -72,6 +72,7 @@ class CompileId(NamedTuple):
             assert self.frame_id is not None and self.frame_compile_id is not None
             return f"{self.frame_id}/{self.frame_compile_id}"
 
+
 class TraceId(NamedTuple):
     compile_id: CompileId
     # This starts off as 0, and every time we restart analysis it goes
