@@ -8,18 +8,24 @@ namespace torch::inductor {
 
 // NOTICE: Following APIs are subject to change due to active development
 // We provide NO BC guarantee for these APIs
-class TORCH_API AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
+
+// HERE we use C10_EXPORT because libtorch_python needs this Symbol be exported.
+// And `TORCH_API and `TORCH_XPU_API`` do not export the symbol in Windows
+// build.
+class C10_EXPORT AOTIModelContainerRunnerXpu : public AOTIModelContainerRunner {
  public:
   // @param device_str: xpu device string, e.g. "xpu", "xpu:0"
   AOTIModelContainerRunnerXpu(
       const std::string& model_so_path,
       size_t num_models = 1,
       const std::string& device_str = "xpu",
-      const std::string& cubin_dir = "");
+      const std::string& kernel_bin_dir = "");
 
-  ~AOTIModelContainerRunnerXpu();
+  ~AOTIModelContainerRunnerXpu() override;
 
-  std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs);
+  std::vector<at::Tensor> run(
+      const std::vector<at::Tensor>& inputs,
+      void* stream_handle = nullptr) override;
 
   std::vector<at::Tensor> run_with_xpu_stream(
       std::vector<at::Tensor>& inputs,
