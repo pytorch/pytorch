@@ -496,9 +496,9 @@ def diff_tensor_meta(
         val2 = getattr(meta2, meta_name)
         try:
             if val1 != val2:
-                pair_diffs.append(f"'{meta_name}'")
+                pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
         except GuardOnDataDependentSymNode as _:
-            pair_diffs.append(f"'{meta_name}'")
+            pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
             continue
     return pair_diffs
 
