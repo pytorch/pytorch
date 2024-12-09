@@ -1831,7 +1831,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if outputs is None:
+        if op_overload and not op_overload._schema.returns:
+            # kernel does not return a value
+            output_args = []
+        elif outputs is None:
             # outputs is not specified, the default is to write to buf_name
             output_args = [buf_name]
         else:
