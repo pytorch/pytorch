@@ -312,7 +312,11 @@ XPUStream getStreamFromExternal(
   // The sycl::queue* will be the actual id
 
   TORCH_CHECK(ext_queue, "External sycl::queue* must not be a nullptr.");
-  TORCH_CHECK(ext_queue->is_in_order(), "External SYCL queue must be in-order.")
+  TORCH_CHECK(
+      ext_queue->is_in_order(), "External SYCL queue must be in-order.");
+  TORCH_CHECK(
+      ext_queue->get_context() == c10::xpu::get_device_context(),
+      "External SYCL queue must be created with the same context as the PyTorch XPU used.");
   return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_queue));
 }
 
