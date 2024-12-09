@@ -48,9 +48,6 @@ class CachedTensor(torch.Tensor):
         self.source_field = source_field
         self.metadata = metadata
 
-        # Compile only
-        self.nested_int_ref: Any = None
-
     def __repr__(self) -> str:  # type: ignore[override]
         return f"CachedTensor({repr(self.metadata[self.source_field])})"
 
