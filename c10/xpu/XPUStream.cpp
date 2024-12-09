@@ -285,6 +285,7 @@ XPUStream getStreamFromExternal(
   // The sycl::queue* will be the actual id
 
   TORCH_CHECK(ext_queue, "External sycl::queue* must not be a nullptr.");
+  TORCH_CHECK(ext_queue->is_in_order(), "External SYCL queue must be in-order.")
   return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_queue));
 }
 
