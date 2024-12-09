@@ -883,7 +883,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
+  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
@@ -1097,6 +1097,9 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
   endif()
 else()
+  # Define export functions for AOTI.
+  add_compile_definitions(EXPORT_AOTI_FUNCTIONS)
+
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
   # Windows SDK broke compatibility since version 25131, but introduced this
