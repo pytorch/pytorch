@@ -8121,7 +8121,7 @@ def forward(self, x, b_t, y):
 
         inps = (torch.ones(5),)
 
-        ep = export_for_training(M(), inps)
+        ep = export_for_training(M(), inps).run_decompositions({})
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
