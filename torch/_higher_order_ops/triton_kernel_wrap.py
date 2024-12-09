@@ -24,6 +24,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
+from torch._dynamo.variables.lazy import LazyVariableTracker, VariableTracker
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1084,11 +1085,6 @@ class TritonHOPifier:
                         != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
                     )
                     or (
-                        "prune_configs_by" in defaults
-                        and defaults["prune_configs_by"].default
-                        != kernel.early_config_prune
-                    )
-                    or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
@@ -1178,6 +1174,36 @@ class TritonHOPifier:
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
+
+        # Run prune_configs_by to filter the configs
+        if isinstance(variable.kernel, Autotuner):
+            # args and kwargs aren't real values yet
+            # e.g., LazyVariableTracker
+            # If a user wants to access them, we should realize them
+            def realize_var(
+                var: VariableTracker,
+            ) -> Union[Any, VariableTracker, LazyVariableTracker]:
+                while isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
+                    var = var.realize()
+                # if we can return the value, do it
+                if hasattr(var, "value"):
+                    return var.value
+                elif hasattr(var, "get_real_value"):
+                    return var.get_real_value()
+                else:
+                    return var
+
+            realizedKwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
+            realizedArgs = zip(
+                variable.kernel.arg_names, [realize_var(arg) for arg in args]
+            )
+            variable.kernel.nargs = dict(realizedArgs)
+
+            variable.kernel.prune_configs(realizedKwargs)
+            # Reset Autotuner vars to the default so we don't run prune_configs again
+            variable.kernel.perf_model = None
+            variable.kernel.configs_top_k = 1.0
+            variable.kernel.early_config_prune = None
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
