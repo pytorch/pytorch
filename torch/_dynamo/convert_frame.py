@@ -850,6 +850,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         check_fn = CheckFunctionManager(
+            code,
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
@@ -1089,6 +1090,7 @@ def _compile(
                     "inject_BUILD_SET_unimplemented_TESTING_ONLY",
                     "_autograd_backward_strict_mode_banned_ops",
                     "reorderable_logging_functions",
+                    "ignore_logger_methods",
                     "traceable_tensor_subclasses",
                     "_custom_ops_profile",
                 }

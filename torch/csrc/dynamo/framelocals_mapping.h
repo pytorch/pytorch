@@ -18,17 +18,24 @@ using FrameLocalsFrameType = _PyInterpreterFrame;
 using FrameLocalsFrameType = PyFrameObject;
 #endif // IS_PYTHON_3_11_PLUS
 
+// NOTE: Lifetime MUST NOT exceed the lifetime of the frame!
 typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
  private:
-  FrameLocalsFrameType* _frame; // non-owning
+  py::object _code_obj;
+  // can't use localsplus directly due to closure variables:
+  // - in 3.11+, the closure vars in the frame's closure object and
+  //   the corresponding localsplus entry is nullptr
+  // - regardless of Python version, we need to unbox the cell variable
+  std::vector<PyObject*> _framelocals;
+
   py::object _dict{py::none()};
 
   void _realize_dict();
 
  public:
-  explicit FrameLocalsMapping(FrameLocalsFrameType* frame) : _frame(frame) {}
+  explicit FrameLocalsMapping(FrameLocalsFrameType* frame);
 
-  PyObject* get(uint64_t idx);
+  PyObject* get(int idx);
 
   bool dict_realized() const {
     return _dict.is_none();
@@ -64,4 +71,6 @@ PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map);
 
 #ifdef __cplusplus
 } // extern "C"
+
+py::tuple code_framelocals_names(py::handle code);
 #endif

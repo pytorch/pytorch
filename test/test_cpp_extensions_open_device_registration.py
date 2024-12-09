@@ -3,6 +3,7 @@
 import _codecs
 import io
 import os
+import sys
 import tempfile
 import types
 import unittest
@@ -329,6 +330,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
+    )
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
@@ -533,6 +538,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
     @unittest.skipIf(
         np.__version__ < "1.25",
         "versions < 1.25 serialize dtypes differently from how it's serialized in data_legacy_numpy",
+    )
+    @unittest.skipIf(
+        np.__version__ >= "2.1",
+        "weights_only failure on numpy >= 2.1",
     )
     def test_open_device_numpy_serialization(self):
         """

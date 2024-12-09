@@ -39,6 +39,7 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
+from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -46,6 +47,7 @@ from torch._C._dynamo.guards import (
     DictGuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlapping_guard,
     profile_guard_manager,
     RootGuardManager,
 )
@@ -65,6 +67,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageOverlap,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -491,14 +494,14 @@ def strip_getattr_getitem(name):
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     extra = ""
-    if guard.user_stack:
-        for fs in reversed(guard.user_stack):
-            if fs.filename not in uninteresting_files():
-                extra = f"  # {format_frame(fs, line=True)}"
-                break
-    elif guard.stack:
-        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
-
+    if guard is not None:
+        if guard.user_stack:
+            for fs in reversed(guard.user_stack):
+                if fs.filename not in uninteresting_files():
+                    extra = f"  # {format_frame(fs, line=True)}"
+                    break
+        elif guard.stack:
+            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
     return f"{code_part:<60}{extra}"
 
 
@@ -615,9 +618,15 @@ class GuardManagerType(enum.Enum):
     DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
+@functools.lru_cache(None)
+def code_framelocals_names_cached(code: types.CodeType):
+    return code_framelocals_names(code)
+
+
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
+        f_code: types.CodeType,
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
@@ -626,6 +635,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
+        self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
@@ -740,7 +750,11 @@ class GuardBuilder(GuardBuilderBase):
         # reported in https://github.com/python/cpython/issues/125608,
         # fixed by https://github.com/python/cpython/pull/125611), we cannot take
         # advantage of __dict__ versions to speed up guard checks.
-        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+        if (
+            config.issue_3_13_0_warning
+            and sys.version_info >= (3, 13)
+            and sys.version_info < (3, 13, 1)
+        ):
             warnings.warn(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
@@ -965,7 +979,8 @@ class GuardBuilder(GuardBuilderBase):
             # NOTE: assumes scope["L"].keys() has the same order as the
             # names in frame's f_locals. This should be the case if self.scope["L"]
             # is set to frame.f_locals.
-            framelocals_idx = list(self.scope["L"].keys()).index(source.local_name)
+            framelocals_names = code_framelocals_names_cached(self.f_code)
+            framelocals_idx = framelocals_names.index(source.local_name)
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,
@@ -1897,14 +1912,19 @@ class GuardBuilder(GuardBuilderBase):
         for code in code_parts:
             self._set_guard_export_info(guard, [code])
 
+        # Make ShapeEnv guards available for testing.
+        if compile_context := CompileContext.try_get():
+            compile_context.shape_env_guards.extend(verbose_code_parts)
+
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        if code_parts:
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
@@ -2242,6 +2262,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class CheckFunctionManager:
     def __init__(
         self,
+        f_code,
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -2274,6 +2295,7 @@ class CheckFunctionManager:
             return r_builder.arg_ref(source.name())
 
         builder = GuardBuilder(
+            f_code,
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
@@ -2401,12 +2423,12 @@ class CheckFunctionManager:
                     "code": code_part,
                     "stack": (
                         structured.from_traceback(guard.stack.summary())
-                        if guard.stack
+                        if guard and guard.stack
                         else None
                     ),
                     "user_stack": (
                         structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
+                        if guard and guard.user_stack
                         else None
                     ),
                 }
@@ -2472,6 +2494,26 @@ class CheckFunctionManager:
                 install_object_aliasing_guard(
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
+                    [code_part],
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlap):
+                overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.overlapping_sources
+                ]
+                non_overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.non_overlapping_sources
+                ]
+                code_part = (
+                    """check_overlapping("""
+                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
+                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                )
+                install_storage_overlapping_guard(
+                    overlapping_guard_managers,
+                    non_overlapping_guard_managers,
                     [code_part],
                 )
                 add_code_part(code_part, None, True)

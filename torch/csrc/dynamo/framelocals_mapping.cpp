@@ -21,15 +21,16 @@
 // frame_get_var fetches the variable value from the frame given the index
 // NOTE: hidden variables are not included.
 // Returns a new reference.
-void FrameLocalsMapping::_realize_dict() {
-  _dict = py::dict();
-  if (!_frame->stacktop) {
+FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
+    : _code_obj(py::cast<py::object>((PyObject*)F_CODE(frame))) {
+  PyCodeObject* co = F_CODE(frame);
+  _framelocals.resize(co->co_nlocalsplus, nullptr);
+
+  if (!frame->stacktop) {
     return;
   }
 
-  PyCodeObject* co = F_CODE(_frame);
-
-  auto update_mapping = [&](int i, PyObject* value) {
+  auto update_fastlocals = [&](int i, PyObject* value) {
     _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
 
     if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
@@ -47,20 +48,18 @@ void FrameLocalsMapping::_realize_dict() {
       value = PyCell_GET(value);
     }
 
-    if (value != nullptr) {
-      py::handle name = PyTuple_GET_ITEM(co->co_localsplusnames, i);
-      _dict[name] = value;
-    }
+    DEBUG_CHECK(0 <= i && i < _framelocals.size());
+    _framelocals[i] = value;
   };
 
-  int offset = co->co_nlocalsplus - co->co_nfreevars;
+  auto offset = co->co_nlocalsplus - co->co_nfreevars;
   for (int i = 0; i < offset; i++) {
-    update_mapping(i, _frame->localsplus[i]);
+    update_fastlocals(i, frame->localsplus[i]);
   }
   // Get references to closure variables
-  PyObject* closure = ((PyFunctionObject*)FUNC(_frame))->func_closure;
+  PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
   for (int i = 0; i < co->co_nfreevars; ++i) {
-    update_mapping(offset + i, PyTuple_GET_ITEM(closure, i));
+    update_fastlocals(offset + i, PyTuple_GET_ITEM(closure, i));
   }
 
   // NOTE no need to move the instruction pointer to after COPY_FREE_VARS
@@ -68,65 +67,117 @@ void FrameLocalsMapping::_realize_dict() {
   // localsplus.
 }
 
-#else
-
-// Based on
-// https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1016
 void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
-  PyCodeObject* co = F_CODE(_frame);
+  py::tuple framelocals_names = code_framelocals_names(_code_obj);
 
-  auto update_mapping =
-      [&](PyObject* names, int i, PyObject* value, bool deref) {
-        py::handle name = PyTuple_GET_ITEM(names, i);
-        if (deref) {
-          CHECK(value != nullptr && PyCell_Check(value));
-          value = PyCell_GET(value);
-        }
-        if (value == nullptr) {
-          _dict.attr("pop")(name, py::none());
-        } else {
-          _dict[name] = value;
-        }
-      };
-
-  // locals
-  int nlocals = PyTuple_GET_SIZE(co->co_varnames);
-  if (nlocals > co->co_nlocals) {
-    nlocals = co->co_nlocals;
-  }
-  for (int i = 0; i < nlocals; i++) {
-    update_mapping(co->co_varnames, i, _frame->f_localsplus[i], false);
-  }
-
-  // cellvars
-  int ncells = PyTuple_GET_SIZE(co->co_cellvars);
-  for (int i = 0; i < ncells; i++) {
-    update_mapping(
-        co->co_cellvars, i, _frame->f_localsplus[co->co_nlocals + i], true);
-  }
-
-  // freevars
-  if (co->co_flags & CO_OPTIMIZED) {
-    int nfree = PyTuple_GET_SIZE(co->co_freevars);
-    for (int i = 0; i < nfree; i++) {
-      update_mapping(
-          co->co_freevars,
-          i,
-          _frame->f_localsplus[co->co_nlocals + ncells + i],
-          true);
+  auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
+  DEBUG_CHECK(nlocalsplus == _framelocals.size());
+  for (int i = 0; i < nlocalsplus; i++) {
+    if (_framelocals[i] != nullptr) {
+      _dict[framelocals_names[i]] = _framelocals[i];
     }
   }
 }
 
+py::tuple code_framelocals_names(py::handle code) {
+  CHECK(PyCode_Check(code.ptr()));
+  return py::cast<py::tuple>(((PyCodeObject*)code.ptr())->co_localsplusnames);
+}
+
+#else
+
+// Based on
+// https://github.com/python/cpython/blob/5f24da9d75bb0150781b17ee4706e93e6bb364ea/Objects/frameobject.c#L1016
+FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
+    : _code_obj(py::cast<py::object>((PyObject*)F_CODE(frame))) {
+  PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
+  auto nlocals =
+      std::min<int>(co->co_nlocals, (int)PyTuple_GET_SIZE(co->co_varnames));
+  auto ncells = PyCode_GetNCellvars(co);
+  auto nfree = PyCode_GetNFreevars(co);
+
+  _framelocals.resize(co->co_nlocals + ncells + nfree, nullptr);
+
+  auto update_fastlocals = [&](int i, bool deref) {
+    DEBUG_CHECK(0 <= i && i < _framelocals.size());
+    PyObject* value = frame->f_localsplus[i];
+    if (deref) {
+      CHECK(value != nullptr && PyCell_Check(value));
+      value = PyCell_GET(value);
+    }
+    _framelocals[i] = value;
+  };
+
+  // locals
+  for (int i = 0; i < nlocals; i++) {
+    update_fastlocals(i, false);
+  }
+
+  // cellvars
+  for (int i = 0; i < ncells; i++) {
+    update_fastlocals(co->co_nlocals + i, true);
+  }
+
+  // freevars
+  if (co->co_flags & CO_OPTIMIZED) {
+    for (int i = 0; i < nfree; i++) {
+      update_fastlocals(co->co_nlocals + ncells + i, true);
+    }
+  }
+}
+
+void FrameLocalsMapping::_realize_dict() {
+  _dict = py::dict();
+  py::tuple framelocals_names = code_framelocals_names(_code_obj);
+  PyCodeObject* co = (PyCodeObject*)_code_obj.ptr();
+
+  auto update_mapping = [&](int i) {
+    DEBUG_CHECK(0 <= i && i < _framelocals.size());
+    PyObject* value = _framelocals[i];
+    if (value == nullptr) {
+      _dict.attr("pop")(framelocals_names[i], py::none());
+    } else {
+      _dict[framelocals_names[i]] = value;
+    }
+  };
+
+  // locals
+  py::tuple varnames = _code_obj.attr("co_varnames");
+  auto nlocals = std::min(co->co_nlocals, (int)varnames.size());
+  for (int i = 0; i < nlocals; i++) {
+    update_mapping(i);
+  }
+
+  // cellvars
+  auto ncells = PyCode_GetNCellvars(co);
+  for (int i = 0; i < ncells; i++) {
+    update_mapping(co->co_nlocals + i);
+  }
+
+  // freevars
+  if (co->co_flags & CO_OPTIMIZED) {
+    auto nfree = PyCode_GetNFreevars(co);
+    for (int i = 0; i < nfree; i++) {
+      update_mapping(co->co_nlocals + ncells + i);
+    }
+  }
+}
+
+py::tuple code_framelocals_names(py::handle code) {
+  CHECK(PyCode_Check(code.ptr()));
+  py::tuple names = code.attr("co_varnames") + code.attr("co_cellvars");
+  if (((PyCodeObject*)code.ptr())->co_flags & CO_OPTIMIZED) {
+    names += code.attr("co_freevars");
+  }
+  return names;
+}
+
 #endif
 
-PyObject* FrameLocalsMapping::get(uint64_t idx) {
-#if IS_PYTHON_3_11_PLUS
-  return _frame->localsplus[idx];
-#else
-  return _frame->f_localsplus[idx];
-#endif // IS_PYTHON_3_11_PLUS
+PyObject* FrameLocalsMapping::get(int idx) {
+  DEBUG_CHECK(0 <= idx && idx < _framelocals.size());
+  return _framelocals[idx];
 }
 
 FrameLocalsMapping* get_framelocals_mapping(FrameLocalsFrameType* frame) {
