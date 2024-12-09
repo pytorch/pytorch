@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocmVersionLessThan,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     skipIfRocm,
     TestCase,
