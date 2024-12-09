@@ -2,15 +2,22 @@
 
 import dataclasses
 import functools
+import itertools
 import logging
+import os
+import traceback
 from importlib import import_module
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Type
 
 import torch
+import torch.utils._pytree as pytree
 from functorch.compile import min_cut_rematerialization_partition
-from torch import _guards
+from torch import _guards, Tensor
+from torch._dynamo.source import LocalSource
+from torch._dynamo.variables.builder import GraphArg
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
+from torch.utils.weak import TensorWeakRef
 
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
@@ -230,6 +237,224 @@ register_backend(
 # by using the relevant fuser with torch.jit.fuser(...)
 aot_ts = aot_autograd(fw_compiler=ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
+
+
+def _try_lift_tensor_arguments(gm, inputs):
+    placeholders = {}
+    i = 0
+    added_inputs = []
+    for n in gm.graph.nodes:
+        if n.op == "placeholder":
+            placeholders[n] = inputs[i]
+            i += 1
+        elif n.op == "call_function":
+            if len(n.kwargs) != 0:
+                continue
+            node_args = [a for a in n.args if isinstance(a, torch.fx.Node)]
+            other_args = [a for a in n.args if not isinstance(a, torch.fx.Node)]
+
+            is_output_tensor = isinstance(n.meta["example_value"], Tensor)
+
+            if (
+                is_output_tensor
+                and all(
+                    (a in placeholders and isinstance(a, (bool, int, float)))
+                    for a in node_args
+                )
+                and all(isinstance(a, (bool, int, float)) for a in other_args)
+            ):
+                real_args = [placeholders.get(a, a) for a in n.args]
+                new_real_arg = n.target(*real_args)
+
+                with gm.graph.inserting_before(n):
+                    name = f"lifted_arg_{len(added_inputs)}"
+                    new_input_node = gm.graph.placeholder(name, type_expr=Tensor)
+                    added_inputs.append(new_real_arg)
+                    new_input_node.meta["grapharg"] = GraphArg(
+                        source=LocalSource(name),
+                        _example=TensorWeakRef(new_real_arg),
+                        pass_arg_as_tensor=False,
+                        fake_tensor=None,
+                        is_tensor=True,
+                        example_strong_ref=new_real_arg,
+                    )
+                    n.replace_all_uses_with(new_input_node)
+
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+
+    new_inputs = [*inputs, *added_inputs]
+
+    log.debug(
+        "test_subclasses _try_lift_tensor_arguments graph after lifting: inputs:%s result:%s",
+        new_inputs,
+        gm.print_readable(False),
+    )
+    return gm, new_inputs
+
+
+@dataclasses.dataclass
+class TensorToSubclassTransform:
+    factory_fn: Callable[[Tensor], Type]
+    precondition: Optional[Callable[[Tensor], bool]] = None
+
+    def check_precondition(self, t):
+        return self.precondition is None or self.precondition(t)
+
+
+@register_backend
+@torch._functorch.config.patch("enable_autograd_cache", False)
+def test_subclasses(gm, inputs, **kwargs):
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if any(isinstance(inp, FunctionalTensor) for inp in inputs):
+        return gm
+
+    if kwargs:
+        log.warning("test_subclasses backend ignoring extra kwargs %s", kwargs)
+
+    log.debug(
+        "test_subclasses backend call inputs:%s gm:%s", inputs, gm.print_readable(False)
+    )
+
+    import copy
+
+    test_gm = copy.deepcopy(gm)
+
+    # Verify original inputs
+    aot_eager(test_gm, inputs)
+
+    from torch.testing._internal.subclasses import (
+        F32_QI32QuantRWTensor,
+        WrapperSubclass,
+    )
+    from torch.testing._internal.two_tensor import TwoTensor
+
+    TRANSFORMATIONS: List[TensorToSubclassTransform] = [
+        TensorToSubclassTransform(
+            factory_fn=lambda t: WrapperSubclass(t),
+        ),
+        TensorToSubclassTransform(
+            factory_fn=lambda t: TwoTensor(t, t),
+        ),
+    ]
+    if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
+        TRANSFORMATIONS.extend(
+            [
+                TensorToSubclassTransform(
+                    factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
+                    precondition=lambda t: t.ndim <= 2,
+                ),
+                # TODO: NestedTensor transformation can have many false-positive failures
+                # as NT does not support many of the operations
+                TensorToSubclassTransform(
+                    factory_fn=lambda t: torch.nested.nested_tensor_from_jagged(
+                        t, offsets=torch.tensor([0, t.size(1)])
+                    ),
+                    precondition=lambda t: t.ndim >= 2,
+                ),
+                # TODO(ivankobzarev): DTensor
+            ],
+        )
+
+    def _is_tensor(t):
+        return isinstance(t, Tensor)
+
+    if not any(_is_tensor(t) for t in inputs):
+        # Try to find tensor creations with inputs and lift as arguments
+        test_gm, test_inputs = _try_lift_tensor_arguments(test_gm, inputs)
+
+        if not any(_is_tensor(t) for t in inputs):
+            log.debug("No tensor inputs")
+            return gm
+
+    MAX_SUBCLASSES_NESTING: int = int(
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=1)
+    )
+    N: int = len(TRANSFORMATIONS)
+
+    TRANSFORM_SEQS: List[Any] = [
+        (),  # empty tuple means no transformation
+    ]
+    for k in range(1, MAX_SUBCLASSES_NESTING + 1):
+        for p in itertools.product(list(range(N)), repeat=k):
+            TRANSFORM_SEQS.append(p)  # noqa: PERF402
+
+    TENSOR_INPUTS_IDXS: List[int] = [
+        i for i, inp in enumerate(inputs) if _is_tensor(inp)
+    ]
+    NUM_TENSOR_INPUTS = len(TENSOR_INPUTS_IDXS)
+
+    TENSOR_INPUTS_TRANSFORM_SEQS = list(
+        itertools.product(TRANSFORM_SEQS, repeat=NUM_TENSOR_INPUTS)
+    )
+    NUM_TENSOR_INPUTS_TRANSFORM_SEQS = len(TENSOR_INPUTS_TRANSFORM_SEQS)
+    log.debug(
+        "test_subclasses backend TENSOR_INPUTS_TRANSFORM_SEQS:%s",
+        TENSOR_INPUTS_TRANSFORM_SEQS,
+    )
+
+    def apply_transform_seq(transform_seq, inp):
+        ret = inp
+        for transform_idx in transform_seq:
+            transform = TRANSFORMATIONS[transform_idx]
+            if transform.check_precondition(ret):
+                ret = transform.factory_fn(ret)
+
+        return ret
+
+    log.info(
+        "test_subclasses backend testing %d transformed inputs gm:%s",
+        NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
+        test_gm.print_readable(False),
+    )
+    for i, transform_seqs in enumerate(TENSOR_INPUTS_TRANSFORM_SEQS):
+        test_inputs = pytree.tree_map(lambda x: x.detach(), copy.copy(inputs))
+        # Have to copy GraphModule, as AOTD caches some info based on inputs in attrs
+        _test_gm = copy.deepcopy(test_gm)
+
+        for seq_idx, idx in enumerate(TENSOR_INPUTS_IDXS):
+            test_inputs[idx] = apply_transform_seq(
+                transform_seqs[seq_idx], test_inputs[idx]
+            )
+
+        try:
+            aot_eager(_test_gm, test_inputs)
+            log.info(
+                "test_subclasses backend testing %d/%d transformed inputs:%s OK",
+                i,
+                NUM_TENSOR_INPUTS_TRANSFORM_SEQS,
+                test_inputs,
+            )
+        except Exception as ex:
+            # TODO: Print script with graph and inputs for repro
+            repro_py = f"""
+import torch
+from torch import tensor
+from torch._dynamo.backends.debugging import aot_eager
+from torch.testing._internal.subclasses import (
+    F32_QI32QuantRWTensor,
+    WrapperSubclass,
+)
+from torch.testing._internal.two_tensor import TwoTensor
+from torch.nested._internal.nested_tensor import NestedTensor
+
+inputs = {[ti.detach() if _is_tensor(ti) else ti for ti in test_inputs]}
+{gm.print_readable(False)}
+gm = GraphModule()
+aot_eager(gm, inputs)"""
+
+            log.error(
+                "test_subclasses error compiling\ninputs:%s\ntransform_seqs:%s\n---REPRO_BEGIN---%s\n---REPRO_END---\nexception:%s",
+                test_inputs,
+                transform_seqs,
+                repro_py,
+                "".join(traceback.format_exception(type(ex), ex, ex.__traceback__)),
+            )
+            raise ex
+
+    return gm
+
 
 # These buggy backends are used for inducing bugs so that we can test
 # our repro extraction / minifier scripts

@@ -13,6 +13,16 @@ CONFIGS = {
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
         "linux-focal-py3.9-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
+    "aot_eager39": {
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
+    },
+    "subclasses39": {
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.9-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
+    },
     "dynamo311": {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 1, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
@@ -22,6 +32,16 @@ CONFIGS = {
         "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+    },
+    "aot_eager311": {
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
+    },
+    "subclasses311": {
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
     },
 }
 
@@ -61,6 +81,7 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     required_jobs = []
     for config in configs:
         required_jobs.extend(list(CONFIGS[config]))
+
     for job in required_jobs:
         assert (
             job in workflow_jobs
@@ -73,6 +94,7 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
 
     def download_report(job_name, subdir):
         job_id = workflow_jobs[job_name]
+
         for listing in listings:
             name = listing["name"]
             if not name.startswith("test-reports-"):
