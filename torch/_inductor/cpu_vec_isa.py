@@ -122,6 +122,9 @@ cdll.LoadLibrary("__lib_path__")
                 if not os.path.isfile(output_path):
                     status, target_file = x86_isa_help_builder.build()
 
+                import time
+
+                start = time.time()
                 # Check build result
                 subprocess.check_call(
                     [
@@ -133,6 +136,8 @@ cdll.LoadLibrary("__lib_path__")
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
+                end = time.time()
+                print("subprocess.check_call time: ", end - start)
             except Exception as e:
                 return False
 
