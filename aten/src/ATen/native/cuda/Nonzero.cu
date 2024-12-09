@@ -222,7 +222,7 @@ void nonzero_static_cuda_out_impl(
     Tensor& out) {
 # if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
 
-  Tensor self_ = self.contiguous();
+  Tensor self_contiguous_ = self.contiguous();
   // see comment in nonzero_cuda_out_impl on reqs for out
   bool out_correct_size =
       out.dim() == 2 && out.sizes()[0] == size && out.sizes()[1] == self.dim();
@@ -240,7 +240,7 @@ void nonzero_static_cuda_out_impl(
   int64_t* out_data_ptr = need_to_copy ? out_temp.mutable_data_ptr<int64_t>()
                                        : out.mutable_data_ptr<int64_t>();
 
-  const scalar_t * in_data_ptr = self_.const_data_ptr<scalar_t>();
+  const scalar_t * in_data_ptr = self_contiguous_.const_data_ptr<scalar_t>();
   constexpr int BLOCK_THREADS = 512; //block_threads<sizeof(scalar_t)>();
   constexpr int ITEMS_PER_THREAD = 16;
   auto grid_size = (self.numel() + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
@@ -248,7 +248,6 @@ void nonzero_static_cuda_out_impl(
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = (self.numel() + iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD);
-  //grid_size = std::min(num_sms, grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(int));
   at::cuda::cub::calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, true>
@@ -288,7 +287,7 @@ void nonzero_static_cuda_out_impl(
     out.copy_(out_temp);
   }
 #else
-  TORCH_CHECK(false, "Nonzero_statis is not supported for cuda <= 11.4");
+  TORCH_CHECK(false, "Nonzero_static is not supported for cuda <= 11.4");
 #endif
 }
 
