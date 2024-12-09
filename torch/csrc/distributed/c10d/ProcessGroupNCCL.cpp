@@ -1489,10 +1489,24 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
         "https://pytorch.org/docs/stable/distributed.html#shutdown");
   }
 
-  // Note: we have rewritten `shutdown` to represent the destroy behavior
-  // (blocking). Thus we route to `abort()` explicitly here to maintain the
-  // old behavior. We should re-validate the choice and document the rationale
-  // better. (TODO)
+  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+  // context. Therefore, we are here only when the global context is tearing
+  // down, which means the entire program is exiting.  At this point, user will
+  // no longer care about the result of any collective, thus we can use abort
+  // instead of destroy to make the destruction non-blocking.
+
+  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+  // does not have the global context mentioned. In that case, calling `abort()`
+  // here could lead to corrupted result. We should consider not doing anything
+  // and just let things leak.
+  // Adversarial example:
+  /*
+    Work routine(Tensor& t) {
+      pg = ProcessGroupNCCL(…);
+      w = pg.allReduce(t);
+      return w;
+    }
+  */
   abort();
 
 join_threads:
