@@ -735,7 +735,6 @@ class OpOverrides(OpDecompositions):
     def __getattr__(self, item):
         return getattr(self._parent, item)
 
-
     @staticmethod
     def constant(value, dtype):
         return repr(value)
