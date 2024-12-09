@@ -290,6 +290,9 @@ XPUStream getStreamFromExternal(
   TORCH_CHECK(
       ext_queue->get_context() == c10::xpu::get_device_context(),
       "External SYCL queue must be created with the same context as the PyTorch XPU used.");
+  TORCH_CHECK(
+      ext_queue->get_device() == c10::xpu::get_raw_device(device_index),
+      "External SYCL queue doesn't match the given device index.");
   return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_queue));
 }
 
