@@ -313,7 +313,7 @@ class TORCH_API Context {
   //    }
 
   // Throws an error if `Context::deterministicAlgorithms()` is true
-  static void alertNotDeterministic(c10::string_view const& caller);
+  static void alertNotDeterministic(std::string_view const& caller);
 
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
