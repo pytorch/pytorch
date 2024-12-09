@@ -451,25 +451,25 @@ jobs:
           name: manywheel-py3_9-rocm6_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -564,25 +564,25 @@ jobs:
           name: manywheel-py3_9-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -688,25 +688,25 @@ jobs:
           name: manywheel-py3_9-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1150,25 +1150,25 @@ jobs:
           name: manywheel-py3_10-rocm6_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1263,25 +1263,25 @@ jobs:
           name: manywheel-py3_10-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1387,25 +1387,25 @@ jobs:
           name: manywheel-py3_10-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -1919,25 +1919,25 @@ jobs:
           name: manywheel-py3_11-rocm6_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2032,25 +2032,25 @@ jobs:
           name: manywheel-py3_11-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2156,25 +2156,25 @@ jobs:
           name: manywheel-py3_11-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2618,25 +2618,25 @@ jobs:
           name: manywheel-py3_12-rocm6_1
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2731,25 +2731,25 @@ jobs:
           name: manywheel-py3_12-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -2855,25 +2855,25 @@ jobs:
           name: manywheel-py3_12-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -3328,25 +3328,25 @@ jobs:
           name: manywheel-py3_13-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
       - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
-          quiet-checkout: true
+          show-progress: false
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
