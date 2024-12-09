@@ -412,7 +412,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     auto grad_weight = output_mask[1] ?
       reshape_dim_outof(0, batch_size, std::get<1>(result)) : Tensor();
     return std::make_tuple(
-        output_mask[0] ? makeBatched(std::move(grad_input), 1, cur_level) : grad_input,
+        output_mask[0] ? makeBatched(std::move(grad_input), 1, cur_level) : std::move(grad_input),
         output_mask[1] ? makeBatched(std::move(grad_weight), 0, cur_level) : std::move(grad_weight),
         std::move(grad_bias));
   }
