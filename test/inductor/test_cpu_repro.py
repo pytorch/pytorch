@@ -845,6 +845,26 @@ class CPUReproTests(TestCase):
                     (_x,),
                 )
 
+    @requires_vectorization
+    def test_asinh_with_corner_inputs(self):
+        # https://github.com/pytorch/pytorch/issues/142345
+
+        def fn(input):
+            out = torch.asinh(input)
+            return out
+
+        x = torch.tensor([0, 0, 0, -10000.1]).repeat(3, 4)
+
+        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
+        for dtype in [torch.float32, torch.bfloat16, torch.float16, torch.double]:
+            for simdlen in bit_widths:
+                with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    _x = x.to(dtype)
+                    self.common(fn, (_x,))
+                    check_metrics_vec_kernel_count(1)
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
