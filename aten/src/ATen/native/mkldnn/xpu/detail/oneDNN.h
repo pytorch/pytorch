@@ -156,7 +156,7 @@ void quantized_matmul(
     bool m2_trnas);
 
 namespace graph {
-TORCH_API void gpu_float_sdpa(
+void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_k,
