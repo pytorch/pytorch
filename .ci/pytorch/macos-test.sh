@@ -19,7 +19,7 @@ fi
 popd
 
 if [[ "${TEST_CONFIG}" == "default" ]]; then
-  # See https://github.com/pytorch/pytorch/pull/142421
+  # See https://github.com/pytorch/pytorch/issues/142206
   # Temporarily turn on CONTINUE_THROUGH_ERROR for all mac default tests in
   # order to find all test failures.  Red signal will show up later than usual,
   # but failing tests can also be found on HUD when clicking additional test
