@@ -279,6 +279,7 @@ def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOT
             # TODO(angelayi): We shouldn't need to do this -- miniz should
             # handle reading the buffer. This is just a temporary workaround
             f.write(path.read())
+            path.seek(0)
             log.debug("Writing buffer to tmp file located at %s.", f.name)
             loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
             return AOTICompiledModel(loader)
