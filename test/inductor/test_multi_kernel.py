@@ -70,6 +70,7 @@ def make_cpp_wrapper_test(orig_test, **extra_args):
 @config.patch(
     {
         "triton.multi_kernel": int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1")),
+        "triton.autotune_at_compile_time": False,  # TODO: Make multikernel work with autotune_at_compile_time
         "benchmark_kernel": True,
     }
 )
