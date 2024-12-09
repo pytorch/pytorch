@@ -1912,7 +1912,7 @@ class TritonKernel(SIMDKernel):
         """
         depcount = 0
         has_read_deps = True # by default, assume that this buffer has > 1 read dependencies
-        if self.current_node: # it can be that self.current_node is None (!)
+        if config.triton.skip_l1_cache and self.current_node: # it can be that self.current_node is None (!)
             for node in self.current_node.scheduler.nodes:
                 for l in list(node.read_writes.reads):
                     if (l.name == name):
@@ -1959,9 +1959,8 @@ class TritonKernel(SIMDKernel):
             or has_read_deps
         ) and (
             config.triton.skip_l1_cache
-            and (torch.version.hip is not None)
         )
-        # NOTE: can be disabled with export TORCHINDUCTOR_SKIP_L1=0
+        # NOTE: controlled with env variable TORCHINDUCTOR_SKIP_L1
 
         cachemod = ""
         if skip_l1_cache:
