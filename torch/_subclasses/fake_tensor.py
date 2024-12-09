@@ -64,6 +64,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -1128,6 +1129,8 @@ class FakeTensorMode(TorchDispatchMode):
     # mode, you should reset the counter to the initial count.
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
+
+    nt_cache_to_nested_int: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
 
     def __init__(
         self,
@@ -2530,9 +2533,10 @@ class FakeTensorMode(TorchDispatchMode):
         # comparing two of those nested ints can generate a guard
         # so we make sure that they have proper source.
         # during hint comparison, we check the nested_int which is the same.
-        if cache.nested_int_ref is None or (ret := cache.nested_int_ref()) is None:
+        ref = self.nt_cache_to_nested_int.get(cache)
+        if ref is None or (ret := ref()) is None:
             ret = self.create_symbolic_nested_int(cache=cache)
-            cache.nested_int_ref = weakref.ref(ret)
+            self.nt_cache_to_nested_int[cache] = weakref.ref(ret)
         assert isinstance(ret, torch.SymInt)
         return ret * coeff
 

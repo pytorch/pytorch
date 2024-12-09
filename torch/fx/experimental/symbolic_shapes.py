@@ -4019,6 +4019,7 @@ class ShapeEnv:
         elif hint is not None and is_nested_int(hint) and nested_int_desc is not None:
             from torch._dynamo.source import SymNodePropertySource
             from torch.nested._internal.nested_int import NestedIntNode
+            from torch.nested._internal.utils import _try_get_fake_mode
 
             assert metafy_fn is not None
             assert source is not None
@@ -4039,7 +4040,9 @@ class ShapeEnv:
             )
             if coeff != 1:
                 # Don't participate in caching when coeff != 1
-                cache.nested_int_ref = weakref.ref(out)
+                fake_mode = _try_get_fake_mode(cache)
+                assert fake_mode is not None
+                fake_mode.nt_cache_to_nested_int[cache] = weakref.ref(out)
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
             # tensor that has hints for all sizes, but we MUST NOT create a
