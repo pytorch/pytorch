@@ -19,6 +19,28 @@ name: !{{ build_environment }}
           echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
 {%- endmacro %}
 
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
+      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+        uses: malfet/checkout@silent-checkout
+        with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
+      {%- if deep_clone %}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+      {%- endif %}
+      {%- if repository != "pytorch/pytorch" %}
+          repository: !{{ repository }}
+      {%- endif %}
+      {%- if directory %}
+          path: !{{ directory }}
+      {%- endif %}
+          quiet-checkout: true
+{%- endmacro -%}
+
 on:
   push:
     {%- if branches == "nightly" %}
