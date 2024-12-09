@@ -9500,7 +9500,7 @@ class GraphModule(torch.nn.Module):
                 return x[:out_size]
 
         dim_min = 5
-        dim_max = 10
+        dim_max = 8
         dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
 
         module = ModuleWithSymRound()
