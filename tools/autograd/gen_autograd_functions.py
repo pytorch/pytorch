@@ -124,12 +124,16 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    // variable_list result = apply(variable_list(grads));
+  ${apply_with_saved_before}
+
+  variable_list result;
+  if (!torch::dynamo::autograd::is_proxy_nodes_into_graph_enabled()) {
+    result = apply(variable_list(grads));
+  } else {
     auto state = get_state();
     ${compute_schema}
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-    variable_list result = interface->call_function(
+    result = interface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
         ${op}_apply_functional_ivalue,
@@ -139,8 +143,10 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
         name(),
         schema,
         /*builtin*/true);
-    ${apply_with_saved_after}
-    return result;
+  }
+
+  ${apply_with_saved_after}
+  return result;
 }
 ivalue_list ${op}::get_state() {
   SavedState saved_state;
@@ -980,7 +986,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     masks = []
 
     need_any_grad_defined_var = False
-    for derivative in enumerate(info.derivatives):
+    for derivative in info.derivatives:
         checks_any_grad_defined, derivative_text = emit_derivative(
             derivative, info.args_with_derivatives
         )

@@ -923,6 +923,15 @@ struct dependent_false : std::false_type {};
 // the IValue arguments to Python via an indirection.
 // In Python, these get proxy'ed into a graph.
 
+// Thread-local config option to switch between two behaviors:
+// (False) compiled autograd's initial capture inlines through apply_with_saved,
+// potentially baking in information about strides and Tensor subclasses into
+// the graph. This is deprecated.
+// (True) compiled autograd's initial capture uses functional autograd to
+// proxy function calls into the graph without specializing on properties.
+TORCH_API bool is_proxy_nodes_into_graph_enabled();
+TORCH_API void set_proxy_nodes_into_graph_enabled(bool enabled);
+
 // Helper struct for packing/unpacking an arbitrary C++ type into a single
 // IValue. There are various full and partial specializations for IValuePacker
 // to handle packing specific types (like TensorOptions) into an IValue.

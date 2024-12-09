@@ -374,8 +374,9 @@ variable_list PyNode::apply_with_saved(
   f->compiled_autograd_tracing = true;
   variable_list result;
   if (!compiled_autograd_should_lift()) {
+    TORCH_INTERNAL_ASSERT(
+        !torch::dynamo::autograd::is_proxy_nodes_into_graph_enabled())
     if (_backward_state_idx.has_value()) {
-      // TODO(rzou): need to excise this branch?
       PyObject* r = PyObject_CallMethod(
           saved.get_py_compiler(),
           "bind_backward_state",

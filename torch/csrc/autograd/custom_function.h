@@ -236,38 +236,41 @@ struct CppNode : public Node {
     saved.before(input_info_);
     saved.before(output_info_);
 
-    // auto results = apply(variable_list(inputs));
-
-    SavedState state;
-    state.pack_saved_data(ctx_.saved_data);
-    variable_list saved_variables = ctx_.get_saved_variables();
-    state.pack(saved_variables);
-    state.pack(ctx_.materialize_grads_);
-    state.pack(output_info_);
-    state.pack(is_variable_input_);
-    auto& stack = state.stack;
-    std::vector<at::TypePtr> schema;
-    schema.reserve(stack.size());
-    for (const auto& ivalue : stack) {
-      if (ivalue.isTensor()) {
-        // special case: ivalue.type() for an undefined tensor doesn't work.
-        schema.emplace_back(at::TensorType::get());
-      } else {
-        schema.emplace_back(ivalue.type());
+    variable_list results;
+    if (!torch::dynamo::autograd::is_proxy_nodes_into_graph_enabled()) {
+      results = apply(variable_list(inputs));
+    } else {
+      SavedState state;
+      state.pack_saved_data(ctx_.saved_data);
+      variable_list saved_variables = ctx_.get_saved_variables();
+      state.pack(saved_variables);
+      state.pack(ctx_.materialize_grads_);
+      state.pack(output_info_);
+      state.pack(is_variable_input_);
+      auto& stack = state.stack;
+      std::vector<at::TypePtr> schema;
+      schema.reserve(stack.size());
+      for (const auto& ivalue : stack) {
+        if (ivalue.isTensor()) {
+          // special case: ivalue.type() for an undefined tensor doesn't work.
+          schema.emplace_back(at::TensorType::get());
+        } else {
+          schema.emplace_back(ivalue.type());
+        }
       }
-    }
 
-    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
-    variable_list results = interface->call_function(
-        saved.get_py_compiler(),
-        "apply_functional",
-        get_functional().value(),
-        inputs,
-        stack,
-        num_outputs(),
-        name(),
-        schema,
-        /*builtin*/ false);
+      const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+      results = interface->call_function(
+          saved.get_py_compiler(),
+          "apply_functional",
+          get_functional().value(),
+          inputs,
+          stack,
+          num_outputs(),
+          name(),
+          schema,
+          /*builtin*/ false);
+    }
 
     saved.after(ctx_.saved_data);
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());

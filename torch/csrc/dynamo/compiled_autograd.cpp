@@ -2,6 +2,16 @@
 
 namespace torch::dynamo::autograd {
 
+thread_local bool kProxyNodesIntoGraphEnabled = true;
+
+bool is_proxy_nodes_into_graph_enabled() {
+  return kProxyNodesIntoGraphEnabled;
+}
+
+void set_proxy_nodes_into_graph_enabled(bool enabled) {
+  kProxyNodesIntoGraphEnabled = enabled;
+}
+
 std::unique_ptr<PyCompilerInterface> kPyCompilerInterface;
 
 const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface() {
