@@ -2,9 +2,10 @@
 import os
 from typing import Callable, Optional, TypeVar
 
-from torch.fx import Graph
+from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
+from torch.fx.traceback import NodeSource, NodeSourceAction
 
 
 T = TypeVar("T")
@@ -83,22 +84,41 @@ class GraphTransformObserver:
         )
 
     def __enter__(self):
-        if self.log_url is None or self.gm is None:
-            return self
-
         self.erased_nodes = set()
         self.created_nodes = set()
+        self.replaced_nodes = {}
         self.gm._register_create_node_hook(self.on_node_creation)
         self.gm._register_erase_node_hook(self.on_node_erase)
+        self.gm._register_replace_node_hook(self.on_node_replace)
 
         return self
 
     def __exit__(self, type, value, tb):
-        if self.log_url is None or self.gm is None:
-            return
-
         self.gm._unregister_create_node_hook(self.on_node_creation)
         self.gm._unregister_erase_node_hook(self.on_node_erase)
+        self.gm._unregister_replace_node_hook(self.on_node_replace)
+
+        for node in self.gm.graph.nodes:
+            if node.name in self.replaced_nodes:
+                action = [NodeSourceAction.REPLACE]
+                if node.name in self.created_nodes:
+                    action.append(NodeSourceAction.CREATE)
+                replaced = self.replaced_nodes[node.name]
+                new_node_source = NodeSource(replaced, self.passname, action)
+                if "from_node" not in node.meta:
+                    node.meta["from_node"] = [new_node_source]
+                else:
+                    node.meta["from_node"].append(new_node_source)
+
+            elif node.name in self.created_nodes:
+                source = NodeSource(None, self.passname, NodeSourceAction.CREATE)
+                if "from_node" not in node.meta:
+                    node.meta["from_node"] = [source]
+                else:
+                    node.meta["from_node"].append(source)
+
+        if self.log_url is None or self.gm is None:
+            return
 
         if len(self.created_nodes) > 0 or len(self.erased_nodes) > 0:
             for e in self.input_dot_graph.get_node_list():
@@ -136,3 +156,6 @@ class GraphTransformObserver:
 
     def on_node_erase(self, node):
         self.erased_nodes.add(node.name)
+
+    def on_node_replace(self, old: Node, new: str, user: Node):
+        self.replaced_nodes[new] = old
