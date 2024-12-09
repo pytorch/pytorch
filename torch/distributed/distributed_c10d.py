@@ -1544,10 +1544,10 @@ def init_process_group(
             build-time configurations, valid values include ``mpi``, ``gloo``,
             ``nccl``, ``ucc``, or one that is registered by a third-party
             plugin.
-            If ``backend`` is not provided, c10d will use a backend registered
-            for the device type indicated by the `device_id` kwarg (if
-            provided). The known default registrations today are: ``nccl`` for
-            ``cuda``, ``gloo`` for ``cpu``.
+            Since 2.6, if ``backend`` is not provided, c10d will use a backend
+            registered for the device type indicated by the `device_id` kwarg
+            (if provided). The known default registrations today are: ``nccl``
+            for ``cuda``, ``gloo`` for ``cpu``.
             If neither ``backend`` nor ``device_id`` is provided, c10d will
             detect the accelerator on the run-time machine and use a backend
             registered for that detected accelerator (or ``cpu``).
