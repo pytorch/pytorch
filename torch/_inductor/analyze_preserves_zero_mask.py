@@ -1,5 +1,6 @@
-from typing import Any, Callable, Optional
 import itertools
+from typing import Any, Callable, Optional, TYPE_CHECKING
+
 import sympy
 
 import torch
@@ -8,14 +9,20 @@ from torch._inductor.index_propagation import SymPyOps, TypedExpr
 
 from .virtualized import StoreMode, V
 
-def construct_symbol(count, dtype) -> sympy.Symbol:
+
+if TYPE_CHECKING:
+    from torch._inductor.scheduler import SchedulerNode
+
+
+def construct_symbol(count: int, dtype: torch.dtype) -> sympy.Symbol:
     real = dtype.is_floating_point
     integer = not real and not dtype.is_complex
     return sympy.Symbol(f"unknown_{count}", real=real, integer=integer)
 
+
 class PreservesZeros(SymPyOps):
     """
-    For prologue kernels where the loads are masked, does the final store of this kernel preserve 
+    For prologue kernels where the loads are masked, does the final store of this kernel preserve
     the zeros.
     """
 
@@ -53,7 +60,7 @@ class PreservesZeros(SymPyOps):
         def inner(*args: Any, **kwargs: Any) -> TypedExpr:
             if hasattr(OpDecompositions, name):
                 return getattr(OpDecompositions, name)(*args, **kwargs).value
-                
+
             nonlocal self
             dtype = getattr(self.dtype_prop, name)(*args, **kwargs)
             return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
@@ -61,7 +68,7 @@ class PreservesZeros(SymPyOps):
         return inner
 
 
-def prologue_preserves_zero_mask(node: torch._inductor.scheduler.SchedulerNode) -> bool:
+def prologue_preserves_zero_mask(node: "SchedulerNode") -> bool:
     """
     Does this prologue preserve zero masks
     """
