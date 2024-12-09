@@ -699,7 +699,7 @@ struct TORCH_API IValue final {
   const std::string& toStringRef() const;
   std::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
-  c10::string_view toStringView() const;
+  std::string_view toStringView() const;
 
   // DoubleList
   bool isDoubleList() const;

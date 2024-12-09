@@ -199,7 +199,7 @@ static void binaryOpScalar(const Tensor& self,
 
 static void div_mode_template(const Tensor& self,
                               const Tensor& other,
-                              std::optional<c10::string_view> rounding_mode,
+                              std::optional<std::string_view> rounding_mode,
                               const Tensor& output,
                               const string op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
@@ -405,7 +405,7 @@ TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Te
 }
 
 TORCH_IMPL_FUNC(div_out_mode_mps)
-(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, const Tensor& output) {
+(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, const Tensor& output) {
   mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
 }
 

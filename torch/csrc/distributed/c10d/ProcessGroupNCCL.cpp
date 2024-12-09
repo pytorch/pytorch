@@ -21,6 +21,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -380,13 +381,13 @@ std::string dump_nccl_trace(
     bool includeStackTraces,
     bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return NCCLTraceBuffer::get()->dump(
+  return FlightRecorder::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string dump_nccl_trace_json(bool includeCollectives, bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
-  return NCCLTraceBuffer::get()->dump_json(
+  return FlightRecorder::get()->dump_json(
       ncclDumpMap, includeCollectives, onlyActive);
 }
 
@@ -646,8 +647,8 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
-  std::optional<NCCLTraceBuffer::Entry> entry =
-      NCCLTraceBuffer::get()->getEntry(trace_id_);
+  std::optional<FlightRecorder::Entry> entry =
+      FlightRecorder::get()->getEntry(trace_id_);
   if (entry.has_value()) {
     auto entryVal = entry.value();
     // Get stack trace from FR entry, in string format
@@ -909,7 +910,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
-  ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
+  traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -990,7 +991,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_ENABLE_MONITORING: "
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
+            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
             << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
             << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_
@@ -1264,13 +1265,14 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-void ProcessGroupNCCL::waitForFutureOrTimeout(
+bool ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
     const std::string& futDescription,
     bool throwException,
     bool log) {
   std::string errorMsg;
+  bool complete = false;
 
   ::c10d::C10dLoggingData data;
   if (log) {
@@ -1294,6 +1296,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
+        complete = true;
       }
     } catch (const std::exception& e) {
       errorMsg = c10::str(
@@ -1338,6 +1341,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
   if (throwException && !errorMsg.empty()) {
     C10_THROW_ERROR(DistBackendError, errorMsg);
   }
+  return complete;
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
@@ -1418,13 +1422,55 @@ void ProcessGroupNCCL::abort() {
   monitorWakeUpCV_.notify_one();
 }
 
+// Difference between `abort()` and `shutdown()`:
+// 1. `abort()` will signal communicators to terminate all NCCL kernels
+// immediately.
+// 2. `shutdown()` will wait for all NCCL kernels to finish before destroying
+// communicators.
+
 // Destroy (shutdown) this backend -- normal exit.
 void ProcessGroupNCCL::shutdown() {
-  // kwen2501 (Aug 2024): moved code of `shutdown()` to `abort()` because it
-  // actually implemented an abort behavior.
-  // TODO: implementation of `shutdown` should use ncclCommDestroy() instead
-  // of ncclCommAbort(). Ideally non-blocking API mode should be used.
-  this->abort();
+  LOG(INFO) << logPrefix()
+            << "Starting to destroy process group, flushing operations.";
+  // Flush all collectives
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& it : devNCCLCommMap_) {
+      auto& ncclComm = it.second;
+      ncclComm->finalize();
+    }
+  }
+  // Wait for all operations to complete.  If NCCL comm is non-blocking and
+  // timeout is reach, this will throw an exception.
+  for (auto& it : devNCCLCommMap_) {
+    auto& ncclComm = it.second;
+    ncclComm->waitReady();
+  }
+  // Tell watchdog to (1) flush its queue and (2) do not use comm objects
+  // anymore because I am going to destroy them now
+  LOG(INFO) << logPrefix() << "Operations flushed, joining watchdog thread.";
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+  }
+  if (onCompletionHookThread_.joinable()) {
+    onCompletionHookThread_.join();
+  }
+  // Watchdog thread exiting, retire heartbeat monitoring thread now to avoid
+  // false alarm
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
+  // Destroy the communicator, reclaim resources
+  LOG(INFO) << logPrefix() << "Watchdog joined, destroying NCCL communicators.";
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& it : devNCCLCommMap_) {
+      auto& ncclComm = it.second;
+      ncclComm->destroy();
+    }
+  }
+  LOG(INFO) << logPrefix() << "Destroy complete.";
 }
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -1443,7 +1489,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
-    shutdown();
+    // Note: we have rewritten `shutdown` to represent the destroy behavior.
+    // Here we route to `abort()` explicitly to maintain the old behavior, until
+    // we fix everything.
+    abort();
   }
 
   // Wait for all threads to finish before returning
@@ -1467,18 +1516,21 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
-bool ProcessGroupNCCL::dumpDebuggingInfo() {
+bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   // Serialize all calls to this function to avoid corrupting data, but allow
   // multiple calls in one runtime. User is responsible for preserving the
   // output file from an earlier call before a later call overwrites it.
   static std::mutex writeDebugInfoMutex;
   std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
-  LOG(ERROR) << logPrefix() << "ProcessGroupNCCL preparing to dump debug info.";
-  if (ncclTraceBufferSize_ > 0) {
+  LOG(ERROR)
+      << logPrefix()
+      << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
+      << includeStackTrace;
+  if (traceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, true, false);
+    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -1683,16 +1735,28 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
-    std::future<bool> asyncDebugDump = std::async(
-        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+    bool dumpStackTrace = true;
+    for (int i = 0; i < 2; i++) {
+      std::future<bool> asyncDebugDump =
+          std::async(std::launch::async, [this, dumpStackTrace]() {
+            return this->dumpDebuggingInfo(dumpStackTrace);
+          });
 
-    // wait for the dump until timeout - log data
-    waitForFutureOrTimeout(
-        asyncDebugDump,
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-        "Flight recorder dump in heartbeatMonitor",
-        false,
-        true);
+      // wait for the dump until timeout - log data
+      auto complete = waitForFutureOrTimeout(
+          asyncDebugDump,
+          std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+          "Flight recorder dump in heartbeatMonitor",
+          false,
+          true);
+
+      if (complete) {
+        break;
+      }
+      // If we failed to dump, try dumping without stack trace in the 2nd
+      // iteration.
+      dumpStackTrace = false;
+    }
     // Indicate to watchdog thread that we have finished dumping.
     promiseFlightRecorderDump_.set_value();
   }
@@ -1961,11 +2025,14 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
     shouldDump_.store(true);
     // Give time for dumping before throwing exception
     auto start = std::chrono::steady_clock::now();
+    // Give 2 * waitTimeoutDumpInMilSec_ to dump the flight recorder.
+    // We try capturing with stack traces first, and if it fails, we try without
+    // stack traces.
     auto status = promiseFlightRecorderDump_.get_future().wait_for(
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+        std::chrono::milliseconds(2 * waitTimeoutDumpInMilSec_));
     if (status == std::future_status::timeout) {
       LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                   << waitTimeoutDumpInMilSec_ << "ms"
+                   << 2 * waitTimeoutDumpInMilSec_ << "ms"
                    << " flight recorder dumps to finish.";
     } else if (status == std::future_status::ready) {
       auto end = std::chrono::steady_clock::now();
@@ -2132,7 +2199,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         pgStatus_->lastCompletedWorkName = opTypeToString(work.opType_);
         pgStatus_->lastCompletedNumelIn = work.numelIn_;
         pgStatus_->lastCompletedNumelOut = work.numelOut_;
-        NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
+        FlightRecorder::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -2515,7 +2582,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
 
-  NCCLTraceBuffer::get()->record_pg_ranks(
+  FlightRecorder::get()->record_pg_ranks(
       std::make_tuple(pg_uid_, pg_desc_), groupRanks());
 
   RECORD_PARAM_COMMS(
@@ -2726,7 +2793,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   these objects to the Work becuase it has implications for keeping those
     //   tensors alive longer and adds overhead when copying Work objects
     //   between threads
-    r->trace_id_ = NCCLTraceBuffer::get()->record(
+    r->trace_id_ = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3403,7 +3470,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // later in endCoalescing we record a 'coalesced' Work which has
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
-    auto trace_id = NCCLTraceBuffer::get()->record(
+    auto trace_id = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -3445,7 +3512,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // TODO(whc) because we don't pass output {tensor} to initWork, we tell
     // initWork to not record, and then we manually call record passing all the
     // information it wants.
-    work->trace_id_ = NCCLTraceBuffer::get()->record(
+    work->trace_id_ = FlightRecorder::get()->record(
         local_id_,
         std::make_tuple(pg_uid_, pg_desc_),
         seqCollective_,
@@ -4493,8 +4560,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /* unused */) {
-  check_gpu_single_tensor(outputTensor, true);
-  check_gpu_single_tensor(inputTensor, true);
+  check_gpu_single_tensor(outputTensor);
+  check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
     RECORD_PARAM_COMMS_DATA(
         std::make_tuple(
@@ -4606,8 +4673,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
 
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
-    check_gpu_single_tensor(outputTensors[r], true);
-    check_gpu_single_tensor(inputTensors[r], true);
+    check_gpu_single_tensor(outputTensors[r]);
+    check_gpu_single_tensor(inputTensors[r]);
     TORCH_CHECK(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
