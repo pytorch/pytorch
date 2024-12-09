@@ -1550,7 +1550,7 @@ def init_process_group(
             ``cuda``, ``gloo`` for ``cpu``.
             If neither ``backend`` nor ``device_id`` is provided, c10d will
             detect the accelerator on the run-time machine and use a backend
-            known for that detected accelerator (or ``cpu``).
+            registered for that detected accelerator (or ``cpu``).
             This field can be given as a lowercase string (e.g., ``"gloo"``),
             which can also be accessed via :class:`Backend` attributes (e.g.,
             ``Backend.GLOO``).
