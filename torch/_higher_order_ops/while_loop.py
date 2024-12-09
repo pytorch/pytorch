@@ -270,12 +270,12 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 def check_outputs_carry_consistency(
     outs: List[torch.Tensor | torch.SymInt | int],
-    crys: List[torch.Tensor | torch.SymInt | int],
+    carries: List[torch.Tensor | torch.SymInt | int],
 ) -> None:
-    if all_diffs := diff_meta_pairs(outs, crys):
+    if all_diffs := diff_meta_pairs(outs, carries):
         diff_str = "\n".join(all_diffs)
         raise RuntimeError(
-            f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diff_str}"
+            f"Expected carried_inputs and body outputs return tensors with same metadata but found:\n{diff_str}"
         )
 
 
