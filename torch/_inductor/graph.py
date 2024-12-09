@@ -810,7 +810,10 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype
         # For a mutation op we should return the dtype of the buffer being mutated
-        if buffer_name in self.scheduler.mutation_real_name:
+        if (
+            hasattr(self.scheduler, "mutation_real_name")
+            and buffer_name in self.scheduler.mutation_real_name
+        ):
             mutated_buf = self.scheduler.mutation_real_name[buffer_name]
             if mutated_buf in self.name_to_buffer:
                 return self.name_to_buffer[mutated_buf].get_dtype()
