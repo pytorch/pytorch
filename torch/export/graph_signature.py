@@ -479,9 +479,8 @@ def _immutable_dict(items):
 
 
 def _make_argument_spec(node, token_names) -> ArgumentSpec:
-    from torch import ScriptObject, SymBool, SymInt, Tensor
+    from torch import ScriptObject, SymBool, SymInt
     from torch._library.fake_class_registry import FakeScriptObject
-    from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(node, (int, bool, float, type(None), str)):
         # For const outputs we just directly return this
