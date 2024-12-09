@@ -41,7 +41,11 @@ from functorch.compile import (
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
+from torch._functorch.aot_autograd import (
+    aot_export_joint_simple,
+    aot_export_module,
+    SerializableAOTDispatchCompiler,
+)
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.output_code import MockFXGraphCacheOutput
@@ -6831,12 +6835,13 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def make_compiler(self, fw_graph_cell):
         mock_inductor_cache = self.inductor_cache
 
-        def compiler(gm, inputs):
+        def compiler(gm, example_inputs):
             nonlocal mock_inductor_cache, fw_graph_cell
-            result = mock_inductor_cache.load(gm, inputs)
+            result = mock_inductor_cache.load(gm, example_inputs)
             fw_graph_cell[0] = gm
             return result
 
+        compiler = SerializableAOTDispatchCompiler(MockFXGraphCacheOutput, compiler)
         return compiler
 
     def run_autograd(
