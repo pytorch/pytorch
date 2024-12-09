@@ -2,7 +2,8 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,12 +14,25 @@ try:
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
+if TYPE_CHECKING:
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
 
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
-    """
-    return torch.compiler.is_compiling()
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        # NOTE: With `@torch.compile(backend="eager")`, torch._dynamo.is_compiling() will get traced
+        # and return true. torch.compiler.is_compiling() is skipped and will return false.
+        return torch.compiler.is_compiling()
 
 
 def wrap_inline(fn: Callable[..., Any]) -> Callable[..., Any]:

@@ -3511,9 +3511,7 @@ class Scheduler:
 
             self.enter_context(node)
 
-            if not isinstance(node, NopKernelSchedulerNode) and (
-                device := node.get_device()
-            ):
+            if device := node.get_device():
                 if (
                     device != self.current_device
                     or node.is_extern()

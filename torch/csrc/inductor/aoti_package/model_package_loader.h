@@ -17,6 +17,11 @@ class TORCH_API AOTIModelPackageLoader {
   std::unordered_map<std::string, std::string> get_metadata();
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inputs);
   std::vector<std::string> get_call_spec();
+  void load_constants(
+      std::unordered_map<std::string, at::Tensor>& constants_map,
+      bool use_inactive,
+      bool check_full_update);
+  std::vector<std::string> get_constant_fqns();
 
  private:
   std::string temp_dir_;

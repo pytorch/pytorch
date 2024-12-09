@@ -168,8 +168,9 @@ class TestCase(InductorTestCase):
         triton_op_name = override if override is not None else torch_op_name
 
         # Get the number of args for the op.
+        # Take the minimum over all signatures to isolate required args.
         signatures = get_signature_for_torch_op(op)
-        num_args = len(signatures[0].parameters)
+        num_args = min(len(signature.parameters) for signature in signatures)
 
         # Test codegen and check for casts.
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * num_args
