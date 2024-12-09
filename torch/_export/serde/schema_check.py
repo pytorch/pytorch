@@ -31,7 +31,7 @@ def _staged_schema():
     thrift_type_defs: Dict[str, str] = {}
 
     def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t) -> Tuple[str, str, str]:
+        def dump_type(t, level: int) -> Tuple[str, str, str]:
             CPP_TYPE_MAP = {
                 str: "std::string",
                 int: "int64_t",
@@ -90,20 +90,21 @@ def _staged_schema():
                         "",
                     )
                 elif o == Union:
+                    assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
                     assert len(args) == 2 and args[1] == type(None)
-                    yaml_type, cpp_type, thrift_type = dump_type(args[0])
+                    yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",
                         f"std::optional<{cpp_type}>",
                         f"optional {thrift_type}",
                     )
                 elif o == Annotated:
-                    return dump_type(t.__origin__)
+                    return dump_type(t.__origin__, level)
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")
                 yaml_arg_types, cpp_arg_types, thrift_arg_types = zip(
-                    *[dump_type(x) for x in typing.get_args(t)]
+                    *[dump_type(x, level + 1) for x in typing.get_args(t)]
                 )
                 return (
                     (f"{yaml_head}[{', '.join(yaml_arg_types)}]"),
@@ -136,7 +137,7 @@ def _staged_schema():
                 )
 
         def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
-            t, cpp_type, thrift_type = dump_type(f.type)
+            t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
             assert (
@@ -455,7 +456,7 @@ void from_json(const nlohmann::json& j, ForwardRef<T>& p) {{
 }} // namespace torch
 """
     thrift_schema = f"""
-namespace py3 torch._export.schema
+namespace py3 torch._export
 namespace cpp2 torch._export.schema
 {chr(10).join(thrift_enum_defs)}
 {chr(10).join(dict(sorted(thrift_type_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
@@ -528,21 +529,24 @@ def _diff_schema(dst, src):
     return additions, subtractions
 
 
-def _hash_schema(s):
-    return hashlib.sha256(repr(s).encode("utf-8")).hexdigest()
+def _hash_content(s: str):
+    return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
 
 
 @dataclasses.dataclass
 class _Commit:
     result: Dict[str, Any]
-    checksum_result: str
+    checksum_next: str
     yaml_path: str
     additions: Dict[str, Any]
     subtractions: Dict[str, Any]
     base: Dict[str, Any]
-    checksum_base: Optional[str]
+    checksum_head: Optional[str]
     cpp_header: str
     cpp_header_path: str
+    thrift_checksum_head: Optional[str]
+    thrift_checksum_real: Optional[str]
+    thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
 
@@ -555,13 +559,26 @@ def update_schema():
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
         assert match is not None
-        checksum_base = match.group(1)
+        checksum_head = match.group(1)
+
+        thrift_content = importlib.resources.read_text(__package__, "schema.thrift")
+        match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
+        _check(match is not None, "checksum not found in schema.thrift")
+        assert match is not None
+        thrift_checksum_head = match.group(1)
+        thrift_content = thrift_content.splitlines()
+        assert thrift_content[0].startswith("// @" + "generated")
+        assert thrift_content[1].startswith("// checksum<<")
+        thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
+
         from yaml import load, Loader
 
         dst = load(content, Loader=Loader)
         assert isinstance(dst, dict)
     else:
-        checksum_base = None
+        checksum_head = None
+        thrift_checksum_head = None
+        thrift_checksum_real = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
     src, cpp_header, thrift_schema = _staged_schema()
@@ -574,14 +591,17 @@ def update_schema():
 
     return _Commit(
         result=src,
-        checksum_result=_hash_schema(src),
+        checksum_next=_hash_content(repr(src)),
         yaml_path=yaml_path,
         additions=additions,
         subtractions=subtractions,
         base=dst,
-        checksum_base=checksum_base,
+        checksum_head=checksum_head,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        thrift_checksum_head=thrift_checksum_head,
+        thrift_checksum_real=thrift_checksum_real,
+        thrift_checksum_next=_hash_content(thrift_schema),
         thrift_schema=thrift_schema,
         thrift_schema_path=thrift_schema_path,
     )
