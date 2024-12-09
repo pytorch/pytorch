@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
 
 
-logger = logging.getLogger("torch.distributed._composable.fsdp")
+logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 
 class FSDPStateContext:
