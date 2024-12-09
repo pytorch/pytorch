@@ -46,6 +46,12 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
+if HAS_TRITON:
+    import triton
+    TRITON_HAS_CPU = "cpu" in triton.backends.backends
+else:
+    TRITON_HAS_CPU = False
+
 HAS_TRITON_CUDA = HAS_CUDA and HAS_TRITON
 
 HAS_TRITON_XPU = HAS_XPU and HAS_TRITON

@@ -10,7 +10,6 @@ import builtins
 import collections
 import itertools
 import pprint
-import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
@@ -19,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
-from torch._dynamo.utils import dynamo_timed, get_metrics_context, to_int_us
+from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -1022,6 +1021,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+            aot_config,
             flat_args,
             fw_metadata.input_info,
             is_inference=is_inference,
@@ -1150,7 +1150,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         @wraps(compiled_fn)
         def wrapped_compiled_fn(args):
             args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-                args, self.old_input_info, is_inference=is_inference
+                aot_config, args, self.old_input_info, is_inference=is_inference
             )
             assert synthetic_base_info is not None
             aliased_args_w_metadata_mutations = [
@@ -1254,6 +1254,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
 def merge_view_inputs(
+    aot_config: AOTConfig,
     fwd_inputs: List[Any],
     mutated_input_info: List[InputAliasInfo],
     *,
@@ -1318,7 +1319,7 @@ def merge_view_inputs(
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
         aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            fwd_inputs, aliased_input_indices
+            aot_config, fwd_inputs, aliased_input_indices
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             other_args.extend(
@@ -1912,10 +1913,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     flat_processed_tangents = list(
                         itertools.chain.from_iterable(
-                            AOTDispatchAutograd.process_runtime_tangent(
-                                t,
-                                m,
-                            )[1]
+                            (
+                                AOTDispatchAutograd.process_runtime_tangent(
+                                    t,
+                                    m,
+                                )[1]
+                            )
                             for t, m in zip(
                                 tangents,
                                 CompiledFunction.metadata.subclass_tangent_meta,
@@ -2019,53 +2022,28 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     saved_compile_context = lazy_backward_info.saved_compile_context
 
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    metrics_context = get_metrics_context()
                     with tracing(saved_context), compile_context(
                         saved_compile_context
                     ), context(), track_graph_compiling(
                         aot_config, "backward"
-                    ), get_metrics_context(), dynamo_timed(
+                    ), metrics_context, dynamo_timed(
                         "backward._backward_impl",
                         phase_name="entire_backward_compile",
                         log_pt2_compile_event=True,
                         dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
-                        fail_type: Optional[str] = None
-                        fail_reason: Optional[str] = None
-                        start_ns = time.time_ns()
-                        try:
-                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                bw_module, placeholder_list
+                        metrics_context.update_outer({"is_forward": False})
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, placeholder_list
+                        )
+                        # Maybe save cache entry
+                        if try_save_cache_entry is not None:
+                            try_save_cache_entry(
+                                CompiledFunction.compiled_bw,
+                                fw_metadata,
+                                aot_config,
                             )
-                            # Maybe save cache entry
-                            if try_save_cache_entry is not None:
-                                try_save_cache_entry(
-                                    CompiledFunction.compiled_bw,
-                                    fw_metadata,
-                                    aot_config,
-                                )
-                        except Exception as e:
-                            # TODO(masnesral): Populating the exception info should be automatic.
-                            fail_type = type(e).__qualname__
-                            fail_reason = str(e)
-                            raise
-                        finally:
-                            # TODO(masnesral): Populating time fields should be automatic.
-                            end_ns = time.time_ns()
-                            metrics = {
-                                "compile_id": str(
-                                    torch._guards.CompileContext.current_compile_id()
-                                ),
-                                "fail_type": fail_type,
-                                "fail_reason": fail_reason,
-                                "is_forward": False,
-                                "start_time_us": start_ns // 1000,
-                                "end_time_us": end_ns // 1000,
-                                "duration_us": (end_ns - start_ns) // 1000,
-                                "structured_logging_overhead_us": to_int_us(
-                                    torch._logging.get_structured_logging_overhead(),
-                                ),
-                            }
-                            get_metrics_context().update_outer(metrics)
 
                 if (
                     torch._functorch.config.donated_buffer
