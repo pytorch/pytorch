@@ -15,6 +15,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -274,9 +275,11 @@ class ExprPrinterTests(InductorTestCase):
         for expr, result in cpu_cases:
             self.assertEqual(
                 cexpr(expr),
-                result(1.0, "LL")
-                if sys.platform in ["darwin", "win32"]
-                else result(1.0, "L"),
+                (
+                    result(1.0, "LL")
+                    if sys.platform in ["darwin", "win32"]
+                    else result(1.0, "L")
+                ),
             )  # 1.0 for FP div
 
     def test_print_floor(self):
@@ -321,12 +324,18 @@ class ExprPrinterTests(InductorTestCase):
         x = sympy.Symbol("x", integer=True)
         expr = Mod(x - 1, 2)
         self.assertExpectedInline(pexpr(expr), """((-1) + x) % 2""")
-        self.assertExpectedInline(cexpr(expr), """((-1L) + x) % 2L""")
+        if IS_MACOS:
+            self.assertExpectedInline(cexpr(expr), """((-1LL) + x) % 2""")
+        else:
+            self.assertExpectedInline(cexpr(expr), """((-1L) + x) % 2L""")
         self.assertExpectedInline(texpr(expr), """((-1) + x) % 2""")
 
         expr = (x - 10) % x
         self.assertExpectedInline(pexpr(expr), """(-10) % x""")
-        self.assertExpectedInline(cexpr(expr), """(-10L) % x""")
+        if IS_MACOS:
+            self.assertExpectedInline(cexpr(expr), """(-10LL) % x""")
+        else:
+            self.assertExpectedInline(cexpr(expr), """(-10L) % x""")
         self.assertExpectedInline(texpr(expr), """(-10) % x""")
 
     def test_print_mod_index(self):
@@ -377,10 +386,15 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
-            "darwin",
-            "win32",
-        ] else "(-1L)*s1"
+        (
+            self.assertEqual(cexpr(expr), "(-1LL)*s1")
+            if sys.platform
+            in [
+                "darwin",
+                "win32",
+            ]
+            else "(-1L)*s1"
+        )
 
     def test_print_Min_Max(self):
         cases = (
@@ -395,9 +409,11 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}(static_cast<int64_t>(-2LL), static_cast<int64_t>(x))"
-                if sys.platform in ["darwin", "win32"]
-                else f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))",
+                (
+                    f"std::{s}(static_cast<int64_t>(-2LL), static_cast<int64_t>(x))"
+                    if sys.platform in ["darwin", "win32"]
+                    else f"std::{s}(static_cast<int64_t>(-2L), static_cast<int64_t>(x))"
+                ),
             )
 
             expr = f(x, 2 * x, 3 * x)
@@ -407,9 +423,11 @@ class ExprPrinterTests(InductorTestCase):
             )
             self.assertEqual(
                 cexpr(expr),
-                f"std::{s}({{x, 2LL*x, 3LL*x}})"
-                if sys.platform in ["darwin", "win32"]
-                else f"std::{s}({{x, 2L*x, 3L*x}})",
+                (
+                    f"std::{s}({{x, 2LL*x, 3LL*x}})"
+                    if sys.platform in ["darwin", "win32"]
+                    else f"std::{s}({{x, 2L*x, 3L*x}})"
+                ),
             )
 
 
