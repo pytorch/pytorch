@@ -850,6 +850,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         check_fn = CheckFunctionManager(
+            code,
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,

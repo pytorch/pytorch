@@ -163,8 +163,7 @@ void lookup(
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
-          py::handle f_locals_dict =
-              (PyObject*)framelocals_mapping_to_dict(f_locals);
+          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
           guard_error_hook_handle(
               cache_entry.guard_manager,
               cache_entry.code,
