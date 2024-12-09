@@ -226,6 +226,7 @@ def mark_nodes_dislike_padding(
     ops_dislike_padding = {
         aten.convolution,
         aten.convolution_backward,
+        aten._scaled_mm,
     }
     # what's a better way to collect the reduction ops?
     ops_like_padding = {
@@ -346,6 +347,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
+        inputs_to_check: Optional[Sequence[int]] = None,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -360,6 +362,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.is_const_graph = is_const_graph
         self.const_code = const_code
         self.const_module = const_module
+        self.inputs_to_check = inputs_to_check
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -850,8 +853,12 @@ class GraphLowering(torch.fx.Interpreter):
         device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and device is not None
+            device is not None
+            and not (
+                isinstance(buffer, ir.ComputedBuffer)
+                and buffer.is_zero_elements()
+                and device == torch.device("cpu")
+            )
         ):
             self.add_device_info(device)
 
