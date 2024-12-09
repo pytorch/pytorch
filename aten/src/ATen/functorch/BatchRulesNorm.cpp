@@ -121,7 +121,7 @@ batch_norm_batch_rule(
     result0 = result0 + bias_;
   }
   result0 = result0.transpose(1, 2);  // [B0, B, C, *], because some arg must have been batched, the output must be batched
-  return std::make_tuple(result0, 0, mean, stats_bdim, rstd, stats_bdim);
+  return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
 }
 
 template<typename F, F Func>
