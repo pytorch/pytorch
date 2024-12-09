@@ -1371,18 +1371,12 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         A_layout, B_layout = layouts[:2]
         if len(A_layout.size) != 2:
             return False
-        if len(A_layout.size) != 2:
+        if len(B_layout.size) != 2:
             return False
         A_size = [int(i) for i in A_layout.size]
         B_size = [int(i) for i in B_layout.size]
-        K = max(A_size[-1], B_size[-2])
-        M = A_size[-2]
-        N = B_size[-1]
-        if K != A_size[-1] and K != 2 * A_size[-2]:
-            return False
-        if K != B_size[-2]:
-            return False
-        return True
+        K = max(A_size[1], B_size[0])
+        return (K == A_size[1] or K == 2 * A_size[0]) and K == B_size[0]
 
     def _shape_match(
         self,

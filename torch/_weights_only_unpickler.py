@@ -235,7 +235,6 @@ def _read_global_instruction(readline: Callable) -> Tuple[str, str]:
 
 def get_globals_in_pkl(file) -> Set[str]:
     globals_in_checkpoint = set()
-    protocol = None
     read = file.read
     readline = file.readline
     op_to_bytes_to_read = {
@@ -291,7 +290,7 @@ def get_globals_in_pkl(file) -> Set[str]:
             read(strlen)
         # first and last op
         elif key[0] == PROTO[0]:
-            protocol = read(1)[0]
+            read(1)[0]
         elif key[0] == STOP[0]:
             return globals_in_checkpoint
         else:
@@ -315,7 +314,6 @@ class Unpickler:
         self.stack: List[Any] = []
         self.append = self.stack.append
         read = self.read
-        readline = self.readline
         while True:
             key = read(1)
             if not key:
