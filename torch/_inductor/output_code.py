@@ -23,6 +23,10 @@ serialized format:
 from __future__ import annotations
 
 import dataclasses
+import logging
+import os
+import re
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -61,10 +65,11 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 if TYPE_CHECKING:
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
-    from torch.fx import GraphModule
 
     from .compile_fx import _CompileFxKwargs
     from .triton_bundler import TritonKernelArtifacts
+
+log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -84,7 +89,7 @@ class OutputCode:
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         raise NotImplementedError(type(self))
 
@@ -142,7 +147,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    gm: Optional[torch.fx.GraphModule],
+    constants: Dict[str, torch.Tensor],
 ) -> None:
     """
     Checks for any reasons not to run cudagraphs and then
@@ -188,7 +193,7 @@ def cudagraph_post_compile(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=tuple(compiled_graph.get_constants(gm).values()),
+            constants=tuple(constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
@@ -247,6 +252,52 @@ def maybe_realign_inputs(
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
+
+
+class CompiledFxGraphConstants:
+    """Wrapper class that unwraps constants from a compiled fx graph. This
+    version of the class only supports directly grabbing the saved constants off of
+    a CompiledFxGraph.
+
+    With freezing, FxGraphCache doesn't store the constants of the input
+    GraphModule it gets from AOTAutograd. Instead, it saves just the **names**
+    of those constants, and grabs the constant values directly from the graph module
+    passed in at runtime.
+
+    Thing is, we don't always *have* the graph module available at runtime, hence
+    the existence of this class and its CompiledFxGraphConstantsWithGm counterpart.
+
+    To support freezing, FXGraphCache gets passed a CompiledFxGraphConstantsWithGm during
+    post compile. Otherwise, CompiledFxGraphConstants supports the basic case of loading
+    the value of constants directly off of the original saved object.
+    """
+
+    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+        assert g.constants is not None
+        return g.constants
+
+
+class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
+    """
+    This version of CompiledFxGraphConstants, instead of grabbing constants
+    directly saved on CompiledFxGraphs, will just grab their names. Then, it takes
+    a second GraphModule to grab the corresponding constant values out of.
+
+    This is necessary for supporting freezing in FxGraphCache.
+    """
+
+    def __init__(self, gm: torch.fx.GraphModule) -> None:
+        self.gm = gm
+
+    def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
+        if g.allocated_constant_name is not None:
+            return {
+                name: getattr(self.gm, name)
+                for name in g.allocated_constant_name.values()
+            }
+        else:
+            assert g.constants is not None
+            return g.constants
 
 
 @dataclasses.dataclass
@@ -420,7 +471,7 @@ class CompiledFxGraph(OutputCode):
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         """
         Run a set of post processing steps after loading from the cache. These involve:
@@ -450,7 +501,7 @@ class CompiledFxGraph(OutputCode):
                     example_inputs,
                     self,
                     cudagraphs,
-                    gm,
+                    constants.unwrap(self),
                 )
         inputs_to_check = self.inputs_to_check
         # cudagraphs could have been disabled from the earlier conditions
@@ -464,25 +515,63 @@ class CompiledFxGraph(OutputCode):
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
 
-    def get_constants(
-        self, gm: Optional[torch.fx.GraphModule]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Get the constant attributes.
-        """
-        # Normal case: The constants are stored in the entry.
-        if self.constants is not None:
-            return self.constants
+    def prepare_for_serialization(self) -> None:
+        # We can't really serialize callables that may be C++/Triton/etc.,
+        # so we serialize their PyCodeCache disk cache location instead.
+        # TODO: This could be better if we're ever able to serialize compiled
+        # models to disk.
+        self.current_callable = None
 
-        # Freezing case: Look up the constants from attributes on the GraphModule using
-        # the allocated_constant_name map.
-        assert gm is not None
-        assert self.allocated_constant_name is not None
-        constants = {
-            name: getattr(gm, orig_name)
-            for name, orig_name in self.allocated_constant_name.items()
-        }
-        return constants
+    def after_deserialization(self, constants: CompiledFxGraphConstants) -> str:
+        from torch._dynamo.utils import counters, dynamo_timed
+        from torch._inductor.codecache import (
+            cpp_prefix_path,
+            get_path,
+            PyCodeCache,
+            write_atomic,
+        )
+
+        # See _save_graph(); we don't store the callable in the cache entry so
+        # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(self.cache_key, "py")[2]
+        code = self.source_code
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            cpp_pp = cpp_prefix_path()
+            if os.path.basename(cpp_pp) in code:
+                if cpp_pp in code:
+                    # Great the name is correct
+                    pass
+                else:
+                    # Old dir name is included, replace it
+                    pattern = rf'#include\s*"[^"]+{os.path.basename(cpp_pp)}"'
+                    code = re.sub(pattern, f'#include "{cpp_pp}"', code)
+                    self.source_code = code
+
+            write_atomic(artifact_path, code, make_dirs=True)
+
+        from .graph import GraphLowering
+
+        # This is used by tests to check the output for specific details.
+        GraphLowering.save_output_code(code)
+
+        try:
+            with dynamo_timed(
+                "PyCodeCache.load_by_key_path",
+                log_pt2_compile_event=True,
+            ):
+                self.current_callable = PyCodeCache.load_by_key_path(
+                    self.cache_key,
+                    artifact_path,
+                    self.cache_linemap,
+                    constants.unwrap(self),
+                ).call
+        except OSError:
+            log.error("Failed to load artifact: %s", artifact_path)
+            raise
+
+        return artifact_path
 
 
 def _typecheck_CompiledFxGraph(h: CompiledFxGraph) -> OutputCode:
@@ -504,7 +593,7 @@ class CompiledAOTI(OutputCode):
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         pass
 
@@ -518,22 +607,16 @@ def _typecheck_CompiledAOTI(h: CompiledAOTI) -> OutputCode:
 
 @dataclasses.dataclass
 class MockFXGraphCacheOutput(OutputCode):
-    gm: Any
-    _fx_graph_cache_key: Optional[str]
-    # How long it took to compile this OutputCode, end to end
-    _time_taken_ns: Optional[int]
+    gm: Any = None
 
-    def __init__(self, gm: Any, key: Optional[str]) -> None:
-        self.gm = gm
-        self._fx_graph_cache_key = key
-        self._time_taken_ns = 0
+    def __post_init__(self) -> None:
         self._boxed_call = True
 
     def post_compile(
         self,
         example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
-        gm: GraphModule,
+        constants: CompiledFxGraphConstants,
     ) -> None:
         pass
 

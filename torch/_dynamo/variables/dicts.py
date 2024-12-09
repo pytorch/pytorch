@@ -312,7 +312,9 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.clone(items=self.items.copy(), mutation_type=ValueMutationNew())
+            return self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
@@ -843,7 +845,7 @@ class CustomizedDictVariable(ConstDictVariable):
                 if val is not None:
                     key = ConstantVariable.create(key)
                     items[key] = var
-        return cls(items, user_cls)
+        return cls(items, user_cls, source=builder.source)
 
     def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)

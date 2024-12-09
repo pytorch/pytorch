@@ -310,14 +310,14 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 namespace onednn_utils {
 
 inline ideep::attr_t create_attr_by_post_op(
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
     const ideep::tensor::desc& input1_desc,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    const c10::string_view& unary_post_op_algorithm) {
+    const std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
