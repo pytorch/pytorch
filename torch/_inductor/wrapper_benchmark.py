@@ -6,6 +6,7 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
+from torch.utils._ordered_set import OrderedSet
 
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
@@ -229,8 +230,8 @@ def parse_profile_event_list(
             "triton_unknown",
             "unknown",
         ]
-        assert set(all_events.keys()).issubset(
-            set(category_list)
+        assert OrderedSet(all_events.keys()).issubset(
+            OrderedSet(category_list)
         ), f"{list(all_events.keys())}"
 
         per_category_wall_time = {}

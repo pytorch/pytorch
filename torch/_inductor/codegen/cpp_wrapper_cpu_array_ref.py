@@ -47,19 +47,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.device = "cpu"
         super().__init__()
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False

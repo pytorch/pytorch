@@ -7,6 +7,7 @@ from typing import Any, Tuple
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -429,7 +430,7 @@ if torch._C._has_mkldnn:
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
-            _visited_nodes = set()
+            _visited_nodes = OrderedSet[torch.fx.Node]()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
                 if _current_node not in _visited_nodes:
