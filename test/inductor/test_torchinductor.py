@@ -2494,6 +2494,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.Tensor([]),))
 
+    @requires_multigpu()
+    def test_linspace4(self):
+        def fn(x):
+            return torch.linspace(0, 2, 0, device=f"{GPU_TYPE}:1")
+
+        self.common(fn, (torch.Tensor([]),))
+
     def test_tensor1(self):
         def fn(x):
             return torch.tensor([1], device=x.device) + x, torch.tensor(
@@ -11742,7 +11749,6 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
-    @skip_if_triton_cpu("Triton CPU: Cannot xfail because it crashes process")
     def test_large_grid(self):
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
         # additional array of the same size as the input.  Numbers derived
@@ -12492,37 +12498,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
 
-        @requires_gpu()
-        @parametrize("upcast_to_fp32", [False, True])
-        @config.patch("triton.use_block_ptr", True)
-        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
-            @torch.compile
-            def func(a, b, c, d):
-                return a * b * c * d
-
-            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
-            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-                func_opt = torch._dynamo.optimize("inductor")(func)
-                code = run_and_get_triton_code(func_opt, *inps)
-                fp32_cast_in_code = "to(tl.float32)" in code
-                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
-
-        @requires_gpu()
-        @parametrize("load_upcast_to_fp32", [False, True])
-        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-        @config.patch("triton.use_block_ptr", True)
-        def test_dtype_aware_codegen(self, load_upcast_to_fp32, input_dtype):
-            @torch.compile
-            def func(a, b, c, d):
-                return torch.sqrt(a * b * c * d)
-
-            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * 4
-            with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
-                func_opt = torch._dynamo.optimize("inductor")(func)
-                code = run_and_get_triton_code(func_opt, *inps)
-                libdevice_cast_in_code = "libdevice.sqrt(tmp3.to(tl.float32))" in code
-                self.assertNotEqual(libdevice_cast_in_code, load_upcast_to_fp32)
-
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
@@ -12604,6 +12579,50 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 or "tl.load(in_ptr0 + (tmp0), (xmask).to(tl.int1)" in code
             )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
+
+        @config.patch("triton.prefer_nd_tiling", True)
+        @config.patch("triton.max_tiles", 3)
+        @parametrize(
+            "block_multiple, ynumel_exceed_ygrid_size",
+            [
+                # xdim has constant mask, ydim does not
+                [True, True],
+                # xdim, ydim both have a constant mask
+                [True, False],
+                # if numel not a block multiple, no constant mask
+                [False, False],
+                # TODO: test zdim too
+            ],
+        )
+        def test_has_constant_mask(self, block_multiple, ynumel_exceed_ygrid_size):
+            from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+            from torch._inductor.runtime.runtime_utils import get_max_y_grid
+
+            shape = [TRITON_MAX_BLOCK["Y"], TRITON_MAX_BLOCK["X"]]
+
+            if not block_multiple:
+                shape = [s + 1 for s in shape]
+
+            if ynumel_exceed_ygrid_size:
+                shape[0] = (
+                    shape[0] * (math.ceil(get_max_y_grid() / shape[0])) + shape[0]
+                )
+
+            a = torch.zeros(shape, device=GPU_TYPE, dtype=torch.bool)
+            b = torch.zeros((shape[0], 1), device=GPU_TYPE, dtype=torch.bool)
+
+            opt_fn = torch.compile(torch.add)
+            code = run_and_get_triton_code(opt_fn, a, b)
+
+            if block_multiple:
+                self.assertTrue("xmask = tl.full" in code)
+                if ynumel_exceed_ygrid_size:
+                    self.assertTrue("ymask = yindex < ynumel" in code)
+                else:
+                    self.assertTrue("ymask = tl.full" in code)
+            else:
+                self.assertTrue("ymask = yindex < ynumel" in code)
+                self.assertTrue("xmask = xindex < xnumel" in code)
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
