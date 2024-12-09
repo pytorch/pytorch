@@ -123,12 +123,11 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 }
 
 inline StreamIdType streamIdType(StreamId s) {
-  // Externally allocated streams have their id being the sycl:queue* pointer
-  // so the last bit will be 0
+  // Externally allocated streams have their id being the sycl:queue* pointer.
+  // So the last bit will be 0.
   if ((!(s & 1) && s)) {
     return StreamIdType(StreamIdType::EXT);
   }
-  // The stream type mask starts from the second rightmost bit.
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = static_cast<StreamIdType>((s >> 1) & mask_for_type);
   TORCH_CHECK(
@@ -140,7 +139,6 @@ inline StreamIdType streamIdType(StreamId s) {
 }
 
 inline StreamIdIndex streamIdIndex(StreamId s) {
-  // The stream index mask starts from the fourth rightmost bit.
   return static_cast<StreamIdIndex>(
       (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
 }
