@@ -692,7 +692,7 @@ def determine_qparams(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
 
-    return scale.to(torch.double), zero_point.to(torch.int64)
+    return scale.to(torch.float32), zero_point.to(torch.int32)
 
 
 def _get_num_pos_args(f: Callable) -> int:

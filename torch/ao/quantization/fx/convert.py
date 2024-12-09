@@ -158,6 +158,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
         node_type = "call_function"
         quantize_op: Optional[Callable] = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
+        # Default is int64 which seems completely unnecessary
+        zero_point = zero_point.to(dtype=torch.int32)
+
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
             quantize_op = torch.ops.quantized_decomposed.quantize_per_channel.default
