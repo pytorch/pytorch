@@ -1096,10 +1096,10 @@ class TestPrologueFusion(TestCase):
 
     def test_broadcast(self):
         def foo(x, y):
-            return (x.expand([1, y.shape[0]]) + 2) @ y
+            return (x.expand([1, y.shape[0]]) + 1) @ y
 
         x = torch.rand([1, 1], dtype=torch.float, device="cuda")
-        y = torch.rand([63, 128], dtype=torch.float, device="cuda")
+        y = torch.rand([64, 128], dtype=torch.float, device="cuda")
 
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
