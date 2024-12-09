@@ -339,7 +339,8 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
  *   1. Different SYCL queue pointers will result in distinct XPUStream objects,
  * even if they reference the same underlying SYCL queue object.
  *   2. Memory blocks allocated by one external XPUStream CANNOT be reused by
- * other XPUStreams, even if they originate from the same SYCL queue object.
+ * other non-equivalent XPUStreams, even if they originate from the same SYCL
+ * queue object.
  */
 
 XPUStream getStreamFromExternal(
