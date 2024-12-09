@@ -1,8 +1,3 @@
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    FSDPModule,
-    fully_shard,
-    MixedPrecisionPolicy,
-    OffloadPolicy,
-    register_fsdp_forward_method,
-)
+from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+
+from .fully_shard import FSDPModule, fully_shard, register_fsdp_forward_method
