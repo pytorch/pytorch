@@ -9,8 +9,10 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
+#include <torch/csrc/dynamo/variable_tracker_cache.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/python_ptr.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
@@ -18,6 +20,9 @@ static struct PyModuleDef _module =
 PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
+
+using torch::impl::BorrowedPyObjectPtr;
+using torch::impl::OwnedPyObjectPtr;
 
 #if IS_PYTHON_3_11_PLUS
 
@@ -33,6 +38,170 @@ std::vector<uint8_t> _PyOpcode_Caches_vec;
 
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
+namespace {
+
+template <typename T>
+bool unicode_is_literal_none(const T* start, const T* end) {
+  if (end != start + 4) {
+    return false;
+  }
+
+  return start[0] == 'N' && start[1] == 'o' && start[2] == 'n' &&
+      start[3] == 'e';
+}
+
+template <typename T>
+OwnedPyObjectPtr strip_function_call_helper(
+    BorrowedPyObjectPtr original,
+    const T* start,
+    size_t length) {
+  // This function is... not great.
+  const T* const end = start + length;
+  const T* curr = start;
+  for (auto p = start; p < end; ++p) {
+    if (*p == ' ' || *p == '(') {
+      curr = p + 1;
+    } else if (*p == ')' || *p == ',' || *p == '[' || *p == ']') {
+      if ((p > curr) && !unicode_is_literal_none(curr, p) &&
+          (Py_UNICODE_ISALPHA(*curr) || *curr == '_')) {
+        return strip_function_call_helper(
+            BorrowedPyObjectPtr(), curr, p - curr);
+      }
+      // The original code skipped adding these chars...
+    }
+  }
+
+  // strip_getattr_getitem
+  auto p = start;
+  for (; p < end; ++p) {
+    if (*p == '.' || *p == '[')
+      break;
+  }
+
+  if (p == end && original.ptr() != nullptr) {
+    return original.own();
+  }
+
+  return OwnedPyObjectPtr::own(
+      PyUnicode_FromKindAndData(sizeof(*start), start, p - start));
+}
+
+OwnedPyObjectPtr strip_function_call(BorrowedPyObjectPtr name) {
+  if (!PyUnicode_Check(name.ptr())) {
+    PyErr_SetString(PyExc_TypeError, "String expected");
+    return OwnedPyObjectPtr::none();
+  }
+
+  if (PyUnicode_READY(name.ptr()) != 0)
+    return OwnedPyObjectPtr::none();
+
+  auto length = PyUnicode_GET_LENGTH(name.ptr());
+  switch (PyUnicode_KIND(name.ptr())) {
+    case PyUnicode_1BYTE_KIND:
+      return strip_function_call_helper(
+          name, PyUnicode_1BYTE_DATA(name.ptr()), length);
+    case PyUnicode_2BYTE_KIND:
+      throw std::runtime_error("unimplemented - 2byte");
+    case PyUnicode_4BYTE_KIND:
+      throw std::runtime_error("unimplemented - 4byte");
+    default:
+      throw std::runtime_error("unimplemented - bad value");
+  }
+}
+
+bool _checkParamCount(size_t nargs, size_t expected) {
+  if (nargs < expected) {
+    PyErr_SetString(PyExc_TypeError, "Too few parameters");
+    return false;
+  }
+  if (nargs > expected) {
+    PyErr_SetString(PyExc_TypeError, "Too many parameters");
+    return false;
+  }
+  return true;
+}
+
+template <typename T>
+OwnedPyObjectPtr is_valid_var_name_helper(const T* start, size_t length) {
+  if (length < 1)
+    return OwnedPyObjectPtr::false_();
+
+  // TODO: the original code is a bit odd... check it. It just checked that the
+  // string starts with alnum. Then if it's all digits then it logs a warning.
+
+  if (!Py_UNICODE_ISALNUM(*start))
+    return OwnedPyObjectPtr::false_();
+  while (length-- > 0) {
+    if (!Py_UNICODE_ISDIGIT(*start++)) {
+      return OwnedPyObjectPtr::true_();
+    }
+  }
+
+  // 2 == warning
+  return OwnedPyObjectPtr::own(PyLong_FromLong(2));
+}
+
+OwnedPyObjectPtr is_valid_var_name(BorrowedPyObjectPtr name) {
+  if (!PyUnicode_Check(name.ptr())) {
+    PyErr_SetString(PyExc_TypeError, "String expected");
+    return OwnedPyObjectPtr::none();
+  }
+
+  if (PyUnicode_READY(name.ptr()) != 0)
+    return OwnedPyObjectPtr::none();
+
+  auto length = PyUnicode_GET_LENGTH(name.ptr());
+  switch (PyUnicode_KIND(name.ptr())) {
+    case PyUnicode_1BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_1BYTE_DATA(name.ptr()), length);
+    case PyUnicode_2BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_2BYTE_DATA(name.ptr()), length);
+    case PyUnicode_4BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_4BYTE_DATA(name.ptr()), length);
+    default:
+      throw std::runtime_error("unimplemented - bad value");
+  }
+}
+
+PyObject* _strip_function_call(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (!_checkParamCount(nargs, 1))
+    return Py_None;
+  return strip_function_call(BorrowedPyObjectPtr(args[0])).release();
+}
+
+PyObject* _is_valid_var_name(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (!_checkParamCount(nargs, 1))
+    return Py_None;
+  return is_valid_var_name(BorrowedPyObjectPtr(args[0])).release();
+}
+
+#define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
+
+void _register_functions(PyObject* mod) {
+  static std::array<PyMethodDef, 3> fns = {
+      PyMethodDef{
+          "strip_function_call",
+          PYC_FN(_strip_function_call),
+          METH_FASTCALL,
+          nullptr},
+      PyMethodDef{
+          "is_valid_var_name",
+          PYC_FN(_is_valid_var_name),
+          METH_FASTCALL,
+          nullptr},
+      PyMethodDef{nullptr, nullptr, 0, nullptr},
+  };
+  PyModule_AddFunctions(mod, fns.data());
+}
+
+} // anonymous namespace
+
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
   if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
@@ -41,6 +210,8 @@ void initDynamoBindings(PyObject* torch) {
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
+
+  register_variable_tracker_cache(dynamo);
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
@@ -82,6 +253,7 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
+  _register_functions(dynamo);
 }
 
 } // namespace torch::dynamo
