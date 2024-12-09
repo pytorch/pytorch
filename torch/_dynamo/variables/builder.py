@@ -36,7 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._guards import GuardSource, TracingContext
+from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -60,7 +60,7 @@ from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
-from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..guards import GuardBuilder, install_guard, install_guards, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
     auto_unset,
@@ -73,7 +73,6 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
-    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
     FloatTensorSource,
@@ -423,12 +422,11 @@ class VariableBuilder:
 
     def install_guards(self, *guards):
         source = self.get_source()
-        if (
-            isinstance(source, ConstantSource)
-            or source.guard_source() == GuardSource.CONSTANT
-        ):
+        try:
+            tmp = [source.make_guard(guard) for guard in guards]
+        except NotImplementedError:
             return None
-        install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
+        install_guards(tmp, skip=1)
         return {}
 
     @classmethod
@@ -795,7 +793,7 @@ class VariableBuilder:
                             self.tx, GetItemSource(saved_tensors_source, i)
                         )(v)
                     )
-            install_guard(*guards)
+            install_guards(guards)
 
             return self.tx.output.side_effects.track_object_existing(
                 value,
@@ -1310,7 +1308,7 @@ class VariableBuilder:
                 )
                 guards.append(source_i.make_guard(guard))
 
-            install_guard(*guards, skip=1)
+            install_guards(guards, skip=1)
 
             grapharg = GraphArg(
                 source,

@@ -27,7 +27,9 @@ from typing import (
     Union,
 )
 
+import torch
 from torch.utils import _pytree as pytree
+from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -37,11 +39,6 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import sympy
-
-    # Import the following modules during type checking to enable code intelligence features,
-    # such as auto-completion in tools like pylance, even when these modules are not explicitly
-    # imported in user code.
-    import torch
 
 
 """
@@ -169,6 +166,7 @@ class ShapeGuard(NamedTuple):
     sloc: SLoc
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to
@@ -209,11 +207,10 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
-            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+            and self.create_fn.func is torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT
         )
         return (
             is_duplicate_input,

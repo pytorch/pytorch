@@ -21,7 +21,7 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
-from inspect import currentframe, getframeinfo
+from inspect import currentframe
 from typing import (
     Any,
     Callable,
@@ -67,6 +67,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    TracingContext,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -460,7 +461,10 @@ else:
         return ast.unparse(node).replace("\n", "")
 
 
-def strip_function_call(name):
+strip_function_call = torch._C._dynamo.strip_function_call
+
+
+def _strip_function_call(name):  # .781!
     """
     "___odict_getitem(a, 1)" => "a"
     "a.layers[slice(2)][0]._xyz" ==> "a"
@@ -1291,10 +1295,11 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
-            if re.match(r"[a-zA-Z0-9_]+", base):
-                if re.match(r"^\d+$", base):
+            is_valid = torch._C._dynamo.is_valid_var_name(base)
+            if is_valid:
+                if is_valid == 2:
                     log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
@@ -1736,15 +1741,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -2079,18 +2085,17 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = getframeinfo(caller)[2]
+        func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in self.__class__.__dict__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
-            name_valid = guard.name is not None and guard.name != ""
-
-            guarded_object = self.get(guard.name) if name_valid else None
+            name = guard.name
+            guarded_object = None if not name else self.get(name)
         else:
             guarded_object = provided_guarded_object
 
@@ -2305,7 +2310,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
@@ -2928,12 +2933,21 @@ def install_guard(*guards, skip=0):
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    from torch._guards import TracingContext
+    install_guards(guards, skip)
 
+
+def install_guards(guards, skip=0):
+    """
+    Add dynamo guards to the current tracing context.
+
+    Args:
+        guards: guard(s) to add
+        skip: number of stack frames to ignore for debug stack trace
+    """
     collect_debug_stack = guards_log.isEnabledFor(
         logging.DEBUG
     ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
-    add = TracingContext.get().guards_context.dynamo_guards.add
+    dynamo_guards = TracingContext.get().guards_context.dynamo_guards
     for guard in guards:
         assert isinstance(guard, Guard)
-        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+        dynamo_guards.add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
