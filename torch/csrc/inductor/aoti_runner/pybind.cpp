@@ -18,11 +18,7 @@ void initAOTIRunnerBindings(PyObject* module) {
 
   py::class_<AOTIModelContainerRunnerCpu>(m, "AOTIModelContainerRunnerCpu")
       .def(py::init<const std::string&, int>())
-      .def(
-          "run",
-          &AOTIModelContainerRunnerCpu::run,
-          py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+      .def("run", &AOTIModelContainerRunnerCpu::run)
       .def("get_call_spec", &AOTIModelContainerRunnerCpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -45,11 +41,7 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
-      .def(
-          "run",
-          &AOTIModelContainerRunnerCuda::run,
-          py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+      .def("run", &AOTIModelContainerRunnerCuda::run)
       .def("get_call_spec", &AOTIModelContainerRunnerCuda::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",
@@ -72,11 +64,7 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
-      .def(
-          "run",
-          &AOTIModelContainerRunnerXpu::run,
-          py::arg("inputs"),
-          py::arg("stream_handle") = nullptr)
+      .def("run", &AOTIModelContainerRunnerXpu::run)
       .def("get_call_spec", &AOTIModelContainerRunnerXpu::get_call_spec)
       .def(
           "get_constant_names_to_original_fqns",

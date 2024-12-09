@@ -22,11 +22,11 @@ class TORCH_API AOTIModelContainerRunner {
       delete;
   AOTIModelContainerRunner& operator=(AOTIModelContainerRunner&& other) =
       delete;
-  virtual ~AOTIModelContainerRunner();
+  ~AOTIModelContainerRunner();
 
-  virtual std::vector<at::Tensor> run(
+  std::vector<at::Tensor> run(
       const std::vector<at::Tensor>& inputs,
-      void* stream_handle = nullptr);
+      AOTInductorStreamHandle cuda_stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
