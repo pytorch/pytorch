@@ -62,6 +62,7 @@ jobs:
           { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
@@ -73,6 +74,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-py3_9-clang10-build:
     name: linux-focal-py3.9-clang10
@@ -87,6 +89,7 @@ jobs:
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
+    secrets: inherit
 
   linux-focal-py3_9-clang10-test:
     name: linux-focal-py3.9-clang10
@@ -98,6 +101,7 @@ jobs:
       build-environment: linux-focal-py3.9-clang10
       docker-image: ${{ needs.linux-focal-py3_9-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_9-clang10-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
@@ -112,6 +116,7 @@ jobs:
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu", owners: ["module:rocm"] },
           { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu", owners: ["module:rocm"] },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-test:
     permissions:
@@ -126,6 +131,7 @@ jobs:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan

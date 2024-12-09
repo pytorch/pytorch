@@ -41,7 +41,11 @@ from functorch.compile import (
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
-from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
+from torch._functorch.aot_autograd import (
+    aot_export_joint_simple,
+    aot_export_module,
+    SerializableAOTDispatchCompiler,
+)
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._inductor.output_code import MockFXGraphCacheOutput
@@ -2242,6 +2246,7 @@ def forward(self, primals_1, primals_2):
             )
 
     # https://github.com/pytorch/pytorch/issues/106456
+    @skipIfTorchDynamo()
     def test_input_mutation_noncontiguous(self):
         def f(a):
             a.mul_(2)
@@ -2260,26 +2265,18 @@ def forward(self, primals_1, primals_2):
         self.verify_aot_autograd(
             f, partial(inp_callable, req_grad=True), test_mutation=True
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=False),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable, req_grad=True),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=False),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable, req_grad=True),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
 
     def test_backward_mutation_data(self):
         class BwMutation(torch.autograd.Function):
@@ -2497,20 +2494,12 @@ def forward(self, primals_1, primals_2):
             test_mutation=True,
             make_inputs_subclasses=True,
         )
-        # Input mutations on subclasses with training graphs fail backward guards today.
-        with self.assertRaisesRegex(
-            RuntimeError,
-            """
-During the backward, we encountered a tensor subclass where we guessed its
-metadata incorrectly.
-""",  # noqa: F541
-        ):
-            self.verify_aot_autograd(
-                f,
-                partial(inp_callable1, req_grad=True),
-                test_mutation=True,
-                make_inputs_subclasses=True,
-            )
+        self.verify_aot_autograd(
+            f,
+            partial(inp_callable1, req_grad=True),
+            test_mutation=True,
+            make_inputs_subclasses=True,
+        )
 
         # Important characteristic: the graph takes in 2 inputs!
         # That shows that we didn't try to run our complicated synthetic base logic,
@@ -5504,6 +5493,11 @@ metadata incorrectly.
         self.assertEqual(b_ref.grad.a, b_test.grad.a)
         self.assertEqual(b_ref.grad.b, b_test.grad.b)
 
+    @torch._functorch.config.patch(
+        {
+            "disable_guess_zero_tangent_for_mutated_input_subclass": True,
+        }
+    )
     def test_aot_dispatch_input_mutation(self):
         def f(a, b):
             a.mul_(2)
@@ -5657,6 +5651,11 @@ metadata incorrectly.
         self.assertEqual(b_ref_base.grad.a, b_test_base.grad.a)
         self.assertEqual(b_ref_base.grad.b, b_test_base.grad.b)
 
+    @torch._functorch.config.patch(
+        {
+            "disable_guess_zero_tangent_for_mutated_input_subclass": True,
+        }
+    )
     def test_aot_dispatch_input_mutation_and_output_alias(self):
         def f(a, b):
             a.mul_(2)
@@ -6291,6 +6290,16 @@ metadata incorrectly.
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
     def test_subclass_parameters(self):
+        class _M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + self.p
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -6298,9 +6307,10 @@ metadata incorrectly.
                 self.p2 = torch.nn.Parameter(
                     TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
+                self._m = _M()
 
             def forward(self, x):
-                return x + 2 * self.p1 + self.p2
+                return self._m(x) + x + 2 * self.p1 + self.p2
 
         m = M()
         ref_x = torch.randn(3, 4)
@@ -6756,6 +6766,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(out, optout)
 
+    def test_inputs_overlapping_with_mutation_guard_base(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base[1:], base[1:]]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
+
 
 class MockFXGraphCache:
     """
@@ -6807,12 +6835,13 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def make_compiler(self, fw_graph_cell):
         mock_inductor_cache = self.inductor_cache
 
-        def compiler(gm, inputs):
+        def compiler(gm, example_inputs):
             nonlocal mock_inductor_cache, fw_graph_cell
-            result = mock_inductor_cache.load(gm, inputs)
+            result = mock_inductor_cache.load(gm, example_inputs)
             fw_graph_cell[0] = gm
             return result
 
+        compiler = SerializableAOTDispatchCompiler(MockFXGraphCacheOutput, compiler)
         return compiler
 
     def run_autograd(

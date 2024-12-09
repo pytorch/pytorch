@@ -39,6 +39,10 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 #define NCCL_REMOTE_ERROR
 #endif
 
+static_assert(
+    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
+    "NCCL version must be 2.7 or later");
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \

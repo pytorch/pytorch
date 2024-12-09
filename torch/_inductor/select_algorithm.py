@@ -260,8 +260,10 @@ class TritonTemplateKernel(TritonKernel):
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
-            numel,
-            sympy.S.One,
+            {
+                "x": numel,
+                "r": sympy.S.One,
+            },
             features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
@@ -342,7 +344,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=self.index_dtype, argdefs=argdefs
             ),

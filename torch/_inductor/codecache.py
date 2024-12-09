@@ -1529,7 +1529,9 @@ class AotCodeCompiler:
                 object_output_dir,
             ) = get_name_and_dir_from_output_file_path(consts_s)
             object_build_options = CppTorchDeviceOptions(
-                device_type=device_type,
+                # Intel compiler failed to compile this manully constructed assembly file.
+                # it is ok to use gcc to compile the .S to a .o and linked with Intel comiler .
+                device_type=device_type if device_type != "xpu" else "cpu",
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
@@ -1637,11 +1639,15 @@ class AotCodeCompiler:
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
+            if config.aot_inductor.package_constants_in_so:
+                serialized_weights = b"".join(
+                    _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                    for name in graph.constants.keys()
+                    if name not in graph.folded_constants
+                )
+            else:
+                serialized_weights = b""
+
             consts_size = len(serialized_weights)
 
             # TODO: Fix mmap weights with cuda
@@ -1711,6 +1717,7 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+
             so_builder = CppBuilder(
                 name=output_name,
                 sources=[output_o, consts_o, kernels_o],
@@ -1911,7 +1918,16 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p]:
         func = getattr(func, s)
 
     assert callable(func), op + " can not be loaded through custom_op_wrapper"
-    result = func(*converted_args)
+
+    # convert any kwarg-only arguments to kwargs
+    kwargs = dict()
+    for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
+        if func_arg.kwarg_only:
+            kwargs[func_arg.name] = conv_arg
+    if kwargs:
+        del converted_args[-len(kwargs) :]
+
+    result = func(*converted_args, **kwargs)
     if isinstance(result, (list, tuple)):
         # unsafe_alloc_void_ptrs_from_tensors expects result contains tensor only
         result = [torch.tensor([]) if r is None else r for r in result]
@@ -2294,13 +2310,16 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             std::vector<AtenTensorHandle> output_handles(%s);
             try {
                 inductor_entry_impl(input_handles.data(), output_handles.data());
+                if (PyErr_Occurred()) {
+                    return nullptr;
+                }
                 return pack_tensor_handle_list(output_handles);
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
-                return {};
+                return nullptr;
             } catch(...) {
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
-                return {};
+                return nullptr;
             }
         }
         """
