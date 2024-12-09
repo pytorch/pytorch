@@ -707,6 +707,7 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
     Tensor & grad_weight) {
   auto grad_output = grad_output_.expect_contiguous();
 
+
   if (grad_weight.defined()) {
     auto self = self_.expect_contiguous();
     conv_depthwise2d_grad_weight_out(
@@ -719,6 +720,16 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
 
   if (grad_input.defined()) {
     auto weight = weight_.expect_contiguous();
+    CheckedFrom c = "conv_depthwise2d_backward_cuda_out";
+    TORCH_WARN(grad_input.sizes(), self_.sizes());
+    convolution_shape_check(c,
+		          TensorGeometryArg(TensorGeometry(self_), "input", 7),
+                          TensorGeometryArg(TensorGeometry(*weight), "weight", 2),
+			  TensorGeometryArg(TensorGeometry(*grad_output), "grad_output", 0),
+			  padding,
+			  stride,
+			  dilation,
+			  self_.size(1) / weight->size(1));
     conv_depthwise2d_backward_out(
         self_, *grad_output, grad_input, *weight,
         kernel_size[1], kernel_size[0],
