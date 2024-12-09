@@ -241,7 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  at::Tensor out = std::get<0>(outputs);
+  auto& [out, mean, rstd] = outputs;
   out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
@@ -250,8 +250,6 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   } else if (bias.defined()) {
     out = out.add(bias);
   }
-  at::Tensor mean = std::get<1>(outputs);
-  at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -261,7 +259,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  return outputs;
 }
 
 Tensor rms_norm_symint(
@@ -297,7 +295,7 @@ Tensor rms_norm_symint(
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {
