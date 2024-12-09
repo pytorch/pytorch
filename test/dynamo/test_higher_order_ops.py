@@ -302,6 +302,23 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             expected_opcount=2,
         )
 
+    def test_symint_in_slice(self):
+        def f(x):
+            i = x.size(0) - 2
+            j = x.size(1) - 3
+            k = x.size(2)
+            return wrap(lambda x: x[:i, :j, k:], x)
+
+        x = torch.randn(3, 4, 5)
+        self._test_wrap_simple(
+            f,
+            default_args_generator((x,)),
+            # 3 basic symbols and 2 compound symbols
+            ifdynstaticdefault(2, 7),
+            # 2 more sym expression computation
+            expected_opcount=ifdynstaticdefault(2, 4),
+        )
+
     def test_wrap_pytree_args_nested(self):
         def f(x, y, z):
             def fn(d):
