@@ -14,6 +14,7 @@ jobs:
   intermediate_upload_test_stats:
     name: Intermediate upload test stats for ${{ inputs.workflow_id }}
     runs-on: ubuntu-22.04
+    environment: upload-stats
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
