@@ -13,6 +13,7 @@ from torch._dynamo.external_utils import (
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
+from torch._guards import compile_context, CompileContext, CompileId
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -102,6 +103,10 @@ class AutogradCompilerInstance:
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
+        self.compile_context = compile_context(
+            CompileContext(CompileId(self.id, None, None))
+        )
+        self.compile_context.__enter__()
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -405,6 +410,7 @@ class AutogradCompilerInstance:
                     return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
                 in_compiled_autograd_region = False
+                self.compile_context.__exit__(None, None, None)
 
         return runtime_wrapper, self.compiler_fn(graph)
 

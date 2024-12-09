@@ -522,7 +522,10 @@ class ConvertFrameAssert:
         frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
         FRAME_COMPILE_COUNTER[frame_id] += 1
 
-        compile_id = CompileId(frame_id, frame_compile_id)
+        compiled_autograd_id = None
+        if prior := CompileContext.current_compile_id():
+            compiled_autograd_id = prior.compiled_autograd_id
+        compile_id = CompileId(compiled_autograd_id, frame_id, frame_compile_id)
 
         signpost_event(
             "dynamo",
@@ -1274,7 +1277,7 @@ def replay(filename: str) -> None:
             cache_entry=None,
             frame=None,
             frame_state={},
-            compile_id=CompileId(42, 999),
+            compile_id=CompileId(None, 42, 999),
         )
     finally:
         config.replay_record_enabled = original_replay_val
