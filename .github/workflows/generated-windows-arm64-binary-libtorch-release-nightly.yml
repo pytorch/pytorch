@@ -72,8 +72,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  pytorch/builder
-          ref:  main
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
           path: "builder"
       - name: Bootstrap folders
         shell: cmd
@@ -165,8 +165,8 @@ jobs:
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
-          repository:  pytorch/builder
-          ref:  main
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
           path: "builder"
       - name: Bootstrap Git
         shell: cmd
