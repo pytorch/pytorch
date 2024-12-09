@@ -392,8 +392,8 @@ class TestFP8Matmul(TestCase):
         x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
         y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
-        x_fp8 = x.to(e4m3_type)
-        y_fp8 = y.to(e4m3_type).t()
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
 
         out_fp8 = torch._scaled_mm(
             x_fp8,
@@ -416,8 +416,8 @@ class TestFP8Matmul(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_fp8 = x.to(e4m3_type)
-        y_fp8 = y.to(e4m3_type).t()
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -484,7 +484,7 @@ class TestFP8Matmul(TestCase):
         ):
             torch._scaled_mm(
                 x_fp8,
-                y_fp8.to(e5m2_type),
+                y_fp8.to(torch.float8_e5m2),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
