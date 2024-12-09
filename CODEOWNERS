@@ -80,7 +80,7 @@ nn/qat/ @jerryzh168
 
 # torch.linalg
 # docs
-/torch/linalg/ @lezcano @IvanYashchuk
+/torch/linalg/ @lezcano @IvanYashchuk @nikitaved
 # code
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved @IvanYashchuk
 # tests
