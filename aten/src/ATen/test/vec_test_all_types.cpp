@@ -1783,11 +1783,11 @@ namespace {
         for (const auto i : c10::irange(mask_n * size)) {                   \
           x[i] = generator.get();                                           \
         }                                                                   \
-        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);            \
         constexpr int dst_size = at::vec::Vectorized<dst_t>::size();        \
         constexpr int dst_n = mask_n * size / dst_size;                     \
         if constexpr(dst_n * dst_size >= mask_n * size) {                   \
             constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
+            auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);        \
             auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
             x_vec.store(y);                                                 \
             for (const auto i : c10::irange(mask_n * size)) {               \
