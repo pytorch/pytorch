@@ -2292,7 +2292,19 @@ class SubgraphTracer(fx.Tracer):
         original arg.
         """
         if not isinstance(arg, torch.fx.Proxy):
-            return arg
+            # Note: arg can be a python built-in slice type e.g.
+            # x[:max_seq] is represented as get_item(t, (slice(None, max_seq, None)))
+            # we need to also look into the slice variable itself to lift the
+            # proxies there.
+            if isinstance(arg, slice):
+                return slice(
+                    *(
+                        self.maybe_lift_tracked_freevar_to_input(sub_arg)
+                        for sub_arg in (arg.start, arg.stop, arg.step)
+                    )
+                )
+            else:
+                return arg
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
