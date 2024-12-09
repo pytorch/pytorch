@@ -150,11 +150,14 @@ class NestedTensor(torch.Tensor):
     def offsets(self) -> torch.Tensor:
         ret = None
         if self._non_contig_offsets is not None:
+            # non-contig case
             ret = self._non_contig_offsets
-        if self.is_cpu:
-            ret = self._host_offsets
         else:
-            ret = self._device_offsets
+            # contig case
+            if self.is_cpu:
+                ret = self._host_offsets
+            else:
+                ret = self._device_offsets
         assert ret is not None
         return ret
 

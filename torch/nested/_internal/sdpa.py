@@ -313,15 +313,16 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
     if not isinstance(qkv, NestedTensor):
         raise ValueError("QKV must be nested for flash cumulative_seq_len calculation.")
 
-    if qkv.lengths() is None:
+    qkv_lengths = qkv.lengths()
+    if qkv_lengths is None:
         # TODO: Explore performance impact of copying
         cumulative_seqlen = qkv.offsets().to(dtype=torch.int32, device=qkv.device)
         max_seqlen = qkv._get_max_seqlen()
         n_elem = qkv.values().shape[0]
     else:
         # TODO: Explore performance impact of copying
-        cumulative_seqlen = (
-            qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
+        cumulative_seqlen = qkv_lengths.cumsum(0).to(
+            dtype=torch.int32, device=qkv.device
         )
         max_seqlen = qkv._get_max_seqlen()
         # TODO: Explore performance impact when compiling
