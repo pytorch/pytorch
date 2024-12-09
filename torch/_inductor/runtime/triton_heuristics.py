@@ -336,7 +336,7 @@ class CachingAutotuner(KernelInterface):
                     assert len(self.size_hints) == 2
                     xblock = triton_config.kwargs.get("XBLOCK", 1)
                     rblock = triton_config.kwargs["RBLOCK"]
-                    total_block = (self.size_hints[0] + xblock - 1) // xblock
+                    total_block = (self.size_hints["x"] + xblock - 1) // xblock
                     nreg = getattr(compiled_binary, "n_regs", None)
                     if nreg is None:
                         continue
@@ -1380,9 +1380,9 @@ def _check_max_grid_x(size_hints, x, num_warps):
     warp_size = (
         64 if torch.version.hip else 32
     )  # TODO: query warp size once #129663 is merged
-    num_blocks = (size_hints[0] + x - 1) // x
+    num_blocks = (size_hints["x"] + x - 1) // x
 
-    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints[0]:
+    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints["x"]:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
         num_blocks = num_blocks // 2
     if (num_blocks * num_warps * warp_size) > max_grid_x:
@@ -1418,41 +1418,40 @@ def triton_config(
     """
     # Ideally we want to read this from some device config
 
-    # for a 2d size_hints [a, b], a should be mapped to YBLOCK rather than XBLOCK
-    size_hints = list(reversed(size_hints))
-
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
-    if conditional_product(*size_hints) < target:
+    if conditional_product(*size_hints.values()) < target:
         target //= 8
 
     # shrink sizes to size hints
-    x = min(x, size_hints[0])
+    x = min(x, size_hints["x"])
     if y:
-        y = min(y, size_hints[1])
+        y = min(y, size_hints["y"])
     if z:
-        z = min(z, size_hints[2])
+        z = min(z, size_hints["z"])
 
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
-    while x < min(size_hints[0], TRITON_MAX_BLOCK["X"]) and (
-        x * maxGridSize[0] < size_hints[0] or conditional_product(x, y, z) < target
+    while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and (
+        x * maxGridSize[0] < size_hints["x"] or conditional_product(x, y, z) < target
     ):
         x *= 2
     while (
         y
-        and y < min(size_hints[1], TRITON_MAX_BLOCK["Y"])
+        and y < min(size_hints["y"], TRITON_MAX_BLOCK["Y"])
         and (
-            y * maxGridSize[1] < size_hints[1] or conditional_product(x, y, z) < target
+            y * maxGridSize[1] < size_hints["y"]
+            or conditional_product(x, y, z) < target
         )
     ):
         y *= 2
     while (
         z
-        and z < min(size_hints[2], TRITON_MAX_BLOCK["Z"])
+        and z < min(size_hints["z"], TRITON_MAX_BLOCK["Z"])
         and (
-            z * maxGridSize[2] < size_hints[2] or conditional_product(x, y, z) < target
+            z * maxGridSize[2] < size_hints["z"]
+            or conditional_product(x, y, z) < target
         )
     ):
         z *= 2
@@ -1468,9 +1467,9 @@ def triton_config(
     # see https://github.com/pytorch/pytorch/pull/97950
     if conditional_product(x, y, z) >= 128 and not torch.version.hip:
         num_warps = max(num_warps, 4)
-    xnumel = size_hints[0]
-    ynumel = size_hints[1] if y else None
-    znumel = size_hints[2] if z else None
+    xnumel = size_hints["x"]
+    ynumel = size_hints.get("y")
+    znumel = size_hints.get("z")
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
@@ -1480,7 +1479,7 @@ def triton_config(
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
-    x = min(x, size_hints[0])
+    x = min(x, size_hints["x"])
 
     cfg = {"XBLOCK": x}
     if y:
@@ -1502,17 +1501,17 @@ def triton_config_reduction(
     """
 
     target = conditional_product(x, r)
-    if conditional_product(*size_hints) < target:
+    if conditional_product(*size_hints.values()) < target:
         target //= 8
 
     # shrink sizes to size hints
-    x = min(x, size_hints[0])
-    r = min(r, size_hints[1])
+    x = min(x, size_hints["x"])
+    r = min(r, size_hints["r"])
 
     # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, r) < target:
+    while x < size_hints["x"] and conditional_product(x, r) < target:
         x *= 2
-    while r < size_hints[1] and conditional_product(x, r) < target:
+    while r < size_hints["r"] and conditional_product(x, r) < target:
         r *= 2
 
     if num_warps is None:
@@ -1529,7 +1528,7 @@ def triton_config_reduction(
         r = r // 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    check_config(cfg, xnumel=size_hints[0])
+    check_config(cfg, xnumel=size_hints["x"])
     assert x <= TRITON_MAX_BLOCK["X"], f"increase TRITON_MAX_BLOCK['X'] to {x}"
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
@@ -1547,21 +1546,21 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
         target //= 8
 
     # shrink sizes to size hints
-    x = min(x, size_hints[0])
-    y = min(y, size_hints[1])
-    r = min(r, size_hints[2])
+    x = min(x, size_hints["x"])
+    y = min(y, size_hints["y"])
+    r = min(r, size_hints["r"])
 
     # if we are below original block size, scale up where we can
-    while x < size_hints[0] and conditional_product(x, y, r) < target:
+    while x < size_hints["x"] and conditional_product(x, y, r) < target:
         x *= 2
-    while r < size_hints[2] and conditional_product(x, y, r) < target:
+    while r < size_hints["r"] and conditional_product(x, y, r) < target:
         r *= 2
-    while y < size_hints[1] and conditional_product(x, y, r) < target:
+    while y < size_hints["y"] and conditional_product(x, y, r) < target:
         y *= 2
 
     cfg = {"XBLOCK": x, "YBLOCK": y, "RBLOCK": r}
     num_warps = _num_warps(conditional_product(x, y, r) // 256, min_num_warps=1)
-    check_config(cfg, xnumel=size_hints[0], ynumel=size_hints[1])
+    check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
     assert r <= TRITON_MAX_BLOCK["R"], f"increase TRITON_MAX_BLOCK['r'] to {r}"
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -1580,7 +1579,7 @@ def pointwise(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     assert not inductor_meta.get("no_x_dim")
 
-    numel = functools.reduce(operator.mul, size_hints)
+    numel = functools.reduce(operator.mul, size_hints.values())
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
@@ -1655,16 +1654,16 @@ def pointwise(
 
 
 def _reduction_configs(
-    *, size_hints: List[int], inductor_meta: Dict[str, Any]
+    *, size_hints: Dict[str, int], inductor_meta: Dict[str, Any]
 ) -> List[Config]:
     reduction_hint = inductor_meta.get("reduction_hint", None)
     assert len(size_hints) == 2
-    rnumel = size_hints[-1]
+    rnumel = size_hints["r"]
 
     register_intensive = False
     MAX_RBLOCK = 2048
     if (
-        size_hints[0] >= 1024
+        size_hints["x"] >= 1024
         and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
         >= 10
     ):
@@ -1732,7 +1731,7 @@ def reduction(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
+        size_hints["x"] = 1
 
     assert triton_meta is not None
     if len(size_hints) != 2:
@@ -1759,8 +1758,8 @@ def cooperative_reduction(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
-    xnumel, rnumel = size_hints
+        size_hints["x"] = 1
+    xnumel, rnumel = size_hints["x"], size_hints["r"]
 
     # TODO(jansel): we should base target on the SM count of the local GPU
     target = 64
@@ -1769,11 +1768,11 @@ def cooperative_reduction(
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
-            [xnumel, rnumel // split], reduction_hint, inductor_meta
+            {"x": xnumel, "r": rnumel // split}, reduction_hint, inductor_meta
         )
     else:
         configs = _reduction_configs(
-            size_hints=[xnumel, rnumel // split], inductor_meta=inductor_meta
+            size_hints={"x": xnumel, "r": rnumel // split}, inductor_meta=inductor_meta
         )
     for config in configs:
         config.kwargs["RSPLIT"] = split
@@ -1794,7 +1793,7 @@ def _persistent_reduction_configs(
     reduction_hint=False,
     inductor_meta=None,
 ):
-    xnumel, rnumel = size_hints
+    xnumel, rnumel = size_hints["x"], size_hints["r"]
 
     configs = [
         triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
@@ -1833,7 +1832,7 @@ def persistent_reduction(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
+        size_hints["x"] = 1
 
     configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
 
@@ -1858,7 +1857,7 @@ def split_scan(
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
-        size_hints = [1, *size_hints[1:]]
+        size_hints["x"] = 1
 
     assert triton_meta is not None
     if len(size_hints) != 2:
