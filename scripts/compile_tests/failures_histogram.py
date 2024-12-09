@@ -2,7 +2,6 @@ import argparse
 import re
 
 from common import download_reports, get_testcases, key, open_test_results, skipped_test
-
 from passrate import compute_pass_rate
 
 
@@ -97,7 +96,7 @@ def failures_histogram(eager_dir, dynamo_dir, verbose=False, format_issues=False
         else "(num_failed_tests, error_msg, sample_test)"
     )
     print(header)
-    sum_counts = sum([r[0] for r in result])
+    sum_counts = sum(r[0] for r in result)
     for row in result:
         if format_issues:
             print(as_issue(*row))

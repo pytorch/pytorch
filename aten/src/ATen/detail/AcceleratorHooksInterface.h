@@ -1,6 +1,12 @@
 #pragma once
 
+#include <ATen/core/Generator.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
+#include <c10/core/Stream.h>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
@@ -16,6 +22,58 @@ struct TORCH_API AcceleratorHooksInterface {
 
   // Whether the device at device_index is fully initialized or not.
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
+
+  virtual void init() const {
+    TORCH_CHECK(false, "Backend doesn`t support init()");
+  }
+
+  virtual DeviceIndex deviceCount() const {
+    return 0;
+  }
+
+  virtual void setCurrentDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support setCurrentDevice()");
+  }
+
+  virtual DeviceIndex getCurrentDevice() const {
+    TORCH_CHECK(false, "Backend doesn't support getCurrentDevice()");
+    return -1;
+  }
+
+  virtual DeviceIndex exchangeDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support exchangeDevice()");
+    return -1;
+  }
+
+  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
+    return -1;
+  }
+
+  virtual bool isPinnedPtr(const void* data) const {
+    return false;
+  }
+
+  virtual Allocator* getPinnedMemoryAllocator() const {
+    TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
+    return nullptr;
+  }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
+
+  virtual const Generator& getDefaultGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
+  }
+
+  virtual Generator getNewGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
+  }
 };
 
 } // namespace at
+
+C10_DIAGNOSTIC_POP()

@@ -30,7 +30,7 @@ using namespace torch;
 
 PyObject* THPGeneratorClass = nullptr;
 
-PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
+PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
@@ -73,13 +73,14 @@ static PyObject* THPGenerator_pynew(
   }
 #endif
   else if (device.type() == at::kXPU) {
-    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+    self->cdata = at::detail::getXPUHooks().getNewGenerator(device.index());
   } else if (device.type() == at::kIPU) {
-    self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
+    self->cdata = at::detail::getIPUHooks().getNewGenerator(device.index());
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
@@ -97,7 +98,7 @@ static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   std::scoped_lock<std::mutex> lock(gen.mutex());
   auto state_tensor = gen.get_state();
 
-  return THPVariable_Wrap(std::move(state_tensor));
+  return THPVariable_Wrap(state_tensor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -250,6 +251,56 @@ static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = (THPGenerator*)_self;
+  auto& gen = self->cdata;
+
+  auto ret = THPObjectPtr{PyTuple_New(3)};
+  if (!ret)
+    throw python_error();
+
+  py::object torch_module = py::module::import("torch");
+  py::object torch_generator = torch_module.attr("Generator");
+  PyTuple_SET_ITEM(ret.get(), 0, torch_generator.release().ptr());
+
+  auto args = THPObjectPtr{PyTuple_New(1)};
+  if (!args)
+    throw python_error();
+
+  PyTuple_SET_ITEM(args.get(), 0, THPGenerator_get_device(self, nullptr));
+  PyTuple_SET_ITEM(ret.get(), 1, args.release());
+
+  auto state = THPObjectPtr{PyTuple_New(3)};
+  if (!state)
+    throw python_error();
+
+  c10::DeviceType device_type = gen.device().type();
+  PyTuple_SET_ITEM(state.get(), 0, THPGenerator_initialSeed(_self, nullptr));
+  PyTuple_SET_ITEM(
+      state.get(),
+      1,
+      device_type != at::kCPU ? THPGenerator_getOffset(_self, nullptr)
+                              : Py_None);
+  PyTuple_SET_ITEM(state.get(), 2, THPGenerator_getState(_self, nullptr));
+  PyTuple_SET_ITEM(ret.get(), 2, state.release());
+
+  return ret.release();
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_pickleSetState(PyObject* _self, PyObject* state) {
+  HANDLE_TH_ERRORS
+  THPGenerator_manualSeed(_self, PyTuple_GET_ITEM(state, 0));
+  auto& offset = PyTuple_GET_ITEM(state, 1);
+  if (offset != Py_None) {
+    THPGenerator_setOffset(_self, offset);
+  }
+  THPGenerator_setState(_self, PyTuple_GET_ITEM(state, 2));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPGenerator_properties[] = {
     {"device", (getter)THPGenerator_get_device, nullptr, nullptr, nullptr},
@@ -257,6 +308,8 @@ static struct PyGetSetDef THPGenerator_properties[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPGenerator_methods[] = {
+    {"__reduce__", THPGenerator_reduce, METH_NOARGS, nullptr},
+    {"__setstate__", THPGenerator_pickleSetState, METH_O, nullptr},
     {"get_state", THPGenerator_getState, METH_NOARGS, nullptr},
     {"set_state", THPGenerator_setState, METH_O, nullptr},
     {"clone_state", THPGenerator_cloneState, METH_NOARGS, nullptr},
@@ -278,7 +331,8 @@ static struct PyMemberDef THPGenerator_members[] = {
     {nullptr}};
 
 PyTypeObject THPGeneratorType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
     0, /* tp_itemsize */
     THPGenerator_dealloc, /* tp_dealloc */
@@ -337,7 +391,7 @@ PyObject* pyobj(const Generator& self) {
   return self.pyobj();
 }
 
-PyObject* THPGenerator_Wrap(Generator gen) {
+PyObject* THPGenerator_Wrap(const Generator& gen) {
   if (!gen.defined()) {
     Py_RETURN_NONE;
   }

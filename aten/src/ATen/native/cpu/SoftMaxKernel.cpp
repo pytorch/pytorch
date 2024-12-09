@@ -13,7 +13,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
@@ -1292,19 +1291,19 @@ static void log_softmax_backward_kernel_impl(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     softmax_backward_lastdim_kernel,
-    &softmax_backward_lastdim_kernel_impl);
+    &softmax_backward_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_lastdim_kernel,
-    &log_softmax_backward_lastdim_kernel_impl);
+    &log_softmax_backward_lastdim_kernel_impl)
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_kernel,
-    &log_softmax_backward_kernel_impl);
+    &log_softmax_backward_kernel_impl)
 } // namespace at::native

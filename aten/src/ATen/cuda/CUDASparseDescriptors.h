@@ -61,15 +61,15 @@ class ConstCuSparseDescriptor {
 #endif // AT_USE_CUSPARSE_CONST_DESCRIPTORS || AT_USE_HIPSPARSE_CONST_DESCRIPTORS
 
 #if defined(USE_ROCM)
-using cusparseMatDescr = std::remove_pointer<hipsparseMatDescr_t>::type;
-using cusparseDnMatDescr = std::remove_pointer<hipsparseDnMatDescr_t>::type;
-using cusparseDnVecDescr = std::remove_pointer<hipsparseDnVecDescr_t>::type;
-using cusparseSpMatDescr = std::remove_pointer<hipsparseSpMatDescr_t>::type;
-using cusparseSpMatDescr = std::remove_pointer<hipsparseSpMatDescr_t>::type;
-using cusparseSpGEMMDescr = std::remove_pointer<hipsparseSpGEMMDescr_t>::type;
+using cusparseMatDescr = std::remove_pointer_t<hipsparseMatDescr_t>;
+using cusparseDnMatDescr = std::remove_pointer_t<hipsparseDnMatDescr_t>;
+using cusparseDnVecDescr = std::remove_pointer_t<hipsparseDnVecDescr_t>;
+using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
+using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
+using cusparseSpGEMMDescr = std::remove_pointer_t<hipsparseSpGEMMDescr_t>;
 #if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-using bsrsv2Info = std::remove_pointer<bsrsv2Info_t>::type;
-using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
+using bsrsv2Info = std::remove_pointer_t<bsrsv2Info_t>;
+using bsrsm2Info = std::remove_pointer_t<bsrsm2Info_t>;
 #endif
 #endif
 
@@ -81,7 +81,7 @@ class TORCH_CUDA_CPP_API CuSparseMatDescriptor
     : public CuSparseDescriptor<cusparseMatDescr, &cusparseDestroyMatDescr> {
  public:
   CuSparseMatDescriptor() {
-    cusparseMatDescr_t raw_descriptor;
+    cusparseMatDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
@@ -91,7 +91,7 @@ class TORCH_CUDA_CPP_API CuSparseMatDescriptor
         upper ? CUSPARSE_FILL_MODE_UPPER : CUSPARSE_FILL_MODE_LOWER;
     cusparseDiagType_t diag_type =
         unit ? CUSPARSE_DIAG_TYPE_UNIT : CUSPARSE_DIAG_TYPE_NON_UNIT;
-    cusparseMatDescr_t raw_descriptor;
+    cusparseMatDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
     TORCH_CUDASPARSE_CHECK(cusparseSetMatFillMode(raw_descriptor, fill_mode));
     TORCH_CUDASPARSE_CHECK(cusparseSetMatDiagType(raw_descriptor, diag_type));
@@ -105,7 +105,7 @@ class TORCH_CUDA_CPP_API CuSparseBsrsv2Info
     : public CuSparseDescriptor<bsrsv2Info, &cusparseDestroyBsrsv2Info> {
  public:
   CuSparseBsrsv2Info() {
-    bsrsv2Info_t raw_descriptor;
+    bsrsv2Info_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateBsrsv2Info(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
@@ -115,7 +115,7 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
     : public CuSparseDescriptor<bsrsm2Info, &cusparseDestroyBsrsm2Info> {
  public:
   CuSparseBsrsm2Info() {
-    bsrsm2Info_t raw_descriptor;
+    bsrsm2Info_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseCreateBsrsm2Info(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
@@ -202,7 +202,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
   explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
 
   std::tuple<int64_t, int64_t, int64_t> get_size() {
-    int64_t rows, cols, nnz;
+    int64_t rows = 0, cols = 0, nnz = 0;
     TORCH_CUDASPARSE_CHECK(cusparseSpMatGetSize(
         this->descriptor(),
         &rows,
@@ -254,7 +254,7 @@ class TORCH_CUDA_CPP_API CuSparseSpSVDescriptor
     : public CuSparseDescriptor<cusparseSpSVDescr, &cusparseSpSV_destroyDescr> {
  public:
   CuSparseSpSVDescriptor() {
-    cusparseSpSVDescr_t raw_descriptor;
+    cusparseSpSVDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseSpSV_createDescr(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
@@ -266,24 +266,22 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
     : public CuSparseDescriptor<cusparseSpSMDescr, &cusparseSpSM_destroyDescr> {
  public:
   CuSparseSpSMDescriptor() {
-    cusparseSpSMDescr_t raw_descriptor;
+    cusparseSpSMDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseSpSM_createDescr(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
 };
 #endif
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50200) || !defined(USE_ROCM)
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
  public:
   CuSparseSpGEMMDescriptor() {
-    cusparseSpGEMMDescr_t raw_descriptor;
+    cusparseSpGEMMDescr_t raw_descriptor = nullptr;
     TORCH_CUDASPARSE_CHECK(cusparseSpGEMM_createDescr(&raw_descriptor));
     descriptor_.reset(raw_descriptor);
   }
 };
-#endif
 
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 

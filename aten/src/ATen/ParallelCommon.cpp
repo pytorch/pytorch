@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/PTThreadPool.h>
 #include <ATen/Version.h>
+#include <c10/util/env.h>
 
 #include <sstream>
 #include <thread>
@@ -15,20 +16,25 @@
 #include <omp.h>
 #endif
 
+#if defined(__APPLE__) && defined(__aarch64__) && !defined(C10_MOBILE)
+#include <sys/sysctl.h>
+#endif
+
 namespace at {
 
 namespace {
 
-const char* get_env_var(
+std::string get_env_var(
     const char* var_name, const char* def_value = nullptr) {
-  const char* value = std::getenv(var_name);
-  return value ? value : def_value;
+  auto env = c10::utils::get_env(var_name);
+  return env.has_value() ? env.value() : def_value;
 }
 
+#ifndef C10_MOBILE
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
-    if (auto* value = std::getenv(var_name)) {
-      int nthreads = std::stoi(value);
+    if (auto value = c10::utils::get_env(var_name)) {
+      int nthreads = std::stoi(value.value());
       TORCH_CHECK(nthreads > 0);
       return nthreads;
     }
@@ -39,6 +45,7 @@ size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   }
   return def_value;
 }
+#endif
 
 } // namespace
 
@@ -76,8 +83,6 @@ std::string get_parallel_info() {
   ss << "OpenMP";
   #elif AT_PARALLEL_NATIVE
   ss << "native thread pool";
-  #elif AT_PARALLEL_NATIVE_TBB
-  ss << "native thread pool and TBB";
   #endif
   #ifdef C10_MOBILE
   ss << " [mobile]";
@@ -104,11 +109,23 @@ int intraop_default_num_threads() {
 #if defined(FBCODE_CAFFE2) && defined(__aarch64__)
     nthreads = 1;
 #else
+#if defined(__aarch64__) && defined(__APPLE__)
+    // On Apple Silicon there are efficient and performance core
+    // Restrict parallel algorithms to performance cores by default
+    int32_t num_cores = -1;
+    size_t num_cores_len = sizeof(num_cores);
+    if (sysctlbyname("hw.perflevel0.physicalcpu", &num_cores, &num_cores_len, nullptr, 0) == 0) {
+      if (num_cores > 1) {
+        nthreads = num_cores;
+        return num_cores;
+      }
+    }
+#endif
     nthreads = TaskThreadPoolBase::defaultNumThreads();
 #endif
   }
   return static_cast<int>(nthreads);
-#endif
+#endif /* !defined(C10_MOBILE) */
 }
 
 } // namespace at

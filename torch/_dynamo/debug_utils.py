@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
-
+import atexit
 import copy
+import cProfile
 import functools
 import getpass
 import inspect
@@ -9,6 +11,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 from collections import Counter
@@ -19,7 +22,6 @@ import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
-
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -27,6 +29,7 @@ from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
+
 
 log = logging.getLogger(__name__)
 
@@ -169,7 +172,7 @@ class NNModuleToString:
             """
             from torch.nn import *
             class Repro(torch.nn.Module):
-                def __init__(self):
+                def __init__(self) -> None:
                     super().__init__()
             """
         )
@@ -282,7 +285,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
 
     except OSError as e:
-        log.exception(e)
+        log.exception("")
         raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
@@ -310,8 +313,6 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     When disable_clone is True, we will use args as-is without cloning.
     This is higher fidelity but we may destroy the args in the process.
     """
-    from torch._functorch.aot_autograd import make_boxed_func
-
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
@@ -321,19 +322,9 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
 
-    # TorchInductor returned callable expects lists. So, boxing the call.
-    orig_named_parameters = getattr(gm, "named_parameters", None)
-    orig_named_buffers = getattr(gm, "named_buffers", None)
-    if not hasattr(gm, "_boxed_call") and (
-        orig_named_parameters is not None or orig_named_buffers is not None
-    ):
-        gm = make_boxed_func(gm)
-        if orig_named_parameters is not None:
-            gm.named_parameters = orig_named_parameters
-        if orig_named_buffers is not None:
-            gm.named_buffers = orig_named_buffers
+    # TorchInductor returned callable expects lists. So, may need a boxed calling convention.
+    out = gm(args) if hasattr(gm, "_boxed_call") else gm(*args)
 
-    out = gm(args)
     if only_fwd:
         return out
     if requires_bwd_pass(out):
@@ -359,20 +350,7 @@ def same_two_models(
         is mostly useful for the minifier (which wants to avoid quantizing floating point
         error into integer/boolean error)
     """
-    from .eval_frame import OptimizedModule
-    from .testing import (
-        named_buffers_for_optimized_module,
-        named_parameters_for_optimized_module,
-    )
     from .utils import same
-
-    if isinstance(gm, OptimizedModule):
-        gm.named_parameters = named_parameters_for_optimized_module(gm)
-        gm.named_buffers = named_buffers_for_optimized_module(gm)
-
-    if isinstance(opt_gm, OptimizedModule):
-        opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
-        opt_gm.named_buffers = named_buffers_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
@@ -385,7 +363,9 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
+                raise RuntimeError(  # noqa: B904
+                    "Could not generate fp64 outputs, workaround with torch._dynamo.config.same_two_models_use_fp64 = False"
+                )
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -515,7 +495,7 @@ _is_leaf_or_default = _mk_defaulter(False)
 
 
 class NopInputReader:
-    def __init__(self):
+    def __init__(self) -> None:
         self.total = 0
 
     def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
@@ -671,6 +651,8 @@ class InputWriter:
         return v
 
     def tensor(self, name, t) -> None:
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
         storage = self.storage(
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
@@ -680,7 +662,9 @@ class InputWriter:
             args.append(str(tuple(t.stride())))
         if _dtype_or_default(None) != t.dtype:
             args.append(f"dtype={t.dtype!r}")
-        if _storage_offset_or_default(None) != t.storage_offset():
+        if not statically_known_true(
+            _storage_offset_or_default(None) == t.storage_offset()
+        ):
             args.append(f"storage_offset={t.storage_offset()!r}")
         tensor_metadata = torch._utils.get_tensor_metadata(t)
         if tensor_metadata:
@@ -694,6 +678,29 @@ class InputWriter:
             "reader.tensor("
             + ", ".join([storage, str(tuple(t.shape)), *args])
             + f")  # {name}"
+        )
+
+    def unsupported(self, name, arg):
+        # NB: Try hard not to /print/ a tensor, that will be very slow
+        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        # Best effort dump as much useful stuff we can lol, in case you want
+        # to repair the repro
+        if isinstance(arg, (list, tuple)):
+            self._lines.append('"""')
+            for i, a in enumerate(arg):
+                name_i = f"{name}[{i}]"
+                if isinstance(a, torch.Tensor):
+                    self.tensor(name_i, a)
+                elif isinstance(a, (int, torch.SymInt)):
+                    self.symint(name_i, a)
+                else:
+                    self.unsupported(name_i, a)
+            self._lines.append('"""')
+
+    # write out that the arg was filtered out as it is constant
+    def const(self, name) -> None:
+        self._lines.append(
+            f"reader.const({name!r})  # {name}, filtered out during compilation"
         )
 
     # TODO: this doesn't actually symint atm
@@ -739,7 +746,6 @@ def aot_graph_input_parser(
 
     class TensorContainer:
         "Container for tensors as attributes"
-        pass
 
     # Dictionary for tensors from annotations
     kwargs: Dict[str, Any] = {}
@@ -764,7 +770,8 @@ def aot_graph_input_parser(
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
-                resolved_shape.append(int(dim))
+                if dim:
+                    resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
         out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
@@ -800,3 +807,41 @@ def aot_graph_input_parser(
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
+
+
+def profile_to_file(filename: str) -> Callable[[T], T]:
+    """
+    Decorator to cProfile a given function and save the result to disk on process exit.
+
+    Args:
+        filename: filename to save profile to
+    """
+    prof = cProfile.Profile()
+    filename = os.path.abspath(os.path.expanduser(filename))
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            prof.enable()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                prof.disable()
+
+        return wrapper
+
+    def save_it():
+        prof.dump_stats(filename)
+        sys.stderr.write(
+            textwrap.dedent(
+                f"""\
+                Wrote profile to {filename}, view with:
+
+                    snakeviz {filename}
+
+                """
+            )
+        )
+
+    atexit.register(save_it)
+    return decorator

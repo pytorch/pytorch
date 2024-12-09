@@ -349,10 +349,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
+  [[nodiscard]] constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -380,7 +380,7 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
+  [[nodiscard]] constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
@@ -655,6 +655,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
@@ -671,6 +672,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
+    DispatchKey::AutocastMPS,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
@@ -702,7 +704,7 @@ constexpr DispatchKeySet autogradother_backends =
         // Technically, HIP will now redispatch to its own custom AutogradHIP
         // slot in the runtime table.
         {DispatchKey::FPGA,
-         DispatchKey::ORT,
+         DispatchKey::MAIA,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
          DispatchKey::CustomRNGKeyId,
@@ -819,7 +821,7 @@ C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 // for a given backend key, use the associated autograd key.
 // for non-backend keys, use AutogradOther as a default.
 // Note: it's convenient and fast to return a default here rather than (say)
-// returning an optional<DispatchKey>, or throwing. But it makes callers
+// returning an std::optional<DispatchKey>, or throwing. But it makes callers
 // responsible for either a) enforcing the invariant that only backend keys
 // be passed as arguments, or b) interpreting our return value carefully.
 inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
@@ -863,6 +865,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
   constexpr auto autocast_privateuse1_ks =
       DispatchKeySet(DispatchKey::AutocastPrivateUse1);
+  constexpr auto autocast_mps_ks = DispatchKeySet(DispatchKey::AutocastMPS);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
@@ -878,6 +881,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
       return autocast_xla_ks;
     case BackendComponent::PrivateUse1Bit:
       return autocast_privateuse1_ks;
+    case BackendComponent::MPSBit:
+      return autocast_mps_ks;
     default:
       return DispatchKeySet();
   }
@@ -901,7 +906,7 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
-static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
@@ -911,6 +916,9 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
           DispatchKeySet(
               {DispatchKey::Functionalize,
                DispatchKey::PythonTLSSnapshot,
+               DispatchKey::FuncTorchGradWrapper,
+               DispatchKey::FuncTorchVmapMode,
+               DispatchKey::FuncTorchBatched,
                DispatchKey::Python}))
       .highestPriorityTypeId();
 }

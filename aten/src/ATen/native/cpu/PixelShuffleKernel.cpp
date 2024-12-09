@@ -17,7 +17,7 @@ void cpu_pixel_shuffle(
     TensorBase& output,
     const TensorBase& input,
     int64_t upscale_factor) {
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // [(B1...Bn), C, H, W] => [N, C, H, W]
@@ -45,7 +45,7 @@ void cpu_pixel_shuffle(
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + s1 * stride_s1 +
           s2 * stride_s2 + h * stride_h + w;
-      output_data[i] = input_data[input_offset];
+      output_data[i] = c10::load(&input_data[input_offset]);
 
       data_index_step(n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
     }
@@ -59,7 +59,7 @@ void cpu_pixel_shuffle_channels_last(
     int64_t upscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel shuffle with channels last format supports tensors with 4 dims");
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -81,7 +81,7 @@ void cpu_pixel_shuffle_channels_last(
     data_index_init(begin, n, nbatch, h, height);
     for (const auto i : c10::irange(begin, end)) {
       for (const auto w : c10::irange(width)) {
-        scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
+        const scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
 
         // step 1: transpose each channel lane
         //   from: [c, s1*s2]
@@ -115,7 +115,7 @@ void cpu_pixel_unshuffle(
     TensorBase& output,
     const TensorBase& input,
     int64_t downscale_factor) {
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // [(B1...Bn), C, H, W] => [N, C, H, W]
@@ -144,7 +144,7 @@ void cpu_pixel_unshuffle(
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + h * stride_h +
           s1 * stride_s1 + w * stride_w + s2 * stride_s2;
-      output_data[i] = input_data[input_offset];
+      output_data[i] = c10::load(&input_data[input_offset]);
 
       data_index_step(n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
     }
@@ -158,7 +158,7 @@ void cpu_pixel_unshuffle_channels_last(
     int64_t downscale_factor) {
   TORCH_CHECK(input.ndimension() == 4,
               "pixel unshuffle with channels last format supports tensors with 4 dims");
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -186,7 +186,7 @@ void cpu_pixel_unshuffle_channels_last(
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + h * stride_h + s1 * stride_s1 +
           w * stride_w + s2 * stride_s2 + c * stride_c;
-      output_data[i] = input_data[input_offset];
+      output_data[i] = c10::load(&input_data[input_offset]);
 
       data_index_step(n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
     }
@@ -247,7 +247,7 @@ void pixel_unshuffle_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
-REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
+REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl)
+REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl)
 
 } // at::native

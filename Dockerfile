@@ -1,12 +1,10 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
+
+# NOTE: Building this image require's docker version >= 23.0.
 #
-# NOTE: To build this you will need a docker version > 18.06 with
-#       experimental enabled and DOCKER_BUILDKIT=1
-#
-#       If you do not use buildkit you are not going to have a good time
-#
-#       For reference:
-#           https://docs.docker.com/develop/develop-images/build_enhancements/
+# For reference:
+# - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
+
 ARG BASE_IMAGE=ubuntu:22.04
 ARG PYTHON_VERSION=3.11
 
@@ -34,7 +32,7 @@ RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
          *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
-    curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh"
+    curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
@@ -63,21 +61,27 @@ RUN --mount=type=cache,target=/opt/ccache \
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
-ARG CUDA_VERSION=12.1
+ARG CUDA_PATH=cu121
 ARG CUDA_CHANNEL=nvidia
-ARG INSTALL_CHANNEL=pytorch-nightly
+ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
-# Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
+RUN /opt/conda/bin/conda update -y -n base -c defaults conda
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
+
 ARG TARGETPLATFORM
 
-# On arm64 we can only install wheel packages.
+# INSTALL_CHANNEL whl - release, whl/nightly - nightly, whle/test - test channels
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              pip install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
+RUN IS_CUDA=$(python -c 'import torch ; print(torch.cuda._is_compiled())'); \
+    echo "Is torch compiled with cuda: ${IS_CUDA}"; \
+    if test "${IS_CUDA}" != "True" -a ! -z "${CUDA_VERSION}"; then \
+        exit 1; \
+    fi
 
 FROM ${BASE_IMAGE} as official
 ARG PYTORCH_VERSION

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 
 import torch
@@ -95,7 +96,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
             )
             self.averager.step = 0
 
-    def step(self):
+    def step(self):  # type: ignore[override]
         r"""
         Performs a single optimization step (parameter update).
         """

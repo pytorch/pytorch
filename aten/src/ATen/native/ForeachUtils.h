@@ -98,6 +98,19 @@ inline void check_foreach_api_restrictions(
       scalars.size());
 }
 
+inline void check_foreach_api_restrictions(
+    TensorList tensors1,
+    TensorList tensors2,
+    ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2);
+  TORCH_CHECK(
+      tensors1.size() == scalars.size(),
+      "Tensor list must have same number of elements as scalar list, got ",
+      tensors1.size(),
+      " and ",
+      scalars.size());
+}
+
 // Helper function called in check_fast_path_restrictions to check whether all
 // corresponding tensors (aligning in index across the tensorLists) share the
 // same device and dtype.
@@ -128,10 +141,26 @@ inline bool _check_tensors_share_device_and_dtype(
 // corresponding tensors in tensor lists have the same sizes and strides.
 inline bool _check_tensors_share_sizes_and_strides(
     ArrayRef<TensorList> tensorLists) {
+  auto is_diff_stride = [](const IntArrayRef& size,
+                           const IntArrayRef& left_stride,
+                           const IntArrayRef& right_stride) -> bool {
+    const size_t size_size = size.size();
+    for (const auto dim : c10::irange(size_size)) {
+      if (size[dim] == 1)
+        continue;
+      if (left_stride[dim] != right_stride[dim]) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
       if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
-          tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+          is_diff_stride(
+              tensorLists[0][j].sizes(),
+              tensorLists[0][j].strides(),
+              tensorLists[i][j].strides())) {
         return false;
       }
     }
@@ -179,6 +208,12 @@ inline bool _check_tensors_do_type_promotion_with_scalars(
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
+// [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
+//     ``does_op_promote_integer_inputs_to_float=true`` means that the result of
+//     the op will be float even if inputs are integer or boolean, which
+//     currently fast path does not support. In short, this flag, when
+//     turned on, gatekeeps the op from going down the fastpath.
+
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
 inline bool check_fast_path_restrictions(
@@ -217,7 +252,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       scalarList_.scalar_type(),
       "convert_tensor_to_scalar_list",
       [&]() {
-        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        const scalar_t* scalar_data = scalarList_.const_data_ptr<scalar_t>();
         TORCH_CHECK(
             (expect_length == scalarList_.size(0)),
             "Expected length of scalars to match input of length ",
@@ -232,6 +267,7 @@ inline std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
+// see: [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
 inline bool can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
@@ -240,6 +276,7 @@ inline bool can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
+// see: [note: what's ``does_op_promote_integer_inputs_to_float=true``?]
 inline bool can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
@@ -251,7 +288,7 @@ inline bool can_use_fast_route(
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
 using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
-    std::vector<std::vector<c10::optional<at::Tensor>>>;
+    std::vector<std::vector<std::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
 using FlatMap = std::unordered_map<
     DeviceDtypeKey,
@@ -332,7 +369,7 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                  nested_optional_tensorvec_t nested_tensorvec;
                  nested_tensorvec.reserve(num_lists);
                  for (const auto& i : c10::irange(num_lists)) {
-                   std::vector<c10::optional<at::Tensor>> tensors;
+                   std::vector<std::optional<at::Tensor>> tensors;
                    if (!nested_tensorlist[i].empty()) {
                      // NB: num_tensors is the max possible length for any of
                      // the inner lists of tensor references. Reserving the max

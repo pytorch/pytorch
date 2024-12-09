@@ -12,13 +12,14 @@
 namespace at::native {
 namespace {
 
-using scale_t = std::vector<c10::optional<double>>;
+using scale_t = std::vector<std::optional<double>>;
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same_v<acc_t, float>, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
-              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
+  static_assert(std::is_same_v<acc_t, scalar_nonconst_t>,
+              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.");
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -31,14 +32,15 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same_v<acc_t, float>, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  using bVec = Vectorized<scalar_t>;
+  using bVec = Vectorized<scalar_nonconst_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -50,10 +52,11 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
-void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
-              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same_v<acc_t, float>, int> = 0>
+void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
+  static_assert(std::is_same_v<acc_t, scalar_nonconst_t>,
+              "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.");
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -66,14 +69,15 @@ void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
-void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
-  using bVec = Vectorized<scalar_t>;
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same_v<acc_t, float>, int> = 0>
+void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
+  using bVec = Vectorized<scalar_nonconst_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + fVec(w) * gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + fVec(w) * gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -95,7 +99,7 @@ void cpu_upsample_nearest_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -117,7 +121,7 @@ void cpu_upsample_nearest_backward(
   auto loop1d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
       buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
       acc_data_ptr = buffer_data.get();
       memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -132,7 +136,7 @@ void cpu_upsample_nearest_backward(
         int64_t output_offset = c * output_slice_size + ow;
         acc_data_ptr[input_offset + iw] += grad_output_data[output_offset];
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -142,7 +146,7 @@ void cpu_upsample_nearest_backward(
   auto loop2d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -160,7 +164,7 @@ void cpu_upsample_nearest_backward(
           acc_data_ptr[input_offset + ih * input_width + iw] += grad_output_data[output_offset];
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -170,7 +174,7 @@ void cpu_upsample_nearest_backward(
   auto loop3d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -193,7 +197,7 @@ void cpu_upsample_nearest_backward(
           }
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -232,7 +236,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto grad_output = grad_output_.contiguous(channels_last_memory_format);
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
@@ -242,8 +246,8 @@ void cpu_upsample_nearest_backward_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t input_slice_size = input_depth * input_height * input_width * channels;
@@ -252,7 +256,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto loop2d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -266,13 +270,13 @@ void cpu_upsample_nearest_backward_channels_last(
         int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
         for (const auto ow : c10::irange(output_width)) {
           int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
-          scalar_t* grad_output_ptr = grad_output_data +
+          const scalar_t* grad_output_ptr = grad_output_data +
               (n * output_height * output_width + oh * output_width + ow) * channels;
           opmath_t* buffer_ptr = acc_data_ptr + input_offset + (ih * input_width + iw) * channels;
           nearest_channels_last_acc(buffer_ptr, grad_output_ptr, channels);
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + n * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -283,7 +287,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto loop3d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -299,7 +303,7 @@ void cpu_upsample_nearest_backward_channels_last(
           int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
           for (int64_t ow = 0; ow < output_width; ow++) {
             int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
-            scalar_t* grad_output_ptr = grad_output_data +
+            const scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_depth * output_height * output_width +
                 od * output_height * output_width + oh * output_width + ow) * channels;
 
@@ -308,7 +312,7 @@ void cpu_upsample_nearest_backward_channels_last(
           }
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + n * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -333,7 +337,7 @@ void cpu_upsample_nearest_backward_channels_last(
 void upsample_nearest1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_w});
   });
@@ -342,7 +346,7 @@ void upsample_nearest1d_backward_kernel_impl(
 void _upsample_nearest_exact1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_w});
   });
@@ -351,8 +355,8 @@ void _upsample_nearest_exact1d_backward_kernel_impl(
 void upsample_nearest2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
@@ -367,8 +371,8 @@ void upsample_nearest2d_backward_kernel_impl(
 void _upsample_nearest_exact2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
@@ -383,9 +387,9 @@ void _upsample_nearest_exact2d_backward_kernel_impl(
 void upsample_nearest3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest3d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
@@ -400,9 +404,9 @@ void upsample_nearest3d_backward_kernel_impl(
 void _upsample_nearest_exact3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact3d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
@@ -426,7 +430,7 @@ void cpu_upsample_linear_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -447,7 +451,7 @@ void cpu_upsample_linear_backward(
   auto loop1d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -470,7 +474,7 @@ void cpu_upsample_linear_backward(
         acc_data_ptr[input_offset + iw0] += w0lambda * grad_output_value; /* i0 */
         acc_data_ptr[input_offset + iw1] += w1lambda * grad_output_value; /* i1*/
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -480,7 +484,7 @@ void cpu_upsample_linear_backward(
   auto loop2d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -511,7 +515,7 @@ void cpu_upsample_linear_backward(
           acc_data_ptr[input_offset + ih1 * input_width + iw1] += h1lambda * w1lambda * grad_output_value; /* i11 */
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -521,7 +525,7 @@ void cpu_upsample_linear_backward(
   auto loop3d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -563,7 +567,7 @@ void cpu_upsample_linear_backward(
           }
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + c * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -603,7 +607,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto grad_output = grad_output_.contiguous(channels_last_memory_format);
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
@@ -613,8 +617,8 @@ void cpu_upsample_linear_backward_channels_last(
   int64_t channels =  input_sizes[1];
   int64_t input_depth = (ndim == 5) ? input_sizes[2] : 1;
   int64_t output_depth = (ndim == 5) ? output_sizes[2] : 1;
-  int64_t input_height = (ndim >= 4) ? input_sizes[ndim - 2] : 1;
-  int64_t output_height = (ndim >= 4) ? output_sizes[ndim - 2] : 1;
+  int64_t input_height = input_sizes[ndim - 2];
+  int64_t output_height = output_sizes[ndim - 2];
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
   int64_t input_slice_size = input_depth * input_height * input_width * channels;
@@ -623,7 +627,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto loop2d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -651,7 +655,7 @@ void cpu_upsample_linear_backward_channels_last(
         for (const auto ow : c10::irange(output_width)) {
           compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
-          scalar_t* grad_output_ptr = grad_output_data +
+          const scalar_t* grad_output_ptr = grad_output_data +
               (n * output_height * output_width + oh * output_width + ow) * channels;
           linear_channels_last_acc(input_indexr(n, ih0, iw0, input_offset), grad_output_ptr, h0lambda * w0lambda, channels); /* i00 */
           linear_channels_last_acc(input_indexr(n, ih0, iw1, input_offset), grad_output_ptr, h0lambda * w1lambda, channels); /* i01 */
@@ -659,7 +663,7 @@ void cpu_upsample_linear_backward_channels_last(
           linear_channels_last_acc(input_indexr(n, ih1, iw1, input_offset), grad_output_ptr, h1lambda * w1lambda, channels); /* i11 */
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + n * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -670,7 +674,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto loop3d = [&](int64_t begin, int64_t end) {
     opmath_t* acc_data_ptr = nullptr;
     std::unique_ptr<opmath_t[]> buffer_data;
-    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
         acc_data_ptr = buffer_data.get();
         memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
@@ -703,7 +707,7 @@ void cpu_upsample_linear_backward_channels_last(
           for (const auto ow : c10::irange(output_width)) {
             compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
-            scalar_t* grad_output_ptr = grad_output_data + (n * output_depth * output_height * output_width +
+            const scalar_t* grad_output_ptr = grad_output_data + (n * output_depth * output_height * output_width +
                 od *  output_height * output_width + oh * output_width + ow) * channels;
             linear_channels_last_acc(input_indexr(n, id0, ih0, iw0, input_offset), grad_output_ptr, d0lambda * h0lambda * w0lambda, channels); /* i000 */
             linear_channels_last_acc(input_indexr(n, id0, ih0, iw1, input_offset), grad_output_ptr, d0lambda * h0lambda * w1lambda, channels); /* i001 */
@@ -716,7 +720,7 @@ void cpu_upsample_linear_backward_channels_last(
           }
         }
       }
-      if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
         auto gin = grad_input_data + n * input_slice_size;
         apply_grad_input(acc_data_ptr, gin, input_slice_size);
       }
@@ -741,7 +745,7 @@ void upsample_linear1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_linear1d_backward", [&] {
     cpu_upsample_linear_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_w});
   });
@@ -751,8 +755,8 @@ void upsample_bilinear2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_bilinear2d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_h, scales_w});
@@ -768,9 +772,9 @@ void upsample_trilinear3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_trilinear3d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_d, scales_h, scales_w});
@@ -784,15 +788,15 @@ void upsample_trilinear3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact2d_backward_kernel, &_upsample_nearest_exact2d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact3d_backward_kernel, &_upsample_nearest_exact3d_backward_kernel_impl);
+REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl)
+REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact2d_backward_kernel, &_upsample_nearest_exact2d_backward_kernel_impl)
+REGISTER_DISPATCH(upsample_nearest3d_backward_kernel, &upsample_nearest3d_backward_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact3d_backward_kernel, &_upsample_nearest_exact3d_backward_kernel_impl)
 
-REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl);
+REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward_kernel_impl)
+REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl)
+REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl)
 
 } // namespace at::native

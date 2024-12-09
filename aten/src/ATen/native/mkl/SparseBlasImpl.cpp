@@ -24,11 +24,7 @@
 #include <ATen/ops/sparse_coo_tensor.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace mkl {
+namespace at::native::sparse::impl::mkl {
 
 namespace {
 
@@ -114,7 +110,7 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
 template <typename scalar_t>
 void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;
-  MKL_INT rows, cols;
+  MKL_INT rows = 0, cols = 0;
   MKL_INT *rows_start = nullptr, *rows_end = nullptr, *columns = nullptr;
   scalar_t* values = nullptr;
   at::mkl::sparse::export_csr(
@@ -198,7 +194,7 @@ void addmm_dense_result(
   auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
   auto columns_C = mkl_int_cast(C.size(-1), "columns_C");
 
-  matrix_descr descrA;
+  matrix_descr descrA{};
   descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
@@ -515,7 +511,7 @@ void addmv_out_sparse_csr(
   c10::MaybeOwned<Tensor> vec_ = prepare_dense_vector_for_mkl(vec);
 
   sparse_operation_t opA = SPARSE_OPERATION_NON_TRANSPOSE;
-  matrix_descr descrA;
+  matrix_descr descrA{};
   descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
@@ -655,7 +651,7 @@ void triangular_solve_out_sparse_csr(
   c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_X_row_major);
 
   sparse_operation_t opA = transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
-  matrix_descr descrA;
+  matrix_descr descrA{};
   descrA.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
   descrA.mode = upper ? SPARSE_FILL_MODE_UPPER : SPARSE_FILL_MODE_LOWER;
   descrA.diag = unitriangular ? SPARSE_DIAG_UNIT : SPARSE_DIAG_NON_UNIT;
@@ -667,13 +663,18 @@ void triangular_solve_out_sparse_csr(
         scalar_t alpha = 1;
 
         if (B.size(-1) == 1) {
-          at::mkl::sparse::trsv<scalar_t>(
+          sparse_status_t status = at::mkl::sparse::trsv<scalar_t>(
               opA,
               alpha,
               mkl_sparse_mat.descriptor(),
               descrA,
               B_->data_ptr<scalar_t>(),
               X_->data_ptr<scalar_t>());
+          // Emulate behavior of old MKL version that would set all elements of output array to -NaN
+          // in case of invalid input matrices.
+          if (status == SPARSE_STATUS_INVALID_VALUE) {
+            X_->fill_(-std::numeric_limits<scalar_t>::quiet_NaN());
+          }
         } else {
           IntArrayRef B_strides = B_->strides();
           bool is_B_row_major = (B_strides[ndim - 1] == 1);
@@ -683,7 +684,7 @@ void triangular_solve_out_sparse_csr(
           auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
           auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
           auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];
-          at::mkl::sparse::trsm<scalar_t>(
+          sparse_status_t status = at::mkl::sparse::trsm<scalar_t>(
               opA,
               alpha,
               mkl_sparse_mat.descriptor(),
@@ -694,6 +695,11 @@ void triangular_solve_out_sparse_csr(
               ldb,
               X_->data_ptr<scalar_t>(),
               ldx);
+          // Emulate behavior of old MKL version that would set all elements of output array to -NaN
+          // in case of invalid input matrices.
+          if (status == SPARSE_STATUS_INVALID_VALUE) {
+            X_->fill_(-std::numeric_limits<scalar_t>::quiet_NaN());
+          }
         }
       });
 
@@ -703,8 +709,4 @@ void triangular_solve_out_sparse_csr(
 #endif
 }
 
-} // namespace mkl
-} // namespace impl
-} // namespace sparse
-} // namespace native
 } // namespace at

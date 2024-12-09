@@ -16,9 +16,11 @@ for-loops and speeding them up through vectorization.
 
 Let's demonstrate how to do this using an ensemble of simple CNNs.
 """
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 torch.manual_seed(0)
 
@@ -85,6 +87,7 @@ predictions2 = [model(minibatch) for model in models]
 # stateless version of the model (fmodel) and stacked parameters and buffers.
 from functorch import combine_state_for_ensemble
 
+
 fmodel, params, buffers = combine_state_for_ensemble(models)
 [p.requires_grad_() for p in params]
 
@@ -96,6 +99,7 @@ fmodel, params, buffers = combine_state_for_ensemble(models)
 print([p.size(0) for p in params])
 assert minibatches.shape == (num_models, 64, 1, 28, 28)
 from functorch import vmap
+
 
 predictions1_vmap = vmap(fmodel)(params, buffers, minibatches)
 assert torch.allclose(

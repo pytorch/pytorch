@@ -4,10 +4,11 @@
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
 # The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
-from typing import List, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import torchgen.api.dispatcher as dispatcher
-from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
 from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
@@ -29,21 +30,26 @@ from .gen_inplace_or_view_type import (
     use_derived,
 )
 
+
+if TYPE_CHECKING:
+    from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo
+
+
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #define ${uppercase_op}_AVAILABLE
 struct ${op} : public ${superclass} {
   ${op}(${constructor_args}) ${initializer_list}
-  {};
-  virtual ~${op}() override {};
+  {}
+  virtual ~${op}() override = default;
   virtual std::vector<c10::SymInt> get_symints() const override;
   virtual size_t num_symints() const override;
   virtual std::vector<at::Tensor> get_tensors() const override;
   virtual size_t num_tensors() const override;
   virtual at::Tensor operator()(const at::Tensor&) const override;
   virtual std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
-      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override;
+      std::optional<std::vector<c10::SymInt>> = ::std::nullopt,
+      std::optional<std::vector<at::Tensor>> = ::std::nullopt) const override;
 
 protected:
   virtual void set_symints(std::vector<c10::SymInt>) override;
@@ -155,9 +161,9 @@ def returns_multi_tensor(fn: NativeFunction) -> bool:
 #   tuple: (list of getter logic strings, list of setter logic strings, string
 #     with num items expression)
 def generate_state_getter_setter(
-    bindings: List[Binding],
+    bindings: list[Binding],
     state_vec_type: NamedCType,
-) -> Tuple[List[str], List[str], str]:
+) -> tuple[list[str], list[str], str]:
     getter_logic = []
     setter_logic = []
 
@@ -302,7 +308,7 @@ def process_function(fn: NativeFunction, template: CodeTemplate) -> str:
 
 def gen_view_funcs(
     out: str,
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    fns_with_infos: list[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
     # don't need the info parts, just the function

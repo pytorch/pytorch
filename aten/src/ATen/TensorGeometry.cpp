@@ -1,7 +1,5 @@
 #include <ATen/TensorGeometry.h>
-
-#include <limits>
-#include <cstddef>
+#include <c10/util/overflows.h>
 
 namespace at {
 

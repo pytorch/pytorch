@@ -14,13 +14,13 @@ Object::Object(
           c10::StrongTypePtr(std::move(cu), type),
           type->numAttributes())) {}
 
-c10::optional<Method> Object::find_method(const std::string& basename) const {
+std::optional<Method> Object::find_method(const std::string& basename) const {
   for (Function* fn : type()->methods()) {
     if (fn->name() == basename) {
       return Method(_ivalue(), fn);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void Object::define(const std::string& src, const ResolverPtr& resolver) {

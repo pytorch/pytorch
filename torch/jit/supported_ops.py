@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import inspect
 import textwrap
 
 import torch.jit
 from torch.jit._builtins import _find_builtin
+
 
 # this file is for generating documentation using sphinx autodoc
 # > help(torch.jit.supported_ops) will also give a nice listed of the
@@ -46,10 +48,10 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
         qualified_name = name
     else:
         qualified_name = f"{mod}.{name}"
-    schema_str = "{}({}) -> {}".format(
-        qualified_name,
-        _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
-        _emit_rets(schema.returns),
+    schema_str = (
+        f"{qualified_name}"
+        f"({_emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:])}) "
+        f"-> {_emit_rets(schema.returns)}"
     )
     return schema_str
 
@@ -164,7 +166,6 @@ def _get_torchscript_builtins():
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
                 functions.append(_emit_schema(mod.__name__, fn.__name__, schema))
-                pass
 
     return "TorchScript Builtin Functions", functions
 
@@ -188,7 +189,6 @@ def _get_math_builtins():
                     # (they will show up in the tensor methods section)
                     continue
                 functions.append(schema)
-                pass
 
     return "``math`` Module", functions
 

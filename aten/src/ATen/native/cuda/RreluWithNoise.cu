@@ -71,20 +71,17 @@ template <typename scalar_t>
 inline void _rrelu_with_noise_cuda_train(
     Tensor& output,
     const Tensor& input_,
-    const Tensor& noise_,
+    Tensor& noise_,
     const Scalar& lower_,
     const Scalar& upper_,
-    const std::optional<Generator>& generator) {
+    std::optional<Generator> generator) {
   auto input = input_.contiguous();
   auto noise = noise_.contiguous();
   Tensor tmp_output = output.contiguous();
 
   int64_t numel = input.numel();
-  auto execution_policy = calc_execution_policy(numel);
-
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  const int unroll_factor = std::is_same_v<scalar_t, double> ? 2 : 4;
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(
       generator, cuda::detail::getDefaultCUDAGenerator());
@@ -104,7 +101,7 @@ inline void _rrelu_with_noise_cuda_train(
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if (std::is_same<scalar_t, double>::value) {
+  if (std::is_same_v<scalar_t, double>) {
     rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
         numel,
         rng_engine_inputs,
@@ -138,11 +135,11 @@ inline void _rrelu_with_noise_cuda_train(
 }
 
 Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    const std::optional<Generator>& generator,
+    std::optional<Generator> generator,
     Tensor& output) {
   at::native::resize_output(output, self.sizes());
 
@@ -172,22 +169,22 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
 
 Tensor rrelu_with_noise_cuda(
     const Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    const std::optional<Generator>& generator) {
+    std::optional<Generator> generator) {
   Tensor output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::native::rrelu_with_noise_out_cuda(self, noise, lower, upper, training, generator, output);
 }
 
 Tensor& rrelu_with_noise_cuda_(
     Tensor& self,
-    const Tensor& noise,
+    Tensor& noise,
     const Scalar& lower,
     const Scalar& upper,
     bool training,
-    const std::optional<Generator>& generator) {
+    std::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cuda(
       self, noise, lower, upper, training, generator, self);
 }

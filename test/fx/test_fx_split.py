@@ -1,11 +1,10 @@
 # Owner(s): ["module: fx"]
 
 from collections import defaultdict
-from typing import List, Tuple, Dict
+from typing import Dict, List, Tuple
 
 import torch
 from torch.fx.passes.split_utils import split_by_tags
-
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -39,6 +38,7 @@ class TestFXSplit(TestCase):
             if node.op == "placeholder":
                 self.assertIn("name", node.meta)
                 self.assertEqual(node.meta["name"], node.name)
+
 
 class TestSplitByTags(TestCase):
     class TestModule(torch.nn.Module):
@@ -151,9 +151,10 @@ class TestSplitByTags(TestCase):
             f"{orig_to_split_fqn_mapping=}",
         )
 
+
 class TestSplitOutputType(TestCase):
     class TestModule(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(3, 16, 3, stride=1, bias=True)
             self.relu = torch.nn.ReLU()

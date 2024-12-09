@@ -10,10 +10,6 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,model_fail_to_load,0
-
-
-
 LearningToPaint,pass,0
 
 
@@ -54,47 +50,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,164
+detectron2_fasterrcnn_r_101_c4,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,163
+detectron2_fasterrcnn_r_101_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,172
+detectron2_fasterrcnn_r_101_fpn,pass,46
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,113
+detectron2_fasterrcnn_r_50_c4,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,112
+detectron2_fasterrcnn_r_50_dc5,pass,42
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,121
+detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,97
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,182
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,192
+detectron2_maskrcnn_r_101_fpn,pass,63
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,131
+detectron2_maskrcnn_r_50_c4,pass,57
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,141
+detectron2_maskrcnn_r_50_fpn,pass,63
 
 
 
@@ -142,6 +138,10 @@ hf_Bert_large,pass,0
 
 
 
+hf_BigBird,pass,13
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -154,7 +154,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
+hf_Longformer,pass,4
+
+
+
 hf_Reformer,pass,5
+
+
+
+hf_T5,pass,0
 
 
 
@@ -199,10 +207,6 @@ mobilenet_v2_quantized_qat,pass,2
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 
@@ -334,8 +338,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,28
+vision_maskrcnn,pass,29
 
 
 
-yolov3,pass,2
+yolov3,pass,0

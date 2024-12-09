@@ -19,32 +19,34 @@ namespace native {
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
     bool training,
     double exponential_average_factor,
     double epsilon) {
-  AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
-    const c10::optional<Tensor>& save_mean_opt,
-    const c10::optional<Tensor>& save_var_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_opt,
+    const std::optional<Tensor>& save_var_opt,
     double epsilon,
     const Tensor& reservedSpace) {
-  AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
 }
 
@@ -121,9 +123,9 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_t_opt,
-    const c10::optional<Tensor>& running_mean_t_opt,
-    const c10::optional<Tensor>& running_var_t_opt,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
     bool training,
     double exponential_average_factor,
     double epsilon) {
@@ -131,10 +133,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   c10::MaybeOwned<Tensor> bias_t_maybe_owned =
       at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
-  const Tensor& running_mean_t =
-      c10::value_or_else(running_mean_t_opt, [] { return Tensor(); });
-  const Tensor& running_var_t =
-      c10::value_or_else(running_var_t_opt, [] { return Tensor(); });
+  const Tensor& running_mean_t = running_mean_t_opt.value_or(Tensor());
+  const Tensor& running_var_t = running_var_t_opt.value_or(Tensor());
 
   TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
       bias{bias_t, "bias", 3}, running_mean{running_mean_t, "running_mean", 4},
@@ -217,14 +217,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         nullptr, // z descriptor for BN-Add-Relu
         nullptr, // z for BN-Add-ReLU
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
         exponential_average_factor,
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
@@ -247,14 +247,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
-        running_mean->data_ptr(),
-        running_var->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
+        running_mean->const_data_ptr(),
+        running_var->const_data_ptr(),
         epsilon));
   }
 
@@ -274,17 +274,15 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
-    const c10::optional<Tensor>& save_mean_t_opt,
-    const c10::optional<Tensor>& save_var_t_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_t_opt,
+    const std::optional<Tensor>& save_var_t_opt,
     double epsilon,
     const Tensor& reserveSpace) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& save_mean_t =
-      c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
-  const Tensor& save_var_t =
-      c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
+  const Tensor& save_mean_t = save_mean_t_opt.value_or(Tensor());
+  const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
 
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.
@@ -367,23 +365,23 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       &one,
       &zero,
       idesc.desc(),
-      input->data_ptr(),
+      input->const_data_ptr(),
       nullptr,
       nullptr,
       odesc.desc(),
-      grad_output->data_ptr(),
+      grad_output->const_data_ptr(),
       nullptr,
       nullptr,
       idesc.desc(),
       grad_input_t.data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
+      weight->const_data_ptr(),
       nullptr,
       grad_weight_t.data_ptr(),
       grad_bias_t.data_ptr(),
       epsilon,
-      save_mean->data_ptr(),
-      save_var->data_ptr(),
+      save_mean->const_data_ptr(),
+      save_var->const_data_ptr(),
       nullptr,
       workspace.data_ptr(),
       workspace_size,

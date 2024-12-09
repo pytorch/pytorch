@@ -92,9 +92,9 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
-  const input_t *data_in = input.data_ptr<input_t>();
-  const input_t *data_bd = boundaries.data_ptr<input_t>();
-  const int64_t *data_st = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr;
+  const input_t *data_in = input.const_data_ptr<input_t>();
+  const input_t *data_bd = boundaries.const_data_ptr<input_t>();
+  const int64_t *data_st = sorter.defined() ? sorter.const_data_ptr<int64_t>() : nullptr;
   output_t *data_out = result.data_ptr<output_t>();
 
   bool is_1d_boundaries = boundaries.dim() == 1;
@@ -146,8 +146,8 @@ Tensor& searchsorted_out_cpu(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt,
+    const std::optional<std::string_view> side_opt,
+    const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
@@ -193,8 +193,8 @@ Tensor& searchsorted_out_cpu(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt,
+    const std::optional<std::string_view> side_opt,
+    const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_out_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
@@ -205,8 +205,8 @@ Tensor searchsorted_cpu(
       const Tensor& self,
       bool out_int32,
       bool right,
-      const c10::optional<c10::string_view> side_opt,
-      const c10::optional<Tensor>& sorter_opt) {
+      const std::optional<std::string_view> side_opt,
+      const std::optional<Tensor>& sorter_opt) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -219,15 +219,15 @@ Tensor searchsorted_cpu(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt) {
+    const std::optional<std::string_view> side_opt,
+    const std::optional<Tensor>& sorter_opt) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt);
 }
 
 Tensor& bucketize_out_cpu(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, nullopt, nullopt, result);
+  at::native::searchsorted_out_cpu(boundaries, self, out_int32, right, std::nullopt, std::nullopt, result);
   return result;
 }
 

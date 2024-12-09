@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import math
@@ -114,7 +115,14 @@ def printoptions(**kwargs):
 
 
 def tensor_totype(t):
-    dtype = torch.float if t.is_mps else torch.double
+    dtype = (
+        torch.float
+        if (
+            t.is_mps
+            or (t.is_xpu and not torch.xpu.get_device_properties(t.device).has_fp64)
+        )
+        else torch.double
+    )
     return t.to(dtype=dtype)
 
 
@@ -320,18 +328,14 @@ def _tensor_str(self, indent):
     if self.is_neg():
         self = self.resolve_neg()
 
+    # TODO: Remove me when `masked_select` is implemented for FP8
     if self.dtype in [
-        torch.float16,
-        torch.bfloat16,
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
     ]:
-        self = self.float()
-
-    if self.dtype is torch.complex32:
-        self = self.cfloat()
+        self = self.half()
 
     if self.dtype.is_complex:
         # handle the conjugate bit
@@ -457,7 +461,7 @@ def _str_intern(inp, *, tensor_contents=None):
                 indices_str = "..."
             else:
                 indices_str = _tensor_str(indices, indent + len(indices_prefix))
-            if indices.numel() == 0 or is_meta:
+            if is_meta or indices.numel() == 0:
                 indices_str += ", size=" + str(tuple(indices.shape))
             values_prefix = "values=tensor("
             values = self._values().detach()
@@ -465,7 +469,7 @@ def _str_intern(inp, *, tensor_contents=None):
                 values_str = "..."
             else:
                 values_str = _tensor_str(values, indent + len(values_prefix))
-            if values.numel() == 0 or is_meta:
+            if is_meta or values.numel() == 0:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
                 indices_prefix
@@ -647,7 +651,10 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"tangent={tangent}")
 
     string_repr = _add_suffixes(
-        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse  # type: ignore[possibly-undefined]
+        prefix + tensor_str,  # type: ignore[possibly-undefined]
+        suffixes,
+        indent,
+        force_newline=self.is_sparse,
     )
 
     # Check if this instance is flagged as a parameter and change the repr accordingly.

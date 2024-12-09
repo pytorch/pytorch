@@ -2,8 +2,7 @@
 
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // This IR was copied from code-generated output, but the entire _to_copy
 // operator cannot be trivially code genereated since it is only desirable to
@@ -18,12 +17,12 @@ class ToCopy : public torch::lazy::TsNode {
 
   ToCopy(
       const torch::lazy::Value& self,
-      const c10::optional<at::ScalarType>& dtype,
-      const c10::optional<at::Layout>& layout,
-      const c10::optional<at::Device>& device,
-      const c10::optional<bool>& pin_memory,
+      const std::optional<at::ScalarType>& dtype,
+      const std::optional<at::Layout>& layout,
+      const std::optional<at::Device>& device,
+      const std::optional<bool>& pin_memory,
       const bool& non_blocking,
-      const c10::optional<at::MemoryFormat>& memory_format,
+      const std::optional<at::MemoryFormat>& memory_format,
       std::vector<torch::lazy::Shape>&& shapes)
       : torch::lazy::TsNode(
             ClassOpKind(),
@@ -47,12 +46,12 @@ class ToCopy : public torch::lazy::TsNode {
 
   bool CanBeReused(
       const torch::lazy::Value& self,
-      const c10::optional<at::ScalarType>& dtype,
-      const c10::optional<at::Layout>& layout,
-      const c10::optional<at::Device>& device,
-      const c10::optional<bool>& pin_memory,
+      const std::optional<at::ScalarType>& dtype,
+      const std::optional<at::Layout>& layout,
+      const std::optional<at::Device>& device,
+      const std::optional<bool>& pin_memory,
       const bool& non_blocking,
-      const c10::optional<at::MemoryFormat>& memory_format) const {
+      const std::optional<at::MemoryFormat>& memory_format) const {
     size_t i = 0;
     return (
         operand(i++) == self && this->dtype == dtype &&
@@ -115,13 +114,12 @@ class ToCopy : public torch::lazy::TsNode {
     return _to_copy_out;
   }
 
-  c10::optional<at::ScalarType> dtype;
-  c10::optional<at::Layout> layout;
-  c10::optional<at::Device> device;
-  c10::optional<bool> pin_memory;
+  std::optional<at::ScalarType> dtype;
+  std::optional<at::Layout> layout;
+  std::optional<at::Device> device;
+  std::optional<bool> pin_memory;
   bool non_blocking;
-  c10::optional<at::MemoryFormat> memory_format;
+  std::optional<at::MemoryFormat> memory_format;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

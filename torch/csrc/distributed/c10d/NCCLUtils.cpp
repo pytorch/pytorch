@@ -1,24 +1,17 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 
 #ifdef USE_C10D_NCCL
-#include <vector>
-
-#include <cuda_runtime.h>
 #include <mutex>
-
-namespace {
-constexpr int64_t kCommInitBusyWaitMillis = 10;
-} // namespace
+#include <vector>
 
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  LockType lock(mutex_);
   if (aborted_) {
-    auto commFailureMsg = commFailureReason_ != c10::nullopt
+    auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
     TORCH_CHECK_WITH(
@@ -30,37 +23,118 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  // only wait for initialization if nonblocking mode is enabled
-  if (!initialized_ && nccl_use_nonblocking()) {
-    waitUntilInitialized(nccl_nonblocking_timeout());
+  // In non-blocking mode, ensure comm is ready.
+  if (nonBlocking_) {
+    waitReady();
+    // ncclComm_ should be initialized by now
   }
-
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
   return ncclComm_;
 }
 
-void NCCLComm::waitUntilInitialized(int timeoutSecs) {
-  auto startTimepoint = std::chrono::steady_clock::now();
-  while (!initialized_) {
-    if (ncclComm_) {
-      ncclResult_t result;
-      ncclCommGetAsyncError(ncclComm_, &result);
-      if (result == ncclSuccess) {
-        LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
-        initialized_ = true;
-        break;
-      }
+void NCCLComm::waitReady() {
+  LockType lock(mutex_);
+  if (aborted_)
+    return;
+  // If timeout is reached, throw an exception.
+  C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+}
+
+// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+// last argument to split() API is not used to support
+// multiple implementations
+std::shared_ptr<NCCLComm> NCCLComm::split(
+    NCCLComm* source,
+    int color_id,
+    int rank,
+    ncclConfig_t& config,
+    std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
+  at::cuda::OptionalCUDAGuard gpuGuard(source->deviceIndex_);
+  auto comm = std::make_shared<NCCLComm>();
+  // This call will block until the source communicator is initialized
+  auto sourceComm = source->getNcclComm();
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  C10D_NCCL_CHECK(
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
+      std::nullopt);
+#else
+  // After calling ncclCommSplit in non-blocking mode, we should wait for the
+  // source communicator to be out of ncclInProgress state.
+  // Reason 1:
+  //   it's unsafe to call new operations on the parent comm while it's in
+  //   ncclInProgress state.
+  // Reason 2:
+  //   as of NCCL 2.23, the ptr value of child comm will not be filled until the
+  //   state of parent comm is ncclSuccess. This may change in the future. See:
+  //   https://github.com/NVIDIA/nccl/issues/1472
+  C10D_NCCL_CHECK_TIMEOUT_SLEEP(
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
+      sourceComm, // wait on parent comm
+      std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout = nccl_nonblocking_timeout();
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
     }
-    auto currentTimepoint = std::chrono::steady_clock::now();
-    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                           currentTimepoint - startTimepoint)
-                           .count();
-    if (timeElapsed > timeoutSecs) {
-      std::string err = "NCCL timeout in communicator initialization.";
-      TORCH_CHECK_WITH(DistBackendError, false, err);
-    }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(kCommInitBusyWaitMillis));
   }
+  // comm->ncclComm_ should have valid ptr by now, but not necessarily
+  // initialized. Rely on getNcclComm() to wait for its initialization.
+#endif
+  ++source->ncclCommSplitCounter_;
+  comm->rank_ = rank;
+  // Child comm should be on the same device as parent comm
+  comm->deviceIndex_ = source->deviceIndex_;
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
+  return comm;
+}
+#endif
+
+void NCCLComm::finalize() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip finalize.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
+}
+
+void NCCLComm::destroy() {
+  LockType lock(mutex_);
+  if (aborted_) {
+    LOG(INFO) << "Rank " << rank_
+              << ": NCCL communicator already Invalidated. Skip destroy.";
+    return;
+  }
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
+  // Poison future getNcclComm
+  aborted_ = true;
 }
 
 std::string getNcclVersion() {
@@ -68,7 +142,7 @@ std::string getNcclVersion() {
   static std::string versionString;
 
   c10::call_once(ncclGetVersionFlag, []() {
-    int version;
+    int version = 0;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -86,7 +160,7 @@ std::string getNcclVersion() {
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
 #ifdef NCCL_SUFFIX
       const auto ncclSuffix = std::string(NCCL_SUFFIX);
-      if (ncclSuffix.length()) {
+      if (!ncclSuffix.empty()) {
         versionString += "." + ncclSuffix;
       }
 #endif
@@ -104,16 +178,14 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
       size_t data_size = tensor.storage().nbytes();
       if (data_size > 0 && tensor.storage().data_ptr()) {
         auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
-        char* dst = (char*)std::calloc(data_size, sizeof(char));
+        std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
+        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
-          hash = c10::hash_combine(
-              hash, c10::get_hash(((char*)dst)[i], data_size));
+          hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
         }
-        free(dst);
       }
     }
   }
@@ -121,32 +193,18 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 }
 #endif
 
-bool nccl_use_nonblocking() {
-  static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
-  if (nccl_use_nonblocking_) {
-    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
-  }
-  return nccl_use_nonblocking_;
-}
-
-int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val.has_value() && !val.value().empty()) {
+      timeout = stoi(val.value());
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
@@ -159,17 +217,22 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = std::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
+  if (processGroupFailureReason != std::nullopt) {
     return *processGroupFailureReason;
   }
   std::string interpret;
   std::string err;
 #ifdef ENABLE_NCCL_GET_LAST_ERROR
-  err = "\nLast error:\n" + std::string(ncclGetLastError(NULL));
+  auto ret = ncclGetLastError(nullptr);
+  if (ret) {
+    err = "\nLast error:\n" + std::string(ret);
+  } else {
+    err = "\nLast error: Unknown NCCL Error\n";
+  }
 #endif
   switch (error) {
     case ncclUnhandledCudaError:

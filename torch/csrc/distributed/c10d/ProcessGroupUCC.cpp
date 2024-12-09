@@ -1,6 +1,8 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/env.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -44,7 +46,7 @@ ucc_datatype_t to_ucc_dType(at::Tensor _tensor) {
   }
   try {
     return ucc_dtype_map.at(_tensor.scalar_type());
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported data type for UCC");
   }
 }
@@ -77,7 +79,7 @@ ucc_reduction_op_t to_ucc_reduceOp(
 
   try {
     return ucc_op_map.at(_op);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported ReduceOp for UCC");
   }
 }
@@ -157,11 +159,10 @@ void read_config() {
   torch_ucc_config.enable_comms_logger = false;
 
   // read all torch_ucc env. variables and update the map
-  char* env;
-  for (auto& torch_ucc_env : torch_ucc_envs_map) {
-    env = std::getenv(torch_ucc_env.first.c_str());
-    if (env) {
-      torch_ucc_envs_map[torch_ucc_env.first] = std::string(env);
+  for (auto& [env_name, value] : torch_ucc_envs_map) {
+    auto env = c10::utils::get_env(env_name.c_str());
+    if (env.has_value()) {
+      value = std::move(env.value());
     }
   }
 
@@ -272,6 +273,11 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
   if (Work::recordFunctionEndCallback_) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
+  }
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
   }
   return true;
 }
@@ -708,7 +714,7 @@ void ProcessGroupUCC::runHealthCheck() {
         if (is_last_device) {
           healthCheckData.healthCheckCv.notify_one();
         }
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         // Populate exception ptr.
         healthCheckData.healthCheckException = std::current_exception();
         // Unblock waiting main thread which will report exception.

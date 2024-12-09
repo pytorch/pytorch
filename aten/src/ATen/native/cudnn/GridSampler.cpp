@@ -21,14 +21,18 @@ namespace native {
 // See Note [ATen preprocessor philosophy]
 
 Tensor cudnn_grid_sampler_forward(const Tensor& input_t, const Tensor& grid_t) {
-  AT_ERROR("cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false,
+      "cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t,
     const Tensor& grid_t,
     const Tensor& grad_output_t) {
-  AT_ERROR("cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false,
+      "cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
 }
 
 } // namespace native
@@ -113,8 +117,8 @@ Tensor cudnn_grid_sampler_forward(const Tensor& input_t, const Tensor& grid_t) {
       desc.desc(),
       &one,
       idesc.desc(),
-      input->data_ptr(),
-      grid->data_ptr(),
+      input->const_data_ptr(),
+      grid->const_data_ptr(),
       &zero,
       odesc.desc(),
       output_t.data_ptr()));
@@ -167,15 +171,15 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
       desc.desc(),
       &one,
       idesc.desc(),
-      input->data_ptr(),
+      input->const_data_ptr(),
       &zero,
       gdesc.desc(),
       grad_input_t.data_ptr(),
       &one,
       odesc.desc(),
-      grad_output->data_ptr(),
+      grad_output->const_data_ptr(),
       // intriguingly, the outputs don't need descriptors
-      grid->data_ptr(),
+      grid->const_data_ptr(),
       &zero,
       grad_grid_t.data_ptr()));
 

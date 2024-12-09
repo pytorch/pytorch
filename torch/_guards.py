@@ -1,7 +1,7 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import enum
 import functools
@@ -24,22 +24,24 @@ from typing import (
     Tuple,
     TYPE_CHECKING,
     TypeVar,
+    Union,
 )
 
-import torch
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
+from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
+
 
 log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import sympy
+
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-
-    import sympy
+    import torch
 
 
 """
@@ -79,8 +81,8 @@ class TraceId(NamedTuple):
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
-    LOCAL_NN_MODULE = 2
-    GLOBAL_NN_MODULE = 3
+    LOCAL_SPECIALIZED_NN_MODULE = 2
+    GLOBAL_SPECIALIZED_NN_MODULE = 3
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
@@ -89,25 +91,41 @@ class GuardSource(enum.Enum):
     BACKWARD_STATE = 9
     EPHEMERAL = 10
     SYNTHETIC_LOCAL = 11
+    LOCAL_UNSPECIALIZED_NN_MODULE = 12
+    GLOBAL_UNSPECIALIZED_NN_MODULE = 13
+    LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 14
+    GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE = 15
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
-    def is_nn_module(self) -> bool:
-        return (
-            self
-            in (
-                GuardSource.GLOBAL_NN_MODULE,
-                GuardSource.LOCAL_NN_MODULE,
-            )
-            or self.is_fsdp_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+        )
+
+    def is_unspecialized_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+        )
+
+    def is_unspecialized_builtin_nn_module(self) -> bool:
+        return self in (
+            GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
     def is_local(self):
         return self in (
             GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_FSDP_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
         )
 
 
@@ -129,9 +147,26 @@ class GuardBuilderBase:
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class SLoc:
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
+    maybe_user_loc: Optional[str]
+
+    def __str__(self):
+        floc = (
+            self.framework_loc
+            if isinstance(self.framework_loc, str)
+            else format_frame(self.framework_loc)
+        )
+        if self.maybe_user_loc is not None:
+            return f"{self.maybe_user_loc} ({floc})"
+        else:
+            return f"({floc})"
+
+
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: CapturedTraceback
+    expr: sympy.logic.boolalg.Boolean
+    sloc: SLoc
 
 
 @dataclasses.dataclass
@@ -172,7 +207,16 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        # Put the duplicate input guards at the end. The duplicate guards have
+        # two sources while guard.name only considers one source.
+        from torch._dynamo.guards import GuardBuilder
+
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+        )
         return (
+            is_duplicate_input,
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
@@ -248,13 +292,13 @@ class Guard:
         try:
             return self.create_fn(builder, self)
         except Exception:
-            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            log.exception("Error while creating guard:\n%s", str(self).rstrip())
             if self.stack:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
 
-    def is_nn_module(self):
-        return self.source.is_nn_module()
+    def is_specialized_nn_module(self):
+        return self.source.is_specialized_nn_module()
 
     def is_fsdp_module(self):
         return self.source.is_fsdp_module()
@@ -264,7 +308,7 @@ class Guard:
 
     def set_export_info(self, guard_type, guarded_class, code_list, obj_weakref):
         if not self.guard_types:
-            self.guard_types = list()
+            self.guard_types = []
 
         self.guard_types.append(guard_type)
 
@@ -279,10 +323,15 @@ class Guard:
         else:
             self.code_list.extend(code_list)
 
-        assert self.obj_weakref in (
-            obj_weakref,
-            None,
-        ), "Guarded object must be identical, or None"
+        # Some objects are ephemeral, e.g., list[slice(1, 2)]. If we have
+        # multiple guards on the same object, the weakref can die between the
+        # invocation of set_export_info calls. So a dead weakref is also
+        # acceptable.
+        assert (
+            self.obj_weakref in (obj_weakref, None)
+            or callable(self.obj_weakref)
+            and self.obj_weakref() is None
+        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
         self.obj_weakref = obj_weakref
 
 
@@ -317,6 +366,26 @@ class DuplicateInputs(GuardEnvExpr):
 
 
 """
+A class representing storage overlap relations among inputs that aliases the same storage.
+
+Given that a set of tensors alias the same storage, this guard checks whether they actually
+have overlapping storages.
+
+While non_overlapping_sources represent input tensors that definitely don't have any storage
+overlapping with any other input, overlapping_sources represent tensors that either:
+
+1. Do overlap some other input tensor
+2. Might not overlap some other input tensor, but we are not sure
+"""
+
+
+@dataclasses.dataclass
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: List[Source]
+    non_overlapping_sources: List[Source]
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -331,12 +400,10 @@ In the future, it will have a closer coupling to a generic Checkpoint management
 
 class Checkpointable(Generic[T]):
     @abstractmethod
-    def copy_graphstate(self) -> T:
-        ...
+    def copy_graphstate(self) -> T: ...
 
     @abstractmethod
-    def restore_graphstate(self, state: T):
-        ...
+    def restore_graphstate(self, state: T): ...
 
 
 class GuardsCheckpointState:
@@ -388,7 +455,7 @@ class ModuleContextCheckpointState:
 
 
 class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.nn_modules: Dict[str, Any] = {}
 
     def copy_graphstate(self):
@@ -437,7 +504,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cache_enabled",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
@@ -505,7 +572,7 @@ class GuardsSet:
 
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
-    def __init__(self):
+    def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: List[GuardEnvExpr] = []
 
@@ -516,6 +583,66 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         # NB: "steals" the passed in state
         assert isinstance(state, GuardsCheckpointState)
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
+
+
+class HopSubgraphCache:
+    @abstractmethod
+    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: Dict[str, Callable] = {}
+        self.proxy_dispatch_cache: Dict[str, Callable] = {}
+        self.dynamo_identifiers: Dict[str, str] = {}
+
+    def add_dynamo_identifier(self, cache_key: str, identifier: str):
+        self.dynamo_identifiers[cache_key] = identifier
+
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+        return self.dynamo_identifiers.get(cache_key, None)
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
+
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
 
 
 _TLS = threading.local()
@@ -553,6 +680,8 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Verbose ShapeEnv guards produced.
+        self.shape_env_guards: List[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -606,7 +735,11 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
@@ -616,7 +749,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides: Optional[List[Optional[List[int]]]] = None
+        self.output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -630,6 +763,7 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
@@ -739,7 +873,7 @@ class TracingContext:
 
 
 @contextmanager
-def compile_context(context: CompileContext):
+def compile_context(context: Optional[CompileContext]):
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
@@ -786,21 +920,21 @@ class Source:
         return False
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self) -> GuardSource:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
+            raise NotImplementedError
         return Guard(self, fn)
 
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
+    def is_specialized_nn_module(self) -> bool:
+        return self.guard_source().is_specialized_nn_module()
 
     def subguards_allowed(self):
         """True if you can guard on attributes of this"""

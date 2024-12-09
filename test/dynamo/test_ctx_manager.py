@@ -2,18 +2,15 @@
 import unittest
 
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
-
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-class CutomizedCtxManager:
+class CustomizedCtxManager:
     def __init__(self, mode):
         self.prev = torch.is_grad_enabled()
         self.mode = mode
@@ -23,6 +20,12 @@ class CutomizedCtxManager:
 
     def __exit__(self, exc_type, exc_value, traceback):
         torch._C._set_grad_enabled(self.prev)
+
+
+class CustomizedCtxManagerWithGraphBreak(CustomizedCtxManager):
+    def __enter__(self):
+        torch._dynamo.graph_break()
+        super().__enter__()
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -89,7 +92,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         a = torch.randn([3, 4])
         b = torch.randn([3, 4])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
@@ -110,7 +113,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         a = torch.randn([3, 4])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         for _ in range(10):
             opt_fn(a)
@@ -131,7 +134,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
@@ -151,7 +154,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
@@ -174,7 +177,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -205,7 +208,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
@@ -242,7 +245,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         s = torch.cuda.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x, s)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -281,7 +284,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -310,8 +313,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         res2 = opt_fn2(x)
         self.assertEqual(ref, res)
@@ -329,7 +332,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         s1 = torch.cuda.Stream()
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref0 = fn(x, s0, s1)
         res0 = opt_fn(x, s0, s1)
@@ -344,7 +347,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref1 = fn(x, s1, s1)
         res1 = opt_fn(x, s1, s1)
@@ -356,6 +359,115 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         # We have a re-compilation because of chaning inputs
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref0, res0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_reconstruct(self):
+        def fn(x):
+            e = torch.cuda.Event()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+            return x, e
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_across_graph_break(self):
+        def fn(x):
+            e = torch.cuda.Event()
+            e.record()
+            x = torch.mul(x, 5)
+            x = torch.add(x, 2)
+
+            print("foo")
+
+            torch.cuda.current_stream().wait_event(e)
+            x = torch.add(x, 1)
+            x = torch.cos(x)
+            return x, e
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 9)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_created_outside_of_graph(self):
+        user_stream = torch.cuda.Stream()
+        event = torch.cuda.Event()
+        foo = torch.empty((2, 2), device="cuda")
+
+        def func(foo):
+            event.wait()
+            return foo + 1, event
+
+        x = torch.randn((1024, 1024), device="cuda")
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def run_iters(fn, compile=False):
+            if compile:
+                fn = torch.compile(fn, backend=cnts)
+            for _ in range(10):
+                with torch.cuda.stream(user_stream):
+                    torch.mm(x, x, out=foo)
+                    event.record()
+                out = fn(foo)
+            return out
+
+        ref = run_iters(func, compile=False)
+        res = run_iters(func, compile=True)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_method_create_stream_outside_of_compile(self):
+        def fn(x, cur_stream, new_stream):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            is_idle = event.query()
+
+            new_stream.wait_event(event)
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.cuda.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            # use new event to sync
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        cur_stream = torch.cuda.current_stream()
+        new_stream = torch.cuda.Stream()
+        ref = fn(x, cur_stream, new_stream)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, cur_stream, new_stream)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 19)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -391,11 +503,24 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 19)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_device(self):
+        def fn(x):
+            with torch.cuda.device(x.device.index - 1):
+                x = torch.sin(x + 1)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
@@ -406,7 +531,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         if torch.autograd._profiler_enabled():
             torch.autograd._disable_profiler()
@@ -458,7 +583,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
                 a_float32 = torch.rand((8, 8), device="cuda")
                 b_float32 = torch.rand((8, 8), device="cuda")
 
-                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                with torch.autocast(device_type="cuda", dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
                 return c_float64
 
@@ -478,7 +603,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_is_autocast_cpu_enabled(self):
         def fn(a_float32, b_float32):
-            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+            with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
                 c_float16 = torch.mm(a_float32, b_float32)
                 if torch.is_autocast_cpu_enabled():
                     c_float16 = c_float16 + 1
@@ -487,7 +612,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         a = torch.rand((8, 8))
         b = torch.rand((8, 8))
         ref = fn(a, b)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(a, b)
         self.assertTrue(same(ref, res))
 
@@ -524,7 +649,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        opt_mod = torch._dynamo.optimize("inductor")(module)
+        opt_mod = torch.compile(module, backend="inductor")
         compiled = opt_mod(query, key, value)
 
         self.assertEqual(compiled.device, real_device)
@@ -578,7 +703,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        opt = torch._dynamo.optimize("eager")(module)
+        opt = torch.compile(module, backend="eager")
         res = opt(torch.tensor([0.5]))
         self.assertEqual(res.device, real_device)
         self.assertEqual(res.dtype, real_dtype)
@@ -598,7 +723,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([4, 4])
         self.assertEqual(x.dtype, torch.float32)
         res = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_res = opt_fn(x)
         self.assertTrue(torch.allclose(res, opt_res))
         self.assertEqual(res.dtype, torch.bfloat16)
@@ -639,7 +764,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device_32 = real_32.device
         real_dtype_32 = real_32.dtype
 
-        graph = torch._dynamo.optimize("eager")(module)
+        graph = torch.compile(module, backend="eager")
         out_16, out_32 = graph(torch.tensor([0.5]))
         self.assertEqual(out_16.device, real_device_16)
         self.assertEqual(out_16.dtype, real_dtype_16)
@@ -695,7 +820,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device_32 = real_32.device
         real_dtype_32 = real_32.dtype
 
-        graph = torch._dynamo.optimize("eager")(module)
+        graph = torch.compile(module, backend="eager")
         out_16, out_32 = graph(torch.tensor([0.5]))
         self.assertEqual(out_16.device, real_device_16)
         self.assertEqual(out_16.dtype, real_dtype_16)
@@ -757,17 +882,17 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.dtype, real_dtype)
 
         self.assertEqual(exported.device.index, 0)
-        self.assertEqual(exported.dtype, torch.torch.float16)
+        self.assertEqual(exported.dtype, torch.float16)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_arguments_binding(self):
         def f1(x):
-            with torch.cuda.amp.autocast(False):
+            with torch.autocast(device_type="cuda", enabled=False):
                 x = torch.sin(x + 1)
             return x
 
         def f2(x):
-            with torch.cpu.amp.autocast(False):
+            with torch.autocast(device_type="cpu", enabled=False):
                 x = torch.cos(x + 1)
             return x
 
@@ -791,14 +916,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return new_fwd
 
         def autocast_func_cuda(orig_func):
-            @torch.cuda.amp.autocast(dtype=torch.float16)
+            @torch.autocast(device_type="cuda", dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
             return new_fwd
 
         def autocast_func_cpu(orig_func):
-            @torch.cpu.amp.autocast(dtype=torch.float16)
+            @torch.autocast(device_type="cpu", dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
@@ -824,9 +949,46 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
+    def test_generic_ctx_manager_with_graph_break(self):
+        def fn(x):
+            with CustomizedCtxManagerWithGraphBreak(False):
+                # body runs on eager
+                y = x * 2
+                z = y.sin() + 3
+            return z
+
+        x = torch.randn(2, 3)
+        opt_fn = torch.compile(backend="eager", fullgraph=False)(fn)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_return_context_manager(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            cm = CustomizedCtxManager(False)
+            with cm:
+                pass
+            return cm
+
+        x = torch.randn(2, 3)
+        cm = f(x)
+        self.assertFalse(cm.mode)
+
+    def test_return_context_manager_with_graph_break(self):
+        @torch.compile(backend="eager", fullgraph=False)
+        def f(x):
+            cm = CustomizedCtxManager(False)
+            torch._dynamo.graph_break()
+            with cm:
+                pass
+            return cm
+
+        x = torch.randn(2, 3)
+        cm = f(x)
+        self.assertFalse(cm.mode)
+
     def test_generic_context_manager(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -835,29 +997,29 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(2, 3)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+        opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 2)
-            self.assertEqual(cnts.op_count, 2)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 6)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 12)
 
     def test_nested_generic_context_manager(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CutomizedCtxManager(False):
+                with CustomizedCtxManager(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     x = x * 1.5
@@ -866,25 +1028,25 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.rand(2, 3)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+        opt_fn = torch.compile(backend=cnts, fullgraph=True)(fn)
 
         with torch.no_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 9)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 6)
-            self.assertEqual(cnts.op_count, 6)
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 18)
 
     def test_generic_context_manager_with_graph_break(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -912,11 +1074,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_nested_generic_context_manager_with_graph_break(self):
         def fn(x):
-            with CutomizedCtxManager(True):
+            with CustomizedCtxManager(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CutomizedCtxManager(False):
+                with CustomizedCtxManager(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     torch._dynamo.graph_break()
@@ -937,7 +1099,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
 
         with torch.enable_grad():
             ref = fn(x)
@@ -959,7 +1121,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
         z = torch.randn(4)
@@ -1013,21 +1175,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
-        add = x + y;  x = y = None
+        add: "f32[1]" = x + y;  x = y = None
 
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
         return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",  # NOQA: B950
+        )
 
     def test_disable_saved_tensors_hooks_prev_disabled(self):
         def fn(z):
@@ -1051,21 +1215,23 @@ class GraphModule(torch.nn.Module):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
-        add = x + y;  x = y = None
+        add: "f32[1]" = x + y;  x = y = None
 
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_1 = None
         return (add,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",  # NOQA: B950
+        )
 
     def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
         def fn(z):
@@ -1095,27 +1261,29 @@ class GraphModule(torch.nn.Module):
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self):
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        x = torch.ones(1)
+        x: "f32[1]" = torch.ones(1)
 
-        y = torch.zeros(1)
+        y: "f32[1]" = torch.zeros(1)
 
-        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner');  _saved_tensors_hooks_disable_1 = None
 
-        add = x + y;  y = None
+        add: "f32[1]" = x + y;  y = None
 
-        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable_2 = None
 
-        add_1 = add + x;  add = x = None
+        add_1: "f32[1]" = add + x;  add = x = None
 
-        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message');  _saved_tensors_hooks_disable_3 = None
         return (add_1,)
-"""
-        self.assertExpectedInline(actual, expected)
+""",  # NOQA: B950
+        )
 
     def test_disable_saved_tensors_hooks_graph_break(self):
         def fn(x):
@@ -1132,37 +1300,41 @@ class GraphModule(torch.nn.Module):
         def check_graph(actual, expected):
             self.assertExpectedInline(actual, expected)
 
-        expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
-
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
-
-        y = l_x_ + 1;  l_x_ = None
-
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (y,)
-"""
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
-        check_graph(actual, expected)
-
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_ : torch.Tensor):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[]"):
+        l_x_ = L_x_
 
-        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
 
-        mul = l_y_ * 2;  l_y_ = None
+        y: "f32[]" = l_x_ + 1;  l_x_ = None
 
-        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (mul,)
-"""
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+        return (y,)
+""",  # NOQA: B950
+        )
+
         graph = eager.graphs[1]
         actual = normalize_gm(graph.print_readable(False))
-        check_graph(actual, expected)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_: "f32[]"):
+        l_y_ = L_y_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported');  _saved_tensors_hooks_disable = None
+
+        mul: "f32[]" = l_y_ * 2;  l_y_ = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
+        return (mul,)
+""",  # NOQA: B950
+        )
 
     def test_context_wrapping_grad_mode_decorator(self):
         ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
@@ -1264,6 +1436,212 @@ class GraphModule(torch.nn.Module):
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(x), opt_fn(x))
             self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_inactive_context_graph_break_local(self):
+        def fn(x):
+            x = x + 1
+            ctx = torch.set_grad_enabled(True)
+            torch._dynamo.graph_break()
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_local_nullctx(self):
+        import contextlib
+
+        # test with context manager that results in None target_values
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            torch._dynamo.graph_break()
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_local_nullctx2(self):
+        import contextlib
+
+        # test with nullcontext where graph break happens
+        # in an inlined function that returns something
+        def gn():
+            torch._dynamo.graph_break()
+            return [0, 1, 2]
+
+        def fn(x):
+            x = x + 1
+            ctx = contextlib.nullcontext()
+            lst = gn()
+            with ctx:
+                x = x + lst[1]
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_inactive_context_graph_break_stack(self):
+        def gn(ctx):
+            torch._dynamo.graph_break()
+            return ctx
+
+        def fn(x):
+            x = x + 1
+            ctx = gn(torch.set_grad_enabled(True))
+            # we expect a graph break on next line as well
+            with ctx:
+                x = x + 1
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_inactive_context_graph_break_stack2(self):
+        def gn(x, ctx, y, z, dummy):
+            with ctx:
+                return x * y * z
+
+        def fn(x):
+            x = x + 1
+            x = gn(x, torch.set_grad_enabled(True), 2, 3, torch._dynamo.graph_break())
+            return x
+
+        x = torch.zeros(10, requires_grad=False)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_sdpa_kernel_ctx_manager1(self):
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                torch.nn.attention._cur_sdpa_kernel_backends(), modified_backend_state
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [torch.nn.attention.SDPBackend.MATH]
+            ):
+                output = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+            return output
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
+
+    def test_sdpa_kernel_ctx_manager2(self):
+        original_backend_state = set(torch.nn.attention._cur_sdpa_kernel_backends())
+        modified_backend_state = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_original():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                original_backend_state,
+            )
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                torch.nn.attention._cur_sdpa_kernel_backends(), modified_backend_state
+            )
+
+        def g(x):
+            torch._dynamo.graph_break()
+            output = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                torch.float32
+            )
+            check_backend_state_is_modified()
+            return output
+
+        def f(x):
+            check_backend_state_is_original()
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [torch.nn.attention.SDPBackend.MATH]
+            ):
+                output1 = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+                # graph break
+                output2 = g(x)
+
+                output3 = torch.nn.functional.scaled_dot_product_attention(x, x, x).to(
+                    torch.float32
+                )
+                check_backend_state_is_modified()
+
+            check_backend_state_is_original()
+
+            return output1 + output2 + output3
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
+        self.assertEqual(cnts.frame_count, 3)
+
+    # test sdpa_kernel graph break with 2 arguments
+    def test_sdpa_kernel_ctx_manager3(self):
+        modified_backend_state = {
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        }
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                modified_backend_state,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(
+                # pyre-fixme[16]: Module `torch.nn.attention` has no attribute `SDPBackend`.
+                [
+                    torch.nn.attention.SDPBackend.MATH,
+                    torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                ]
+            ):
+                # FLASH_ATTENTION may not be supported, but we're not actually
+                # doing any sdpa
+                x = x + 1
+                torch._dynamo.graph_break()
+                check_backend_state_is_modified()
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
 
 
 if __name__ == "__main__":

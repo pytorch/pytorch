@@ -19,7 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -80,9 +80,9 @@ void spmm_reduce_kernel_impl(
 
   // access `crow_indices`, `col_indices` and `values` via TensorAccessor
   scalar_t* out_data = out.data_ptr<scalar_t>();
-  auto csr_data = crow_indices.accessor<index_t, 1>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  auto val_data = values.accessor<scalar_t, 1>();
+  auto csr_data = crow_indices.accessor<const index_t, 1>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  auto val_data = values.accessor<const scalar_t, 1>();
   const scalar_t* other_data = other.const_data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
@@ -105,7 +105,7 @@ void spmm_reduce_kernel_impl(
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     opmath_t* buffer_ptr = nullptr;
 
-    int64_t row_start, row_end;
+    int64_t row_start = 0, row_end = 0;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
       row_end = csr_data[m + 1];
@@ -178,10 +178,10 @@ void spmm_reduce_arg_kernel_impl(
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
-  auto csr_data = crow_indices.accessor<index_t, 1>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  auto val_data = values.accessor<scalar_t, 1>();
-  scalar_t* other_data = other.data_ptr<scalar_t>();
+  auto csr_data = crow_indices.accessor<const index_t, 1>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  auto val_data = values.accessor<const scalar_t, 1>();
+  const scalar_t* other_data = other.const_data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
   int64_t K = other.size(-1);
@@ -203,7 +203,7 @@ void spmm_reduce_arg_kernel_impl(
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
     opmath_t* buffer_ptr = nullptr;
 
-    int64_t row_start, row_end, c;
+    int64_t row_start = 0, row_end = 0, c = 0;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
       row_end = csr_data[m + 1];
@@ -222,7 +222,7 @@ void spmm_reduce_arg_kernel_impl(
           c = col_data[e];
           opmath_t val = opmath_t(val_data[e]);
 
-          scalar_t* other_ptr = other_data + c * K;
+          const scalar_t* other_ptr = other_data + c * K;
           for (const auto k : c10::irange(K)) {
             update_with_index<opmath_t, index_t, reduce>(
                 &buffer_ptr[k], opmath_t(val *  other_ptr[k]), &arg_out_ptr[k], index_t(e));
@@ -257,11 +257,11 @@ void spmm_reduce_backward_input_kernel_impl(
 
   auto values = grad_self.values();
   auto grad_values_data = values.accessor<scalar_t, 1>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  auto crow_data = crow_indices.accessor<index_t, 1>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  scalar_t* other_data = other.data_ptr<scalar_t>();
-  auto row_data = row_indices.accessor<index_t, 1>();
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  auto crow_data = crow_indices.accessor<const index_t, 1>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  const scalar_t* other_data = other.const_data_ptr<scalar_t>();
+  auto row_data = row_indices.accessor<const index_t, 1>();
 
   int64_t K = grad_out.size(1);
 
@@ -307,9 +307,9 @@ void spmm_reduce_backward_input_arg_kernel_impl(
 
   auto grad_values = grad_self.values();
   auto grad_values_data = grad_values.accessor<scalar_t, 1>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  scalar_t* other_data = other.data_ptr<scalar_t>();
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  const scalar_t* other_data = other.const_data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
 
   int64_t M = grad_out.size(0);
@@ -319,7 +319,7 @@ void spmm_reduce_backward_input_arg_kernel_impl(
 
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     for (const auto m : c10::irange(begin, end)) {
-      scalar_t* grad_out_ptr = grad_out_data + m * K;
+      const scalar_t* grad_out_ptr = grad_out_data + m * K;
       scalar_t* grad_ptr = grad_data + m * K;
       index_t* arg_out_ptr = arg_out_data + m * K;
 
@@ -389,10 +389,10 @@ void spmm_reduce_backward_other_arg_kernel_impl(
   auto arg_out = arg_out_.contiguous();
 
   scalar_t* grad_other_data = grad_other.data_ptr<scalar_t>();
-  scalar_t* grad_out_data = grad_out.data_ptr<scalar_t>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  auto values_data = values.accessor<scalar_t, 1>();
-  index_t* arg_out_data = arg_out.data_ptr<index_t>();
+  const scalar_t* grad_out_data = grad_out.const_data_ptr<scalar_t>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  auto values_data = values.accessor<const scalar_t, 1>();
+  const index_t* arg_out_data = arg_out.const_data_ptr<index_t>();
 
   int64_t M = grad_out.size(0);
   int64_t K = grad_out.size(1);
@@ -401,9 +401,9 @@ void spmm_reduce_backward_other_arg_kernel_impl(
 
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     for (const auto m : c10::irange(begin, end)) {
-      scalar_t* grad_out_ptr = grad_out_data + m * K;
+      const scalar_t* grad_out_ptr = grad_out_data + m * K;
       scalar_t* grad_ptr = grad_data + m * K;
-      index_t* arg_out_ptr = arg_out_data + m * K;
+      const index_t* arg_out_ptr = arg_out_data + m * K;
 
       for (const auto k : c10::irange(K)) {
         if (arg_out_ptr[k] == index_t(nnz)) {
@@ -434,7 +434,7 @@ void spmm_reduce_kernel(
     const Tensor& values,
     const Tensor& other,
     ReductionType reduce_op) {
-    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
       AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
         AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
           spmm_reduce_kernel_impl<scalar_t, index_t, reduce>(
@@ -452,7 +452,7 @@ void spmm_reduce_arg_kernel(
     const Tensor& values,
     const Tensor& other,
     ReductionType reduce_op) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_arg_kernel_impl<scalar_t, index_t, reduce>(
@@ -471,7 +471,7 @@ void spmm_reduce_backward_input_kernel(
     const Tensor& row_indices,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::SUM || reduce_op == ReductionType::MEAN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_backward_input_kernel_impl<scalar_t, index_t, reduce>(
@@ -489,7 +489,7 @@ void spmm_reduce_backward_input_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_arg_indices", [&]() {
       spmm_reduce_backward_input_arg_kernel_impl<scalar_t, index_t>(
           grad_self, grad_out, col_indices, other, arg_out);
@@ -502,7 +502,7 @@ void spmm_reduce_normalize_values_kernel(
     const Tensor& values,
     const Tensor& crow_indices,
     const Tensor& row_indices) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_normalize_values_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_normalize_values_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "spmm_reduce_normalize_values_indices", [&]() {
       spmm_reduce_normalize_values_kernel_impl<scalar_t, index_t>(
           normalized_values, values, crow_indices, row_indices);
@@ -545,7 +545,7 @@ void spmm_reduce_backward_other_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_other_arg_indices", [&]() {
       spmm_reduce_backward_other_arg_kernel_impl<scalar_t, index_t>(
           grad_other, grad_out, col_indices, values, arg_out);
@@ -555,11 +555,11 @@ void spmm_reduce_backward_other_arg_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel);
-REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
+REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel)
+REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel)
 
-}} // at::native
+} // at::native

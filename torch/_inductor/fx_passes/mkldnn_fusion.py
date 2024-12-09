@@ -1,14 +1,14 @@
+# mypy: allow-untyped-defs
 import functools
 import operator
 from functools import reduce
 from typing import Any, Tuple
 
 import torch
-
+from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .. import ir
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -18,7 +18,7 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
-from ..virtualized import ops
+from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
@@ -26,6 +26,7 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
+
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -197,9 +198,15 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op):
+    def _is_single_computation_op(computation_op, lowp_dtype=None):
         def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
+
+            if lowp_dtype:
+                output_node_meta = match.output_node().meta.get("val")
+                if output_node_meta.dtype != lowp_dtype:
+                    return False
+
             if len(computation_nodes) < 1:
                 return False
             if any(n.args[-3] != "none" for n in computation_nodes):
@@ -210,7 +217,7 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
-            matched = _is_single_computation_op(computation_op)(match)
+            matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
             if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
@@ -243,13 +250,17 @@ if torch._C._has_mkldnn:
                 unary_attr.scalars_attr,
                 unary_attr.algorithm_attr,
             ]
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             return L[computation_op](*computation_args)
 
         return fn
 
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -266,6 +277,10 @@ if torch._C._has_mkldnn:
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             if matched:
                 computation_args = computation_args[:-3] + [
                     "leaky_relu",
@@ -291,7 +306,7 @@ if torch._C._has_mkldnn:
 
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
@@ -312,6 +327,10 @@ if torch._C._has_mkldnn:
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             if matched:
                 computation_args = computation_args[:-3] + [
                     "hardtanh",
@@ -361,8 +380,14 @@ if torch._C._has_mkldnn:
             for n in binary_nodes
         ):
             return False
+
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
+            or not all(
+                get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
+                for i in range(get_meta_value(n.args[0]).dim())
+            )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -486,6 +511,10 @@ if torch._C._has_mkldnn:
                     ]
                 else:
                     computation_args += [1.0, None, [], None]
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
+            counters["inductor"][
+                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
+            ] += len(match.nodes)
             return L[fusion_op](*computation_args)
 
         return fn
@@ -530,9 +559,15 @@ if torch._C._has_mkldnn:
                     ]
                 else:
                     computation_args += [1.0, None, [], None]
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
+            counters["inductor"][
+                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
+            ] += len(match.nodes)
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other):
+            if not _can_be_inplace(other) or other.data.shape != list(
+                match.nodes[0].meta["val"].size()
+            ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -545,7 +580,9 @@ if torch._C._has_mkldnn:
     ]
 
     class UnaryAttr:
-        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        def __init__(
+            self, op_name: str, scalars_attr=None, algorithm_attr=None
+        ) -> None:
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
@@ -721,6 +758,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
+        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_numer=1) -> _recover_linear(pass_number=2)
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -740,7 +778,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
-            pass_number=1,
+            pass_number=2,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             def get_val(val):
@@ -778,18 +816,36 @@ if torch._C._has_mkldnn:
                 graph.erase_node(old_linear_node)
                 if len(reshape_1_node.users) == 0:
                     graph.erase_node(reshape_1_node)
+            counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_count"] += 1
+            counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_nodes"] += len(
+                match.nodes
+            )
 
         def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
-            weight_meta = linear_node.args[1].meta.get("val")
+            packed_weight_node = linear_node.args[1]
+            assert packed_weight_node.target == mkldnn._reorder_linear_weight
+            transpose_weight_node = packed_weight_node.args[0]
+            assert transpose_weight_node.target == aten.permute.default
+            weight_meta = transpose_weight_node.args[0].meta.get("val")
+            bias_node = add_node.args[1]
+            if isinstance(bias_node, int):
+                # we only folding bias if it is a constant
+                return False
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
+                return False
+            assert weight_meta.dtype in (
+                torch.bfloat16,
+                torch.float16,
+            )
+            if bias_meta.dtype != weight_meta.dtype:
                 return False
             return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
-                and bias_meta.size(0) == weight_meta.size(0)
+                and bias_meta.size(0) == weight_meta.size(1)
             )
 
         # convert linear+bias to a single linear for applying fusion path.
@@ -799,7 +855,7 @@ if torch._C._has_mkldnn:
                 CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
                 Arg(),
             ),
-            pass_number=1,
+            pass_number=2,
             extra_check=is_linear_add_bias,
         )
         def linear_bias_pattern(match, *args):
@@ -813,7 +869,9 @@ if torch._C._has_mkldnn:
             )
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
-            match.erase_nodes(graph)
+            match.erase_nodes()
+            counters["inductor"]["mkldnn_linear_bias_matcher_count"] += 1
+            counters["inductor"]["mkldnn_linear_bias_matcher_nodes"] += len(match.nodes)
 
     def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()
@@ -869,7 +927,7 @@ if torch._C._has_mkldnn:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 4
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
         if (
@@ -908,6 +966,14 @@ if torch._C._has_mkldnn:
         """
         Check if the node is supported for MKLDNN linear.
         """
+
+        def is_const_or_cat_by_const(weight):
+            if weight.op == "get_attr":
+                return True
+            if weight.target != aten.cat.default:
+                return False
+            return all(arg.op == "get_attr" for arg in weight.args[0])
+
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
         if linear_node.target == aten.addmm.default:
@@ -917,7 +983,7 @@ if torch._C._has_mkldnn:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
         weight_idx = 2 if linear_node.target == aten.addmm.default else 1
-        if linear_node.args[weight_idx].op != "get_attr":
+        if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
@@ -1044,6 +1110,10 @@ if torch._C._has_mkldnn:
                 conv_node.replace_all_uses_with(packed_conv_node)
                 packed_conv_node.meta.update(conv_node.meta)
                 graph.erase_node(conv_node)
+            counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
         @register_freezing_graph_pattern(
             CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
@@ -1095,6 +1165,10 @@ if torch._C._has_mkldnn:
                 lstm_node.replace_all_uses_with(packed_lstm_node)
                 packed_lstm_node.meta.update(lstm_node.meta)
                 graph.erase_node(lstm_node)
+            counters["inductor"]["mkldnn_rnn_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_rnn_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
         @register_freezing_graph_pattern(
             CallFunction(
@@ -1106,10 +1180,12 @@ if torch._C._has_mkldnn:
                 alpha=KeywordArg("alpha"),
             ),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         @register_freezing_graph_pattern(
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         def linear(match, *args, **kwargs):
             graph = match.graph
@@ -1146,9 +1222,18 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
+                # MKL packed matrix can't be copied to a different address because the internal implementation
+                # depends on the alignment of internally-stored metadata.
+                # In aot mode, we need to firstly save the packed weight, when loading it,
+                # it will be in a different address which doesn't work.
+                # Disable MKL prepack linear in AOT mode
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if (is_lp_weight or mkldnn._is_mkldnn_acl_supported())
+                    if (
+                        is_lp_weight
+                        or mkldnn._is_mkldnn_acl_supported()
+                        or V.aot_compilation is True
+                    )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1156,7 +1241,11 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_lp_weight or mkldnn._is_mkldnn_acl_supported():
+                if (
+                    is_lp_weight
+                    or mkldnn._is_mkldnn_acl_supported()
+                    or V.aot_compilation is True
+                ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -1168,13 +1257,17 @@ if torch._C._has_mkldnn:
                 linear_node.replace_all_uses_with(packed_linear_node)
                 packed_linear_node.meta.update(linear_node.meta)
                 graph.erase_node(linear_node)
+            counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
     def _eliminate_duplicate_packed_nodes(gm):
         """
         Combine packed weight nodes with the same inputs to reduce memory usage.
         for example:
         class Model(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(32, 32, bias=True)
 
@@ -1188,6 +1281,7 @@ if torch._C._has_mkldnn:
 
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
+            torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,

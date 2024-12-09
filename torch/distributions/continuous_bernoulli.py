@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from numbers import Number
 
@@ -12,6 +13,8 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.types import _size
+
 
 __all__ = ["ContinuousBernoulli"]
 
@@ -165,7 +168,7 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)
@@ -228,8 +231,8 @@ class ContinuousBernoulli(ExponentialFamily):
         cut_nat_params = torch.where(
             out_unst_reg, x, (self._lims[0] - 0.5) * torch.ones_like(x)
         )
-        log_norm = torch.log(torch.abs(torch.exp(cut_nat_params) - 1.0)) - torch.log(
-            torch.abs(cut_nat_params)
-        )
+        log_norm = torch.log(
+            torch.abs(torch.special.expm1(cut_nat_params))
+        ) - torch.log(torch.abs(cut_nat_params))
         taylor = 0.5 * x + torch.pow(x, 2) / 24.0 - torch.pow(x, 4) / 2880.0
         return torch.where(out_unst_reg, log_norm, taylor)

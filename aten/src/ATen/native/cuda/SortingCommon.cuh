@@ -7,8 +7,7 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // Is this questionable namespace pollution?
 #if defined(USE_ROCM)
@@ -21,7 +20,7 @@ constexpr int MAX_BLOCK_SIZE = 1024;
 // Maximum size per grid dimension that we assume (compute capability >= 2.0)
 constexpr int64_t MAX_GRID_SIZE = 65535LL;
 
-static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
+inline bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
   if (gridTiles > MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE) {
     return false;
   }
@@ -47,14 +46,16 @@ static bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
 template <typename scalar_t, bool handleNaN = false>
 struct GTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && at::_isnan(lhs) && !at::_isnan(rhs)) || (lhs > rhs);
+    return (handleNaN && at::_isnan(lhs) && !at::_isnan(rhs)) ||
+        (static_cast<scalar_t>(lhs) > static_cast<scalar_t>(rhs));
   }
 };
 
 template <typename scalar_t, bool handleNaN = false>
 struct LTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
-    return (handleNaN && at::_isnan(rhs) && !at::_isnan(lhs)) || (lhs < rhs);
+    return (handleNaN && at::_isnan(rhs) && !at::_isnan(lhs)) ||
+        (static_cast<scalar_t>(lhs) < static_cast<scalar_t>(rhs));
   }
 };
 
@@ -92,7 +93,7 @@ struct GlobalIndexToPerSliceIndex {
 };
 
 // Returns 2^(ceil(lg(n)) from Stanford bit twiddling hacks
-static uint64_t nextHighestPowerOf2(uint64_t n) {
+inline uint64_t nextHighestPowerOf2(uint64_t n) {
   n--;
   n |= n >> 1;
   n |= n >> 2;
@@ -189,5 +190,4 @@ void run_launcher(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

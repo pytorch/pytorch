@@ -4,6 +4,7 @@ import contextlib
 import warnings
 
 import numpy as np
+
 import torch
 from torch.library import _scoped_library, Library
 from torch.testing._internal.common_utils import (
@@ -316,7 +317,7 @@ class TestAutogradFallback(TestCase):
             op = self.get_op("foo")
 
             lib.impl(
-                "foo", lambda a: (a.clone(), a.clone().detach().requires_grad_()), "CPU"
+                "foo", lambda a: (a.clone(), a.detach().clone().requires_grad_()), "CPU"
             )
             x = torch.randn(3, requires_grad=True)
             y, z = op(x)

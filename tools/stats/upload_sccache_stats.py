@@ -1,33 +1,27 @@
+from __future__ import annotations
+
 import argparse
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any
 
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
-    unzip,
-    upload_to_rockset,
+    upload_workflow_stats_to_s3,
 )
 
 
 def get_sccache_stats(
     workflow_run_id: int, workflow_run_attempt: int
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
 
         # Download and extract all the reports (both GHA and S3)
         download_s3_artifacts("sccache-stats", workflow_run_id, workflow_run_attempt)
-
-        artifact_paths = download_gha_artifacts(
-            "sccache-stats", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
 
         stats_jsons = []
         for json_file in Path(".").glob("**/*.json"):
@@ -37,7 +31,7 @@ def get_sccache_stats(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
+    parser = argparse.ArgumentParser(description="Upload test stats to s3")
     parser.add_argument(
         "--workflow-run-id",
         type=int,
@@ -52,4 +46,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     stats = get_sccache_stats(args.workflow_run_id, args.workflow_run_attempt)
-    upload_to_rockset("sccache_stats", stats)
+    upload_workflow_stats_to_s3(
+        args.workflow_run_id, args.workflow_run_attempt, "sccache_stats", stats
+    )

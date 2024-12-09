@@ -5,9 +5,7 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// A dataset that wraps another dataset in a shared pointer and implements the
 /// `BatchDataset` API, delegating all calls to the shared instance. This is
@@ -38,7 +36,7 @@ class SharedBatchDataset : public BatchDataset<
   }
 
   /// Returns the `size` from the underlying dataset.
-  optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return dataset_->size();
   }
 
@@ -78,6 +76,4 @@ template <typename UnderlyingDataset, typename... Args>
 SharedBatchDataset<UnderlyingDataset> make_shared_dataset(Args&&... args) {
   return std::make_shared<UnderlyingDataset>(std::forward<Args>(args)...);
 }
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

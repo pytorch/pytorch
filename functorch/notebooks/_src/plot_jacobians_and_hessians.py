@@ -8,10 +8,12 @@ deep learning models. It is difficult (or annoying) to compute these quantities
 efficiently using a standard autodiff system like PyTorch Autograd; functorch
 provides ways of computing various higher-order autodiff quantities efficiently.
 """
+
 from functools import partial
 
 import torch
 import torch.nn.functional as F
+
 
 torch.manual_seed(0)
 
@@ -54,6 +56,7 @@ jacobian = compute_jac(xp)
 # to PyTorch Autograd; instead, functorch provides a ``vjp`` transform:
 from functorch import vjp, vmap
 
+
 _, vjp_fn = vjp(partial(predict, weight, bias), x)
 (ft_jacobian,) = vmap(vjp_fn)(unit_vectors)
 assert torch.allclose(ft_jacobian, jacobian)
@@ -69,6 +72,7 @@ assert torch.allclose(ft_jacobian, jacobian)
 # respect to.
 from functorch import jacrev
 
+
 ft_jacobian = jacrev(predict, argnums=2)(weight, bias, x)
 assert torch.allclose(ft_jacobian, jacobian)
 
@@ -77,6 +81,7 @@ assert torch.allclose(ft_jacobian, jacobian)
 # there are). In general, we expect that vectorization via ``vmap`` can help
 # eliminate overhead and give better utilization of your hardware.
 from torch.utils.benchmark import Timer
+
 
 without_vmap = Timer(stmt="compute_jac(xp)", globals=globals())
 with_vmap = Timer(stmt="jacrev(predict, argnums=2)(weight, bias, x)", globals=globals())
@@ -107,6 +112,7 @@ ft_jac_weight, ft_jac_bias = jacrev(predict, argnums=(0, 1))(weight, bias, x)
 # forward-mode AD (which computes Jacobian-vector products), we are computing
 # it column-by-column. The Jacobian matrix has M rows and N columns.
 from functorch import jacfwd, jacrev
+
 
 # Benchmark with more inputs than outputs
 Din = 32
@@ -143,6 +149,7 @@ print(f"jacrev time: {using_bwd.timeit(500)}")
 # Depending on your model, you may want to use ``jacfwd(jacfwd(f))`` or
 # ``jacrev(jacrev(f))`` instead to compute hessians.
 from functorch import hessian
+
 
 # # TODO: make sure PyTorch has tanh_backward implemented for jvp!!
 # hess0 = hessian(predict, argnums=2)(weight, bias, x)

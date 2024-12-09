@@ -1,9 +1,10 @@
 from typing import Dict, List, Tuple
 
 from torch.fx import Graph, GraphModule, Node
-
 from torch.fx._compatibility import compatibility
+
 from .matcher_utils import InternalMatch, SubgraphMatcher
+
 
 __all__ = ["SubgraphMatcherWithNameNodeMap"]
 
@@ -31,8 +32,8 @@ def _split_to_graph_and_name_node_map(
                 name_node_map, Dict
             ), "Expecting the input graph to have a dict output as the last element"
             n.args = (flattened,)
-            orig_pytree_info = gm._graph._codegen.pytree_info
-            gm._graph._codegen.pytree_info = _PyTreeInfo(
+            orig_pytree_info = gm._graph._codegen.pytree_info  # type: ignore[attr-defined]
+            gm._graph._codegen.pytree_info = _PyTreeInfo(  # type: ignore[attr-defined]
                 orig_pytree_info.orig_args, orig_pytree_info.in_spec, out_spec
             )
     gm.recompile()
@@ -60,8 +61,8 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             relu *= 2
             return relu
 
-        pattern_gm = capture_pre_autograd_graph(pattern, example_inputs)
-        target_gm = capture_pre_autograd_graph(target_graph, example_inputs)
+        pattern_gm = export_for_training(pattern, example_inputs).module()
+        target_gm = export_for_training(target_graph, example_inputs).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         matches = matcher.match(target_gm)
         for match in matches:

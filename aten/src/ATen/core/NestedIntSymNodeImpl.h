@@ -4,9 +4,9 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace c10 {
@@ -67,7 +67,7 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode wrap_int(int64_t num) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(num));
-  };
+  }
 
   int64_t guard_int(const char* file, int64_t line) override {
     TORCH_CHECK(false);
@@ -134,17 +134,19 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
 
-  c10::optional<int64_t> nested_int() override {
+  std::optional<int64_t> nested_int() override {
     return val_;
   }
 
-  c10::optional<int64_t> nested_int_coeff() override {
+  std::optional<int64_t> nested_int_coeff() override {
     return coeff_;
   }
 
   bool is_symbolic() override {
     return false;
   }
+
+  c10::SymNode clone() override;
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
@@ -173,7 +175,6 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   DEFINE_NOT_SUPPORTED(ceil)
   DEFINE_NOT_SUPPORTED(floor)
   DEFINE_NOT_SUPPORTED(neg)
-  DEFINE_NOT_SUPPORTED(clone)
   DEFINE_NOT_SUPPORTED(sym_float)
 
 #undef DEFINE_NOT_SUPPORTED

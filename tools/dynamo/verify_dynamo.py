@@ -5,6 +5,7 @@ import sys
 import traceback
 import warnings
 
+
 MIN_CUDA_VERSION = "11.6"
 MIN_ROCM_VERSION = "5.4"
 MIN_PYTHON_VERSION = (3, 8)
@@ -141,7 +142,7 @@ def check_rocm():
     return rocm_ver if torch.version.hip else "None"
 
 
-def check_dynamo(backend, device, err_msg):
+def check_dynamo(backend, device, err_msg) -> None:
     import torch
 
     if device == "cuda" and not torch.cuda.is_available():
@@ -203,7 +204,7 @@ _SANITY_CHECK_ARGS = (
 )
 
 
-def main():
+def main() -> None:
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda()
@@ -215,8 +216,8 @@ def main():
         f"ROCM version: {rocm_ver}\n"
     )
     for args in _SANITY_CHECK_ARGS:
-        if sys.version_info >= (3, 12):
-            warnings.warn("Dynamo not yet supported in Python 3.12. Skipping check.")
+        if sys.version_info >= (3, 13):
+            warnings.warn("Dynamo not yet supported in Python 3.13. Skipping check.")
             continue
         check_dynamo(*args)
     print("All required checks passed")

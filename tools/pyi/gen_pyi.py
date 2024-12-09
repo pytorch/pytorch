@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import argparse
 import collections
 import importlib
 import sys
-
 from pprint import pformat
-from typing import Dict, List, Sequence
+from typing import Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
+
+from tools.autograd.gen_python_functions import (
+    group_overloads,
+    load_signatures,
+    should_generate_py_binding,
+)
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -14,15 +21,9 @@ from torchgen.api.python import (
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
 
-from tools.autograd.gen_python_functions import (
-    group_overloads,
-    load_signatures,
-    should_generate_py_binding,
-)
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -176,14 +177,18 @@ blocklist = [
     "copy_",
 ]
 
-binary_ops = (
+shift_ops = (
+    "lshift",
+    "rshift",
+    "ilshift",
+    "irshift",  # inplace ops
+)
+arithmetic_ops = (
     "add",
     "sub",
     "mul",
     "div",
     "pow",
-    "lshift",
-    "rshift",
     "mod",
     "truediv",
     "matmul",
@@ -194,24 +199,26 @@ binary_ops = (
     "rtruediv",
     "rfloordiv",
     "rpow",  # reverse arithmetic
+    "iadd",
+    "idiv",
+    "imul",
+    "isub",
+    "ifloordiv",
+    "imod",  # inplace ops
+)
+logic_ops = (
     "and",
     "or",
     "xor",
     "rand",
     "ror",
-    "rxor",  # logic
-    "iadd",
+    "rxor",  # reverse logic
     "iand",
-    "idiv",
-    "ilshift",
-    "imul",
     "ior",
-    "irshift",
-    "isub",
-    "ixor",
-    "ifloordiv",
-    "imod",  # inplace ops
+    "ixor",  # inplace ops
 )
+binary_ops = shift_ops + arithmetic_ops + logic_ops
+
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
 comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
@@ -221,7 +228,7 @@ to_py_type_ops = ("bool", "float", "complex", "long", "index", "int", "nonzero")
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
-def sig_for_ops(opname: str) -> List[str]:
+def sig_for_ops(opname: str) -> list[str]:
     """sig_for_ops(opname : str) -> List[str]
 
     Returns signatures for operator special functions (__add__ etc.)"""
@@ -231,14 +238,28 @@ def sig_for_ops(opname: str) -> List[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in binary_ops:
-        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
-    elif name in comparison_ops:
-        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
-        if name in symmetric_comparison_ops:
+    if name == "rpow":
+        return [  # somehow required to make mypy ci happy?
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ... # type: ignore[has-type]"
+        ]
+    elif name in arithmetic_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
+    elif name in logic_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
+    elif name in shift_ops:
+        return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
+    elif name in symmetric_comparison_ops:
+        return [
             # unsafe override https://github.com/python/mypy/issues/5704
-            sig += "  # type: ignore[override]"
-        return [sig]
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
+            f"def {opname}(self, other: Any) -> _bool: ...",
+        ]
+    elif name in asymmetric_comparison_ops:
+        return [
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
+        ]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
@@ -252,11 +273,11 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "builtins." + tname
         return [f"def {opname}(self) -> {tname}: ..."]
     else:
-        raise Exception("unknown op", opname)
+        raise Exception("unknown op", opname)  # noqa: TRY002
 
 
-def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
-    type_hints: List[str] = []
+def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
+    type_hints: list[str] = []
 
     # Some deprecated ops that are on the blocklist are still included in pyi
     if sig_group.signature.name in blocklist and not sig_group.signature.deprecated:
@@ -286,7 +307,7 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     return type_hints
 
 
-def get_max_pool_dispatch(name: str, arg_list: List[str]) -> Dict[str, List[str]]:
+def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]]:
     flag_pos = arg_list.index("{return_indices}")
     # If return_indices is positional arg, everything before should have no default
     arg_list_positional = (
@@ -330,7 +351,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
     # TODO the list for `torch._C._nn` is nonexhaustive
-    unsorted_c_nn_function_hints: Dict[str, List[str]] = {}
+    unsorted_c_nn_function_hints: dict[str, list[str]] = {}
 
     for d in (2, 3):
         unsorted_c_nn_function_hints.update(
@@ -465,6 +486,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                             "dropout_p: float = 0.0",
                             "is_causal: bool = False",
                             "scale: Optional[float] = None",
+                            "enable_gqa: bool = False",
                         ]
                     )
                 )
@@ -472,7 +494,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         }
     )
 
-    c_nn_function_hints: List[str] = []
+    c_nn_function_hints: list[str] = []
     for _, hints in sorted(unsorted_c_nn_function_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
@@ -505,7 +527,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "pdist",
         "cosine_similarity",
     ]
-    imported_hints = [f"from .. import {_} as {_}" for _ in torch_imports]
+    imported_hints = [f"from torch import {_} as {_}" for _ in torch_imports]
 
     # Functions imported into `torch.nn.functional` from `torch._C._nn`
     c_nn_imports = [
@@ -522,12 +544,14 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    imported_hints += [f"from .._C._nn import {_} as {_}" for _ in c_nn_imports]
+    imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
     # This is from `torch._C._nn` but renamed
-    imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
+    imported_hints.append(
+        "from torch._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid"
+    )
 
     # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
-    unsorted_dispatched_hints: Dict[str, List[str]] = {}
+    unsorted_dispatched_hints: dict[str, list[str]] = {}
 
     for d in (1, 2, 3):
         unsorted_dispatched_hints.update(
@@ -562,7 +586,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     # There's no fractional_max_pool1d
     del unsorted_dispatched_hints["fractional_max_pool1d"]
 
-    dispatched_hints: List[str] = []
+    dispatched_hints: list[str] = []
     for _, hints in sorted(unsorted_dispatched_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
@@ -593,7 +617,7 @@ We gather the docstrings for torch with the following steps:
 """
 
 
-def gather_docstrs() -> Dict[str, str]:
+def gather_docstrs() -> dict[str, str]:
     docstrs = {}
 
     def mock_add_docstr(func: Mock, docstr: str) -> None:
@@ -647,12 +671,12 @@ def gen_pyi(
     # also needs to update the other file.
 
     # Dictionary for NamedTuple definitions
-    structseqs: Dict[str, str] = {}
+    structseqs: dict[str, str] = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    unsorted_function_hints: Dict[str, List[str]] = collections.defaultdict(list)
+    unsorted_function_hints: dict[str, list[str]] = collections.defaultdict(list)
 
     for n, n1, n2 in [
         ("csr", "crow", "col"),
@@ -777,6 +801,9 @@ def gen_pyi(
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
+            "_is_functional_tensor_base": [
+                "def _is_functional_tensor_base(t: Tensor) -> _bool: ..."
+            ],
             "_from_functional_tensor": [
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
@@ -789,6 +816,9 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
+            "_functionalize_unsafe_set": [
+                "def _functionalize_unsafe_set(dst: Tensor, src: Tensor) -> None: ..."
+            ],
             "_functionalize_mark_mutation_hidden_from_autograd": [
                 "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
             ],
@@ -798,7 +828,25 @@ def gen_pyi(
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
                 "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
+            "_functionalize_was_inductor_storage_resized": [
+                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
+            "_functionalize_was_storage_changed": [
+                "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_set_storage_changed": [
+                "def _functionalize_set_storage_changed(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_has_metadata_mutation": [
+                "def _functionalize_has_metadata_mutation(tensor: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_apply_view_metas": [
+                "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+            ],
+            "_functionalize_is_symbolic": [
+                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
+            ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -1015,13 +1063,6 @@ def gen_pyi(
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
         hint = hint.replace("at::Reduction::Mean", "1")
         hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
-        # Match both:
-        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
-        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
-        hint = hint.replace(
-            "Tuple[Tensor, ...], List[Tensor]] = None",
-            "Tuple[Tensor, ...], List[Tensor], None] = None",
-        )
         return hint
 
     docstrs = gather_docstrs()
@@ -1038,7 +1079,7 @@ def gen_pyi(
     # Generate type signatures for Tensor methods
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    unsorted_tensor_method_hints: Dict[str, List[str]] = collections.defaultdict(list)
+    unsorted_tensor_method_hints: dict[str, list[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update(
         {
             "size": [
@@ -1055,14 +1096,14 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
-            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
+            "__new__": ["def __new__(cls, *args, **kwargs) -> Self: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
-                "def new(self, storage: Storage) -> Tensor: ...",
-                "def new(self, other: Tensor) -> Tensor: ...",
-                f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
+                f"def new(cls, *args: Any, {DEVICE_PARAM}) -> Self: ...",
+                "def new(cls, storage: Storage) -> Self: ...",
+                "def new(cls, other: Tensor) -> Self: ...",
+                f"def new(cls, size: _size, *, {DEVICE_PARAM}) -> Self: ...",
             ],
             "__init__": [
                 f"def __init__(self, *args: Any, {DEVICE_PARAM}) -> None: ...",
@@ -1070,12 +1111,12 @@ def gen_pyi(
                 "def __init__(self, other: Tensor) -> None: ...",
                 f"def __init__(self, size: _size, *, {DEVICE_PARAM}) -> None: ...",
             ],
-            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
+            "as_subclass": ["def as_subclass(self, cls: _Type[S]) -> S: ..."],
             "_make_subclass": [
                 "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
                     ", ".join(
                         [
-                            "cls: Type[S]",
+                            "cls: _Type[S]",
                             "data: Tensor",
                             "require_grad: _bool = False",
                             "dispatch_strides: _bool = False",
@@ -1085,6 +1126,7 @@ def gen_pyi(
                     )
                 )
             ],
+            "__contains__": ["def __contains__(self, other: Any, /) -> _bool: ..."],
             "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
@@ -1115,10 +1157,22 @@ def gen_pyi(
                     )
                 )
             ],
+            "xpu": [
+                "def xpu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
+                )
+            ],
             "cpu": [
                 "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
-            "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
+            "numpy": ["def numpy(self, *, force: _bool = False) -> numpy.ndarray: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
@@ -1143,6 +1197,7 @@ def gen_pyi(
             "_is_view": ["def _is_view(self) -> _bool: ..."],
             "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
+            "is_xpu": ["is_xpu: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
             "is_sparse": ["is_sparse: _bool"],
@@ -1151,11 +1206,11 @@ def gen_pyi(
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
             "is_mtia": ["is_mtia: _bool"],
-            "is_ort": ["is_ort: _bool"],
+            "is_maia": ["is_maia: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
             "is_ipu": ["is_ipu: _bool"],
-            "storage_offset": ["def storage_offset(self) -> _int: ..."],
+            "storage_offset": ["def storage_offset(self) -> Union[_int, SymInt]: ..."],
             "to": [
                 (
                     f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
@@ -1173,7 +1228,7 @@ def gen_pyi(
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
-                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "offset: IntLikeType, size: _symsize, stride: _symsize) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
@@ -1395,36 +1450,22 @@ def gen_pyi(
     fm.write_with_template(
         "torch/_C/__init__.pyi",
         "torch/_C/__init__.pyi.in",
-        lambda: {
-            "generated_comment": "@" + "generated from torch/_C/__init__.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/_C/_VariableFunctions.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/_VF.pyi",
         "torch/_C/_VariableFunctions.pyi.in",
-        lambda: {
-            "generated_comment": "@"
-            + "generated from torch/_C/_VariableFunctions.pyi.in",
-            **env,
-        },
+        lambda: env,
     )
     fm.write_with_template(
         "torch/return_types.pyi",
         "torch/_C/return_types.pyi.in",
-        lambda: {
-            "generated_comment": "@" + "generated from torch/_C/return_types.pyi",
-            **env,
-        },
+        lambda: env,
     )
     gen_nn_functional(fm)
 

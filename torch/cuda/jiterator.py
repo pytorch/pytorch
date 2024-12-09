@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import re
 from typing import Callable, List
 
 import torch
 from torch import Tensor
+
 
 __all__: List[str] = []
 
@@ -38,7 +40,7 @@ class _CodeParser:
         )  # DOTALL for matching multiline
 
         if result is None:
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Couldn't parse code, please check correctness:\n {code_string}"
             )
 

@@ -19,15 +19,15 @@ Tensor& scalar_fill(Tensor& self, const Scalar& value) {
   AT_DISPATCH_V2(
       self.scalar_type(), "fill_out", AT_WRAP([&]() {
         fill_inplace<scalar_t>(self, value);
-      }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return self;
 }
 
-Tensor scalar_tensor_static(const Scalar& s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt) {
+Tensor scalar_tensor_static(const Scalar& s, std::optional<ScalarType> dtype_opt, std::optional<Device> device_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoDispatchBelowAutograd mode;
   Tensor result = at::detail::empty_cpu(
-      {}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
+      {}, dtype_opt, std::nullopt, device_opt, std::nullopt, std::nullopt);
   scalar_fill(result, s);
   return result;
 }

@@ -22,6 +22,8 @@ from torch._dynamo.trace_rules import (
 )
 from torch._dynamo.utils import hashable, is_safe_constant, istype
 from torch._dynamo.variables import TorchInGraphFunctionVariable, UserFunctionVariable
+from torch.testing._internal.common_utils import skipIfWindows
+
 
 try:
     from .utils import create_dummy_module_and_function
@@ -33,6 +35,13 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
     "torch._nested_tensor_from_mask",
     "torch._nested_from_padded",
+    "torch.sparse_compressed_tensor",
+    "torch.sparse_bsc_tensor",
+    "torch.sparse_bsr_tensor",
+    "torch.sparse_coo_tensor",
+    "torch.sparse_csc_tensor",
+    "torch.sparse_csr_tensor",
+    "torch.cuda._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
@@ -62,7 +71,13 @@ ignored_c_binding_in_graph_function_names = {
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
     "torch._C._pickle_save",
-    "torch.cuda._get_device_properties",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._validate_sparse_csr_tensor_args",
+    "torch._validate_sparse_bsr_tensor_args",
+    "torch._validate_sparse_csc_tensor_args",
+    "torch._validate_sparse_coo_tensor_args",
+    "torch._validate_sparse_bsc_tensor_args",
+    "torch._validate_compressed_sparse_indices",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
@@ -100,10 +115,10 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
     """
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
-    torch_object_ids = dict()
+    torch_object_ids = {}
     c_binding_in_graph_functions = set()
     non_c_binding_in_graph_functions = set()
-    torch_name_rule_map = dict()
+    torch_name_rule_map = {}
 
     # In some platforms, these functions were loaded as classes instead of functions.
     # To mitigate these weired cases, we need this special check.
@@ -214,9 +229,8 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
             "torch.serialization",
             "torch.storage",
             "torch.utils",
+            "torch.distributed.",
         ]
-        if config.trace_distributed:
-            disallowed_modules.append("torch.distributed.")
 
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -309,10 +323,16 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # or loaded in case there is typo in the strings.
     def test_skipfiles_inlinelist(self):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
-            self.assertTrue(
-                isinstance(importlib.import_module(m), types.ModuleType),
-                f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
-            )
+            try:
+                mod = importlib.import_module(m)
+            except ImportError:
+                continue
+            else:
+                self.assertTrue(
+                    isinstance(mod, types.ModuleType),
+                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    "is not a python module, please check and correct it.",
+                )
 
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"
@@ -418,6 +438,28 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
+
+
+class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "need to import MLP module from distributed",
+    )
+    @skipIfWindows(
+        msg="AssertionError: False is not true : MLP did not survive skip files"
+    )
+    def test_module_survive_skip_files(self):
+        from torch.testing._internal.common_fsdp import MLP
+
+        model = MLP(3)
+        inp = torch.randn((2, 3))
+        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
+        model.compile(backend="eager")
+        model(inp)
+        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertTrue(
+            frame_count_after > frame_count_before, "MLP did not survive skip files"
+        )
 
 
 if __name__ == "__main__":

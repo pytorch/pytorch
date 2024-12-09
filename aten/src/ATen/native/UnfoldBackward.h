@@ -21,7 +21,7 @@ using unfold_backward_fn = void (*)(
   int64_t step
 );
 
-DECLARE_DISPATCH(unfold_backward_fn, unfold_backward_stub);
+DECLARE_DISPATCH(unfold_backward_fn, unfold_backward_stub)
 
 namespace {
 
@@ -29,13 +29,12 @@ namespace {
 // grad_in does not mean that it is a gradient wrt to input,
 // grad_in/grad_out is just an input/output of unfold_backward kernel.
 
-static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
-  Tensor& grad_out,
-  const Tensor& grad_in,
-  int64_t dim,
-  int64_t size,
-  int64_t step
-) {
+[[maybe_unused]] static TensorIterator _make_unfold_backward_iter_over_grad_out(
+    Tensor& grad_out,
+    const Tensor& grad_in,
+    int64_t dim,
+    int64_t size,
+    int64_t step) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
 
@@ -100,13 +99,12 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_out(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_owned_output(grad_out_restrided)
-    .add_owned_input(grad_in_restrided)
-    .add_owned_input(idx_dim_restrided)
+    .add_owned_const_input(grad_in_restrided)
+    .add_owned_const_input(idx_dim_restrided)
     .build();
 
   return iter;
 }
-
 }
 
 } // namespace at::native

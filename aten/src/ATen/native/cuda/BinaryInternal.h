@@ -15,9 +15,7 @@
 
 #include <type_traits>
 
-namespace at {
-namespace native {
-namespace binary_internal {
+namespace at::native::binary_internal {
 
 template <typename scalar_t>
 struct DivFunctor {
@@ -43,6 +41,4 @@ struct MulFunctor<bool> {
 };
 void div_true_kernel_cuda(TensorIteratorBase& iter);
 void div_trunc_kernel_cuda(TensorIteratorBase& iter);
-} // namespace binary_internal
-} // namespace native
-} // namespace at
+} // namespace at::native::binary_internal

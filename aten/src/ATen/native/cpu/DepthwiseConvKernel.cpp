@@ -13,6 +13,8 @@
 
 #ifdef __ARM_NEON__
 #include <arm_neon.h>
+#elif defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000
+#include <riscv_vector.h>
 #endif
 
 namespace at::native {
@@ -244,6 +246,209 @@ void convolution_depthwise3x3_winograd_impl(
   }
 }
 
+#elif defined(__riscv_v_intrinsic) && __riscv_v_intrinsic>=12000
+
+inline void winograd_f2k3_input_transform_inplace__rvv(
+    vfloat32m1x4_t* input_tile_val) {
+  const vfloat32m1_t d0 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 0);
+  const vfloat32m1_t d1 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 1);
+  const vfloat32m1_t d2 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 2);
+  const vfloat32m1_t d3 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 3);
+
+  const vfloat32m1_t wd0 = __riscv_vfsub_vv_f32m1(d0, d2, 4);
+  const vfloat32m1_t wd1 = __riscv_vfadd_vv_f32m1(d1, d2, 4);
+  const vfloat32m1_t wd2 = __riscv_vfsub_vv_f32m1(d2, d1, 4);
+  const vfloat32m1_t wd3 = __riscv_vfsub_vv_f32m1(d1, d3, 4);
+
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 0, wd0);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 1, wd1);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 2, wd2);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 3, wd3);
+}
+
+inline void winograd_f2k3_output_transform_inplace__rvv(
+    vfloat32m1x4_t* input_tile_val) {
+  const vfloat32m1_t m0 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 0);
+  const vfloat32m1_t m1 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 1);
+  const vfloat32m1_t m2 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 2);
+  const vfloat32m1_t m3 = __riscv_vget_v_f32m1x4_f32m1(*input_tile_val, 3);
+
+  const vfloat32m1_t m0_plus_m1 = __riscv_vfadd_vv_f32m1(m0, m1, 4);
+  const vfloat32m1_t wm0 = __riscv_vfadd_vv_f32m1(m0_plus_m1, m2, 4);
+  const vfloat32m1_t m1_sub_m2 = __riscv_vfsub_vv_f32m1(m1, m2, 4);
+  const vfloat32m1_t wm1 = __riscv_vfsub_vv_f32m1(m1_sub_m2, m3, 4);
+
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 0, wm0);
+  *input_tile_val = __riscv_vset_v_f32m1_f32m1x4(*input_tile_val, 1, wm1);
+}
+
+inline vfloat32m1_t
+vmuladdq_f32(const vfloat32m1_t c, const vfloat32m1_t a, const vfloat32m1_t b) {
+  return __riscv_vfmacc_vv_f32m1(c, a, b, 4);
+}
+
+inline vfloat32m1_t
+vmulsubq_f32(const vfloat32m1_t c, const vfloat32m1_t a, const vfloat32m1_t b) {
+  return __riscv_vfnmsac_vv_f32m1(c, a, b, 4);
+}
+
+inline void winograd_f2k3_kernel_transform__rvv(
+    const vfloat32m1_t g0,
+    const vfloat32m1_t g1,
+    const vfloat32m1_t g2,
+    vfloat32m1x4_t* const transform) {
+  const vfloat32m1_t const_half = __riscv_vfmv_v_f_f32m1(0.5f, 4);
+  const vfloat32m1_t g0_plus_g2 = __riscv_vfadd_vv_f32m1(g0, g2, 4);
+  vfloat32m1_t half_g0_plus_g2 =  __riscv_vfmul_vv_f32m1(const_half, g0_plus_g2, 4);
+
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 0, g0);
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 1, vmuladdq_f32(half_g0_plus_g2, const_half, g1));
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 2, vmulsubq_f32(half_g0_plus_g2, const_half, g1));
+  *transform = __riscv_vset_v_f32m1_f32m1x4(*transform, 3, g2);
+}
+
+inline vfloat32m1x4_t v4f_transpose4x4__rvv(const vfloat32m1x4_t m) {
+  vfloat32m1x4_t ret;
+  __riscv_vsseg4e32_v_f32m1x4((float*)(&ret), m, 4);
+  return ret;
+}
+
+void convolution_depthwise3x3_winograd_impl(
+    const Arguments& args,
+    const float* const input,
+    const float* const kernel,
+    const float* const bias,
+    float* const output) {
+
+  vbool32_t mask = __riscv_vreinterpret_v_u32m1_b32(__riscv_vmv_v_x_u32m1((uint32_t)(1 << 1),2));
+  const vfloat32m1_t vbias = __riscv_vfmerge_vfm_f32m1(__riscv_vfmv_v_f_f32m1(0.0, 4), *bias, mask, 4);
+  vfloat32m1x4_t kernel_tile;
+
+  {
+    const vfloat32m1_t g0 = __riscv_vle32_v_f32m1(kernel, 4);
+    const vfloat32m1_t g1 = __riscv_vle32_v_f32m1(kernel + 3, 4);
+    // g2[3] is junk
+    vfloat32m1_t a_slidedown = __riscv_vslidedown_vx_f32m1(__riscv_vle32_v_f32m1(kernel + 5, 4), 1, 4);
+    const vfloat32m1_t g2 =
+          __riscv_vslideup_vx_f32m1(a_slidedown, __riscv_vle32_v_f32m1(kernel + 5, 4), 3, 4);
+    vfloat32m1x4_t w;
+
+    winograd_f2k3_kernel_transform__rvv(
+        g0, g1, g2, &w);
+
+    w = v4f_transpose4x4__rvv(w);
+
+    winograd_f2k3_kernel_transform__rvv(
+        __riscv_vget_v_f32m1x4_f32m1(w, 0),
+        __riscv_vget_v_f32m1x4_f32m1(w, 1),
+        __riscv_vget_v_f32m1x4_f32m1(w, 2),
+        &kernel_tile);
+
+  }
+
+#define TILE                                                                   \
+  winograd_f2k3_input_transform_inplace__rvv(                                  \
+      &input_tile);                                                            \
+  input_tile = v4f_transpose4x4__rvv(input_tile);                              \
+  winograd_f2k3_input_transform_inplace__rvv(                                  \
+      &input_tile);                                                            \
+                                                                               \
+  for (const auto row : c10::irange(4)) {                                      \
+    vfloat32m1_t input_mul_kernel =                                            \
+         __riscv_vfmul_vv_f32m1(                                               \
+           __riscv_vle32_v_f32m1((float*)&input_tile + row * 4, 4),            \
+           __riscv_vle32_v_f32m1((float*)&kernel_tile + row * 4, 4),           \
+           4);                                                                 \
+    __riscv_vse32_v_f32m1(                                                     \
+      (float*)&input_tile + row * 4,                                           \
+      input_mul_kernel,                                                        \
+      4);                                                                      \
+  }                                                                            \
+                                                                               \
+  vfloat32m1_t val = __riscv_vget_v_f32m1x4_f32m1(input_tile, 1);              \
+  vfloat32m1_t val_add_vbias =  __riscv_vfadd_vv_f32m1(val, vbias, 4);         \
+  input_tile = __riscv_vset_v_f32m1_f32m1x4(input_tile, 1, val_add_vbias);     \
+  winograd_f2k3_output_transform_inplace__rvv(                                 \
+      &input_tile);                                                            \
+  input_tile = v4f_transpose4x4__rvv(input_tile);                              \
+  winograd_f2k3_output_transform_inplace__rvv(                                 \
+      &input_tile)
+
+  // Non-padded regime.
+
+  // Iterate over non-padded output tiles.
+  // TODO: avoid spilling W by breaking out the non-padded vs padded case.
+  for (int64_t oth = 0; oth < (args.out_rows + 1) / 2; ++oth) {
+    for (int64_t otw = 0; otw < (args.out_cols + 1) / 2; ++otw) {
+      // load input tile for [oth, otw];
+      int64_t ih = oth * 2 - args.pad_rows;
+      int64_t iw = otw * 2 - args.pad_cols;
+      // fast-path, all accesses in-bounds
+      if (C10_LIKELY(
+              ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
+                  iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
+                  2 * otw + 1 < args.out_cols
+              )) {
+        vfloat32m1x4_t input_tile;
+        for (const auto row : c10::irange(4)) {
+          __riscv_vse32_v_f32m1(
+            (float*)&input_tile + row * 4,
+            __riscv_vle32_v_f32m1(input + (ih + row) * args.in_cols + iw, 4),
+            4);
+        }
+
+        TILE;
+
+        for (const auto row : c10::irange(2)) {
+          __riscv_vse32_v_f32m1(
+              output + (oth * 2 + row) * args.out_cols + otw * 2,
+              __riscv_vle32_v_f32m1((float*)&input_tile + row * 4, 2),
+              2);
+        }
+      } else {
+        float block[4][4];
+        for (const auto row : c10::irange(4)) {
+          for (const auto col : c10::irange(4)) {
+            if (ih + row >= 0 && iw + col >= 0 && ih + row < args.in_rows &&
+                iw + col < args.in_cols) {
+              block[row][col] = input[(ih + row) * args.in_cols + iw + col];
+            } else {
+              block[row][col] = 0.0;
+            }
+          }
+        }
+
+        vfloat32m1x4_t input_tile;
+        for (const auto row : c10::irange(4)) {
+          __riscv_vse32_v_f32m1(
+            (float*)&input_tile + row * 4,
+            __riscv_vle32_v_f32m1(&block[row][0], 4),
+            4);
+        }
+
+        TILE;
+
+        float oblock[2][2];
+        for (const auto row : c10::irange(2)) {
+          __riscv_vse32_v_f32m1(
+            &oblock[row][0],
+            __riscv_vle32_v_f32m1((float*)&input_tile + row * 4, 2),
+            2);
+        }
+        for (const auto row : c10::irange(2)) {
+          for (const auto col : c10::irange(2)) {
+            if (2 * oth + row < args.out_rows &&
+                2 * otw + col < args.out_cols) {
+              output[(2 * oth + row) * args.out_cols + 2 * otw + col] =
+                  oblock[row][col];
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 #else
 
 void convolution_depthwise3x3_winograd_impl(
@@ -292,9 +497,9 @@ Tensor _convolution_depthwise3x3_winograd(
                       bias_potentially_undefined :
                       at::zeros({kernel_sizes[0]}, input.options());
 
-  auto input_data = input.data_ptr<float>();
-  auto kernel_data = kernel.data_ptr<float>();
-  auto bias_data = bias.data_ptr<float>();
+  auto input_data = input.const_data_ptr<float>();
+  auto kernel_data = kernel.const_data_ptr<float>();
+  auto bias_data = bias.const_data_ptr<float>();
   auto output_data = output.data_ptr<float>();
 
   at::parallel_for(0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
@@ -315,6 +520,6 @@ Tensor _convolution_depthwise3x3_winograd(
 
 }  // namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd);
+ALSO_REGISTER_AVX512_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd)
 
 }  // namespace at::native

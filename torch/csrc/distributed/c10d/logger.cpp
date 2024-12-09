@@ -61,7 +61,7 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer)
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-c10::once_flag log_graph_static_flag;
+static c10::once_flag log_graph_static_flag;
 
 void Logger::log_if_graph_static(bool is_static) {
   c10::call_once(log_graph_static_flag, [this, is_static]() {
@@ -116,7 +116,7 @@ void Logger::set_env_variables() {
 void Logger::set_parameter_stats() {
   // The number of parameter tensors
   ddp_logging_data_->ints_map["num_parameter_tensors"] =
-      reducer_->params_.size();
+      static_cast<int64_t>(reducer_->params_.size());
   // Total parameters size (Bytes)
   ddp_logging_data_->ints_map["total_parameter_size_bytes"] = 0;
   // Parameters' data types, there may be multiple data
@@ -234,7 +234,7 @@ void Logger::set_event_time(
     Timer& timer,
     Timer::Event event) {
   auto timestamp = timer.getTimestamp(event);
-  if (timestamp != c10::nullopt) {
+  if (timestamp != std::nullopt) {
     // TODO: should we set this as human-readable time instead of unixtime?
     event_time = *timestamp;
   }
@@ -247,7 +247,7 @@ void Logger::calculate_avg_time(
     Timer::Event start_event,
     Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  c10::optional<int64_t> maybe_time_duration =
+  std::optional<int64_t> maybe_time_duration =
       timer.measureDifference(start_event, end_event);
   if (!maybe_time_duration.has_value()) {
     return;

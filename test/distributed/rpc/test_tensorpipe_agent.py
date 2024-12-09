@@ -6,6 +6,7 @@ import sys
 import torch
 import torch.distributed as dist
 
+
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -15,9 +16,9 @@ from torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture i
     TensorPipeRpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc_utils import (
+    generate_tests,
     GENERIC_TESTS,
     TENSORPIPE_TESTS,
-    generate_tests,
 )
 
 

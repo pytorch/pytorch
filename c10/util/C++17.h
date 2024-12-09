@@ -34,18 +34,6 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superseded by std::invoke_result.  Since
-// c++20, std::result_of is removed.
-template <typename F, typename... args>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-using invoke_result = typename std::invoke_result<F, args...>;
-#else
-using invoke_result = typename std::result_of<F && (args && ...)>;
-#endif
-
-template <typename F, typename... args>
-using invoke_result_t = typename invoke_result<F, args...>::type;
-
 // std::is_pod is deprecated in C++20, std::is_standard_layout and
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
@@ -56,27 +44,6 @@ template <typename T>
 constexpr bool is_pod_v = is_pod<T>::value;
 
 namespace guts {
-
-template <typename Base, typename Child, typename... Args>
-std::enable_if_t<
-    !std::is_array_v<Base> && !std::is_array_v<Child> &&
-        std::is_base_of_v<Base, Child>,
-    std::unique_ptr<Base>>
-make_unique_base(Args&&... args) {
-  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
-}
-
-template <class... B>
-using conjunction = std::conjunction<B...>;
-template <class... B>
-using disjunction = std::disjunction<B...>;
-template <bool B>
-using bool_constant = std::bool_constant<B>;
-template <class B>
-using negation = std::negation<B>;
-
-template <class T>
-using void_t = std::void_t<T>;
 
 #if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
@@ -93,21 +60,10 @@ C10_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 // member functions.
 namespace detail {
 template <class F, class Tuple, std::size_t... INDEX>
-#if defined(_MSC_VER)
-// MSVC has a problem with the decltype() return type, but it also doesn't need
-// it
-C10_HOST_DEVICE constexpr auto apply_impl(
-    F&& f,
-    Tuple&& t,
-    std::index_sequence<INDEX...>)
-#else
-// GCC/Clang need the decltype() return type
 C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
     F&& f,
     Tuple&& t,
-    std::index_sequence<INDEX...>)
-#endif
-{
+    std::index_sequence<INDEX...>) {
   return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
 }
 } // namespace detail
@@ -123,44 +79,8 @@ C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 
 #endif
 
-template <typename Functor, typename... Args>
-std::enable_if_t<
-    std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
-invoke(Functor&& f, Args&&... args) {
-  return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
-}
-
-template <typename Functor, typename... Args>
-std::enable_if_t<
-    !std::is_member_pointer_v<std::decay_t<Functor>>,
-    typename c10::invoke_result_t<Functor, Args...>>
-invoke(Functor&& f, Args&&... args) {
-  return std::forward<Functor>(f)(std::forward<Args>(args)...);
-}
-
-namespace detail {
-struct _identity final {
-  template <class T>
-  using type_identity = T;
-
-  template <class T>
-  decltype(auto) operator()(T&& arg) {
-    return std::forward<T>(arg);
-  }
-};
-
-template <class Func, class Enable = void>
-struct function_takes_identity_argument : std::false_type {};
-
-template <class Func>
-struct function_takes_identity_argument<
-    Func,
-    std::void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {
-};
-} // namespace detail
-
 } // namespace guts
+
 } // namespace c10
 
 #endif // C10_UTIL_CPP17_H_

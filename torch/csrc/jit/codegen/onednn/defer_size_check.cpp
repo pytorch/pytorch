@@ -2,10 +2,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 class SizeCheckMover {
  private:
@@ -41,7 +38,7 @@ class SizeCheckMover {
           // tensorexpr_elementwise_set that's defined in
           // torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp
           OperatorMap<std::string> schemaMap = get_tensorexpr_elementwise_set();
-          c10::optional<std::string> mapping =
+          std::optional<std::string> mapping =
               schemaMap.find(u.user->getOperator());
           return mapping == "unary";
         });
@@ -82,7 +79,4 @@ void DeferSizeCheck(std::shared_ptr<Graph>& graph) {
   SizeCheckMover(graph->block(), graph).run();
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

@@ -4,8 +4,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 template <size_t D, typename Derived>
 AvgPoolImpl<D, Derived>::AvgPoolImpl(const AvgPoolOptions<D>& options_)
@@ -229,7 +228,7 @@ void MaxUnpoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 Tensor MaxUnpool1dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool1d(
       input,
       indices,
@@ -242,7 +241,7 @@ Tensor MaxUnpool1dImpl::forward(
 Tensor MaxUnpool2dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool2d(
       input,
       indices,
@@ -255,7 +254,7 @@ Tensor MaxUnpool2dImpl::forward(
 Tensor MaxUnpool3dImpl::forward(
     const Tensor& input,
     const Tensor& indices,
-    const c10::optional<std::vector<int64_t>>& output_size) {
+    const std::optional<std::vector<int64_t>>& output_size) {
   return F::detail::max_unpool3d(
       input,
       indices,
@@ -281,19 +280,19 @@ FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(
 void FractionalMaxPool2dImpl::reset() {
   _random_samples =
       register_buffer("_random_samples", options._random_samples());
-  if (options.output_size() == c10::nullopt &&
-      options.output_ratio() == c10::nullopt) {
+  if (options.output_size() == std::nullopt &&
+      options.output_ratio() == std::nullopt) {
     TORCH_CHECK(
         false,
         "FractionalMaxPool2d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != c10::nullopt &&
-      options.output_ratio() != c10::nullopt) {
+  if (options.output_size() != std::nullopt &&
+      options.output_ratio() != std::nullopt) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != c10::nullopt) {
+  if (options.output_ratio() != std::nullopt) {
     at::ArrayRef<double> output_ratio =
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
@@ -340,19 +339,19 @@ FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(
 void FractionalMaxPool3dImpl::reset() {
   _random_samples =
       register_buffer("_random_samples", options._random_samples());
-  if (options.output_size() == c10::nullopt &&
-      options.output_ratio() == c10::nullopt) {
+  if (options.output_size() == std::nullopt &&
+      options.output_ratio() == std::nullopt) {
     TORCH_CHECK(
         false,
         "FractionalMaxPool3d requires specifying either ",
         "an output size, or a pooling ratio");
   }
-  if (options.output_size() != c10::nullopt &&
-      options.output_ratio() != c10::nullopt) {
+  if (options.output_size() != std::nullopt &&
+      options.output_ratio() != std::nullopt) {
     TORCH_CHECK(
         false, "only one of output_size and output_ratio may be specified");
   }
-  if (options.output_ratio() != c10::nullopt) {
+  if (options.output_ratio() != std::nullopt) {
     at::ArrayRef<double> output_ratio =
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
@@ -440,5 +439,4 @@ Tensor LPPool3dImpl::forward(const Tensor& input) {
 
 template class LPPoolImpl<3, LPPool3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

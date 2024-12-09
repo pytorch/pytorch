@@ -7,6 +7,7 @@
 #include <limits>
 
 #include <ATen/cuda/cub_definitions.cuh>
+#include <ATen/cuda/CUDAContextLight.h>
 
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
 
@@ -51,8 +52,7 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
-     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
 
 #if !defined(USE_ROCM)
 namespace at_cuda_detail {
@@ -110,7 +110,7 @@ struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
 };
 
-#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+#elif defined(USE_ROCM)
 
 template<>
 struct cuda_type<c10::BFloat16> {
@@ -160,25 +160,18 @@ inline void segmented_sort_pairs(
 }
 
 #if CUB_SUPPORTS_UNIQUE_BY_KEY()
-template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename KeysOutputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
 inline void unique_by_key(
   KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
-  KeysOutputIteratorT keys_out, ValuesOutputIteratorT values_out,
+  ValuesOutputIteratorT values_out,
   NumSelectedIteratorT num_selected, int64_t num_input_items)
 {
   // TODO: use thrust::discard_iterator to handle null keys_out when https://github.com/NVIDIA/cub/issues/406 is fixed.
-  constexpr bool null_keys_out = std::is_same<KeysOutputIteratorT, std::nullptr_t>::value;
   using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
-  using RealKeysOutputIteratorT = typename std::conditional<null_keys_out, KeyT *, KeysOutputIteratorT>::type;
-  RealKeysOutputIteratorT keys_out_;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  if constexpr (null_keys_out) {
-    keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
-    keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
-  } else {
-    keys_out_ = keys_out;
-  }
+  keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+  auto keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
@@ -234,7 +227,7 @@ constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
 // so split at int_max/2
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, int max_cub_size=impl::max_cub_size>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::InclusiveScan,
       input,
@@ -299,9 +292,179 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 #endif
 }
 
+# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
+
+template<typename T>
+struct BlockPrefixCallbackOp
+{
+    public:
+    T running_total;
+
+    __host__ __device__ BlockPrefixCallbackOp(T running_total) : running_total(running_total) {}
+
+    // Callback operator to be entered by the first warp of threads in the block.
+    // Thread-0 is responsible for returning a value for seeding the block-wide scan.
+    __host__ __device__ T operator()(T block_aggregate)
+    {
+        T old_prefix = running_total;
+        running_total += block_aggregate;
+        return old_prefix;
+    }
+};
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
+__global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem, int iters_per_cta) {
+  if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
+  d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  d_out += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+
+  using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
+
+  // Specialize BlockStore type for our thread block (uses warp-striped loads for coalescing, then transposes in shared
+  // memory to a blocked arrangement)
+  using BlockStoreT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockStore<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_STORE_WARP_TRANSPOSE>;
+
+  // Specialize BlockScan type for our thread block
+  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<T, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
+  using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<T, BLOCK_THREADS>;
+
+
+  // Shared memory
+  __shared__ union TempStorage
+  {
+    typename BlockLoadT::TempStorage load;
+    typename BlockStoreT::TempStorage store;
+    typename BlockScanT::TempStorage scan;
+    typename BlockReduceT::TempStorage reduce;
+  } temp_storage;
+
+  // load agg and reduce my starting value
+  T agg_data;
+  agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
+  T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
+  __syncthreads();
+  BlockPrefixCallbackOp prefix_op(aggregate);
+
+
+  // Per-thread tile data
+  T data[ITEMS_PER_THREAD];
+
+  int remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+  for (int i=0; i<iters_per_cta; i++){
+  // Load items into a blocked arrangement
+    if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
+      BlockLoadT(temp_storage.load).Load(d_in, data);
+    } else {
+       #pragma unroll
+       for (int j=0; j<ITEMS_PER_THREAD; j++) {
+         data[j] = 0;
+       }
+       BlockLoadT(temp_storage.load).Load(d_in, data, remaining);
+    }
+
+    // Barrier for smem reuse
+    __syncthreads();
+
+    // Compute inclusive prefix sum
+    BlockScanT(temp_storage.scan).InclusiveSum(data, data, prefix_op);
+
+    // Barrier for smem reuse
+    __syncthreads();
+
+    // Store items from a blocked arrangement
+    if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
+      BlockStoreT(temp_storage.store).Store(d_out, data);
+    } else {
+      BlockStoreT(temp_storage.store).Store(d_out, data, remaining);
+    }
+    d_in += BLOCK_THREADS * ITEMS_PER_THREAD;
+    d_out += BLOCK_THREADS * ITEMS_PER_THREAD;
+    remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
+    if (remaining <= 0) return;
+    __syncthreads();
+  }
+
+}
+
+
+
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
+__global__ void calc_block_sums(const T * d_in, T * agg, int64_t nelem, int iters_per_cta){
+    if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
+    d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+
+    using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<T, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
+    using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<T, BLOCK_THREADS>;
+    // Shared memory
+    __shared__ union TempStorage
+    {
+      typename BlockLoadT::TempStorage load;
+      typename BlockReduceT::TempStorage reduce;
+    } temp_storage;
+    T data[ITEMS_PER_THREAD];
+    T agg_val = 0;
+    int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+    for (int i=0; i<iters_per_cta; i++){
+      if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
+        BlockLoadT(temp_storage.load).Load(d_in, data);
+        __syncthreads();
+        agg_val += BlockReduceT(temp_storage.reduce).Sum(data);
+
+      } else {
+        BlockLoadT(temp_storage.load).Load(d_in, data, remaining);
+        __syncthreads();
+        agg_val += BlockReduceT(temp_storage.reduce).Sum(data);
+      }
+      d_in += BLOCK_THREADS * ITEMS_PER_THREAD;
+      remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
+      if (remaining <= 0) return;
+      __syncthreads();
+
+    }
+    if (threadIdx.x == 0) {
+      agg[blockIdx.x] = agg_val;
+    }
+
+}
+
+template<int size>
+constexpr int block_threads(){
+  if constexpr (size >=16) {
+    return 128;
+  } else if constexpr (size >=8) {
+    return 256;
+  } else {
+    return 512;
+  }
+}
+
+template<typename scalar_t, typename ScanOpT>
+inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * output, ScanOpT scan_op, int64_t num_items) {
+  static_assert(std::is_same<ScanOpT, std::plus<scalar_t>>::value, "");
+  constexpr int BLOCK_THREADS = block_threads<sizeof(scalar_t)>();
+  constexpr int ITEMS_PER_THREAD = 16;
+  auto grid_size = (num_items + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
+  const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+
+  const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
+  grid_size = std::min(num_sms, grid_size);
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
+  calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD>
+  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+    input, (scalar_t*)agg.get(), num_items, iters_per_cta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  final_scan_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
+  <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+  input, output, (scalar_t*)agg.get(), num_items, iters_per_cta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+#endif
+
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
-#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+#if defined(USE_ROCM)
   //For ROCm, use hipCUB chained iterators
   CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::ExclusiveScan,
       input,

@@ -5,9 +5,10 @@
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <string>
 #include <stdexcept>
+#include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
 
@@ -56,6 +57,14 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
+bool Context::deterministicMkldnn() const {
+  return deterministic_mkldnn;
+}
+
+void Context::setDeterministicMkldnn(bool b) {
+  deterministic_mkldnn = b;
+}
+
 bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
@@ -64,7 +73,7 @@ bool Context::deterministicAlgorithmsWarnOnly() const {
   return _deterministic_algorithms_warn_only;
 }
 
-void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
+void Context::setDeterministicAlgorithms(bool b, bool warn_only = false) {
   _deterministic_algorithms = b;
   _deterministic_algorithms_warn_only = warn_only;
 }
@@ -77,7 +86,7 @@ void Context::setDeterministicFillUninitializedMemory(bool b) {
   _deterministic_fill_uninitialized_memory = b;
 }
 
-void Context::alertNotDeterministic(c10::string_view const& caller) {
+void Context::alertNotDeterministic(std::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
       TORCH_WARN(
@@ -113,6 +122,20 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
+  // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
+  TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),
+    "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
+    at::num_sdp_backends, " unique backends specified in priority order.");
+  for (uint32_t i = 0; i < order.size(); i++) {
+    sdp_priority_order[i] = (at::SDPBackend) order[i];
+  }
+}
+
+std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
+  return sdp_priority_order;
+}
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
@@ -137,6 +160,14 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+bool Context::allowFP16BF16ReductionMathSDP() const {
+  return allow_fp16_bf16_reduction_mathSDP;
+}
+
+void Context::setAllowFP16BF16ReductionMathSDP(bool e) {
+  allow_fp16_bf16_reduction_mathSDP = e;
+}
+
 bool Context::userEnabledCuDNNSDP() const {
   return enabled_cudnnSDP;
 }
@@ -145,28 +176,29 @@ void Context::setSDPUseCuDNN(bool e) {
   enabled_cudnnSDP = e;
 }
 
+void Context::setSDPUseOverrideable(bool e) {
+  enabled_overrideable = e;
+}
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+bool Context::userEnabledOverrideableSDP() const {
+  return enabled_overrideable;
+}
+
+static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
+static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
 
 bool Context::checkCuBLASConfigDeterministic() {
-  bool cublas_config_deterministic = true;
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
-  if (hasCUDART() && (versionCUDART() >= 10020)) {
-    char* workspace_config = std::getenv(cublas_config_var_name);
-    cublas_config_deterministic = (workspace_config != nullptr) && (
-      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
-      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
-    );
+  if (hasCUDART()) {
+    const auto workspace_config = c10::utils::get_env(cublas_config_var_name);
+    return (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
   }
-  return cublas_config_deterministic;
+  return true;
 }
 
 void Context::alertCuBLASConfigNotDeterministic() const {
-  static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
+  static const bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
   if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
     return;
   }
@@ -261,6 +293,54 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "please file an issue on GitHub."
     );
   }
+}
+
+at::BlasBackend Context::blasPreferredBackend() {
+#ifdef USE_ROCM
+  if (blas_preferred_backend == at::BlasBackend::Cublaslt) {
+    static const bool hipblaslt_unsupported = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx940", "gfx941", "gfx942",
+#if ROCM_VERSION >= 60300
+          "gfx1100", "gfx1101"
+#endif
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use hipBLASLt on an unsupported architecture! "
+            "Overriding blas backend to hipblas");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if (hipblaslt_unsupported) blas_preferred_backend = at::BlasBackend::Cublas;
+  }
+#endif
+  return blas_preferred_backend;
+}
+
+void Context::setBlasPreferredBackend(at::BlasBackend b) {
+#ifdef _MSC_VER
+  TORCH_WARN_ONCE(
+    "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+    "It is not supported on Windows."
+  );
+#else
+  TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
+      "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
+  TORCH_CHECK((b != at::BlasBackend::Ck) || hasROCM(),
+      "Cannot set preferred backend to Ck if PyTorch has not been compiled for ROCm.");
+  if (b != at::BlasBackend::Cublas) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+  blas_preferred_backend = b;
+#endif
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {
@@ -415,7 +495,7 @@ Allocator* getCPUAllocator() {
 }
 
 // override_allow_tf32_flag = true
-//    means the allow_tf32 flags are overrided and tf32 is force disabled
+//    means the allow_tf32 flags are overridden and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
 thread_local bool override_allow_tf32_flag = false;

@@ -2,8 +2,7 @@
 
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
-namespace torch {
-namespace torch_dispatch_mode {
+namespace torch::torch_dispatch_mode {
 
 struct StashTorchDispatchModeGuard {
  public:
@@ -20,7 +19,7 @@ struct StashTorchDispatchModeGuard {
   }
 
   ~StashTorchDispatchModeGuard() {
-    if (saved_mode_key_ != c10::nullopt) {
+    if (saved_mode_key_.has_value()) {
       c10::impl::TorchDispatchModeTLS::set_mode(
           saved_mode_, saved_mode_key_.value());
     } else {
@@ -28,14 +27,20 @@ struct StashTorchDispatchModeGuard {
           std::move(saved_mode_));
     }
   }
+  StashTorchDispatchModeGuard(const StashTorchDispatchModeGuard&) = delete;
+  StashTorchDispatchModeGuard(StashTorchDispatchModeGuard&&) = delete;
+  StashTorchDispatchModeGuard& operator=(const StashTorchDispatchModeGuard&) =
+      delete;
+  StashTorchDispatchModeGuard& operator=(StashTorchDispatchModeGuard&&) =
+      delete;
 
-  const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
+  const std::shared_ptr<c10::impl::PyObject_TorchDispatchMode>& get_cur_mode() {
     return saved_mode_;
   }
 
  private:
-  std::shared_ptr<at::SafePyObject> saved_mode_;
-  c10::optional<c10::impl::TorchDispatchModeKey> saved_mode_key_;
+  std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> saved_mode_;
+  std::optional<c10::impl::TorchDispatchModeKey> saved_mode_key_;
 };
 
 struct StashTorchDispatchStackGuard {
@@ -45,6 +50,12 @@ struct StashTorchDispatchStackGuard {
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
     saved_state_ = std::move(old);
   }
+  StashTorchDispatchStackGuard(const StashTorchDispatchStackGuard&) = delete;
+  StashTorchDispatchStackGuard(StashTorchDispatchStackGuard&&) = delete;
+  StashTorchDispatchStackGuard& operator=(const StashTorchDispatchStackGuard&) =
+      delete;
+  StashTorchDispatchStackGuard& operator=(StashTorchDispatchStackGuard&&) =
+      delete;
 
   ~StashTorchDispatchStackGuard() {
     c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
@@ -54,5 +65,4 @@ struct StashTorchDispatchStackGuard {
   c10::impl::TorchDispatchModeTLS saved_state_;
 };
 
-} // namespace torch_dispatch_mode
-} // namespace torch
+} // namespace torch::torch_dispatch_mode

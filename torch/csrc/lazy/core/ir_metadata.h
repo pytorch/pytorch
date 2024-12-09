@@ -5,8 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 struct SourceLocation {
   std::string file;
   std::string function;
@@ -39,11 +38,14 @@ struct TORCH_API MetaData {
 struct TORCH_API ScopePusher {
   explicit ScopePusher(const std::string& name);
   ~ScopePusher();
+  ScopePusher(ScopePusher&& other) = delete;
+  ScopePusher(const ScopePusher&) = delete;
+  ScopePusher& operator=(const ScopePusher&) = delete;
+  ScopePusher& operator=(ScopePusher&&) = delete;
 
   static void ResetScopes();
 };
 
 TORCH_API MetaData GetMetaDataIfDebugging();
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

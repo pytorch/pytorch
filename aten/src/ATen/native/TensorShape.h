@@ -8,7 +8,7 @@ namespace at::native {
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
 
 inline bool cat_should_skip_tensor(const Tensor& t) {
-  return t.numel() == 0 && t.dim() == 1;
+  return t.sym_numel() == 0 && t.dim() == 1;
 }
 
  // Check to see if the shape of tensors is compatible
@@ -30,7 +30,7 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
  }
 
 inline void check_cat_no_zero_dim(const MaterializedITensorListRef& tensors) {
-  int64_t i = 0;
+  [[maybe_unused]] int64_t i = 0;
   for(const Tensor& t : tensors) {
     TORCH_CHECK(t.dim() > 0,
              "zero-dimensional tensor (at position ", i, ") cannot be concatenated");

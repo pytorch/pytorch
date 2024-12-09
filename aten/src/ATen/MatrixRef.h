@@ -2,8 +2,6 @@
 #include <ATen/Utils.h>
 #include <c10/util/ArrayRef.h>
 
-#include <vector>
-
 namespace at {
 /// MatrixRef - Like an ArrayRef, but with an extra recorded strides so that
 /// we can easily view it as a multidimensional array.
@@ -94,6 +92,7 @@ class MatrixRef {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   std::enable_if_t<std::is_same_v<U, T>, MatrixRef<T>>& operator=(
       U&& Temporary) = delete;
 

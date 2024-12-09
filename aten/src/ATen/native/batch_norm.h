@@ -11,9 +11,9 @@ using batch_norm_collect_stats_fn = void (*)(Tensor&, Tensor&, const Tensor&);
 using batch_norm_backward_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&,
         const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double);
 
-DECLARE_DISPATCH(batch_norm_fn, batch_norm_cpu_stub);
-DECLARE_DISPATCH(batch_norm_collect_stats_fn, batch_norm_cpu_collect_stats_stub);
-DECLARE_DISPATCH(batch_norm_backward_fn, batch_norm_cpu_backward_stub);
+DECLARE_DISPATCH(batch_norm_fn, batch_norm_cpu_stub)
+DECLARE_DISPATCH(batch_norm_collect_stats_fn, batch_norm_cpu_collect_stats_stub)
+DECLARE_DISPATCH(batch_norm_backward_fn, batch_norm_cpu_backward_stub)
 
 // TensorAccessor when it is defined to work around undefined...
 template <typename scalar_t>
@@ -26,8 +26,13 @@ static TensorAccessor<scalar_t, 1> conditional_accessor_1d(const Tensor& t) {
 
 template <typename scalar_t>
 static scalar_t* conditional_data_ptr(const Tensor& t) {
-  return t.defined() ? t.contiguous().data_ptr<scalar_t>()
-                     : nullptr;
+  if constexpr (std::is_const_v<scalar_t>) {
+    return t.defined() ? t.contiguous().const_data_ptr<scalar_t>()
+                      : nullptr;
+  } else {
+    return t.defined() ? t.contiguous().data_ptr<scalar_t>()
+                      : nullptr;
+  }
 }
 
 } // namespace at::native

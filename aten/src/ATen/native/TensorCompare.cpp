@@ -82,7 +82,6 @@ namespace at::meta {
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
   TORCH_CHECK(type != ScalarType::Bool &&
-      type != ScalarType::BFloat16 &&
       type != ScalarType::ComplexFloat &&
       type != ScalarType::ComplexDouble,
       "Unsupported input type encountered for isin(): ", type);
@@ -422,28 +421,28 @@ void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
-void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+void _assert_async_msg_cpu(const Tensor& self, std::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
-void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+void _assert_scalar(const Scalar& scalar, std::string_view assert_msg) {
   TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
-Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+Tensor _functional_assert_scalar(const Scalar& scalar, std::string_view assert_msg, const Tensor& dep_token) {
   _assert_scalar(scalar, assert_msg);
   return dep_token.clone();
 }
 
 Tensor _functional_assert_async_msg_cpu(
   const Tensor& self,
-  c10::string_view assert_msg,
+  std::string_view assert_msg,
   const Tensor& dep_token) {
   _assert_async_msg_cpu(self, assert_msg);
   return dep_token.clone();
 }
 
-void _print(c10::string_view s) {
+void _print(std::string_view s) {
   std::cout << s << "\n";
 }
 
@@ -492,7 +491,7 @@ static void isin_sorting(
   if (assume_unique) {
     out.copy_(mask.slice(0, 0, elements.numel()).view_as(out));
   } else {
-    out.copy_(at::index(mask, {c10::optional<Tensor>(unique_order)}));
+    out.copy_(at::index(mask, {std::optional<Tensor>(unique_order)}));
   }
 }
 
@@ -585,8 +584,8 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim,
                                        Tensor& values, Tensor& indices) {
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "mode only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda() || self.is_xpu(),
+              "mode only supports CPU, CUDA and XPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
   TORCH_CHECK(self.device() == values.device(),
@@ -754,27 +753,27 @@ TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 }
 
 // Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor& clip_out(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor clip(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor clip(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor clip(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor clip(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp_(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp_(self, min, max);
 }
 
@@ -791,12 +790,6 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 }
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
-}
-static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
-  reportNYIDimnameOverload("argmax");
-}
-static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
-  reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argsort");

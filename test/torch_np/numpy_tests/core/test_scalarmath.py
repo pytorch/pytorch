@@ -6,19 +6,11 @@ import itertools
 import operator
 import sys
 import warnings
-
 from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
-
-# from numpy._utils import _pep440
 import pytest
 from pytest import raises as assert_raises
-
-# from hypothesis import given, settings
-# from hypothesis.strategies import sampled_from
-# from hypothesis.extra import numpy as hynp
-
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -29,8 +21,9 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
+
 
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
@@ -47,8 +40,6 @@ else:
         assert_,
         assert_almost_equal,
         assert_equal,
-        #    assert_array_equal, suppress_warnings, _gen_alignment_data,
-        #    assert_warns,
     )
 
 
@@ -173,7 +164,7 @@ class TestBaseMath(TestCase):
                 np.add(2, inp2, out=out)
                 assert_almost_equal(out, exp1 + 2, err_msg=msg)
 
-    @xpassIfTorchDynamo  # (reason="pytorch does not have .view")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not have .view")
     def test_lower_align(self):
         # check data that is not aligned to element size
         # i.e doubles are aligned to 4 bytes on i386
@@ -205,7 +196,7 @@ class TestPower(TestCase):
                 assert_almost_equal(b, 6765201, err_msg=msg)
 
     @skip(reason="NP_VER: fails on CI on older NumPy")
-    @xpassIfTorchDynamo  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
+    @xpassIfTorchDynamo_np  # (reason="Value-based casting: (2)**(-2) -> 0 in pytorch.")
     def test_integers_to_negative_integer_power(self):
         # Note that the combination of uint64 with a signed integer
         # has common type np.float64. The other combinations should all
@@ -363,9 +354,9 @@ class TestModulus(TestCase):
         b = np.array(1.0, dtype=dt)
         a = np.nextafter(np.array(0.0, dtype=dt), -b)
         rem = operator.mod(a, b)
-        assert_(rem <= b, "dt: %s" % dt)
+        assert_(rem <= b, f"dt: {dt}")
         rem = operator.mod(-a, -b)
-        assert_(rem >= -b, "dt: %s" % dt)
+        assert_(rem >= -b, f"dt: {dt}")
 
         # Check nans, inf
         #     with suppress_warnings() as sup:
@@ -380,14 +371,14 @@ class TestModulus(TestCase):
             finf = np.array(np.inf, dtype=dt)
             fnan = np.array(np.nan, dtype=dt)
             rem = operator.mod(fone, fzer)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             # MSVC 2008 returns NaN here, so disable the check.
             # rem = operator.mod(fone, finf)
             # assert_(rem == fone, 'dt: %s' % dt)
             rem = operator.mod(fone, fnan)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             rem = operator.mod(finf, fone)
-            assert_(np.isnan(rem), "dt: %s" % dt)
+            assert_(np.isnan(rem), f"dt: {dt}")
             for op in [floordiv_and_mod, divmod]:
                 div, mod = op(fone, fzer)
                 assert_(np.isinf(div)) and assert_(np.isnan(mod))
@@ -439,7 +430,7 @@ class TestComplexDivision(TestCase):
         for t in [np.complex64, np.complex128]:
             # tupled (numerator, denominator, expected)
             # for testing as expected == numerator/denominator
-            data = list()
+            data = []
 
             # trigger branch: real(fabs(denom)) > imag(fabs(denom))
             # followed by else condition as neither are == 0
@@ -473,7 +464,7 @@ class TestConversion(TestCase):
             assert_equal([int(_m) for _m in a], li)
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not emit this warning.")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not emit this warning.")
     def test_iinfo_long_values_1(self):
         for code in "bBh":
             with pytest.warns(DeprecationWarning):
@@ -576,7 +567,7 @@ class TestConversion(TestCase):
 #            assert_equal( val, val2 )
 
 
-@xpassIfTorchDynamo  # (reason="can delegate repr to pytorch")
+@xpassIfTorchDynamo_np  # (reason="can delegate repr to pytorch")
 class TestRepr(TestCase):
     def _test_type_repr(self, t):
         finfo = np.finfo(t)
@@ -739,6 +730,9 @@ class TestBitShifts(TestCase):
         # gh-2449
         dt = np.dtype(type_code)
         nbits = dt.itemsize * 8
+        if dt in (np.dtype(np.uint64), np.dtype(np.uint32), np.dtype(np.uint16)):
+            raise SkipTest("NYI: bitshift uint64")
+
         for val in [5, -5]:
             for shift in [nbits, nbits + 4]:
                 val_scl = np.array(val).astype(dt)[()]
@@ -852,7 +846,7 @@ class TestScalarOpsMisc(TestCase):
             operation(min, neg_1)
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @xpassIfTorchDynamo  # (reason="pytorch does not warn on overflow")
+    @xpassIfTorchDynamo_np  # (reason="pytorch does not warn on overflow")
     @parametrize("dtype", "B")
     def test_scalar_unsigned_integer_overflow(self, dtype):
         val = np.dtype(dtype).type(8)

@@ -508,19 +508,16 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     if variant_name != '':
         test_name = test_name + '_' + variant_name
 
-    no_grad = variant_name == 'inplace'
-
     self_variable = create_input((self_size,))[0][0]
-    kwargs = None
 
     # need to record this because methods can change the size (e.g. unsqueeze)
-    args_variable, kwargs_variable = create_input(args)
+    args_variable, _kwargs_variable = create_input(args)
 
     self_tensor = deepcopy(self_variable.data)
     args_tensor = deepcopy(unpack_variables(args_variable))
 
     f_args_variable = (self_variable,) + args_variable
-    f_args_tensor = (self_tensor,) + args_tensor
+    f_args_tensor = (self_tensor,) + args_tensor  # noqa: F841
     with torch._jit_internal._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
     return script_fn, inputs
@@ -589,7 +586,7 @@ def forward({}):
 
 def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
     def script_module(*args, **kwargs):
-        formals, tensors, actuals = get_script_args(args)
+        _formals, tensors, actuals = get_script_args(args)
 
         method_args = ', '.join(['self'] + actuals)
         call_args_str = ', '.join(actuals)
@@ -604,7 +601,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         class TheModule(torch.jit.ScriptModule):
             __constants__ = submodule_constants
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = nn_module(*constructor_args)
 
@@ -709,11 +706,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
+    args_variable, _kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 
-    args, mod = f_args_variable, create_script_module(None, nn_module, constructor_args, *f_args_variable)(*f_args_variable)
+
+    _args, mod = f_args_variable, create_script_module(
+        None, nn_module, constructor_args, *f_args_variable
+    )(*f_args_variable)
 
     return mod, out_var
 

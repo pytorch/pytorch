@@ -1,2 +1,8 @@
-from ._fsdp_api import MixedPrecisionPolicy
-from .fully_shard import FSDP, fully_shard
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    FSDPModule,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+    register_fsdp_forward_method,
+)

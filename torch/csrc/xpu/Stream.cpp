@@ -67,12 +67,6 @@ static void THXPStream_dealloc(THXPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject* THXPStream_get_device(THXPStream* self, void* unused) {
-  HANDLE_TH_ERRORS
-  return THPDevice_New(self->xpu_stream.device());
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THXPStream_get_sycl_queue(THXPStream* self, void* unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(&self->xpu_stream.queue());
@@ -145,7 +139,8 @@ static PyMethodDef THXPStream_methods[] = {
     {nullptr}};
 
 PyTypeObject THXPStreamType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._XpuStreamBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._XpuStreamBase", /* tp_name */
     sizeof(THXPStream), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THXPStream_dealloc, /* tp_dealloc */

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import contextlib
 import enum
@@ -18,7 +18,7 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
+    skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.dist_utils import INIT_METHOD_TEMPLATE, dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
@@ -662,7 +662,7 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
     @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
-    @skip_if_rocm
+    @skip_if_rocm_multiprocess
     def test_ddp_dist_autograd_local_vs_remote_gpu(self):
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and

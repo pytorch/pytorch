@@ -6,19 +6,17 @@ from typing import cast, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed._tensor import DeviceMesh, distribute_tensor
-from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import (
-    _Partial,
+from torch.distributed import DeviceMesh, init_device_mesh
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
+    Partial,
     Placement,
     Replicate,
     Shard,
 )
-from torch.testing._internal.common_distributed import run_with_both_funcol_impls
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-)
+from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -26,7 +24,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-@instantiate_parametrized_tests
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
@@ -81,7 +78,7 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         # test if addmm output is a partial
         self.assertIsInstance(dist_res, DTensor)
-        self.assertIsInstance(dist_res.placements[0], _Partial)
+        self.assertIsInstance(dist_res.placements[0], Partial)
 
         # test if result is the same as tensor
         dist_local_res = dist_res.full_tensor()
@@ -124,6 +121,25 @@ class DistMatrixOpsTest(DTensorTestBase):
             test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
+    def test_matmul(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dim = 128
+        x = torch.randn(8, dim)
+        A = torch.randn(dim, dim)
+        y = torch.matmul(x, A)
+
+        # Prepare DTensors
+        dx = distribute_tensor(x, device_mesh, [Replicate()])
+        dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+        # Use `inference_mode` to test DTensor's capability of decomposing
+        # `matmul` op
+        with torch.inference_mode():
+            dy = torch.matmul(dx, dA)
+
+        self.assertEqual(y, dy.full_tensor())
+
+    @with_comms
     def test_t(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
@@ -138,7 +154,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(tranposed_mat2.placements, shard_spec)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_t_partial(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -149,11 +164,11 @@ class DistMatrixOpsTest(DTensorTestBase):
         da = distribute_tensor(a, device_mesh, [Shard(1)])
         db = distribute_tensor(b, device_mesh, [Shard(0)])
 
-        # mm(da, db) should return a _Partial tensor.
-        # transposing it should keep it _Partial
+        # mm(da, db) should return a Partial tensor.
+        # transposing it should keep it Partial
         dc = torch.mm(da, db).t()
 
-        self.assertTrue(isinstance(dc.placements[0], _Partial))
+        self.assertTrue(isinstance(dc.placements[0], Partial))
 
         # check that the local and distributed op results match
         self.assertEqual(
@@ -275,6 +290,7 @@ class DistMatrixOpsTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        comm_mode = CommDebugMode()
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
             (4, 8, 8, 8),
@@ -301,28 +317,73 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            dropout_p = 0.0
-            is_causal = True
-            params = torch.backends.cuda.SDPAParams(
-                query, key, value, None, dropout_p, is_causal
-            )
-            if not torch.backends.cuda.can_use_flash_attention(params, debug=False):
-                self.skipTest("Flash attention is not available")
+        available_backends = []
+        dropout_p = 0.0
+        # TODO: Add test cases where is_causal=False and an attention mask is provided.
+        #       Gaps include missing op support for aten.masked_fill_.Scalar.
+        is_causal = True
+        enable_gqa = False
+        params = torch.backends.cuda.SDPAParams(
+            query, key, value, None, dropout_p, is_causal, enable_gqa
+        )
+        if torch.backends.cuda.can_use_flash_attention(params, debug=False):
+            available_backends.append(SDPBackend.FLASH_ATTENTION)
+        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
+            available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
-            out = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal
-            )
-            dist_out = F.scaled_dot_product_attention(
-                dist_query,
-                dist_key,
-                dist_value,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-            )
-            self.assertEqual(dist_out.full_tensor(), out)
+        for backend in available_backends:
+            with sdpa_kernel(backends=[backend]):
+                out = F.scaled_dot_product_attention(
+                    query, key, value, dropout_p=dropout_p, is_causal=is_causal
+                )
+                with comm_mode:
+                    dist_out = F.scaled_dot_product_attention(
+                        dist_query,
+                        dist_key,
+                        dist_value,
+                        dropout_p=dropout_p,
+                        is_causal=is_causal,
+                    )
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_out.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_out.full_tensor(), out)
 
-        # TODO: add backward test once we support the backward op
+                out.sum().backward()
+                with comm_mode:
+                    dist_out.sum().backward()
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_query.grad.full_tensor(), query.grad)
+                    self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_key.grad.full_tensor(), key.grad)
+                    self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_value.grad.full_tensor(), value.grad)
+
+    @skipIfRocm
+    @skip_unless_torch_gpu
+    @with_comms()
+    def test_dtensor_mm(self):
+        """
+        Test mm with DTensor with 2D mesh.
+        We need to add the test here since we only test 1D mesh in test_dtensor_ops.py.
+        Also, we added tests for the corner case where one of the 2D dimension is 1.
+
+        # TODO: we need to test more DTensor ops with 2D mesh, especially when 1 of the
+        mesh dimension of the 2D mesh is 1.
+        """
+        mesh_0 = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        mesh_1 = init_device_mesh(self.device_type, (self.world_size, 1))
+        mesh_2 = init_device_mesh(self.device_type, (1, self.world_size))
+
+        for mesh in [mesh_0, mesh_1, mesh_2]:
+            lhs = torch.randn(256, 128)
+            rhs = torch.randn(128, 256)
+            mm_result = lhs @ rhs
+
+            lhs_dtensor = distribute_tensor(lhs, mesh, [Shard(dim=0), Replicate()])
+            rhs_dtensor = distribute_tensor(rhs, mesh, [Replicate(), Shard(dim=1)])
+            dtensor_result = lhs_dtensor @ rhs_dtensor
+            self.assertEqual(dtensor_result.full_tensor(), mm_result)
 
 
 if __name__ == "__main__":

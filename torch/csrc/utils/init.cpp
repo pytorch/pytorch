@@ -5,8 +5,7 @@
 #include <pybind11/functional.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace throughput_benchmark {
+namespace torch::throughput_benchmark {
 
 void initThroughputBenchmarkBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -36,11 +35,11 @@ void initThroughputBenchmarkBindings(PyObject* module) {
       .def(
           "run_once",
           [](ThroughputBenchmark& self,
-             py::args args,
+             const py::args& args,
              const py::kwargs& kwargs) {
             // Depending on this being ScriptModule of nn.Module we will release
             // the GIL or not further down in the stack
-            return self.runOnce(std::move(args), kwargs);
+            return self.runOnce(args, kwargs);
           })
       .def(
           "benchmark",
@@ -53,5 +52,4 @@ void initThroughputBenchmarkBindings(PyObject* module) {
           });
 }
 
-} // namespace throughput_benchmark
-} // namespace torch
+} // namespace torch::throughput_benchmark

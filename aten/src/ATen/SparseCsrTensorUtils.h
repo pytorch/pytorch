@@ -23,7 +23,8 @@
       case kSparseBsc:                                               \
         return __VA_ARGS__();                                        \
       default:                                                       \
-        AT_ERROR(                                                    \
+        TORCH_CHECK(                                                 \
+            false,                                                   \
             NAME,                                                    \
             " expected sparse compressed tensor layout but got ",    \
             the_layout);                                             \
@@ -42,7 +43,8 @@
       case kSparseBsc:                                            \
         return (COLUMN_DIM_ACTION)();                             \
       default:                                                    \
-        AT_ERROR(                                                 \
+        TORCH_CHECK(                                              \
+            false,                                                \
             NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
@@ -61,7 +63,8 @@
       case kSparseBsc:                                            \
         return (BLOCK_ACTION)();                                  \
       default:                                                    \
-        AT_ERROR(                                                 \
+        TORCH_CHECK(                                              \
+            false,                                                \
             NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
@@ -77,7 +80,8 @@
       case kSparseBsr:                                                \
         return (ROW_DIM_ACTION)();                                    \
       default:                                                        \
-        AT_ERROR(                                                     \
+        TORCH_CHECK(                                                  \
+            false,                                                    \
             NAME,                                                     \
             " expected sparse row compressed tensor layout but got ", \
             the_layout);                                              \
@@ -93,7 +97,8 @@
       case kSparseBsc:                                                   \
         return (COL_DIM_ACTION)();                                       \
       default:                                                           \
-        AT_ERROR(                                                        \
+        TORCH_CHECK(                                                     \
+            false,                                                       \
             NAME,                                                        \
             " expected sparse column compressed tensor layout but got ", \
             the_layout);                                                 \
@@ -108,7 +113,8 @@
       case kSparseCsc:                                                        \
         return (ACTION)();                                                    \
       default:                                                                \
-        AT_ERROR(                                                             \
+        TORCH_CHECK(                                                          \
+            false,                                                            \
             NAME,                                                             \
             " expected sparse compressed (non-block) tensor layout but got ", \
             the_layout);                                                      \
@@ -123,7 +129,8 @@
       case kSparseBsc:                                                    \
         return (ACTION)();                                                \
       default:                                                            \
-        AT_ERROR(                                                         \
+        TORCH_CHECK(                                                      \
+            false,                                                        \
             NAME,                                                         \
             " expected sparse compressed block tensor layout but got ",   \
             the_layout);                                                  \
@@ -138,6 +145,27 @@
           kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
 namespace at::sparse_csr {
+
+// Implements RAII object to manage checking sparse tensor invariants:
+class CheckSparseTensorInvariants {
+  bool old_state;
+
+ public:
+  CheckSparseTensorInvariants(bool state)
+      : old_state(at::globalContext().checkSparseTensorInvariants()) {
+    at::globalContext().setCheckSparseTensorInvariants(state);
+  }
+  CheckSparseTensorInvariants(CheckSparseTensorInvariants&& other) = delete;
+  CheckSparseTensorInvariants(const CheckSparseTensorInvariants&) = delete;
+  CheckSparseTensorInvariants& operator=(const CheckSparseTensorInvariants&) =
+      delete;
+  CheckSparseTensorInvariants& operator=(CheckSparseTensorInvariants&&) =
+      delete;
+
+  ~CheckSparseTensorInvariants() {
+    at::globalContext().setCheckSparseTensorInvariants(old_state);
+  }
+};
 
 using SparseCsrTensor = Tensor;
 
@@ -283,6 +311,21 @@ inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
       [&self] {
         return std::make_pair(self.ccol_indices(), self.row_indices());
       });
+}
+
+inline ScalarType getIndexDtype(Tensor const& self) {
+  switch (self.layout()) {
+    case kSparseCsr:
+    case kSparseBsr:
+      return self.crow_indices().scalar_type();
+    case kSparseCsc:
+    case kSparseBsc:
+      return self.ccol_indices().scalar_type();
+    case kSparse:
+      return self._indices().scalar_type();
+    default:
+      return ScalarType::Long;
+  }
 }
 
 inline Layout flip_compressed_layout(Layout layout) {

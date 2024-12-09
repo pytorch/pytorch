@@ -31,7 +31,7 @@ static std::vector<Generator> default_gens_cuda;
  * Warning: this function must only be called once!
  */
 static void initCUDAGenVector() {
-  num_gpus = c10::cuda::device_count();
+  num_gpus = static_cast<int32_t>(c10::cuda::device_count());
   cuda_gens_init_flag.resize(num_gpus);
   default_gens_cuda.resize(num_gpus);
 }
@@ -128,23 +128,44 @@ void CUDAGeneratorState::increase(uint64_t increment) {
 /**
  * Registers this state to a CUDA graph to manage within the graph.
  */
-void CUDAGeneratorState::register_to_graph(cuda::CUDAGraph* graph) {
-  // Ensures the generator is not being captured, as registering during capture
-  // is invalid.
+void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
+  // Ensures that the RNG state is not currently being captured.
   at::cuda::assertNotCapturing(
       "Cannot register the state during capturing stage.");
-  current_graph_ = graph;
-  capturing_ = true;
 
-  // When a state is registered to the graph for the first time, we ensure GPU
-  // tensors are allocated. These GPU tensors are owned by the state and are
-  // reused across different graphs.
-  if (!is_gpu_tensor_allocated_) {
-    auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
+  // If this is the first graph to be registered, allocate memory for the seed
+  // and offset on the GPU.
+  if (registered_graphs_.empty()) {
+    auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
     seed_extragraph_ = at::empty({1}, options);
     offset_extragraph_ = at::empty({1}, options);
   }
-  is_gpu_tensor_allocated_ = true;
+
+  // Insert the graph into the set of registered graphs if it's not already
+  // registered.
+  if (registered_graphs_.find(graph) == registered_graphs_.end()) {
+    registered_graphs_.insert(graph);
+  }
+}
+
+/**
+ * Unregisters a CUDA graph from the RNG state.
+ */
+void CUDAGeneratorState::unregister_graph(cuda::CUDAGraph* graph) {
+  // Verify the graph was previously registered.
+  TORCH_CHECK(
+      registered_graphs_.find(graph) != registered_graphs_.end(),
+      "The graph should be registered to the state");
+
+  // Remove the graph from the set of registered graphs.
+  registered_graphs_.erase(graph);
+
+  // If no more graphs are registered, deallocate the GPU memory for the seed
+  // and offset.
+  if (registered_graphs_.empty()) {
+    seed_extragraph_.reset();
+    offset_extragraph_.reset();
+  }
 }
 
 /**
@@ -170,6 +191,7 @@ void CUDAGeneratorState::register_to_graph(cuda::CUDAGraph* graph) {
  * This method is intended to reset graph-related state variables before capturing begins.
  */
 void CUDAGeneratorState::capture_prologue() {
+  capturing_ = true;
   offset_intragraph_ = 0;
   seed_extragraph_.fill_(int64_t(seed_));
   offset_extragraph_.fill_(int64_t(0));
@@ -181,7 +203,6 @@ void CUDAGeneratorState::capture_prologue() {
  */
 uint64_t CUDAGeneratorState::capture_epilogue() {
   capturing_ = false;
-  current_graph_ = nullptr;
   return offset_intragraph_;
 }
 
@@ -305,7 +326,7 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = seed_size + offset_size;
 
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto offset = static_cast<int64_t>(this->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
@@ -392,9 +413,16 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
 /**
  * Registers this state to a CUDA graph to manage within the graph.
  */
-void CUDAGeneratorImpl::register_to_graph(cuda::CUDAGraph* graph) {
+void CUDAGeneratorImpl::register_graph(cuda::CUDAGraph* graph) {
   graph->register_generator_state(state_);
-  state_->register_to_graph(graph);
+  state_->register_graph(graph);
+}
+
+/**
+ * Unregisters a CUDA graph from the RNG state.
+ */
+void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
+  state_->unregister_graph(graph);
 }
 
 /**

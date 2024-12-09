@@ -18,16 +18,14 @@
 #include <ATen/ops/layer_norm.h>
 #endif
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 namespace {
 Tensor linear_for_ffn(
     const Tensor& bias,
     const Tensor& mat1,
     const Tensor& mat2,
-    c10::optional<bool> use_gelu) {
+    std::optional<bool> use_gelu) {
   if (mat1.is_nested()) {
     return NestedTensor_times_Tensor_plus_Tensor_addmm(
         bias, mat1, mat2.t(), 1, 1, use_gelu);
@@ -56,7 +54,7 @@ Tensor ffn(
   TORCH_CHECK(w1.dim() == 2, "2d weights expected");
   TORCH_CHECK(w2.dim() == 2, "2d weights expected");
   Tensor res = linear_for_ffn(b1, input, w1, use_gelu);
-  res = linear_for_ffn(b2, res, w2, c10::nullopt);
+  res = linear_for_ffn(b2, res, w2, std::nullopt);
   return res;
 }
 
@@ -91,8 +89,8 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_bias_1,
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask,
-    const c10::optional<int64_t> mask_type) {
+    const std::optional<Tensor>& mask,
+    const std::optional<int64_t> mask_type) {
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
@@ -147,5 +145,4 @@ Tensor transformer_encoder_layer_forward(
   return x;
 }
 
-} // namespace native
 } // namespace at

@@ -16,7 +16,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 class MyTestModule(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
@@ -44,8 +44,12 @@ class TestSaveAndLoadAPI(DTensorTestBase):
             model.state_dict(), checkpoint_id=os.path.join(self.temp_dir, "first")
         )
 
-        with patch.object(dcp.FileSystemReader, "check", return_value=False) as m1:
-            with patch.object(dcp.FileSystemWriter, "check", return_value=False) as m2:
+        with patch.object(
+            dcp.FileSystemReader, "validate_checkpoint_id", return_value=False
+        ) as m1:
+            with patch.object(
+                dcp.FileSystemWriter, "validate_checkpoint_id", return_value=False
+            ) as m2:
                 dcp.save(
                     model.state_dict(),
                     checkpoint_id=os.path.join(self.temp_dir, "second"),

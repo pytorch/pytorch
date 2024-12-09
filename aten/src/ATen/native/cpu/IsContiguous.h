@@ -1,6 +1,6 @@
 #pragma once
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 // n: number of function arguments (arity)
 // traits: function_traits (see FunctionTraits.h)
@@ -31,14 +31,16 @@ struct IsContiguous<0, -1, traits, s> {
 };
 
 // output and all inputs are contiguous
-template <typename traits,
-    typename std::enable_if<std::is_void<typename traits::result_type>::value>::type* = nullptr>
+template <
+    typename traits,
+    std::enable_if_t<std::is_void_v<typename traits::result_type>>* =
+        nullptr>
 static inline bool is_contiguous(const int64_t* strides) {
   return IsContiguous<traits::arity, traits::arity - 1, traits>::eval(strides);
 }
 
 template <typename traits,
-    typename std::enable_if<!std::is_void<typename traits::result_type>::value>::type* = nullptr>
+    std::enable_if_t<!std::is_void_v<typename traits::result_type>>* = nullptr>
 static inline bool is_contiguous(const int64_t* strides) {
   return IsContiguous<traits::arity, traits::arity, traits>::eval(strides);
 }
@@ -46,17 +48,17 @@ static inline bool is_contiguous(const int64_t* strides) {
 // input at `s` is scalar (stride 0); output and other inputs are contiguous
 // NB: output is typically at strides[0] so first input corresponds to s=1
 template <typename traits, int s,
-    typename std::enable_if<std::is_void<typename traits::result_type>::value>::type* = nullptr>
+    std::enable_if_t<std::is_void_v<typename traits::result_type>>* = nullptr>
 static inline bool is_contiguous_scalar(const int64_t* strides) {
   static_assert(s > 0 && s <= traits::arity, "scalar argument index out of bounds");
   return IsContiguous<traits::arity, traits::arity - 1, traits, s>::eval(strides);
 }
 
 template <typename traits, int s,
-    typename std::enable_if<!std::is_void<typename traits::result_type>::value>::type* = nullptr>
+    std::enable_if_t<!std::is_void_v<typename traits::result_type>>* = nullptr>
 static inline bool is_contiguous_scalar(const int64_t* strides) {
   static_assert(s > 0 && s <= traits::arity, "scalar argument index out of bounds");
   return IsContiguous<traits::arity, traits::arity, traits, s>::eval(strides);
 }
 
-}}}
+}}

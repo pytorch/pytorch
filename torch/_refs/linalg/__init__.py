@@ -1,11 +1,9 @@
+# mypy: allow-untyped-defs
 from functools import partial
-
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
-
 import torch._prims as prims
-
 import torch._prims_common as utils
 import torch._refs as refs
 import torch._refs.linalg as linalg
@@ -17,7 +15,6 @@ from torch._prims_common import (
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
-    NumberType,
     TensorLikeType,
 )
 from torch._prims_common.wrappers import (
@@ -62,6 +59,8 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
             "without narrowing to the specified dtype ({dtype})",
         )
 
+
+import operator
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
@@ -108,13 +107,15 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
+    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
         torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
@@ -165,7 +166,7 @@ def _backshift_permutation(dim0, dim1, ndim):
 
 def _inverse_permutation(perm):
     # Given a permutation, returns its inverse. It's equivalent to argsort on an array
-    return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
+    return [i for i, j in sorted(enumerate(perm), key=operator.itemgetter(1))]
 
 
 # CompositeImplicitAutograd
@@ -282,7 +283,7 @@ def norm(
     else:
         if ord is None:
             ord = 2.0
-        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd

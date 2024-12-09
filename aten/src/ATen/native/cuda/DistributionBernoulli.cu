@@ -23,18 +23,18 @@
 
 namespace at::native {
 
-void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, const std::optional<Generator>& gen_) {
+void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::optional<Generator> gen_) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::bernoulli_kernel(self, p_, generator);
 }
 
-void bernoulli_scalar_kernel(const TensorBase &self, double p, const std::optional<Generator>& gen) {
+void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
   auto iter = TensorIterator::borrowing_nullary_op(self);
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::bernoulli_kernel(iter, p, generator);
 }
 
-REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
-REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel)
+REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel)
 
 } // namespace at::native

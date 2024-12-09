@@ -5,9 +5,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 
-namespace at {
-namespace native {
-namespace cuda_utils {
+namespace at::native::cuda_utils {
 
 constexpr int kCUDABlockReduceNumThreads = 512;
 // Algorithmic limitation: BlockReduce does two WarpReduce calls, each
@@ -103,7 +101,7 @@ __inline__ __device__ T BlockReduceMax(T val, T* shared) {
     shared[wid] = val;
   }
   __syncthreads();
-  val = (tid < B::Warps()) ? shared[lid] : T(0);
+  val = (tid < B::Warps()) ? shared[lid] : T(std::numeric_limits<T>::lowest());
   if (wid == 0) {
     val = WarpReduceMax(val);
   }
@@ -138,6 +136,4 @@ BlockReduce(T val, const ReduceOp& op, const T& identity_element, T* shared) {
   return val;
 }
 
-} // namespace cuda_utils
-} // namespace native
-} // namespace at
+} // namespace at::native::cuda_utils

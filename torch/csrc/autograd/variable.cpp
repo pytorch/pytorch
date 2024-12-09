@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
@@ -23,8 +24,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // Returns a ViewFunc with a corresponding view that matches the shape,
 // stride, and storage offset of the given tensor.
@@ -41,8 +41,8 @@ static std::unique_ptr<ViewFunc> create_view_func_matching(const Variable& t) {
 
 DifferentiableViewMeta::DifferentiableViewMeta(
     at::TensorImpl* self_impl,
-    c10::optional<ViewInfo> backward_info,
-    c10::optional<ViewInfo> forward_info,
+    std::optional<ViewInfo> backward_info,
+    std::optional<ViewInfo> forward_info,
     bool shared_view_info,
     CreationMeta creation_meta)
     : AutogradMeta(self_impl),
@@ -254,9 +254,9 @@ void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
   const auto& fn = self.grad_fn();
   std::shared_ptr<hooks_list>& list =
       materialize_autograd_meta(self)->cpp_hooks_list_;
-  list.reset(new hooks_list());
-  std::unique_ptr<FunctionPreHook> hook_ptr{
-      new CppFunctionTensorPreHook(list, self.output_nr())};
+  list = std::make_shared<hooks_list>();
+  auto hook_ptr =
+      std::make_unique<CppFunctionTensorPreHook>(list, self.output_nr());
   // NB: we could potentially only update hooks_ if !fn, but it shouldn't
   // matter
   //     and this was the way before, so we keep it like this for now.
@@ -563,9 +563,10 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   };
 
   const auto& fn = self.grad_fn();
-  std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionSingleTensorPreHook(
-      std::move(retain_grad_hook), self.output_nr())};
-  fn->add_retains_grad_hook(std::move(hook_ptr), self.output_nr());
+  fn->add_retains_grad_hook(
+      std::make_unique<CppFunctionSingleTensorPreHook>(
+          std::move(retain_grad_hook), self.output_nr()),
+      self.output_nr());
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
@@ -580,10 +581,10 @@ bool VariableHooks::retains_grad(const at::TensorBase& self) const {
 void VariableHooks::_backward(
     const Tensor& self,
     at::TensorList inputs,
-    const c10::optional<Tensor>& gradient,
-    c10::optional<bool> keep_graph,
+    const std::optional<Tensor>& gradient,
+    std::optional<bool> keep_graph,
     bool create_graph) const {
-  // TODO torch::autograd::backward should take the c10::optional<Tensor>
+  // TODO torch::autograd::backward should take the std::optional<Tensor>
   // gradient directly instead of us having to unwrap it to Tensor _gradient
   // here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
@@ -885,9 +886,11 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   if (symints.has_value()) {
     TORCH_INTERNAL_ASSERT(symints->size() == num_symints());
     first_symints = std::vector<c10::SymInt>(
-        symints->begin(), symints->begin() + first->num_symints());
+        symints->begin(),
+        symints->begin() + static_cast<std::ptrdiff_t>(first->num_symints()));
     second_symints = std::vector<c10::SymInt>(
-        symints->begin() + first->num_symints(), symints->end());
+        symints->begin() + static_cast<std::ptrdiff_t>(first->num_symints()),
+        symints->end());
   }
 
   std::optional<std::vector<at::Tensor>> first_tensors;
@@ -895,9 +898,11 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   if (tensors.has_value()) {
     TORCH_INTERNAL_ASSERT(tensors->size() == num_tensors());
     first_tensors = std::vector<at::Tensor>(
-        tensors->begin(), tensors->begin() + first->num_tensors());
+        tensors->begin(),
+        tensors->begin() + static_cast<std::ptrdiff_t>(first->num_tensors()));
     second_tensors = std::vector<at::Tensor>(
-        tensors->begin() + first->num_tensors(), tensors->end());
+        tensors->begin() + static_cast<std::ptrdiff_t>(first->num_tensors()),
+        tensors->end());
   }
 
   return std::make_unique<ChainedViewFunc>(
@@ -905,5 +910,4 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
       second->clone_and_set(second_symints, second_tensors));
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

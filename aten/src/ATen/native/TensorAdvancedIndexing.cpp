@@ -190,8 +190,8 @@ void scatter_meta_impl(
     const Tensor& self,
     int64_t dim,
     const Tensor& index,
-    const c10::optional<Tensor>& src = nullopt,
-    const c10::optional<c10::string_view> reduce = nullopt) {
+    const std::optional<Tensor>& src = std::nullopt,
+    const std::optional<std::string_view> reduce = std::nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
@@ -227,7 +227,7 @@ TORCH_META_FUNC2(scatter, reduce)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce) {
+ const std::string_view reduce) {
   TORCH_WARN_ONCE(
       "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
       "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
@@ -240,8 +240,8 @@ TORCH_META_FUNC2(scatter, value_reduce)
  int64_t dim,
  const Tensor& index,
  const Scalar& src,
- const c10::string_view reduce) {
-  scatter_meta_impl(*this, self, dim, index, nullopt, reduce);
+ const std::string_view reduce) {
+  scatter_meta_impl(*this, self, dim, index, std::nullopt, reduce);
 }
 
 TORCH_META_FUNC(scatter_add)
@@ -254,7 +254,7 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self) {
   (void) include_self;
   scatter_meta_impl</*use_new_options=*/true>(*this, self, dim, index, src, reduce);
@@ -326,7 +326,7 @@ void index_func_meta_impl(
   int64_t dim,
   const Tensor& index,
   const Tensor& source,
-  c10::string_view func) {
+  std::string_view func) {
   auto numel = index.numel();
 
   TORCH_CHECK_INDEX(index.dim() <= 1, func, "_(): Index is supposed to be a vector, but got dim: ",
@@ -387,7 +387,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_reduce)
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
@@ -479,8 +479,8 @@ DEFINE_DISPATCH(index_put_with_sort_stub);
 DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
-REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub)
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub)
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -590,9 +590,9 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA/MPS tensors, force all index tensors to have the same striding to
-  // simplify the CUDA/MPS kernel.
-  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
+  // For CUDA/MPS/XPU tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS/XPU kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS || this->src.device().type() == kXPU)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
@@ -629,7 +629,7 @@ TORCH_IMPL_FUNC(index_out)
   index_stub(device_type(), *this, sizes, strides);
 }
 
-Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
+Tensor quantized_index(const Tensor & self, const torch::List<std::optional<Tensor>>& indices) {
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == c10::kPerTensorAffine ||
       self.qscheme() == c10::kPerTensorSymmetric,
@@ -643,7 +643,7 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
       result, self.q_scale(), self.q_zero_point(), self.scalar_type());
 }
 
-Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices) {
+Tensor _unsafe_index(const Tensor& self, const torch::List<std::optional<Tensor>>& indices) {
   // Disallow boolean indexing since it leads to dynamic output shapes
   for (auto i : c10::irange(indices.size())) {
     auto index = indices.get(i);
@@ -654,6 +654,82 @@ Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>
     }
   }
   return at::index(self, indices);
+}
+
+Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch::List<std::optional<Tensor>>& indices, const Scalar& fill) {
+  // Unsafe masked index is equivalent to
+  //   where(mask, self[indices], fill)
+  // with the main difference being that the when the `mask` is false, the tensor
+  // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
+  // when `mask` is false. When `mask` is true, the `indices` are expected to be
+  // in bounds and is not checked. We also assume that the `indices` are non-negative
+  //
+  // This function is not meant to be executed on eager mode. An unoptimized version
+  // is provided here.
+  //
+  // compiler backends should implement this op such that `self[indices]` is not
+  // loaded when `mask` is true. See inductor for a reference.
+  auto clamp = [](const std::optional<Tensor>& index, auto size) -> std::optional<Tensor> {
+    if (!index) {
+      return index;
+    }
+    // Disallow bool
+    auto dtype = index->scalar_type();
+    TORCH_CHECK(dtype == kLong || dtype == kInt,
+                "_unsafe_masked_index found unexpected index type ", dtype);
+    return at::clamp(*index, -size, size - 1);
+  };
+
+  torch::List<std::optional<Tensor>> clamped_indices(indices);
+  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
+  if (self.numel() == 0) {
+      // Returns a tensor filled with `fill` value
+      // We use a hack here since we do not have a method to get the
+      // correct size of the tensor. (except with meta impl which is
+      // not available on mobile builds)
+      std::vector<int64_t> new_sizes(self.dim());
+      auto compute_new_size = [](const std::optional<Tensor>& index, auto size) -> int64_t {
+          if (index && size == 0) {
+              return 1;
+          } else {
+              return size;
+          }
+      };
+      std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
+      auto result = self.new_full(new_sizes, fill);
+      return at::_unsafe_index(result, clamped_indices);
+  }
+
+  auto result = at::_unsafe_index(self, clamped_indices);
+  return result.masked_fill(at::logical_not(mask), fill);
+}
+
+Tensor _unsafe_masked_index_put_accumulate(const Tensor& self, const Tensor& mask, const torch::List<std::optional<Tensor>>& indices, const Tensor& values) {
+  // This is the backward of _unsafe_masked_index.
+  // This function is not meant to be executed on eager mode.
+
+  if (self.numel() == 0) {
+    return self.clone();
+  }
+
+  // We recompute the clamped indices and rely on inductor to CSE the computation
+  auto clamp = [](const std::optional<Tensor>& index, auto size) -> std::optional<Tensor> {
+    if (!index) {
+      return index;
+    }
+    // Disallow bool
+    auto dtype = index->scalar_type();
+    TORCH_CHECK(dtype == kLong || dtype == kInt,
+                "_unsafe_masked_index found unexpected index type ", dtype);
+    return at::clamp(*index, -size, size - 1);
+  };
+
+  torch::List<std::optional<Tensor>> clamped_indices(indices);
+  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
+  auto masked_value = values.masked_fill(at::logical_not(mask), 0);
+  return at::_unsafe_index_put(self, clamped_indices, masked_value, true);
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
@@ -702,15 +778,15 @@ Tensor put(const Tensor & self, const Tensor& index, const Tensor & source, cons
   return self.clone(at::MemoryFormat::Preserve).put_(index, source, accumulate);
 }
 
-Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
+Tensor index_put(const Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
 }
 
-Tensor _unsafe_index_put(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
+Tensor _unsafe_index_put(const Tensor& self, const torch::List<std::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
   return at::index_put(self, indices, value, accumulate);
 }
 
-Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _index_put_impl_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
@@ -730,12 +806,12 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
   }
-  if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
+  if ((self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU) && (accumulate || globalContext().deterministicAlgorithms())) {
       TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
       value_.device(), " for value tensor");
       index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
@@ -788,7 +864,7 @@ Tensor take(const Tensor& self, const Tensor& index) {
     return out;
 }
 
-Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
+Tensor & index_put_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
@@ -798,13 +874,9 @@ TORCH_IMPL_FUNC(index_copy_out)
 
     // See Note [Enabling Deterministic Operations]
     if (result.is_cuda() && globalContext().deterministicAlgorithms()){
-        torch::List<c10::optional<Tensor>> indices;
-        indices.reserve(dim + 1);
-        for (const auto i: c10::irange(dim)) {
-          (void)i;
-          indices.emplace_back();
-        }
-        indices.emplace_back(index);
+        torch::List<std::optional<Tensor>> indices;
+        indices.resize(dim + 1);
+        indices.set(dim, index);
         result.index_put_(indices, source, false);
         return;
     }
@@ -975,7 +1047,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
             scalar_t *self_ip = result_ptr + self_i * result_stride;
-            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
+            *self_ip += c10::load(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });
@@ -1140,7 +1212,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
@@ -1359,8 +1431,8 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         });
       });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+      AT_DISPATCH_V2(
+        self.scalar_type(), "index_select", AT_WRAP([&index_contig, &self, &result, &dim, &numel] {
         auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
         auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
@@ -1377,7 +1449,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             *(result_data_ptr + i * result_stride) = *self_ip;
           }
         });
-      });
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, AT_EXPAND(AT_FLOAT8_TYPES));
     }
   }
 
@@ -1512,7 +1584,7 @@ static bool can_use_expanded_index_path(
   }
 
   const auto st = self.scalar_type();
-  if (!(c10::isFloatingType(st)) || st == ScalarType::Half) {
+  if (!(c10::isFloatingType(st))) {
     return false;
   }
 
@@ -1548,10 +1620,15 @@ static bool can_use_expanded_index_path(
   // and strides on other dims to be 0 or 1, e.g.
   //   shape [108365, 16]; strides [1, 0]
   //   shape [13264, 1, 7]; strides [1, 1, 0]
+  // Note: the size should not > 1 when the stride == 1
+  // See https://github.com/pytorch/pytorch/issues/129093
   auto index_strides = index.strides().vec();
+  auto index_sizes = index.sizes().vec();
   bool is_index_expanded = index_strides[0] == 1;
   for (const auto dim : c10::irange(1, index_strides.size())) {
-    if (index_strides[dim] > 1) { is_index_expanded = false; }
+    if (index_strides[dim] > 1 || (index_strides[dim] == 1 && index_sizes[dim] > 1)) {
+      is_index_expanded = false;
+    }
   }
 
   // index is expanded
@@ -1624,7 +1701,7 @@ static void _scatter_via_index_put(
   const Tensor& mut_out,
   bool accumulate) {
   if (self.dim() == 1) {
-    torch::List<c10::optional<Tensor>> indices;
+    torch::List<std::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index);
     mut_out.index_put_(indices, src, accumulate);
@@ -1698,7 +1775,7 @@ static void _scatter_via_index_put(
       src.strides()
     ).flatten();
 
-    torch::List<c10::optional<Tensor>> indices;
+    torch::List<std::optional<Tensor>> indices;
     indices.reserve(1);
     indices.push_back(index_flat);
 
@@ -1719,7 +1796,7 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const c10::optional<c10::string_view> reduce = nullopt,
+    const std::optional<std::string_view> reduce = std::nullopt,
     bool reduce_includes_self = true) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());
@@ -1732,7 +1809,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   auto op = ReductionType::SUM;
-  bool deterministic = globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA;
+  bool deterministic = globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU);
 
   if (reduce.has_value()) {
     op = get_operator_enum(reduce.value(), use_new_options);
@@ -1788,7 +1865,7 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& out) {
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
@@ -1801,7 +1878,7 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& out) {
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
@@ -1825,8 +1902,8 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
-  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+  // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
@@ -1842,7 +1919,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self,
  const Tensor& out) {
 
@@ -2123,7 +2200,7 @@ static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Devi
 
 } // anonymous namespace
 
-Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
+Tensor take_along_dim(const Tensor& self, const Tensor& indices, std::optional<int64_t> opt_dim) {
   checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
     auto [self_broadcasted, indices_broadcasted, dim] =
@@ -2135,7 +2212,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
   return self.view(-1).gather(0, indices.view(-1));
 }
 
-Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
+Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, std::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
     auto [self_broadcasted, indices_broadcasted, dim] =
@@ -2208,12 +2285,20 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
 }
 
 Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
-  return (self != 0).sum(dims);
+  auto reduce = self;
+  if (reduce.scalar_type() != kBool) {
+    reduce = reduce != 0;
+  }
+  return reduce.sum(dims);
 }
 
 Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
   if (!dims.empty()) {
-    return (self != 0).sum(dims);
+    auto reduce = self;
+    if (reduce.scalar_type() != kBool) {
+      reduce = reduce != 0;
+    }
+    return reduce.sum(dims);
   }
 
   // Optimized all-reduce
@@ -2241,7 +2326,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
 }
 
 
-Tensor count_nonzero(const Tensor& self, c10::optional<int64_t> dim) {
+Tensor count_nonzero(const Tensor& self, std::optional<int64_t> dim) {
   if (dim) {
     return at::count_nonzero(self, IntArrayRef{*dim});
   }
@@ -2329,7 +2414,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (C10_UNUSED const auto j : c10::irange(n1)) {
+          for ([[maybe_unused]] const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

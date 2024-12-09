@@ -31,7 +31,7 @@ using namespace torch::autograd::utils;
 
 namespace torch::autograd {
 
-static PyObject* THPNNVariableFunctionsModule = NULL;
+static PyObject* THPNNVariableFunctionsModule = nullptr;
 
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
 {
@@ -60,14 +60,14 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 0, Py_None);
   }
   if (scalarType) {
-    PyTuple_SET_ITEM(tuple.get(), 1, torch::autograd::utils::wrap(torch::getTHPDtype(*scalarType)));
+    PyTuple_SET_ITEM(tuple.get(), 1, Py_NewRef(torch::getTHPDtype(*scalarType)));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
   if (opt_memory_format.has_value()) {
-    PyTuple_SET_ITEM(tuple.get(), 3, torch::utils::getTHPMemoryFormat(opt_memory_format.value()));
+    PyTuple_SET_ITEM(tuple.get(), 3, Py_NewRef(torch::utils::getTHPMemoryFormat(opt_memory_format.value())));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 3, Py_None);
@@ -84,14 +84,14 @@ static PyMethodDef nn_functions[] = {
   {"_parse_to", castPyCFunctionWithKeywords(THPVariable__parse_to),
     METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
-  {NULL}
+  {nullptr}
 };
 
 void initNNFunctions(PyObject* module) {
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
      "torch._C._nn",
-     NULL,
+     nullptr,
      -1,
      nn_functions
   };

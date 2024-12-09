@@ -75,7 +75,6 @@ Promotion Examples::
     >>> int_tensor = torch.ones(1, dtype=torch.int)
     >>> long_tensor = torch.ones(1, dtype=torch.long)
     >>> uint_tensor = torch.ones(1, dtype=torch.uint8)
-    >>> double_tensor = torch.ones(1, dtype=torch.double)
     >>> bool_tensor = torch.ones(1, dtype=torch.bool)
     # zero-dim tensors
     >>> long_zerodim = torch.tensor(1, dtype=torch.long)
@@ -213,7 +212,8 @@ non-None device argument.  To globally change the default device, see also
 
 .. note::
    For legacy reasons, a device can be constructed via a single device ordinal, which is treated
-   as a cuda device.  This matches :meth:`Tensor.get_device`, which returns an ordinal for cuda
+   as the current :ref:`accelerator<accelerators>` type.
+   This matches :meth:`Tensor.get_device`, which returns an ordinal for device
    tensors and is not supported for cpu tensors.
 
    >>> torch.device(1)

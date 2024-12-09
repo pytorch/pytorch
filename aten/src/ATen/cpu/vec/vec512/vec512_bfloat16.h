@@ -7,7 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,18 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+
+#ifndef SLEEF_CONST
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
+#define SLEEF_CONST
+#endif
+#define SLEEF_CONST_OLD SLEEF_CONST
+#else
+#define SLEEF_CONST_OLD
+#endif
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m256i& a, __m512& o) {
@@ -98,6 +110,11 @@ static inline void cvtfp16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
   __m256i hi = _mm512_extracti32x8_epi32(a, 1);
   cvtfp16_fp32(lo, o1);
   cvtfp16_fp32(hi, o2);
+}
+
+static inline __m256i cvtfp32_fp16(const __m512& src) {
+  return _mm512_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m512i cvtfp32_fp16(const __m512& a, const __m512& b) {
@@ -204,73 +221,7 @@ public:
   }
   template <int64_t mask>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
-    __at_align__ int16_t tmp_values[size()];
-    a.store(tmp_values);
-    if (mask & 0x01)
-      tmp_values[0] = b.values[31];
-    if (mask & 0x02)
-      tmp_values[1] = b.values[30];
-    if (mask & 0x04)
-      tmp_values[2] = b.values[29];
-    if (mask & 0x08)
-      tmp_values[3] = b.values[28];
-    if (mask & 0x10)
-      tmp_values[4] = b.values[27];
-    if (mask & 0x20)
-      tmp_values[5] = b.values[26];
-    if (mask & 0x40)
-      tmp_values[6] = b.values[25];
-    if (mask & 0x80)
-      tmp_values[7] = b.values[24];
-    if (mask & 0x100)
-      tmp_values[8] = b.values[23];
-    if (mask & 0x200)
-      tmp_values[9] = b.values[22];
-    if (mask & 0x400)
-      tmp_values[10] = b.values[21];
-    if (mask & 0x800)
-      tmp_values[11] = b.values[20];
-    if (mask & 0x1000)
-      tmp_values[12] = b.values[19];
-    if (mask & 0x2000)
-      tmp_values[13] = b.values[18];
-    if (mask & 0x4000)
-      tmp_values[14] = b.values[17];
-    if (mask & 0x8000)
-      tmp_values[15] = b.values[16];
-    if (mask & 0x10000)
-      tmp_values[16] = b.values[15];
-    if (mask & 0x20000)
-      tmp_values[17] = b.values[14];
-    if (mask & 0x40000)
-      tmp_values[18] = b.values[13];
-    if (mask & 0x80000)
-      tmp_values[19] = b.values[12];
-    if (mask & 0x100000)
-      tmp_values[20] = b.values[11];
-    if (mask & 0x200000)
-      tmp_values[21] = b.values[10];
-    if (mask & 0x400000)
-      tmp_values[22] = b.values[9];
-    if (mask & 0x800000)
-      tmp_values[23] = b.values[8];
-    if (mask & 0x1000000)
-      tmp_values[24] = b.values[7];
-    if (mask & 0x2000000)
-      tmp_values[25] = b.values[6];
-    if (mask & 0x4000000)
-      tmp_values[26] = b.values[5];
-    if (mask & 0x8000000)
-      tmp_values[27] = b.values[4];
-    if (mask & 0x10000000)
-      tmp_values[28] = b.values[3];
-    if (mask & 0x20000000)
-      tmp_values[29] = b.values[2];
-    if (mask & 0x40000000)
-      tmp_values[30] = b.values[1];
-    if (mask & 0x80000000)
-      tmp_values[31] = b.values[0];
-    return loadu(tmp_values);
+    return _mm512_mask_blend_epi16(mask, a.values, b.values);
   }
   static Vectorized<T> blendv(const Vectorized<T>& a,
       const Vectorized<T>& b, const Vectorized<T>& mask) {
@@ -362,7 +313,8 @@ public:
   }
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wignored-qualifiers"
-  Vectorized<T> map(const __m512 (*const vop)(__m512)) const {
+
+  Vectorized<T> map(SLEEF_CONST __m512 (*SLEEF_CONST_OLD vop)(__m512)) const {
     __m512 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
@@ -753,6 +705,8 @@ class Vectorized<BFloat16>: public Vectorized16<BFloat16> {
 public:
   using Vectorized16::Vectorized16;
 
+  using value_type = BFloat16;
+
   Vectorized<BFloat16> frac() const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
@@ -896,12 +850,16 @@ Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vecto
 template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
     auto vsrc = _mm512_loadu_si512(reinterpret_cast<__m512i*>((void*)(src + i)));
     _mm512_storeu_si512(reinterpret_cast<__m512i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -968,7 +926,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // j0-j15  n0-n15
   // k0-k15  o0-o15
   // l0-l15  p0-p15
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; i++) {
     r[i] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i]), t[i + 4], 0x01);
     r[i + 4] = _mm512_inserti64x4(_mm512_castsi256_si512(t[i + 8]), t[i + 12], 0x01);
@@ -980,7 +940,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // u3: c4c5 d4b5 c6c7 d6b7 c12c13 d12d13 c14c15 d14d15   g4g5 h4h5 g6g7 h6h7 g12g13 h12h13 g14g15 h14h15
   // i j  m n
   // k l  o p
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 8; i += 2) {
     u[i] = _mm512_unpacklo_epi32(r[i], r[i + 1]);
     u[i + 1] = _mm512_unpackhi_epi32(r[i], r[i + 1]);
@@ -1043,7 +1005,9 @@ static inline void _transpose_mxn_half_16_16(__m256i t[], __m512i u[]) {
   // 12-- 13--
   // 6-- 7--
   // 14-- 15--
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; i++) {
     u[i] = _mm512_permutex2var_epi16(r[i], const1, r[i + 4]);
     u[i + 4] = _mm512_permutex2var_epi16(r[i], const2, r[i + 4]);
@@ -1077,7 +1041,9 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   // n: n0  n1  n2  n3  n4  n5  n6  n7  n8  n9  n10 n11 n12 n13 n14 n15
   // o: o0  o1  o2  o3  o4  o5  o6  o7  o8  o9  o10 o11 o12 o13 o14 o15
   // p: p0  p1  p2  p3  p4  p5  p6  p7  p8  p9  p10 p11 p12 p13 p14 p15
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1085,7 +1051,9 @@ inline void transpose_mxn<BFloat16, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1107,7 +1075,9 @@ inline void transpose_mxn<Half, 16, 16>(
   __m256i t[16];
   // load from src to registers
   // Same matrix indices as above transpose_mxn<BFloat16, 16, 16>
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; i++) {
     t[i] = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i * ld_src));
   }
@@ -1115,7 +1085,9 @@ inline void transpose_mxn<Half, 16, 16>(
   __m512i u[8];
   _transpose_mxn_half_16_16(t, u);
 
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; i++) {
     _mm256_storeu_si256(
       reinterpret_cast<__m256i*>(dst + (i * 2) * ld_dst),
@@ -1146,7 +1118,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 513 545 514 546 515 547 520 552 521 553 522 554 523 555 528 ... 571
   // ...
   // t[31]: 964 996 965 997 966 998 967 999 972 1004 973 1005 974 1006 975 1007 980 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; ++i) {
     d[i * 2] = _mm512_unpacklo_epi16(r[i * 2], r[i * 2 + 1]);
     d[i * 2 + 1] = _mm512_unpackhi_epi16(r[i * 2], r[i * 2 + 1]);
@@ -1171,7 +1145,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 513 545 577 609 520 552 584 616 521 553 585 617 528 ... 633
   // ...
   // t[31]: 902 934 966 998 903 935 967 999 910 942 974 1006 911 943 975 1007 918 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; ++i) {
     r[i * 4] = _mm512_unpacklo_epi32(d[i * 4], d[i * 4 + 2]);
     r[i * 4 + 1] = _mm512_unpackhi_epi32(d[i * 4], d[i * 4 + 2]);
@@ -1198,7 +1174,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
   // t[16]: 512 544 576 608 640 672 704 736 520 552 584 616 648 680 712 744 528 ... 760
   // ...
   // t[31]: 775 807 839 871 903 935 967 999 783 815 847 879 911 943 975 1007 791 ... 1023
+#ifndef __msvc_cl__
 #pragma unroll(4)
+#endif
   for (int i = 0; i < 4; ++i) {
     d[i * 8] = _mm512_unpacklo_epi64(r[i * 8], r[i * 8 + 4]);
     d[i * 8 + 1] = _mm512_unpackhi_epi64(r[i * 8], r[i * 8 + 4]);
@@ -1247,7 +1225,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x000000000000000a,
       0x0000000000000003,
       0x0000000000000002);
+#ifndef __msvc_cl__
 #pragma unroll(8)
+#endif
   for (int i = 0; i < 8; ++i) {
     r[i] = _mm512_permutex2var_epi64(d[i], /*idx*/const1, d[i + 8]);
     r[i + 8] = _mm512_permutex2var_epi64(d[i], /*idx*/const2, d[i + 8]);
@@ -1292,7 +1272,9 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
       0x0000000000000006,
       0x0000000000000005,
       0x0000000000000004);
+#ifndef __msvc_cl__
 #pragma unroll(16)
+#endif
   for (int i = 0; i < 16; ++i) {
     d[i] = _mm512_permutex2var_epi64(r[i], /*idx*/const3, r[i + 16]);
     d[i + 16] = _mm512_permutex2var_epi64(r[i], /*idx*/const4, r[i + 16]);
@@ -1302,55 +1284,95 @@ static inline void _transpose_mxn_half_32_32(__m512i r[], __m512i d[]) {
 // Code referred to FBGEMM:
 // https://github.com/pytorch/FBGEMM/blob/39a423e4ad1a04b77fea81c7d09c3e6f8984fae9/src/UtilsAvx512.cc#LL19C6-L19C6
 template<>
-inline void transpose_mxn<BFloat16, 32, 32>(
-    const BFloat16* src,
-    int64_t ld_src,
-    BFloat16* dst,
-    int64_t ld_dst) {
-  // Load from memory
+inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst, int M, int N) {
+  // load from src
+  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<BFloat16> expects M, N <= 32.");
   __m512i r[32];
-#pragma unroll(32)
-  for (int i = 0; i < 32; ++i) {
-    r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
+  int i;
+  if (N == 32) {
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_loadu_si512(&src[i * ld_src]);
+    }
+  } else {
+    __mmask32 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+    }
+  }
+  for (; i < 32; ++i) {
+    r[i] = _mm512_setzero_si512();
   }
 
   __m512i d[32];
   _transpose_mxn_half_32_32(r, d);
 
-  // Store to dst
-#pragma unroll(32)
-  for (int i = 0; i < 32; ++i) {
-    _mm512_storeu_si512(dst + i* ld_dst, d[i]);
+  // store to dst
+  if (M == 32) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
+    }
+  } else {
+    __mmask32 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+    }
   }
 }
 
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same_v<T, BFloat16> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
+  transpose_mxn<BFloat16>(src, ld_src, dst, ld_dst, M, N);
+}
+
 template<>
-inline void transpose_mxn<Half, 32, 32>(
-    const Half* src,
-    int64_t ld_src,
-    Half* dst,
-    int64_t ld_dst) {
-  // Load from memory
+inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst, int M, int N) {
+  TORCH_CHECK(M <= 32 && N <= 32, "transpose_mxn<Half> expects M, N <= 32.");
+  // load from src
   __m512i r[32];
-#pragma unroll(32)
-  for (int i = 0; i < 32; ++i) {
-    r[i] = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(src + i* ld_src));
+  int i;
+  if (N == 32) {
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_loadu_si512(&src[i * ld_src]);
+    }
+  } else {
+    __mmask32 src_mask = (1 << N) - 1;
+    for (i = 0; i < M; ++i) {
+      r[i] = _mm512_maskz_loadu_epi16(src_mask, &src[i * ld_src]);
+    }
+  }
+  for (; i < 32; ++i) {
+    r[i] = _mm512_setzero_si512();
   }
 
   __m512i d[32];
   _transpose_mxn_half_32_32(r, d);
 
-  // Store to dst
-#pragma unroll(32)
-  for (int i = 0; i < 32; ++i) {
-    _mm512_storeu_si512(dst + i* ld_dst, d[i]);
+  // store to dst
+  if (M == 32) {
+    for (i = 0; i < N; ++i) {
+      _mm512_storeu_si512(&dst[i * ld_dst], d[i]);
+    }
+  } else {
+    __mmask32 dst_mask = (1 << M) - 1;
+    for (i = 0; i < N; ++i) {
+      _mm512_mask_storeu_epi16(&dst[i * ld_dst], dst_mask, d[i]);
+    }
   }
+}
+
+template <typename T, int M, int N,
+          typename std::enable_if_t<std::is_same_v<T, Half> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
+  transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }
 
 template <>
 class Vectorized<Half>: public Vectorized16<Half> {
 public:
   using Vectorized16::Vectorized16;
+
+  using value_type = Half;
 
   Vectorized<Half> frac() const;
 
@@ -1496,12 +1518,16 @@ Vectorized<Half> inline clamp_min(const Vectorized<Half>& a, const Vectorized<Ha
 template <>
 inline void convert(const Half* src, Half* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<Half>::size()); i += Vectorized<Half>::size()) {
     auto vsrc = _mm512_loadu_si512(reinterpret_cast<__m512i*>((void*)(src + i)));
     _mm512_storeu_si512(reinterpret_cast<__m512i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -1568,10 +1594,10 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(c
 inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
  return cvt_from_fp32<type>(__m512(a), __m512(b)); \
 }
-CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_VECTORIZED_INIT(Half, half);
+CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_VECTORIZED_INIT(Half, half)
 
-#else //defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#else //defined(CPU_CAPABILITY_AVX512)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -1598,12 +1624,12 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   } \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_NON_VECTORIZED_INIT(Half, half)
 
-#endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#endif // defined(CPU_CAPABILITY_AVX512)
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)); \
@@ -1619,10 +1645,10 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
-#else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   __at_align__ float values[Vectorized<float>::size()]; \
@@ -1637,8 +1663,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   data += Vectorized<float>::size(); \
   load_fp32_from_##name(data, out2); \
 }
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
 }}}

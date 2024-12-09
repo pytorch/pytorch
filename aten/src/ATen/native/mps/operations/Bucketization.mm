@@ -17,221 +17,11 @@
 namespace at::native {
 namespace mps {
 
-static const char* METAL_BUCKETIZATION = R"BUCKETIZE_METAL(
-
-#include <metal_stdlib>
-using namespace metal;
-
-// The bucketization kernels are mostly copied-n-pasted from bucketization.cu.
-
-template<typename input_t>
-int64_t lower_bound(constant input_t *data_ss, int64_t start, int64_t end, const input_t val, constant int64_t *data_sort) {
-  // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
-  // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
-  const int64_t orig_start = start;
-  while (start < end) {
-    const int64_t mid = start + ((end - start) >> 1);
-    const input_t mid_val = data_ss[orig_start + data_sort[mid]];
-    if (!(mid_val >= val)) {
-      start = mid + 1;
-    }
-    else {
-      end = mid;
-    }
-  }
-  return start;
-}
-
-template<typename input_t>
-int64_t lower_bound(constant input_t *data_ss, int64_t start, int64_t end, const input_t val) {
-  while (start < end) {
-    const int64_t mid = start + ((end - start) >> 1);
-    const input_t mid_val = data_ss[mid];
-    if (!(mid_val >= val)) {
-      start = mid + 1;
-    }
-    else {
-      end = mid;
-    }
-  }
-  return start;
-}
-
-template<typename input_t>
-int64_t upper_bound(constant input_t *data_ss, int64_t start, int64_t end, const input_t val, constant int64_t *data_sort) {
-  // sorter gives relative ordering for ND tensors, so we need to save and add the non-updated start as an offset
-  // i.e. the second row of a 3x3 tensors starts at element 3 but sorter's second row only contains 0, 1, or 2
-  const int64_t orig_start = start;
-  while (start < end) {
-    const int64_t mid = start + ((end - start) >> 1);
-    const input_t mid_val = data_ss[orig_start + data_sort[mid]];
-    if (!(mid_val > val)) {
-      start = mid + 1;
-    }
-    else {
-      end = mid;
-    }
-  }
-  return start;
-}
-
-template<typename input_t>
-int64_t upper_bound(constant input_t *data_ss, int64_t start, int64_t end, const input_t val) {
-  while (start < end) {
-    const int64_t mid = start + ((end - start) >> 1);
-    const input_t mid_val = data_ss[mid];
-    if (!(mid_val > val)) {
-      start = mid + 1;
-    }
-    else {
-      end = mid;
-    }
-  }
-  return start;
-}
-
-template<typename input_t, typename output_t>
-kernel void searchsorted_sorter(
-    constant  input_t       * data_in     [[buffer(0)]],
-    constant  input_t       * data_bd     [[buffer(1)]],
-    device    output_t      * data_out    [[buffer(2)]],
-    constant  int64_t       & idim_in     [[buffer(3)]],
-    constant  int64_t       & idim_bd     [[buffer(4)]],
-    constant  int64_t       & numel_in    [[buffer(5)]],
-    constant  int64_t       & right       [[buffer(6)]],
-    constant  int64_t       & is_1d_boundaries [[buffer(7)]],
-    constant  int64_t       * data_sort   [[buffer(8)]],
-    uint2     tgid                        [[threadgroup_position_in_grid]],
-    uint2     tid2                        [[thread_position_in_threadgroup]],
-    uint2     tptg     [[threads_per_threadgroup]]) {
-
-  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in; tid += tptg.x) {
-    // If boundaries tensor is 1d, we always search the entire boundary tensor
-    int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
-    int64_t end_bd = start_bd + idim_bd;
-
-    int64_t pos = !right ?
-      lower_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid], data_sort) - start_bd :
-      upper_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid], data_sort) - start_bd;
-
-    // type conversion might happen here
-    data_out[tid] = pos;
-  }
-}
-
-template<typename input_t, typename output_t>
-kernel void searchsorted(
-    constant  input_t       * data_in     [[buffer(0)]],
-    constant  input_t       * data_bd     [[buffer(1)]],
-    device    output_t      * data_out    [[buffer(2)]],
-    constant  int64_t       & idim_in     [[buffer(3)]],
-    constant  int64_t       & idim_bd     [[buffer(4)]],
-    constant  int64_t       & numel_in    [[buffer(5)]],
-    constant  int64_t       & right       [[buffer(6)]],
-    constant  int64_t       & is_1d_boundaries [[buffer(7)]],
-    uint2     tgid                        [[threadgroup_position_in_grid]],
-    uint2     tid2                        [[thread_position_in_threadgroup]],
-    uint2     tptg     [[threads_per_threadgroup]]) {
-
-  for (int64_t tid = tgid.x * tptg.x + tid2.x; tid < numel_in; tid += tptg.x) {
-    // If boundaries tensor is 1d, we always search the entire boundary tensor
-    int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
-    int64_t end_bd = start_bd + idim_bd;
-
-    int64_t pos = !right ?
-      lower_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd :
-      upper_bound<input_t>(data_bd, start_bd, end_bd, data_in[tid]) - start_bd;
-
-    // type conversion might happen here
-    data_out[tid] = pos;
-  }
-}
-
-#define REGISTER_SEARCHSORTED_OP(INPUT_T, OUTPUT_T)               \
-template                                                          \
-[[host_name("searchsorted_" #INPUT_T"_"#OUTPUT_T"_sorter")]]      \
-kernel void searchsorted_sorter<INPUT_T, OUTPUT_T>(                      \
-    constant  INPUT_T       * data_in     [[buffer(0)]],          \
-    constant  INPUT_T       * data_bd     [[buffer(1)]],          \
-    device    OUTPUT_T      * data_out    [[buffer(2)]],          \
-    constant  int64_t       & idim_in     [[buffer(3)]],          \
-    constant  int64_t       & idim_bd     [[buffer(4)]],          \
-    constant  int64_t       & numel_in    [[buffer(5)]],          \
-    constant  int64_t       & right       [[buffer(6)]],          \
-    constant  int64_t       & is_1d_boundaries [[buffer(7)]],     \
-    constant  int64_t       * data_sort   [[buffer(8)]],          \
-    uint2     tgid          [[threadgroup_position_in_grid]],     \
-    uint2     tid2          [[thread_position_in_threadgroup]],   \
-    uint2     tptg          [[threads_per_threadgroup]]);         \
-template                                                          \
-[[host_name("searchsorted_" #INPUT_T"_"#OUTPUT_T)]]               \
-kernel void searchsorted<INPUT_T, OUTPUT_T>(                      \
-    constant  INPUT_T       * data_in     [[buffer(0)]],          \
-    constant  INPUT_T       * data_bd     [[buffer(1)]],          \
-    device    OUTPUT_T      * data_out    [[buffer(2)]],          \
-    constant  int64_t       & idim_in     [[buffer(3)]],          \
-    constant  int64_t       & idim_bd     [[buffer(4)]],          \
-    constant  int64_t       & numel_in    [[buffer(5)]],          \
-    constant  int64_t       & right       [[buffer(6)]],          \
-    constant  int64_t       & is_1d_boundaries [[buffer(7)]],     \
-    uint2     tgid          [[threadgroup_position_in_grid]],     \
-    uint2     tid2          [[thread_position_in_threadgroup]],   \
-    uint2     tptg          [[threads_per_threadgroup]]);         \
-
-
-REGISTER_SEARCHSORTED_OP(float, int);
-REGISTER_SEARCHSORTED_OP(float, long);
-REGISTER_SEARCHSORTED_OP(half, int);
-REGISTER_SEARCHSORTED_OP(half, long);
-REGISTER_SEARCHSORTED_OP(char, int);
-REGISTER_SEARCHSORTED_OP(char, long);
-REGISTER_SEARCHSORTED_OP(uchar, int);
-REGISTER_SEARCHSORTED_OP(uchar, long);
-REGISTER_SEARCHSORTED_OP(short, int);
-REGISTER_SEARCHSORTED_OP(short, long);
-REGISTER_SEARCHSORTED_OP(int, int);
-REGISTER_SEARCHSORTED_OP(int, long);
-REGISTER_SEARCHSORTED_OP(long, int);
-REGISTER_SEARCHSORTED_OP(long, long);
-
-)BUCKETIZE_METAL";
-
-static id<MTLLibrary> compileBucketizationOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> bucketizationLibrary = nil;
-  if (bucketizationLibrary) {
-    return bucketizationLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  bucketizationLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BUCKETIZATION
-                                                                         encoding:NSASCIIStringEncoding]
-                                              options:options
-                                                error:&error];
-  TORCH_CHECK(
-      bucketizationLibrary, "Failed to create metal bucketization library, error: ", [[error description] UTF8String]);
-  return bucketizationLibrary;
-}
-
-static id<MTLComputePipelineState> bucketizationPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> bucketizationLib = compileBucketizationOpsLibrary(device);
-  id<MTLFunction> bucketizationFunc =
-      [bucketizationLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(bucketizationFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:bucketizationFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Bucketization_metallib.h>
+#endif
 
 static void searchsorted_mps_contiguous(Tensor& result,
                                         const Tensor& input,
@@ -250,28 +40,20 @@ static void searchsorted_mps_contiguous(Tensor& result,
   int64_t right_i64 = right;
   int64_t is_1d_boundaries = boundaries.dim() == 1;
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input.scalar_type()) + "_" +
-          scalarToMetalTypeString(result.scalar_type()) + (sorter.defined() ? "_sorter" : "");
-      id<MTLComputePipelineState> bucketizationPSO = mps::bucketizationPipelineState(device, kernel);
+      const std::string kernel = "searchsorted_" + scalarToMetalTypeString(input) + "_" +
+          scalarToMetalTypeString(result) + (sorter.defined() ? "_sorter" : "");
+      id<MTLComputePipelineState> bucketizationPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
-      mtl_setBuffer(computeEncoder, input, 0);
-      mtl_setBuffer(computeEncoder, boundaries, 1);
-      mtl_setBuffer(computeEncoder, result, 2);
-      [computeEncoder setBytes:&idim_in length:sizeof(int64_t) atIndex:3];
-      [computeEncoder setBytes:&idim_bd length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:&numel_in length:sizeof(int64_t) atIndex:5];
-      [computeEncoder setBytes:&right_i64 length:sizeof(int64_t) atIndex:6];
-      [computeEncoder setBytes:&is_1d_boundaries length:sizeof(int64_t) atIndex:7];
+      mtl_setArgs(computeEncoder, input, boundaries, result, idim_in, idim_bd, numel_in, right_i64, is_1d_boundaries);
       if (sorter.defined())
         mtl_setBuffer(computeEncoder, sorter, 8);
 
@@ -293,8 +75,8 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Tensor& self,
                              bool out_int32,
                              bool right,
-                             const c10::optional<c10::string_view> side_opt,
-                             const c10::optional<Tensor>& sorter_opt,
+                             const std::optional<std::string_view> side_opt,
+                             const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
@@ -338,8 +120,8 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const Scalar& self,
                              bool out_int32,
                              bool right,
-                             const c10::optional<c10::string_view> side_opt,
-                             const c10::optional<Tensor>& sorter_opt,
+                             const std::optional<std::string_view> side_opt,
+                             const std::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_out_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
@@ -349,8 +131,8 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Tensor& self,
                         bool out_int32,
                         bool right,
-                        const c10::optional<c10::string_view> side_opt,
-                        const c10::optional<Tensor>& sorter) {
+                        const std::optional<std::string_view> side_opt,
+                        const std::optional<Tensor>& sorter) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -362,15 +144,15 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const Scalar& self,
                         bool out_int32,
                         bool right,
-                        const c10::optional<c10::string_view> side_opt,
-                        const c10::optional<Tensor>& sorter) {
+                        const std::optional<std::string_view> side_opt,
+                        const std::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);
 }
 
 Tensor& bucketize_out_mps(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
   TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
-  at::native::searchsorted_out_mps(boundaries, self, out_int32, right, c10::nullopt, c10::nullopt, result);
+  at::native::searchsorted_out_mps(boundaries, self, out_int32, right, std::nullopt, std::nullopt, result);
   return result;
 }
 

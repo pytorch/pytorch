@@ -1,42 +1,71 @@
 # Owner(s): ["oncall: distributed"]
 
-import os
 import sys
 import unittest
-import weakref
 from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
-import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
-
 from functorch import make_fx
+from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
+    DistributedTestBase,
     MultiThreadedTestCase,
-    TEST_SKIPS,
     requires_nccl,
-    run_with_both_funcol_impls,
-    run_with_both_funcol_impls_with_arg,
-    run_with_legacy_funcol,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfHpu,
+    TEST_CUDA,
+    TEST_HPU,
     TestCase,
 )
+
+
+# NOTE: Instructions for adding new device types to this test file
+#
+# This test file contains two types of tests:
+# 1. Tests that run on both CPUs and accelerators
+# 2. Tests that run only on accelerators
+#
+# We use two variables to manage device types:
+# - `devices`: A list containing device types for both CPU and accelerator tests
+# - `DEVICE`: A string containing only the accelerator type for accelerator-only tests
+#
+# To add a new device type:
+# 1. Add a new `elif` statement in the if-else ladder below
+# 2. Check for the presence of your device (e.g., TEST_NEW_DEVICE)
+# 3. Append your device type to the `devices` list
+# 4. Assign your device type string to `DEVICE`
+#
+# Example:
+# elif TEST_NEW_DEVICE:
+#     devices.append("new_device")
+#     DEVICE = "new_device"
+
+DEVICE = "cuda"
+devices = ["cpu"]
+if TEST_HPU:
+    devices.append("hpu")
+    DEVICE = "hpu"
+elif TEST_CUDA:
+    devices.append("cuda")
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -61,6 +90,7 @@ def new_subgroups(group_size: int, pg_tag=None):
     return cur_subgroup, subgroups
 
 
+@skipIfHpu
 class TestExpand(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -150,6 +180,7 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual(2, group_size)
 
 
+@skipIfHpu
 class TestPgTag(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -226,6 +257,7 @@ class TestPgTag(MultiThreadedTestCase):
 
 
 @instantiate_parametrized_tests
+@skipIfHpu
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -235,8 +267,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_broadcast(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -252,8 +283,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res = ft_c.broadcast(tensor, 0, mesh)
         self.assertEqual(res, torch.ones([4], device=device))
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_all_reduce_eager(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -270,8 +300,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
         self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_all_reduce_coalesced_eager(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -286,8 +315,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res[0], t0 * 4)
         self.assertEqual(res[1], t1 * 4)
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_all_gather_tensor(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -302,15 +330,14 @@ class TestTraceableCollectives(MultiThreadedTestCase):
             for dim in dims_to_gather:
                 output_size = [3, 3, 3]
                 output_size[dim] *= mesh.size(0)
-                # each rank have its own tensor, all_gather gives a list
+                # each rank have its own tensor, all_gather gives a bigger tensor
                 local_tensor = torch.ones([3, 3, 3], device=device)
                 gathered_tensor = ft_c.all_gather_tensor(
                     local_tensor, gather_dim=dim, group=(mesh, 0)
                 )
                 self.assertEqual(gathered_tensor, torch.ones(output_size))
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_all_gather_into_tensor_coalesced(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -327,8 +354,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
             torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1]
         )
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_reduce_scatter_tensor(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -352,8 +378,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
                 )
                 self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
 
-    @parametrize("device", ["cpu", "cuda"])
-    @run_with_both_funcol_impls
+    @parametrize("device", devices)
     def test_reduce_scatter_into_tensor_coalesced(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
@@ -371,17 +396,14 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.tensor([8], device=device), res[1])
 
 
-@instantiate_parametrized_tests
 class TestMetaCollectives(TestCase):
-    @run_with_both_funcol_impls_with_arg
-    def test_all_reduce(self, use_native_funcol):
+    def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
-        group = "0" if use_native_funcol else [1]
-        out = ft_c.all_reduce(x, "sum", group)
+        out = ft_c.all_reduce(x, "sum", "0")
         self.assertEqual(x.size(), out.size())
 
 
-@instantiate_parametrized_tests
+@skipIfHpu
 class TestGradCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -391,32 +413,36 @@ class TestGradCollectives(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    @run_with_both_funcol_impls_with_arg
-    def test_all_reduce(self, use_native_funcol):
+    def test_all_reduce(self):
         x = torch.rand([4], requires_grad=True)
         y = torch.rand([4], requires_grad=True)
-        group = "0" if use_native_funcol else [0, 1]
-        out = ft_c.all_reduce(x, "sum", group)
+        out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
         self.assertIsNone(x.grad)
 
 
-@instantiate_parametrized_tests
-class TestMakeFx(MultiThreadedTestCase):
-    @property
-    def world_size(self):
-        return 2
-
+class TestMakeFx(TestCase):
     def setUp(self):
-        super().setUp()
-        self._spawn_threads()
+        # make_fx is not thread-safe due to patching nd mutating global states
+        # so create a fake_pg.
+        self.rank = 0
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
-    @run_with_both_funcol_impls_with_arg
-    def test_all_reduce_tracing(self, use_native_funcol):
+    def tearDown(self):
+        super().tearDown()
 
+        self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
+
+    def test_all_reduce_tracing(self):
         def allred(input):
-            group = "0" if use_native_funcol else [0, 1]
-            return ft_c.all_reduce(input, "sum", group=group) + 1
+            return ft_c.all_reduce(input, "sum", group=dist.group.WORLD) + 1
 
         graph = make_fx(allred)(torch.rand(4))
         FileCheck().check("all_reduce").check("wait_tensor").run(str(graph.graph))
@@ -441,79 +467,55 @@ class TestMakeFx(MultiThreadedTestCase):
 
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
-WORLD_SIZE = 2
+
+# Adding support for HCCL backend
+# To add a different backend
+# add an elif to the same chain with a conditional checking for the device type (along the lines of TEST_HPU or TEST_CUDA)
+# And then set the BACKEND variable appropriately.
+if TEST_HPU:
+    BACKEND = dist.Backend.HCCL
 
 
-def exit_if_lt_x_gpu(x):
-    if torch.cuda.device_count() < x:
-        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+# allows you to check for multiple accelerator irrespective of device type
+# to add new device types to this check simply follow the same format
+# and append an elif with the conditional and appropriate device count function for your new device
+def exit_if_lt_x_accelerators(x):
+    if TEST_CUDA:
+        if torch.cuda.device_count() < x:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+    elif TEST_HPU:
+        if torch.hpu.device_count() < x:
+            sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
 
 
 def with_comms(func=None):
     if func is None:
-        return partial(
-            with_comms,
-        )
+        return partial(with_comms)
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-        self.dist_init()
-        func(self)
-        self.destroy_comms()
+
+        kwargs["device"] = DEVICE
+        self.pg = self.create_pg(device=DEVICE)
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            torch.distributed.destroy_process_group()
 
     return wrapper
 
 
-@instantiate_parametrized_tests
-class TestCollectivesWithNCCL(MultiProcessTestCase):
-    def setUp(self):
-        super().setUp()
-        os.environ["WORLD_SIZE"] = str(self.world_size)
-        os.environ["BACKEND"] = dist.Backend.NCCL
-        self._spawn_processes()
-
-    @property
-    def device(self):
-        return torch.device(self.rank)
-
-    @property
-    def world_size(self):
-        return WORLD_SIZE
-
-    @property
-    def process_group(self):
-        return dist.group.WORLD
-
-    def dist_init(self):
-        dist.init_process_group(
-            backend=BACKEND,
-            world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
-        )
-
-        # set device for nccl pg for collectives
-        if BACKEND == "nccl":
-            torch.cuda.set_device(self.rank)
-
-    def destroy_comms(self):
-        # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
-        dist.destroy_process_group()
-
-    @requires_nccl()
+class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @with_comms()
-    @run_with_both_funcol_impls
-    def test_all_gather_into_tensor_coalesced(self):
-        exit_if_lt_x_gpu(self.world_size)
-
+    def test_all_gather_into_tensor_coalesced(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
         tensors = [
-            torch.ones([4], device=f"cuda:{self.rank}"),
-            torch.ones([4], device=f"cuda:{self.rank}") + 1,
+            torch.ones([4], device=device),
+            torch.ones([4], device=device) + 1,
         ]
-        mesh = dt.DeviceMesh(f"cuda:{self.rank}", torch.arange(self.world_size))
+        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
 
         res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
@@ -521,9 +523,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
     @with_comms()
-    @run_with_both_funcol_impls
-    def test_all_to_all_single(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+    def test_all_to_all_single(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
 
@@ -540,9 +540,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(y, expected)
 
     @with_comms()
-    @run_with_both_funcol_impls
-    def test_all_to_all_single_1d_input(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+    def test_all_to_all_single_1d_input(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
 
@@ -559,45 +557,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(y, expected)
 
     @with_comms()
-    @run_with_legacy_funcol  # native funcol doesn't support none sizes
-    def test_all_to_all_single_output_split_sizes_none(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
-        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
-        rank = dist.get_rank()
-
-        input_split_sizes = [1] * self.world_size
-        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
-        y = ft_c.all_to_all_single(
-            x, output_split_sizes=None, input_split_sizes=input_split_sizes, group=mesh
-        )
-        expected = []
-        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
-            expected.append(torch.full_like(tensor, (idx + 1)))
-        expected = torch.cat(expected)
-        self.assertEqual(y, expected)
-
-    @with_comms()
-    @run_with_legacy_funcol  # native funcol doesn't support none sizes
-    def test_all_to_all_single_input_split_sizes_none(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
-        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
-        rank = dist.get_rank()
-
-        output_split_sizes = [1] * self.world_size
-        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
-        y = ft_c.all_to_all_single(
-            x, output_split_sizes=output_split_sizes, input_split_sizes=None, group=mesh
-        )
-        expected = []
-        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
-            expected.append(torch.full_like(tensor, (idx + 1)))
-        expected = torch.cat(expected)
-        self.assertEqual(y, expected)
-
-    @with_comms()
-    @run_with_legacy_funcol  # native funcol doesn't support none sizes
-    def test_all_to_all_single_split_sizes_none(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
+    def test_all_to_all_single_split_sizes_none(self, device):
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
         rank = dist.get_rank()
 
@@ -611,21 +571,19 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         expected = torch.cat(expected)
         self.assertEqual(y, expected)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @requires_nccl()
     @with_comms()
-    @run_with_both_funcol_impls
-    def test_tracing(self):
+    def test_tracing(self, device):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
 
         compiled_allreduce = torch.compile(allreduce, fullgraph=True)
-        compiled_allreduce(torch.randn(8, device=self.device), self.process_group)
+        compiled_allreduce(torch.randn(8, device=device), self.pg)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @run_with_both_funcol_impls
-    def test_tracing_with_fakepg(self):
-        exit_if_lt_x_gpu(self.world_size)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_tracing_with_fakepg(self, device=DEVICE):
+        exit_if_lt_x_accelerators(self.world_size)
 
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
@@ -637,23 +595,42 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
             world_size=8,
             store=FakeStore(),
         )
-        allreduce(torch.randn(8, device=self.device), pg=dist.group.WORLD)
+        allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
+        dist.destroy_process_group()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @requires_nccl()
+    @with_comms()
+    def test_tracing_with_dce_code(self, device):
+        if self.world_size > 2:
+            return
+
+        def func(batch, group, rank):
+            ret = ft_c.permute_tensor(batch, [1, 0], group)
+            if hasattr(ret, "wait"):
+                ret = ret.wait()
+            if rank == 0:
+                return ret
+            else:
+                return batch * 5
+
+        compiled_func = torch.compile(func)
+        ret = compiled_func(
+            torch.ones((100,), device=device), self.process_group, self.rank
+        )
+        dist.barrier()
 
 
-@instantiate_parametrized_tests
-class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
-
+class TestDistributedBackendCollectivesWithWorldSize4(
+    TestCollectivesWithDistributedBackend
+):
     @property
     def world_size(self):
         return 4
 
-    @requires_nccl()
     @with_comms()
-    @run_with_both_funcol_impls
-    def test_permute_tensor_with_sub_group(self):
-        exit_if_lt_x_gpu(self.world_size)
-
-        device = "cuda"
+    def test_permute_tensor_with_sub_group(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
         mesh_dim_names = ["dp", "tp"]
 
         mesh_2d = dt.init_device_mesh(
@@ -666,121 +643,184 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
 
             # rank0: [0., 1.], rank1: [2., 3.]
             send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
-            recvd_tensor = ft_c.permute_tensor(
-                send_tensor,
-                [1, 0],
-                group=mesh
-            )
+            recvd_tensor = ft_c.permute_tensor(send_tensor, [1, 0], group=mesh)
 
             # rank0: [2., 3.], rank1: [0., 1.]
-            expected = torch.arange(
-                2,
-                dtype=torch.float32,
-                device=device
-            ) + 2 * ((rank - 1 + 2) % 2)
+            expected = torch.arange(2, dtype=torch.float32, device=device) + 2 * (
+                (rank - 1 + 2) % 2
+            )
             self.assertEqual(
                 recvd_tensor,
                 expected,
                 msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
-                    f"but received {recvd_tensor} instead."
+                f"but received {recvd_tensor} instead.",
             )
 
 
-
-class TestOpWaitiness(MultiProcessTestCase):
-    @property
-    def world_size(self):
-        return 1
-
+@instantiate_parametrized_tests
+@skipIfHpu
+class TestFunctionalAutograd(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()
-        self._spawn_processes()
+        self._spawn_threads()
 
-    def _init_process_group(self):
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-        dist.init_process_group(
-            backend="fake",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=FakeStore(),
-        )
+    @property
+    def world_size(self):
+        return 2
 
-    @run_with_legacy_funcol  # impl specific
-    def test_wait_reduce_outstanding_work_count(self):
-        self._init_process_group()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+    @parametrize("compile", [True, False])
+    def test_all_to_all_single(self, compile: bool = True) -> None:
+        group = dist.group.WORLD.group_name
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        t = torch.ones((self.world_size, 2), requires_grad=True)
 
-        res.trigger_wait()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 2
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
+            out = out + 0
+            return out
 
-    @run_with_legacy_funcol  # impl specific
-    def test_add_triggers_wait(self):
-        self._init_process_group()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        out = compiled(t, self.world_size)
+        self.assertEqual(out.shape, t.shape)
+        self.assertEqual(out, torch.full_like(t, 2.0))
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
-        foo = res + torch.ones([4])
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
-        self.assertFalse(isinstance(foo, ft_c.AsyncCollectiveTensor))
+    def test_all_to_all_single_inductor(self) -> None:
+        group = dist.group.WORLD.group_name
 
-    @run_with_legacy_funcol  # impl specific
-    def test_view_does_not_trigger_wait(self):
-        self._init_process_group()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        t = torch.rand((self.world_size, 2), requires_grad=True)
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
+            out = out + 2
+            return out.sum()
 
-        foo = res.view([2, 2])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
-        self.assertTrue(ft_c_impl._tensor_needs_wait(foo))
-        self.assertTrue(isinstance(foo, ft_c.AsyncCollectiveTensor))
+        compiled = torch.compile(my_func, fullgraph=True)
 
-        foo.trigger_wait()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        def run_with_backward():
+            out = compiled(t, self.world_size)
+            out.backward()
 
-        self.assertEqual(foo.tolist(), [[1.0, 1.0], [1.0, 1.0]])
+        res, codes = run_and_get_code(run_with_backward)
+        for code in codes:
+            FileCheck().check_count(
+                "_c10d_functional.all_to_all_single.default", 1, exactly=True
+            ).check_count("_c10d_functional.wait_tensor.default", 1, exactly=True).run(
+                code
+            )
 
-    @run_with_legacy_funcol  # impl specific
-    def test_dead_wrapper_triggers_wait(self):
-        self._init_process_group()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertIsNotNone(t.grad)
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
+    @parametrize("compile", [True, False])
+    def test_all_gather_tensor(self, compile: bool) -> None:
+        group = dist.group.WORLD.group_name
 
-        wr = weakref.ref(res)
-        self.assertTrue(wr() is not None)
-        res = None
-        self.assertTrue(wr() is None)
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+            assert t.requires_grad
+            out = ft_c.all_gather_tensor_autograd(
+                t * 1.0,
+                gather_dim=dim,
+                group=group,
+            )
+            out = out * 1.0
+            return out
 
-    @run_with_legacy_funcol  # impl specific
-    def test_dead_wrapper_plus_view(self):
-        self._init_process_group()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        res = res.view([2, 2])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        res = None
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        dims_to_gather = [0, 1, 2]
+        for dim in dims_to_gather:
+            output_size = [3, 3, 3]
+            output_size[dim] *= self.world_size
+            # each rank have its own tensor, all_gather gives a bigger tensor
+            local_tensor = torch.ones([3, 3, 3], requires_grad=True)
+            gathered_tensor = compiled(local_tensor, dim)
+            self.assertEqual(gathered_tensor, torch.ones(output_size))
 
+            gathered_tensor.sum().backward()
+            self.assertEqual(
+                local_tensor.grad,
+                torch.full((3, 3, 3), fill_value=float(self.world_size)),
+            )
+
+    @parametrize("compile", [True, False])
+    def test_reduce_scatter_tensor(self, compile: bool) -> None:
+        group = dist.group.WORLD.group_name
+
+        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+            assert t.requires_grad
+            rs_tensor = (
+                ft_c.reduce_scatter_tensor_autograd(
+                    input_tensor * 1.0, "sum", scatter_dim=dim, group=group
+                )
+                * 1.0
+            )
+            return rs_tensor
+
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
+
+        dims_to_scatter = [0, 1]
+        for dim in dims_to_scatter:
+            group_size = self.world_size
+            input_size = [3, 3]
+            output_size = [3, 3]
+            output_size[dim] *= group_size
+            input_tensor = torch.ones(output_size, requires_grad=True)
+            rs_tensor = compiled(input_tensor, dim)
+            res_num = 1 * group_size
+            self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
+            rs_tensor.sum().backward()
+            self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
+
+
+class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
+    @with_comms()
+    def test_all_to_all_single(self, device) -> None:
+        group = self.pg
+        t = torch.ones((self.world_size, 2), requires_grad=True, device=device)
+
+        sizes = [1] * self.world_size
+        assert t.requires_grad
+        out = ft_c.all_to_all_single_autograd(t * 2, sizes, sizes, group) + 0
+
+        self.assertEqual(out.shape, t.shape)
+        self.assertEqual(out, torch.full_like(t, 2.0))
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertEqual(t.grad, torch.full_like(t, 2.0))
+
+
+# Update the supported devices in DEVICE
+instantiate_device_type_tests(
+    TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE
+)
+instantiate_device_type_tests(
+    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE
+)
+instantiate_device_type_tests(
+    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -20,6 +20,9 @@ The resulting FX Graph is then polished before it is finally translated into an 
 The main advantage of this approach is that the `FX graph <https://pytorch.org/docs/stable/fx.html>`_ is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
+In addition, during the export process, memory usage is significantly reduced compared to the TorchScript-enabled exporter.
+See the :doc:`documentation <onnx_dynamo_memory_usage>` for more information.
+
 The exporter is designed to be modular and extensible. It is composed of the following components:
 
   - **ONNX Exporter**: :class:`Exporter` main class that orchestrates the export process.
@@ -28,7 +31,6 @@ The exporter is designed to be modular and extensible. It is composed of the fol
   - **FX Graph Extractor**: :class:`FXGraphExtractor` extracts the FX graph from the PyTorch model.
   - **Fake Mode**: :class:`ONNXFakeContext` is a context manager that enables fake mode for large scale models.
   - **ONNX Program**: :class:`ONNXProgram` is the output of the exporter that contains the exported ONNX graph and diagnostics.
-  - **ONNX Program Serializer**: :class:`ONNXProgramSerializer` serializes the exported model to a file.
   - **ONNX Diagnostic Options**: :class:`DiagnosticOptions` has a set of options that control the diagnostics emitted by the exporter.
 
 Dependencies
@@ -44,6 +46,9 @@ They can be installed through `pip <https://pypi.org/project/pip/>`_:
 .. code-block:: bash
 
   pip install --upgrade onnx onnxscript
+
+`onnxruntime <https://onnxruntime.ai>`_ can then be used to execute the model
+on a large variety of processors.
 
 A simple example
 ----------------
@@ -75,9 +80,9 @@ See below a demonstration of exporter API in action with a simple Multilayer Per
 
   model = MLPModel()
   tensor_x = torch.rand((97, 8), dtype=torch.float32)
-  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
+  onnx_program = torch.onnx.export(model, (tensor_x,), dynamo=True)
 
-As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_export` with an instance of the model and its input.
+As the code above shows, all you need is to provide :func:`torch.onnx.export` with an instance of the model and its input.
 The exporter will then return an instance of :class:`torch.onnx.ONNXProgram` that contains the exported ONNX graph along with extra information.
 
 The in-memory model available through ``onnx_program.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
@@ -86,6 +91,17 @@ The ONNX model may then be serialized into a `Protobuf file <https://protobuf.de
 .. code-block:: python
 
   onnx_program.save("mlp.onnx")
+
+Two functions exist to export the model to ONNX based on TorchDynamo engine.
+They slightly differ in the way they produce the :class:`ExportedProgram`.
+:func:`torch.onnx.dynamo_export` was introduced with PyTorch 2.1 and
+:func:`torch.onnx.export` was extended with PyTorch 2.5 to easily switch
+from TorchScript to TorchDynamo. To call the former function,
+the last line of the previous example can be replaced by the following one.
+
+.. code-block:: python
+
+  onnx_program = torch.onnx.dynamo_export(model, tensor_x)
 
 Inspecting the ONNX model using GUI
 -----------------------------------
@@ -110,9 +126,14 @@ By expanding it, the function body is shown.
 
 The function body is a sequence of ONNX operators or other functions.
 
-Diagnosing issues with SARIF
-----------------------------
+When the conversion fails
+-------------------------
 
+Function :func:`torch.onnx.export` should called a second time with
+parameter ``report=True``. A markdown report is generated to help the user
+to resolve the issue.
+
+Function :func:`torch.onnx.dynamo_export` generates a report using 'SARIF' format.
 ONNX diagnostics goes beyond regular logs through the adoption of
 `Static Analysis Results Interchange Format (aka SARIF) <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html>`__
 to help users debug and improve their model using a GUI, such as
@@ -131,6 +152,11 @@ The main advantages are:
 
    generated/onnx_dynamo_diagnostics_rules/*
 
+.. toctree::
+    :hidden:
+
+    onnx_dynamo_memory_usage
+
 API Reference
 -------------
 
@@ -144,13 +170,7 @@ API Reference
 .. autoclass:: torch.onnx.ONNXProgram
     :members:
 
-.. autoclass:: torch.onnx.ONNXProgramSerializer
-    :members:
-
 .. autoclass:: torch.onnx.ONNXRuntimeOptions
-    :members:
-
-.. autoclass:: torch.onnx.InvalidExportOptionsError
     :members:
 
 .. autoclass:: torch.onnx.OnnxExporterError

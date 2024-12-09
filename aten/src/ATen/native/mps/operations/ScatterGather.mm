@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -53,10 +54,10 @@ TORCH_IMPL_FUNC(gather_out_mps)
     }
     auto input_type = getMPSDataType(self);
     auto output_type = getMPSDataType(output);
-    if (input_type == MPSDataTypeUInt8 || ((input_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (input_type == MPSDataTypeUInt8) {
       input_type = MPSDataTypeInt8;
     }
-    if (output_type == MPSDataTypeUInt8 || ((output_type == MPSDataTypeBool && !is_macos_13_or_newer()))) {
+    if (output_type == MPSDataTypeUInt8) {
       output_type = MPSDataTypeInt8;
     }
     string key = "gather_out_mps" + getTensorsStringKey({self, index, output}) + ":" + std::to_string(dim);
@@ -113,7 +114,7 @@ static void scatter_mps_general(const Tensor& self_arg,
                                 const Tensor& src,
                                 const Tensor& output,
                                 string func_name,
-                                const c10::string_view reduce) {
+                                const std::string_view reduce) {
   using namespace mps;
 
   if (self_arg.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
@@ -306,7 +307,7 @@ TORCH_IMPL_FUNC(scatter_src_out_mps)
 TORCH_IMPL_FUNC(scatter_value_out_mps)
 (const Tensor& self, int64_t dim, const Tensor& index, const Scalar& value, const Tensor& output) {
   Tensor src =
-      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+      at::empty(index.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_out_mps", "set");
 }
@@ -316,7 +317,7 @@ TORCH_IMPL_FUNC(scatter_reduce_out_mps)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& output) {
   scatter_mps_general(self, dim, index, src, output, "scatter_reduce_out_mps", reduce);
 }
@@ -326,10 +327,10 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out_mps)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& output) {
   Tensor src =
-      at::empty(index.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, self.suggest_memory_format());
+      at::empty(index.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, self.suggest_memory_format());
   src.fill_(value);
   scatter_mps_general(self, dim, index, const_cast<Tensor&>(src), output, "scatter_value_reduce_out_mps", reduce);
 }
@@ -339,4 +340,29 @@ TORCH_IMPL_FUNC(scatter_add_mps_out)
   scatter_mps_general(self, dim, index, src, output, "scatter_add_mps_out", "add");
 }
 
+static void scatter_reduce_two_mps_kernel(const Tensor& self,
+                                          const int64_t dim,
+                                          const Tensor& index,
+                                          const Tensor& src,
+                                          const ReductionType& reduce) {
+  static const bool is_macOS_15_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  switch (reduce) {
+    case ReductionType::MEAN:
+    case ReductionType::SUM:
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "add");
+    case ReductionType::PROD:
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "prod");
+    case ReductionType::MIN:
+      TORCH_CHECK(self.scalar_type() != kInt || is_macOS_15_or_newer, "torch.int32 is only supported on MacOS15+");
+      TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amin");
+    case ReductionType::MAX:
+      TORCH_CHECK(self.scalar_type() != kInt || is_macOS_15_or_newer, "torch.int32 is only supported on MacOS15+");
+      TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
+      return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amax");
+  }
+  TORCH_CHECK(false, "Unsupported reduction type: ", static_cast<int>(reduce));
+}
+
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_mps_kernel);
 } // namespace at::native

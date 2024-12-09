@@ -5,8 +5,8 @@
 #include <utility>
 
 // SHAPE CACHING CODE
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 namespace {
 using CanonicalArg = std::variant<CanonicalizedSymbolicShape, IValue>;
 using CanonicalArgVec = std::vector<CanonicalArg>;
@@ -109,7 +109,7 @@ TORCH_API void cache_shape_function(
   shapeCache.Add(std::move(cache_key), std::move(can_ret_vec));
 }
 
-TORCH_API c10::optional<std::vector<at::SymbolicShape>>
+TORCH_API std::optional<std::vector<at::SymbolicShape>>
 get_cached_shape_function(
     const FunctionSchema* schema,
     const std::vector<SSAInput>& arg_vec) {
@@ -120,7 +120,7 @@ get_cached_shape_function(
       get_cache_key(schema, arg_vec, ss_map, /* deep_copy */ false);
   auto cached_ret_vec = shapeCache.Get(cache_key);
   if (cached_ret_vec == nullptr) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   // Decanonicalize the return values
   auto inverse_ss_map = std::unordered_map<int64_t, int64_t>();
@@ -148,7 +148,7 @@ void CanonicalizedSymbolicShape::init(
     std::unordered_map<int64_t, int64_t>& ss_map) {
   auto sizes = orig_shape.sizes();
   if (!sizes) {
-    values_ = c10::nullopt;
+    values_ = std::nullopt;
     return;
   }
   values_ = std::vector<int64_t>();
@@ -205,6 +205,5 @@ bool operator==(
     const CanonicalizedSymbolicShape& a,
     const CanonicalizedSymbolicShape& b) {
   return a.values_ == b.values_;
-};
-} // namespace jit
-} // namespace torch
+}
+} // namespace torch::jit

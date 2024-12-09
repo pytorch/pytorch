@@ -87,7 +87,7 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_synchronization(
-        reinterpret_cast<uintptr_t>(stream));
+        c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
 #if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
   C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
@@ -105,12 +105,12 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_stream_synchronization(
-        reinterpret_cast<uintptr_t>(stream));
+        c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
 C10_CUDA_API bool hasPrimaryContext(DeviceIndex device_index);
-C10_CUDA_API c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
+C10_CUDA_API std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
 
 } // namespace c10::cuda

@@ -25,8 +25,8 @@ runs:
         s3-bucket: ${{ inputs.s3-bucket }}
 
     - name: Download PyTorch Build Artifacts from GHA
-      if: inputs.use-gha
-      uses: actions/download-artifact@v3
+      if: ${{ inputs.use-gha }}
+      uses: actions/download-artifact@v4
       with:
         name: ${{ inputs.name }}
 

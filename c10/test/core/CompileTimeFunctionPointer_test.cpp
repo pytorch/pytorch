@@ -14,14 +14,14 @@ void dummy() {}
 using dummy_ptr = TORCH_FN_TYPE(dummy);
 static_assert(c10::is_compile_time_function_pointer<dummy_ptr>::value);
 static_assert(dummy_ptr::func_ptr() == &dummy);
-static_assert(std::is_same<void(), dummy_ptr::FuncType>::value);
+static_assert(std::is_same_v<void(), dummy_ptr::FuncType>);
 } // namespace test_access_through_type
 
 namespace test_access_through_value {
 void dummy() {}
 constexpr auto dummy_ptr = TORCH_FN(dummy);
 static_assert(dummy_ptr.func_ptr() == &dummy);
-static_assert(std::is_same<void(), decltype(dummy_ptr)::FuncType>::value);
+static_assert(std::is_same_v<void(), decltype(dummy_ptr)::FuncType>);
 } // namespace test_access_through_value
 
 namespace test_access_through_type_also_works_if_specified_as_pointer {
@@ -29,14 +29,14 @@ void dummy() {}
 using dummy_ptr = TORCH_FN_TYPE(&dummy);
 static_assert(c10::is_compile_time_function_pointer<dummy_ptr>::value);
 static_assert(dummy_ptr::func_ptr() == &dummy);
-static_assert(std::is_same<void(), dummy_ptr::FuncType>::value);
+static_assert(std::is_same_v<void(), dummy_ptr::FuncType>);
 } // namespace test_access_through_type_also_works_if_specified_as_pointer
 
 namespace test_access_through_value_also_works_if_specified_as_pointer {
 void dummy() {}
 constexpr auto dummy_ptr = TORCH_FN(&dummy);
 static_assert(dummy_ptr.func_ptr() == &dummy);
-static_assert(std::is_same<void(), decltype(dummy_ptr)::FuncType>::value);
+static_assert(std::is_same_v<void(), decltype(dummy_ptr)::FuncType>);
 } // namespace test_access_through_value_also_works_if_specified_as_pointer
 
 namespace test_run_through_type {

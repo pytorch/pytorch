@@ -1,18 +1,22 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, List, Optional
 
 import sympy
 
 import torch
 
-from ...codecache import cache_dir
-from ...config import cuda as inductor_cuda_config
+from ... import config
 from ...ir import Layout
+from ...runtime.runtime_utils import cache_dir
+from ...virtualized import V
 from .cuda_env import get_cuda_arch, get_cuda_version
+
 
 log = logging.getLogger(__name__)
 
@@ -46,12 +50,15 @@ def _gen_cutlass_file(
 
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
+    if config.is_fbcode():
+        return True
+
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.abspath(
-        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
+        os.path.join(config.cuda.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
@@ -151,7 +158,7 @@ def _gen_ops_cached(arch, version) -> List[Any]:
             arch,
             version,
         )
-        return list()
+        return []
     arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)
@@ -177,6 +184,23 @@ def gen_ops() -> List[Any]:
     arch = get_cuda_arch()
     version = get_cuda_version()
     return _gen_ops_cached(arch, version)
+
+
+def torch_dtype_to_cutlass_type(
+    torch_dtype: torch.dtype,
+) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
+    # Import cutlass python scripts.
+    assert try_import_cutlass()
+    import cutlass_library  # type: ignore[import]
+
+    if torch_dtype == torch.float:
+        return cutlass_library.library.DataType.f32
+    elif torch_dtype == torch.half:
+        return cutlass_library.library.DataType.f16
+    elif torch_dtype == torch.bfloat16:
+        return cutlass_library.library.DataType.bf16
+    else:
+        raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
 
 def dtype_match(
@@ -274,10 +298,67 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     def is_static_int(number):
         return isinstance(number, (int, sympy.Integer))
 
-    if is_static_int(size[-1]) and is_static_int(offset):
-        alignments = get_alignments(dtype)
-        for alignment in alignments:
-            if int(size[-1]) % alignment == 0 and int(offset) % alignment == 0:
-                return alignment
+    def a_factor_of(x, alignment):
+        if is_static_int(x) and is_static_int(alignment):
+            return x % alignment == 0
+        rem = sympy.Mod(x, alignment)
+        return V.graph.sizevars.evaluate_expr(sympy.Eq(rem, 0))
 
+    try:
+        contiguous_dim = inductor_layout.stride.index(1)
+    except ValueError:
+        # No dim with stride 1 found, return 1
+        return 1
+    alignments = get_alignments(dtype)
+    for alignment in alignments:
+        if not a_factor_of(size[contiguous_dim], alignment) or not a_factor_of(
+            offset, alignment
+        ):
+            continue
+        if all(
+            (dim == contiguous_dim)
+            or a_factor_of(inductor_layout.stride[dim], alignment)
+            for dim in range(len(size))
+        ):
+            return alignment
     return 1
+
+
+class CUDACompileSourceCapturingContext:
+    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
+    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
+
+    def __init__(self):
+        self.sources = []
+        self._compile_patch = None
+
+    def __enter__(self, *args, **kwargs):
+        import unittest.mock as mock
+
+        import torch._inductor.codecache
+
+        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
+
+        def my_compile(source_code, dst_file_ext):
+            self.sources.append(source_code)
+            return _compile_method_orig(source_code, dst_file_ext)
+
+        self._compile_patch = mock.patch(
+            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
+        )
+        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+
+    def __exit__(self, *args, **kwargs):
+        return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
+
+
+def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
+    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
+    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
+    from torch._inductor.codecache import cuda_compile_command
+
+    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
+    compile_command = cuda_compile_command(
+        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
+    )
+    return compile_command

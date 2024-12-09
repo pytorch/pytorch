@@ -9,6 +9,7 @@
 
 #include <c10/core/CPUAllocator.h>
 
+#include <c10/util/error.h>
 #ifdef _WIN32
 #include <c10/util/Unicode.h>
 #endif
@@ -61,7 +62,7 @@ constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -252,13 +253,13 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
 #else
         TORCH_CHECK(false, "unable to open file <", filename_, "> in sharedmem mode, shm_open unavailable on this platform");
@@ -266,7 +267,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       } else {
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
         if ((fd = open(filename_.c_str(), O_RDONLY)) == -1) {
-          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-only mode: ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-only mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
       }
     } else {
@@ -275,32 +276,38 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 
     struct stat file_stat{};
     if (fstat(fd, &file_stat) == -1) {
+#ifndef STRIP_ERROR_MESSAGES
       int last_err = errno;
+#endif
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
         ::close(fd);
       }
-      TORCH_CHECK(false, "unable to stat the file <", filename_, ">: ", strerror(last_err), " (", last_err, ")");
+      TORCH_CHECK(false, "unable to stat the file <", filename_, ">: ", c10::utils::str_error(last_err), " (", last_err, ")");
     }
 
     if (size > 0) {
       if (static_cast<int64_t>(size) > file_stat.st_size) {
         if (flags_) {
           if (ftruncate(fd, static_cast<off_t>(size)) == -1) {
-            TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", strerror(errno), " (", errno, ")");
+            TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", c10::utils::str_error(errno), " (", errno, ")");
           }
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
+#ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
+#endif
             ::close(fd);
-            TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", strerror(last_err), " (", last_err, ")");
+            TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", c10::utils::str_error(last_err), " (", last_err, ")");
           }
 /* on macOS write returns with errno 45 (Opperation not supported) when used
  * with a file descriptor obtained via shm_open
  */
 #ifndef __APPLE__
           if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
+#ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
+#endif
             ::close(fd);
-            TORCH_CHECK(false, "unable to write to file <", filename_, ">: ", strerror(last_err), " (", last_err, ")");
+            TORCH_CHECK(false, "unable to write to file <", filename_, ">: ", c10::utils::str_error(last_err), " (", last_err, ")");
           }
 #endif
         } else {
@@ -323,7 +330,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 
     if (base_ptr_ == MAP_FAILED) {
       base_ptr_ = nullptr; /* let's be sure it is NULL */
-      TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
+      TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
     }
 
 #if !defined(__APPLE__) && !defined(__ANDROID__)
@@ -335,7 +342,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       fd_ = fd;
     } else {
       if (::close(fd) == -1) {
-        TORCH_CHECK(false, "Error closing file <", filename_, ">: ", strerror(errno), " (", errno, ")");
+        TORCH_CHECK(false, "Error closing file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
       }
       fd_ = -1;
     }
@@ -344,14 +351,14 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_UNLINK
         if (shm_unlink(filename_.c_str()) == -1) {
-          TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", c10::utils::str_error(errno), " (", errno, ")");
         }
 #else
         TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
 #endif
       } else {
         if (unlink(filename_.c_str()) == -1)
-          TORCH_CHECK(false, "could not unlink file ", filename_, " : ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "could not unlink file ", filename_, " : ", c10::utils::str_error(errno), " (", errno, ")");
       }
     }
 
@@ -363,7 +370,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size)
+MapAllocator::MapAllocator(std::string_view filename, int flags, size_t size)
   : MapAllocator(WITH_FD, filename, -1, flags, size)
 {}
 
@@ -405,19 +412,19 @@ void MapAllocator::close() {
 #else /* _WIN32 */
   if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
     if (::close(fd_) == -1) {
-      TORCH_CHECK(false, "could not close file descriptor ", fd_, " :", strerror(errno), " (", errno, ")" );
+      TORCH_CHECK(false, "could not close file descriptor ", fd_, " :", c10::utils::str_error(errno), " (", errno, ")" );
     }
   }
 
   if (munmap(base_ptr_, size_)) {
-    TORCH_CHECK(false, "could not unmap the shared memory file: ", strerror(errno), " (", errno, ")");
+    TORCH_CHECK(false, "could not unmap the shared memory file: ", c10::utils::str_error(errno), " (", errno, ")");
   }
 
   if (!(flags_ & (ALLOCATOR_MAPPED_FROMFD | ALLOCATOR_MAPPED_UNLINK))) {
     if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_UNLINK
       if (shm_unlink(filename_.c_str()) == -1) {
-        TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", strerror(errno), " (", errno, ")");
+        TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", c10::utils::str_error(errno), " (", errno, ")");
       }
 #else
       TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
@@ -429,11 +436,11 @@ void MapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size) {
+MapAllocator::MapAllocator(std::string_view filename, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
-MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size) {
+MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
@@ -578,7 +585,7 @@ RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& d
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr MapAllocator::makeDataPtr(std::string_view filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};

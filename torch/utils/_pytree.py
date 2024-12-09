@@ -16,13 +16,16 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import functools
 import importlib
+import importlib.metadata
 import json
 import sys
 import threading
 import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
+from enum import Enum
 from typing import (
     Any,
     Callable,
@@ -47,6 +50,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -65,6 +69,7 @@ __all__ = [
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
+    "tree_iter",
     "tree_leaves",
     "tree_leaves_with_path",
     "tree_structure",
@@ -105,6 +110,13 @@ class KeyEntry(Protocol):
 
     def get(self, parent: Any) -> Any:
         ...
+
+
+class EnumEncoder(json.JSONEncoder):
+    def default(self, obj: object) -> str:
+        if isinstance(obj, Enum):
+            return obj.value  # type: ignore[no-any-return]
+        return super().default(obj)  # type: ignore[no-any-return]
 
 
 Context = Any
@@ -157,6 +169,31 @@ class _SerializeNodeDef(NamedTuple):
 SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
+# NB: we try really hard to not import _cxx_pytree (which depends on optree)
+# as much as possible. This is for isolation: a user who is not using C++ pytree
+# shouldn't pay for it, and it helps makes things like cpython upgrades easier.
+try:
+    _optree_version = importlib.metadata.version("optree")
+except importlib.metadata.PackageNotFoundError:
+    _cxx_pytree_dynamo_traceable = _cxx_pytree_exists = False
+else:
+    _cxx_pytree_exists = True
+    from torch._vendor.packaging.version import Version
+
+    _cxx_pytree_dynamo_traceable = Version(_optree_version) >= Version("0.13.0")
+    if not _cxx_pytree_dynamo_traceable:
+        warnings.warn(
+            "optree is installed but the version is too old to support PyTorch Dynamo in C++ pytree. "
+            "C++ pytree support is disabled. "
+            "Please consider upgrading optree using `python3 -m pip install --upgrade 'optree>=0.13.0'`.",
+            FutureWarning,
+        )
+
+    del Version
+
+_cxx_pytree_imported = False
+_cxx_pytree_pending_imports: List[Any] = []
+
 
 def register_pytree_node(
     cls: Type[Any],
@@ -206,11 +243,12 @@ def register_pytree_node(
         flatten_with_keys_fn=flatten_with_keys_fn,
     )
 
-    try:
+    if not _cxx_pytree_exists:
+        return
+
+    if _cxx_pytree_imported:
         from . import _cxx_pytree as cxx
-    except ImportError:
-        pass
-    else:
+
         cxx._private_register_pytree_node(
             cls,
             flatten_fn,
@@ -219,8 +257,49 @@ def register_pytree_node(
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
         )
+    else:
+        args = (cls, flatten_fn, unflatten_fn)
+        kwargs = {
+            "serialized_type_name": serialized_type_name,
+            "to_dumpable_context": to_dumpable_context,
+            "from_dumpable_context": from_dumpable_context,
+        }
+        _cxx_pytree_pending_imports.append((args, kwargs))
 
 
+def _register_namedtuple(
+    cls: Type[Any],
+    *,
+    serialized_type_name: str,
+) -> None:
+    """
+    Registers a namedtuple as a valid pytree node. By default namedtuples are
+    valid pytree nodes, but they are not serializable. This API provides the
+    argument `serialized_type_name` which allows these namedtuples to be
+    serialized.
+
+    Args:
+        cls: the dataclass type to register
+        serialized_type_name: The serialized name for the dataclass. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        namedtuple.
+    """
+    _private_register_pytree_node(
+        cls,
+        _namedtuple_flatten,
+        _namedtuple_unflatten,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=_namedtuple_serialize,
+        from_dumpable_context=_namedtuple_deserialize,
+        flatten_with_keys_fn=_namedtuple_flatten_with_keys,
+    )
+
+
+@deprecated(
+    "`torch.utils._pytree._register_pytree_node` is deprecated. "
+    "Please use `torch.utils._pytree.register_pytree_node` instead.",
+    category=FutureWarning,
+)
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -257,16 +336,12 @@ def _register_pytree_node(
             Like ``flatten_fn``, but in place of a List[leaf], it should return
             a List[(keypath, leaf)].
     """
-    warnings.warn(
-        "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch.utils._pytree.register_pytree_node instead.",
-        stacklevel=2,
-    )
-
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
+            "`to_str_fn` and `maybe_from_str_fn` is deprecated. "
+            "Please use `to_dumpable_context` and `from_dumpable_context` instead.",
+            FutureWarning,
+            stacklevel=2,
         )
 
     _private_register_pytree_node(
@@ -422,18 +497,34 @@ def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple
 
 
 def _namedtuple_serialize(context: Context) -> DumpableContext:
-    json_namedtuple = {
-        "class_name": context.__name__,
-        "fields": context._fields,
-    }
-    return json_namedtuple
+    if context not in SUPPORTED_SERIALIZED_TYPES:
+        raise NotImplementedError(
+            f"Can't serialize TreeSpec of namedtuple class {context} because we "
+            "didn't register a serializated_type_name. Please register using "
+            "`_register_namedtuple`."
+        )
+
+    serialize_node_def = SUPPORTED_SERIALIZED_TYPES[context]
+    serialized_type_name = serialize_node_def.serialized_type_name
+
+    if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
+        raise NotImplementedError(
+            f"Can't serialize TreeSpec of namedtuple class {context} because we "
+            "couldn't find a serializated_type_name. Please register using "
+            "`_register_namedtuple`."
+        )
+    return serialized_type_name
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    class_name = dumpable_context["class_name"]
-    assert isinstance(class_name, str)
-    context = namedtuple(class_name, dumpable_context["fields"])  # type: ignore[misc]
-    return context
+    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        raise NotImplementedError(
+            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+            "because we couldn't find a serializated name."
+        )
+
+    typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    return typ
 
 
 def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -616,7 +707,7 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass
+@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
     context: Context
@@ -627,9 +718,12 @@ class TreeSpec:
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self.num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
-        self.num_leaves = sum(spec.num_leaves for spec in self.children_specs)
-        self.num_children = len(self.children_specs)
+        num_nodes = sum((spec.num_nodes for spec in self.children_specs), start=1)
+        num_leaves = sum(spec.num_leaves for spec in self.children_specs)
+        num_children = len(self.children_specs)
+        object.__setattr__(self, "num_nodes", num_nodes)
+        object.__setattr__(self, "num_leaves", num_leaves)
+        object.__setattr__(self, "num_children", num_children)
 
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
@@ -762,9 +856,9 @@ class LeafSpec(TreeSpec):
         super().__init__(None, None, [])
 
     def __post_init__(self) -> None:
-        self.num_nodes = 1
-        self.num_leaves = 1
-        self.num_children = 0
+        object.__setattr__(self, "num_nodes", 1)
+        object.__setattr__(self, "num_leaves", 1)
+        object.__setattr__(self, "num_children", 0)
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
@@ -820,22 +914,21 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return treespec.unflatten(leaves)
 
 
-def _tree_leaves_helper(
+def tree_iter(
     tree: PyTree,
-    leaves: List[Any],
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> None:
+) -> Iterable[Any]:
+    """Get an iterator over the leaves of a pytree."""
     if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
-        return
+        yield tree
+    else:
+        node_type = _get_node_type(tree)
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        child_pytrees, _ = flatten_fn(tree)
 
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, _ = flatten_fn(tree)
-
-    # Recursively flatten the children
-    for child in child_pytrees:
-        _tree_leaves_helper(child, leaves, is_leaf=is_leaf)
+        # Recursively flatten the children
+        for child in child_pytrees:
+            yield from tree_iter(child, is_leaf=is_leaf)
 
 
 def tree_leaves(
@@ -843,9 +936,7 @@ def tree_leaves(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    leaves: List[Any] = []
-    _tree_leaves_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves
+    return list(tree_iter(tree, is_leaf=is_leaf))
 
 
 def tree_structure(
@@ -930,7 +1021,7 @@ def tree_map_(
     """
     leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    tuple(map(func, *flat_args))  # consume and exhaust the iterable
+    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
 
 
@@ -1012,7 +1103,7 @@ def map_only(
         raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
-        # @functools.wraps(func)  # torch dynamo doesn't support this yet
+        @functools.wraps(func)
         def wrapped(x: T) -> Any:
             if pred(x):
                 return func(x)
@@ -1126,7 +1217,7 @@ def tree_all(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(map(pred, flat_args))
 
 
@@ -1135,7 +1226,7 @@ def tree_any(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(map(pred, flat_args))
 
 
@@ -1175,7 +1266,7 @@ def tree_all_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1215,7 +1306,7 @@ def tree_any_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1305,7 +1396,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if serialize_node_def.to_dumpable_context is None:
         try:
-            serialized_context = json.dumps(treespec.context)
+            serialized_context = json.dumps(treespec.context, cls=EnumEncoder)
         except TypeError as e:
             raise TypeError(
                 "Unable to serialize context. "
@@ -1348,9 +1439,9 @@ def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
     else:
         context = serialize_node_def.from_dumpable_context(json_schema["context"])
 
-    children_specs = []
-    for child_string in json_schema["children_spec"]:
-        children_specs.append(_json_to_treespec(child_string))
+    children_specs = [
+        _json_to_treespec(child_string) for child_string in json_schema["children_spec"]
+    ]
 
     return TreeSpec(typ, context, children_specs)
 
@@ -1405,14 +1496,20 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`pytree_to_str` is deprecated. Please use `treespec_dumps` instead.",
+    category=FutureWarning,
+)
 def pytree_to_str(treespec: TreeSpec) -> str:
-    warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")
     return treespec_dumps(treespec)
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`str_to_pytree` is deprecated. Please use `treespec_loads` instead.",
+    category=FutureWarning,
+)
 def str_to_pytree(json: str) -> TreeSpec:
-    warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
     return treespec_loads(json)
 
 
@@ -1423,9 +1520,9 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     """
     leaves: List[Any] = []
     for a in args:
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     for a in kwargs.values():
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     return leaves
 
 

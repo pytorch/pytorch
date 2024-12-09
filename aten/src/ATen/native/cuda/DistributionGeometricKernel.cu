@@ -5,11 +5,11 @@
 
 namespace at::native {
 
-void geometric_kernel(TensorIteratorBase& iter, double p_, const std::optional<Generator>& gen) {
+void geometric_kernel(TensorIteratorBase& iter, double p_, std::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::geometric_kernel(iter, p_, generator);
 }
 
-REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel)
 
 } // namespace at::native

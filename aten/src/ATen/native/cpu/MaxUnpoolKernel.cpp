@@ -7,7 +7,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at::native {
 
@@ -37,8 +37,11 @@ void cpu_max_unpool(
 
   // treat batch size and channels as one dimension
   // and the feature map as another dimension
-  int64_t channels, output_depth, output_height, output_width;
-  if (is_3d) {
+  int64_t channels = 0;
+  [[maybe_unused]] int64_t output_depth = 0;
+  [[maybe_unused]] int64_t output_height = 0;
+  [[maybe_unused]] int64_t output_width = 0;
+  if constexpr (is_3d) {
     TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d: expect input to be 4d or 5d tensor.");
     channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
     output_depth = output.size(-3);
@@ -54,7 +57,7 @@ void cpu_max_unpool(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = output.numel() / channels;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W: [channels, input_image_size]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -79,12 +82,12 @@ void cpu_max_unpool(
   });
 
   if (optional_error_index) {
-    if (is_3d) {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+    if constexpr (is_3d) {
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);
     } else {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_height,
           "x", output_width);
     }
@@ -118,7 +121,7 @@ void cpu_max_unpool_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -148,7 +151,7 @@ void cpu_max_unpool_channels_last(
   });
 
   if (optional_error_index) {
-    AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+    TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
         "x", output_width, ")");
   }
@@ -174,7 +177,10 @@ void cpu_max_unpool_backward(
 
   // treat batch size and channels as one dimension
   // and the feature map as another dimension
-  int64_t channels, output_depth, output_height, output_width;
+  int64_t channels = 0;
+  [[maybe_unused]] int64_t output_depth = 0;
+  [[maybe_unused]] int64_t output_height = 0;
+  [[maybe_unused]] int64_t output_width = 0;
   if (is_3d) {
     TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d_backward: expect grad_output to be 4d or 5d tensor.");
     channels = ndim == 4 ? grad_output.size(0) : grad_output.size(0) * grad_output.size(1);
@@ -191,7 +197,7 @@ void cpu_max_unpool_backward(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = grad_output.numel() / channels;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -217,12 +223,12 @@ void cpu_max_unpool_backward(
 
   if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     } else {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     }
@@ -239,13 +245,13 @@ void max_unpool2d_kernel_impl(
     const Tensor& indices) {
   switch(input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool2d", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_unpool2d", [&] {
         cpu_max_unpool<scalar_t, /*is_3d*/false>(output, input, indices);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool2d_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_unpool2d_channels_last", [&] {
         cpu_max_unpool_channels_last<scalar_t>(output, input, indices);
       });
       break;
@@ -259,14 +265,14 @@ void max_unpool3d_kernel_impl(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool3d", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "max_unpool3d", [&] {
     cpu_max_unpool<scalar_t, /*is_3d*/true>(output, input, indices);
   });
 }
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
-REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
+REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl)
+REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl)
 
 } // at::native

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union
@@ -7,6 +8,7 @@ from torch import Tensor
 from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.fx import Node
+
 
 __all__ = [
     "Quantizer",
@@ -24,8 +26,6 @@ class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
-
-    pass
 
 
 @dataclass(eq=True, frozen=True)
@@ -47,6 +47,7 @@ class QuantizationSpec(QuantizationSpecBase):
     is_dynamic: bool = False
 
     def __post_init__(self):
+        # TODO: add init for quant_min/quant_max
         # quant_min must be less than quant_max
         if (
             self.quant_min is not None
@@ -71,6 +72,7 @@ class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
+    is_dynamic: bool = False
 
 
 """
@@ -104,6 +106,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
     ch_axis: Optional[int] = None
+    is_dynamic: bool = False
 
 
 @dataclass
@@ -156,3 +159,23 @@ class Quantizer(ABC):
     @abstractmethod
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
+
+    def prepare_obs_or_fq_callback(
+        self,
+        model: torch.fx.GraphModule,
+        edge_or_node_to_obs_or_fq: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    ) -> None:
+        """A callback that will be called after the observers or fake quants are created
+        for each sharing group, but before they are inserted into the graph. The
+        callback can be used to make final quantization adjustments, such as enforcing
+        specific scale and zero point on model input or output.
+
+        Args:
+          * `model`: the graph module being prepared.
+          * `edge_or_node_to_obs_or_fq`: a dictionary mapping each annotated edge and
+            node to the corresponding observer or fake quant object. Note that multiple
+            edges and/or nodes can map to the same observer / fake quant instance if
+            they were annotated with SharedQuantizationSpec. This dictionary can be
+            modified by the callback.
+        """
+        return

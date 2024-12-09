@@ -78,7 +78,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
   return result;
 }
 
-static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
   TORCH_CHECK(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
@@ -102,8 +102,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
   if (!(p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25))))) {
-    TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cdist only supports CPU and CUDA devices, X1 got: ", device1);
-    TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cdist only supports CPU and CUDA devices, X2 got: ", device2);
+    TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X1 got: ", device1);
+    TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "cdist only supports CPU, XPU and CUDA devices, X2 got: ", device2);
   }
 
   auto dim1 = x1.dim();
@@ -147,7 +147,7 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   return result;
 }
 
-Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
@@ -175,7 +175,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   return result;
 }
 
-Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
+Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, std::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
@@ -228,9 +228,9 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
   auto device1 = x1.device().type();
-  TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X1 got: ", device1);
+  TORCH_CHECK(device1 == kCPU || device1 == kCUDA || device1 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X1 got: ", device1);
   auto device2 = x2.device().type();
-  TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "_cdist_backward only supports CPU and CUDA devices, X2 got: ", device2);
+  TORCH_CHECK(device2 == kCPU || device2 == kCUDA || device2 == kXPU, "_cdist_backward only supports CPU, XPU and CUDA devices, X2 got: ", device2);
 
   Tensor grad_x1 =
       at::empty({batch_product, n, m}, x1.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -244,7 +244,7 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
 Tensor _pdist_forward(const Tensor& self, const double p) {
   TORCH_CHECK(self.is_contiguous(), "_pdist_forward requires contiguous input");
   auto device = self.device().type();
-  TORCH_CHECK(device == kCPU || device == kCUDA, "_pdist_forward only supports CPU and CUDA devices, got: ", device);
+  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU, "_pdist_forward only supports CPU, XPU and CUDA devices, got: ", device);
   Tensor result = at::empty({0}, self.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (self.size(0) <= 1) {
     result.resize_({0});
@@ -265,7 +265,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   TORCH_CHECK(self.is_contiguous(), "_pdist_backward requires self to be contiguous");
   TORCH_CHECK(pdist.is_contiguous(), "_pdist_backward requires pdist to be contiguous");
   auto device = self.device().type();
-  TORCH_CHECK(device == kCPU || device == kCUDA, "_pdist_backward only supports CPU and CUDA devices, got: ", device);
+  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU, "_pdist_backward only supports CPU, XPU and CUDA devices, got: ", device);
   Tensor result = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   pdist_backward_stub(device, result, grad, self, p, pdist);
   return result;

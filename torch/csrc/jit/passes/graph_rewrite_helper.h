@@ -5,16 +5,14 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-namespace torch {
-namespace jit {
-namespace graph_rewrite_helper {
+namespace torch::jit::graph_rewrite_helper {
 
 std::string getFuncName(Value* func_value);
 Value* getValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap);
-c10::optional<IValue> getIValue(
+std::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap);
@@ -49,6 +47,4 @@ struct PatternInfo {
   }
 };
 
-} // namespace graph_rewrite_helper
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::graph_rewrite_helper

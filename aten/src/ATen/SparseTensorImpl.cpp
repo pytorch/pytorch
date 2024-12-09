@@ -57,13 +57,13 @@ void SparseTensorImpl::release_resources() {
 }
 
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  AT_ERROR("sparse tensors do not have set_size");
+  TORCH_CHECK(false, "sparse tensors do not have set_size");
 }
 void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  AT_ERROR("sparse tensors do not have set_stride");
+  TORCH_CHECK(false, "sparse tensors do not have set_stride");
 }
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
-  AT_ERROR("sparse tensors do not have set_storage_offset");
+  TORCH_CHECK(false, "sparse tensors do not have set_storage_offset");
 }
 #ifdef DEBUG
 bool SparseTensorImpl::has_storage() const {
@@ -108,7 +108,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = sym_nnz() < 2;
+  coalesced_ = TORCH_GUARD_SIZE_OBLIVIOUS(sym_nnz().sym_lt(2));
 }
 
 

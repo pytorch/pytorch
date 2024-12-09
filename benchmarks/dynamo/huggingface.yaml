@@ -1,0 +1,110 @@
+skip:
+  all:
+    # Difficult to setup accuracy test because .eval() not supported
+    - Reformer
+    # Fails deepcopy
+    - BlenderbotForConditionalGeneration
+    - GPTNeoForCausalLM
+    - GPTNeoForSequenceClassification
+    # Fails with even batch size = 1
+    - GPTJForCausalLM
+    - GPTJForQuestionAnswering
+
+  device:
+    cpu: []
+
+  control_flow:
+    - AllenaiLongformerBase
+
+batch_size:
+  # TODO - Fails even after fake tensors
+  divisors:
+    AlbertForMaskedLM: 2
+    AlbertForQuestionAnswering: 2
+    AllenaiLongformerBase: 2
+    BartForCausalLM: 2
+    BartForConditionalGeneration: 2
+    BertForMaskedLM: 2
+    BertForQuestionAnswering: 2
+    BlenderbotForCausalLM: 8
+    # BlenderbotForConditionalGeneration : 16
+    BlenderbotSmallForCausalLM: 4
+    BlenderbotSmallForConditionalGeneration: 2
+    CamemBert: 2
+    DebertaForMaskedLM: 4
+    DebertaForQuestionAnswering: 2
+    DebertaV2ForMaskedLM: 4
+    DebertaV2ForQuestionAnswering: 8
+    DistilBertForMaskedLM: 2
+    DistilBertForQuestionAnswering: 2
+    DistillGPT2: 2
+    ElectraForCausalLM: 2
+    ElectraForQuestionAnswering: 2
+    GPT2ForSequenceClassification: 2
+    # GPTJForCausalLM : 2
+    # GPTJForQuestionAnswering : 2
+    # GPTNeoForCausalLM : 32
+    # GPTNeoForSequenceClassification : 2
+    GoogleFnet: 2
+    LayoutLMForMaskedLM: 2
+    LayoutLMForSequenceClassification: 2
+    M2M100ForConditionalGeneration: 4
+    MBartForCausalLM: 2
+    MBartForConditionalGeneration: 2
+    MT5ForConditionalGeneration: 2
+    MegatronBertForCausalLM: 4
+    MegatronBertForQuestionAnswering: 2
+    MobileBertForMaskedLM: 2
+    MobileBertForQuestionAnswering: 2
+    OPTForCausalLM: 2
+    PLBartForCausalLM: 2
+    PLBartForConditionalGeneration: 2
+    PegasusForCausalLM: 4
+    PegasusForConditionalGeneration: 2
+    RobertaForCausalLM: 2
+    RobertaForQuestionAnswering: 2
+    Speech2Text2ForCausalLM: 4
+    T5ForConditionalGeneration: 2
+    T5Small: 2
+    TrOCRForCausalLM: 2
+    XGLMForCausalLM: 4
+    XLNetLMHeadModel: 2
+    YituTechConvBert: 2
+
+
+tolerance:
+  higher_training:
+    - MT5ForConditionalGeneration
+    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
+    # harmful.
+    - AlbertForQuestionAnswering
+
+  higher_max_autotune_training:
+    # DebertaForQuestionAnswering needs higher tolerance in Max-Autotune mode
+    - DebertaForQuestionAnswering
+
+  higher_inference:
+    - GPT2ForSequenceClassification
+    - RobertaForQuestionAnswering
+
+  higher_inference_cpu:
+    - LayoutLMForSequenceClassification
+    - GPT2ForSequenceClassification
+
+  cosine: []
+
+
+accuracy:
+  skip:
+    large_models:
+      # Models too large to have eager, dynamo and fp64_numbers simultaneously
+      # even for 40 GB machine.
+      - DebertaV2ForMaskedLM
+      - BlenderbotForCausalLM
+
+only_inference:
+  # Fails with dynamo for train mode
+  - M2M100ForConditionalGeneration
+
+only_fp32:
+  - GoogleFnet

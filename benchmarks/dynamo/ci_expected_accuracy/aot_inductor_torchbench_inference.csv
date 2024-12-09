@@ -6,15 +6,11 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-BERT_pytorch,fail_to_run,0
+BERT_pytorch,pass,0
 
 
 
 Background_Matting,pass_due_to_skip,0
-
-
-
-DALLE2_pytorch,fail_to_run,0
 
 
 
@@ -34,7 +30,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,fail_to_run,0
+basic_gnn_gcn,pass,0
 
 
 
@@ -242,6 +238,10 @@ pyhpc_equation_of_state,pass,0
 
 
 
+pyhpc_isoneutral_mixing,pass,0
+
+
+
 pyhpc_turbulent_kinetic_energy,pass,0
 
 
@@ -250,7 +250,7 @@ pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 
-pytorch_stargan,fail_to_run,0
+pytorch_stargan,pass,0
 
 
 
@@ -278,7 +278,7 @@ resnext50_32x4d,pass,0
 
 
 
-sam,fail_to_run,0
+sam,pass,0
 
 
 

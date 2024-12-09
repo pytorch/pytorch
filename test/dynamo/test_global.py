@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
-import torch
+from typing import Optional
 
+import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+
 
 try:
     from . import utils
@@ -54,7 +56,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -69,10 +71,10 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         """Wrap the second call with torch._dynamo as well"""
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x)
         self.assertTrue(same(res2 - res1, 2 * torch.ones(10)))
 
@@ -85,7 +87,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         self.assertTrue(same(res1, x + x + 1))
 
@@ -102,7 +104,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -116,7 +118,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -134,7 +136,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -148,7 +150,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -162,7 +164,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -175,7 +177,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res1 = opt_fn(x)
         res2 = fn(x)
         self.assertTrue(same(res2 - res1, torch.ones(10)))
@@ -183,7 +185,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_1(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: str = None):
+            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
                 self.value = value
                 self.name = name or fresh_name()
 
@@ -195,7 +197,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
@@ -203,12 +205,12 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_2(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: str = None):
+            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
                 self.value = value
                 self.name = name or fresh_name()
 
             @staticmethod
-            def constant(value: torch.Tensor, name: str = None):
+            def constant(value: torch.Tensor, name: Optional[str] = None):
                 return Variable(value, name)
 
         def fn(a, b):
@@ -219,10 +221,32 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         a = torch.randn(10)
         b = torch.randn(10)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
+
+    def test_store_global_crossfile_inline(self):
+        try:
+            from . import mock_store_global_crossfile_inline
+        except ImportError:
+            import mock_store_global_crossfile_inline
+
+        @torch.compile()
+        def fn(x):
+            mock_store_global_crossfile_inline.set_flag_true()
+            mock_store_global_crossfile_inline.set_flag_false()
+            return x + 1
+
+        @torch.compile()
+        def fn_set_true(x):
+            mock_store_global_crossfile_inline.set_flag_true()
+            return x + 1
+
+        fn_set_true(torch.ones(2, 2))
+        self.assertTrue(mock_store_global_crossfile_inline.global_flag)
+        fn(torch.ones(2, 2))
+        self.assertFalse(mock_store_global_crossfile_inline.global_flag)
 
 
 if __name__ == "__main__":

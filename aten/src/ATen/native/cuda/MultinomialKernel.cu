@@ -328,7 +328,7 @@ void multinomial_with_replacement_kernel_impl(
     Tensor& result,
     const Tensor& self,
     const int64_t n_sample,
-    const std::optional<Generator>& generator) {
+    std::optional<Generator> generator) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(generator, cuda::detail::getDefaultCUDAGenerator());
 
   int inputSize = self.dim();
@@ -386,27 +386,27 @@ void multinomial_with_replacement_kernel_impl(
       // for subsequent samples in this space
       Tensor origDist = native::empty_like(
           self_v,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       origDist.copy_(self_v);
 
       Tensor normDist = native::empty_like(
           self_v,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       Tensor prefixSum = native::empty_like(
           self_v,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows

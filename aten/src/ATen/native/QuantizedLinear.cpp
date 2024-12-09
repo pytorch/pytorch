@@ -32,14 +32,14 @@
 #endif // USE_FBGEMM
 
 namespace caffe2 {
-CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>);
+CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>)
 } // namespace caffe2
 
 #ifdef USE_FBGEMM
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>);
-CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>);
+CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>)
+CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>)
 } // namespace caffe2
 #endif // USE_FBGEMM
 
@@ -64,7 +64,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
                   "and will be removed in a future PyTorch release.")
 
   const Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -305,7 +305,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   const Tensor weight_contig = weight.contiguous();
-  const int8_t* weight_ptr = weight_contig.data_ptr<int8_t>();
+  const int8_t* weight_ptr = weight_contig.const_data_ptr<int8_t>();
   auto ptr = std::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
@@ -404,7 +404,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   auto ptr = std::make_unique<fbgemm::PackedGemmMatrixFP16>(
       fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
   c10::intrusive_ptr<LinearPackedParamsBase> packed_weight =
-      c10::make_intrusive<PackedLinearWeightFp16>(std::move(ptr), c10::nullopt);
+      c10::make_intrusive<PackedLinearWeightFp16>(std::move(ptr), std::nullopt);
   auto unique_ptr_wrapper =
       std::make_unique<decltype(packed_weight)>(std::move(packed_weight));
   return cpp_custom_type_hack::create(
@@ -424,7 +424,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   const Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =

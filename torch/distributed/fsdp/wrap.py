@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the BSD license found in the
@@ -22,6 +23,7 @@ from typing import (
 )
 
 import torch.nn as nn
+
 
 __all__ = [
     "always_wrap_policy",
@@ -484,7 +486,7 @@ def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
         # FSDP config with these attributes for this module. Currently this
         # is only used to disable mixed precision for BatchNorm when
         # auto_wrapping.
-        overrides = {**kwargs, **module._wrap_overrides}  # type: ignore[arg-type]
+        overrides = {**kwargs, **module._wrap_overrides}  # type: ignore[arg-type, dict-item]
         return wrapper_cls(module, **overrides)
 
     return wrapper_cls(module, **kwargs)

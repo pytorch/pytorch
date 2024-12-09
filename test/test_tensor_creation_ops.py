@@ -14,10 +14,27 @@ from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
-    set_default_dtype, set_default_tensor_type,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TestCase,
+    run_tests,
+    do_test_empty_full,
+    TEST_WITH_ROCM,
+    suppress_warnings,
+    torch_to_numpy_dtype_dict,
+    numpy_to_torch_dtype_dict,
+    slowTest,
+    set_default_dtype,
+    set_default_tensor_type,
+    TEST_SCIPY,
+    IS_MACOS,
+    IS_PPC,
+    IS_JETSON,
+    IS_WINDOWS,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    parametrize,
+    skipIfTorchDynamo,
+    xfailIfTorchDynamo,
+)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -25,7 +42,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
-    float_to_corresponding_complex_type_map
+    float_to_corresponding_complex_type_map, all_types_complex_float8_and
 )
 
 from torch.utils.dlpack import to_dlpack
@@ -147,7 +164,16 @@ class TestTensorCreation(TestCase):
                 exact_dtype=False)
 
     def test_cat_all_dtypes_and_devices(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
+        for dt in all_types_and_complex_and(
+            torch.half,
+            torch.bool,
+            torch.bfloat16,
+            torch.chalf,
+            torch.float8_e4m3fn,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2,
+            torch.float8_e5m2fnuz,
+        ):
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
 
             expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
@@ -157,11 +183,13 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch.cat((x, x), 1), expected2)
 
     def test_fill_all_dtypes_and_devices(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
+        for dt in all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
             for x in [torch.tensor((10, 10), dtype=dt, device=device),
                       torch.empty(10000, dtype=dt, device=device)]:  # large tensor
                 numel = x.numel()
-                bound = 100 if dt in (torch.uint8, torch.int8) else 2000
+                bound_dtypes = (torch.uint8, torch.int8, torch.float8_e4m3fn,
+                                torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)
+                bound = 100 if dt in bound_dtypes else 2000
                 for n in range(-bound, bound, bound // 10):
                     x.fill_(n)
                     self.assertEqual(x, torch.tensor([n] * numel, dtype=dt, device=device))
@@ -945,7 +973,7 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_vstack_row_stack(self, device, dtype):
-        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.row_stack))
+        ops = ((torch.vstack, np.vstack), (torch.row_stack, np.vstack))
         for torch_op, np_op in ops:
             self._test_special_stacks(0, 2, torch_op, np_op, device, dtype)
             for i in range(5):
@@ -1043,6 +1071,9 @@ class TestTensorCreation(TestCase):
             # Note: numpy -2.0 or -1.5 -> uint8 conversion is undefined
             #       see https://github.com/pytorch/pytorch/issues/97794
             refs = (0, 254, 255, 0, 0, 0, 1, 2)
+        elif dtype == torch.int16:
+            # CPU min and max float -> int16 conversion is divergent.
+            vals = (-2, -1.5, -.5, 0, .5, 1.5, 2)
 
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
@@ -1050,11 +1081,17 @@ class TestTensorCreation(TestCase):
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
+    @unittest.skipIf(IS_MACOS, "Nonfinite conversion results on MacOS are different from others.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
+        refs = 0
+        if dtype == torch.bool:
+            refs = True
+        elif dtype in (torch.int32, torch.int64):
+            refs = torch.iinfo(dtype).min
 
-        self._float_to_int_conversion_helper(vals, device, dtype)
+        self._float_to_int_conversion_helper(vals, device, dtype, (refs, ) * 3)
 
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
@@ -1582,6 +1619,8 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     def test_random_from_to_bool(self, device):
         size = 2000
 
@@ -1661,7 +1700,9 @@ class TestTensorCreation(TestCase):
 
     # NB: uint64 is broken because its max value is not representable in
     # int64_t, but this is what random expects
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch .uint16, torch.uint32))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1750,6 +1791,8 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_to(self, device, dtype):
         size = 2000
@@ -2469,7 +2512,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(d.shape[0], 800)
 
     # TODO: this test should be updated
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     @onlyCPU
     def test_arange_inference(self, device):
         # end only
@@ -3170,18 +3212,19 @@ class TestTensorCreation(TestCase):
         dtype = torch.float64
         t = torch.randn(2, 5, dtype=dtype, device=device)
         with tempfile.NamedTemporaryFile() as f:
+            expected_filename = f.name if shared else None
             t.numpy().tofile(f)
             t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
-            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertTrue(t_mapped.untyped_storage().filename == expected_filename)
             self.assertEqual(torch.flatten(t), t_mapped)
 
             s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
-            self.assertTrue(s.filename == f.name)
+            self.assertTrue(s.filename == expected_filename)
 
     @onlyCPU
     def test_storage_filename(self, device):
         t = torch.randn(2, 5, device=device)
-        self.assertIsNone(t.storage().filename)
+        self.assertIsNone(t.untyped_storage().filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
@@ -3350,6 +3393,8 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
@@ -3544,6 +3589,7 @@ class TestRandomTensorCreation(TestCase):
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Produces inconsistent errors when run in fbcode.")
     def test_randperm_device_compatibility(self, device):
         cuda_gen = torch.Generator(device='cuda')
         cpu_gen = torch.Generator(device='cpu')
@@ -3822,7 +3868,7 @@ def to_memview(tensor):
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
-        """Check the output of 'asarray', given its input and assertion informations.
+        """Check the output of 'asarray', given its input and assertion information.
 
         Besides calling 'asarray' itself, this function does 4 different checks:
             1. Whether the result is aliased or not, depending on 'is_alias'

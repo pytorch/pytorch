@@ -1,16 +1,18 @@
 # Owner(s): ["module: inductor"]
 import itertools
+import unittest
 
 import torch
-
+import torch._dynamo.testing
+from torch._higher_order_ops.associative_scan import associative_scan
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
@@ -41,6 +43,19 @@ class CondModels:
                 return x - y
 
             return torch.cond(p, true_fn, false_fn, [a, b])
+
+    class SimpleWithIntClosure(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.num = 3
+
+        def forward(self, p, a, b):
+            return torch.cond(
+                pred=p,
+                true_fn=lambda a, b: [a + b + self.num],
+                false_fn=lambda a, b: [a - b - self.num],
+                operands=(a, b),
+            )
 
     class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
@@ -197,14 +212,17 @@ class CondTests(TestCase):
 
         for inputs in input_sets:
             for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
+                cloned_inputs = [inp.clone() for inp in inputs_with_predicates]
                 result = model(*inputs_with_predicates)
                 result_compiled = compiled_model(*inputs_with_predicates)
+                # inputs must not be mutated
+                torch.testing.assert_close(cloned_inputs, inputs_with_predicates)
                 torch.testing.assert_close(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
@@ -218,8 +236,56 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_simple_with_int_closure(self, device):
+        self._run_test(
+            model=torch.compile(CondModels.SimpleWithIntClosure(), dynamic=True),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+        )
+
+    @requires_gpu
+    def test_cond_control_flow_with_precomputed_size(self):
+        class TestModel(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv2d = torch.nn.Conv2d(
+                    512, 512, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                )
+                self.threshold = 20
+
+            def forward(self, x: torch.Tensor, index) -> torch.Tensor:
+                def true_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                def false_fn(x: torch.Tensor):
+                    return self.conv2d(x)
+
+                return torch.cond(
+                    index < self.threshold and index >= 0, true_fn, false_fn, (x,)
+                )
+
+        main_model = TestModel().to(GPU_TYPE)
+        x1 = torch.rand(2, 512, 128, 72).to(GPU_TYPE)
+        x2 = torch.rand(2, 512, 96, 96).to(GPU_TYPE)
+
+        opt_model = torch.compile(main_model)
+        out1 = main_model(x1, 1)
+        opt_out1 = opt_model(x1, 1)
+        self.assertTrue(torch.allclose(out1, opt_out1, atol=1e-5))
+
+        out2 = main_model(x2, 30)
+        opt_out2 = opt_model(x2, 30)
+        self.assertTrue(torch.allclose(out2, opt_out2, atol=1e-5))
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
@@ -235,8 +301,8 @@ class CondTests(TestCase):
             num_predicates=3,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_outer_code_before_after(self, device, dynamic):
         # some code before and after the conditional
@@ -250,8 +316,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_multiple_outputs(self, device, dynamic):
         # multiple outputs with different shapes
@@ -266,8 +332,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_advanced_dynamic_shapes(self, device):
         # subgraphs input shapes include symbolic expressions
         class Model(torch.nn.Module):
@@ -294,7 +360,99 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @requires_cuda
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_outer_to_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cos(x)
+
+                def false_fn(x):
+                    return torch.sin(x)
+
+                nz = torch.nonzero(a)
+                b = torch.ones([nz.size(0), 8], device=nz.device)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                return torch.cond(p, true_fn, false_fn, [b])
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @unittest.skip("unbacked symints from inner to outer graph not supported yet")
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_unbacked_symint_inner_to_outer(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.cos(b)
+
+                def false_fn(x):
+                    nz = torch.nonzero(x)
+                    b = torch.ones([nz.size(0), 8], device=nz.device)
+                    return torch.sin(b)
+
+                b = torch.sin(a)
+
+                y = torch.cond(p, true_fn, false_fn, [b])
+                return torch.sin(y)
+
+        with torch._dynamo.config.patch(
+            {
+                "capture_dynamic_output_shape_ops": True,
+            }
+        ):
+            self._run_test(
+                model=Model(),
+                inputs=(torch.randn(2, 3, 3),),
+                device=device,
+                dynamic=True,
+            )
+
+    @requires_gpu
     def test_cond_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         self._run_test(
@@ -304,11 +462,11 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             ),
-            device="cuda",
+            device=GPU_TYPE,
             dynamic=False,
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
         self._run_test(
@@ -317,13 +475,12 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             ),
-            device="cuda",
+            device=GPU_TYPE,
             dynamic=True,
         )
 
-    @skipIfRocm
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
@@ -334,8 +491,8 @@ class CondTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_cond_non_tensor_predicates(self, device, dynamic):
         # model with a boolean predicate
@@ -352,7 +509,7 @@ class CondTests(TestCase):
                 num_predicates=0,
             )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
@@ -375,8 +532,8 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph(self, device):
         class Model(torch.nn.Module):
             def forward(self, p, a):
@@ -396,8 +553,8 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     def test_cond_decompose_ops_in_subgraph_recursive(self, device):
         def inner_fn1(x):
             return torch.zeros_like(x)
@@ -423,7 +580,7 @@ class CondTests(TestCase):
             device=device,
         )
 
-    @requires_cuda
+    @requires_gpu
     def test_cond_inductor_fx_passes_recursively_applied(self):
         counters = {"pre_grad": 0, "post_grad": 0}
 
@@ -448,7 +605,7 @@ class CondTests(TestCase):
                     torch.randn(10, 20),
                     torch.randn(10, 20),
                 ),
-                device="cuda",
+                device=GPU_TYPE,
                 dynamic=True,
                 num_predicates=3,
             )
@@ -488,8 +645,6 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, (ci, cj, a, b))
 
-    # TODO(aakhundov): add while_loop test with parametrs
-    # once dynamo / export allows while_loop closure capture
     class Parameters(torch.nn.Module):
         class InnerModel(torch.nn.Module):
             def __init__(self, device):
@@ -526,7 +681,9 @@ class WhileLoopModels:
             return f * g / 1.41
 
     # TODO(aakhundov): add while_loop test with outer buffers
-    # once dynamo / export allows while_loop closure capture
+    # with dynamic=True once dynamo / export allows while_loop
+    # closure capture with mark_dynamic:
+    # https://github.com/pytorch/pytorch/issues/123596
     class OuterBuffers(torch.nn.Module):
         def forward(self, c, a, b):
             d = a * 2
@@ -540,6 +697,24 @@ class WhileLoopModels:
 
             return torch._higher_order_ops.while_loop(cond_fn, body_fn, [c, a, b])
 
+    class PytreeCarry(torch.nn.Module):
+        def forward(self, it, pytree_input):
+            def cond_fn(it, pytree_input):
+                return it > 0
+
+            def body_fn(it, pytree_input):
+                x = pytree_input[0][0]
+                y = pytree_input[1]["x"]
+                z = pytree_input[1]["y"]
+                new_x = y.sin()
+                new_y = z.cos()
+                new_z = x + 1
+                return it - 1, ([new_x], {"x": new_y, "y": new_z})
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn, body_fn, (it, pytree_input)
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -550,36 +725,58 @@ class WhileLoopTests(TestCase):
         dynamic=False,
         num_counters=1,
     ):
+        import torch.utils._pytree as pytree
+
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
-        inputs = [inp.to(device=device) for inp in inputs]
+        inputs = pytree.tree_map(lambda t: t.to(device=device), inputs)
         input_sets = [inputs]
         if dynamic:
-            larger_inputs = []
-            for inp in inputs:
+
+            def mark_first_dim_dyn(inp):
+                torch._dynamo.mark_dynamic(inp, 0)
+
+            pytree.tree_map(mark_first_dim_dyn, input_sets)
+
+            def tile_fn(inp):
                 # tile every first dim 5x
                 tiling = [5] + [1] * (inp.ndim - 1)
-                larger_inputs.append(torch.tile(inp, tiling))
+                t = torch.tile(inp, tiling)
+                # mark every first dim as dynamic
+                torch._dynamo.mark_dynamic(inp, 0)
+                return t
+
+            larger_inputs = pytree.tree_map(tile_fn, inputs)
             input_sets.append(larger_inputs)
-            for inputs in input_sets:
-                for inp in inputs:
-                    # mark every first dim as dynamic
-                    if inp.ndim:
-                        torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            for inputs_with_counters in prepend_counters(inputs, num_counters):
+            flat_inputs, inp_spec = pytree.tree_flatten(inputs)
+            for flat_inputs_with_counters in prepend_counters(
+                flat_inputs, num_counters
+            ):
+                counters, flat = (
+                    flat_inputs_with_counters[:num_counters],
+                    flat_inputs_with_counters[num_counters:],
+                )
+                unflat_inputs = pytree.tree_unflatten(flat, inp_spec)
+                inputs_with_counters = counters + unflat_inputs
+                cloned_inputs = pytree.tree_map(
+                    lambda t: t.clone(), inputs_with_counters
+                )
                 result = model(*inputs_with_counters)
-                result_compiled = compiled_model(*inputs_with_counters)
+                with torch.no_grad():
+                    result_compiled = compiled_model(*inputs_with_counters)
+                # inputs must not be mutated
+                torch.testing.assert_close(cloned_inputs, inputs_with_counters)
                 torch.testing.assert_close(
                     result, result_compiled, atol=1e-4, rtol=1e-4
                 )
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_simple_control_flow(self, device, dynamic):
         # while_loop control flow without nesting
@@ -593,11 +790,11 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_nested_control_flow(self, device, dynamic):
-        # while_loop control flow without nesting
+        # while_loop control flow with nesting
         self._run_test(
             model=WhileLoopModels.Nested(),
             inputs=(
@@ -609,11 +806,11 @@ class WhileLoopTests(TestCase):
             num_counters=2,
         )
 
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
     @parametrize("dynamic", [False, True])
     def test_while_loop_with_outer_code(self, device, dynamic):
-        # while_loop control flow without nesting
+        # while_loop control flow with outer code
         self._run_test(
             model=WhileLoopModels.OuterCode(),
             inputs=(
@@ -624,13 +821,164 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_while_loop_with_parameters(self, device, dynamic):
+        # while_loop control flow with parameters
+        self._run_test(
+            model=WhileLoopModels.Parameters(device),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work now due to
+    # https://github.com/pytorch/pytorch/issues/123596
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_outer_buffers(self, device, dynamic):
+        # while_loop control flow with outer code
+        self._run_test(
+            model=WhileLoopModels.OuterBuffers(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    # dynamic=True doesn't work due to we haven't handle lifted symbols
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_with_pytree_inputs(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.PytreeCarry(),
+            inputs=(
+                (
+                    [torch.randn(10, 20)],
+                    {"x": torch.randn(10, 20), "y": torch.randn(10, 20)},
+                ),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
+
+
+class AssociativeScanTests(TestCase):
+    @requires_gpu
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("backend", ["inductor"])
+    @parametrize("device", [torch.device("cpu"), GPU_TYPE])
+    # This test will fail as flip in combination with particular input lenghts
+    # produces weird results.
+    # This is under investigations in
+    # https://github.com/pytorch/pytorch/issues/131805
+    @decorateIf(unittest.skip, lambda params: params["device"] == GPU_TYPE)
+    def test_associative_scan_CUDA_flip(self, combine_mode, backend, device):
+        def fct(x: torch.Tensor, y: torch.Tensor):
+            return x + y
+
+        # for n in range(10):
+        for n in [9]:
+            x = torch.arange(n, device=device)
+            torch.compiler.reset()
+            associative_scan1 = torch.compile(
+                associative_scan, backend=backend, fullgraph=True
+            )
+            associative_scan2 = associative_scan
+
+            if combine_mode == "pointwise" and device == torch.device("cpu"):
+                with self.assertRaisesRegex(Exception, r"."):
+                    associative_scan1(
+                        fct, x, 0, reverse=False, combine_mode=combine_mode
+                    )
+
+                # Skipping test because combine_mode currently only suppors CUDA tensors
+                return
+
+            result1 = associative_scan1(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=False, combine_mode=combine_mode
+            )
+            result3 = torch.cumsum(x, 0)
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only non-compiled and compare with compiled reverse=True
+            result1 = associative_scan1(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result2 = torch.flip(
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Flip only compiled and compare with non-compiled reverse=True
+            result1 = torch.flip(
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Use reverse=False, but flip both results before and after
+            result1 = torch.flip(
+                associative_scan1(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
+            )
+            result2 = torch.flip(
+                associative_scan2(
+                    fct, torch.flip(x, [0]), 0, reverse=False, combine_mode=combine_mode
+                ),
+                [0],
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
+            # Reverse=True
+            result1 = associative_scan1(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result2 = associative_scan2(
+                fct, x, 0, reverse=True, combine_mode=combine_mode
+            )
+            result3 = torch.flip(torch.cumsum(torch.flip(x, [0]), 0), [0])
+
+            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result3)
+
 
 instantiate_parametrized_tests(CondTests)
 instantiate_parametrized_tests(WhileLoopTests)
+instantiate_parametrized_tests(AssociativeScanTests)
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

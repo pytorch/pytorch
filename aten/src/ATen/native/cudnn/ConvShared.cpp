@@ -705,7 +705,7 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
 Tensor cudnn_convolution_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_t,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -758,8 +758,8 @@ Tensor cudnn_convolution_add_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& z_t,
-    const c10::optional<Scalar>& alpha,
-    const c10::optional<Tensor>& bias_t,
+    const std::optional<Scalar>& alpha,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -816,10 +816,10 @@ Tensor cudnn_convolution_add_relu(
 
 REGISTER_CUDA_DISPATCH(
     cudnn_convolution_backward_stub,
-    &cudnn_convolution_backward);
+    &cudnn_convolution_backward)
 REGISTER_CUDA_DISPATCH(
     cudnn_convolution_transpose_backward_stub,
-    &cudnn_convolution_transpose_backward);
+    &cudnn_convolution_transpose_backward)
 
 } // namespace native
 } // namespace at

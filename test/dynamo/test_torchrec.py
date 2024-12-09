@@ -4,13 +4,13 @@ import unittest
 from typing import Dict, List
 
 import torch
-
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch import nn
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import NoTest
+
 
 try:
     from torchrec.datasets.random import RandomRecDataset
@@ -179,7 +179,7 @@ class TorchRecTests(TestCase):
 
         counter = CompileCounter()
 
-        @torch._dynamo.optimize(counter, nopython=True)
+        @torch.compile(backend=counter, fullgraph=True)
         def f(jag_tensor):
             # The indexing here requires more symbolic reasoning
             # and doesn't work right now

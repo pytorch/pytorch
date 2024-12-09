@@ -172,7 +172,8 @@ static struct PyGetSetDef metaclass_properties[] = {
     {nullptr}};
 
 static PyTypeObject metaclass = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.tensortype", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.tensortype", /* tp_name */
     sizeof(PyTypeObject) /* tp_basicsize */
 };
 
@@ -188,7 +189,8 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 }
 
 static PyTypeObject tensor_type_prototype = {
-    PyVarObject_HEAD_INIT(&metaclass, 0) nullptr, /* tp_name */
+    PyVarObject_HEAD_INIT(&metaclass, 0)
+    nullptr, /* tp_name */
     sizeof(PyTensorType) /* tp_basicsize */
 };
 
@@ -242,8 +244,9 @@ static void set_type(
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout = torch::getTHPLayout(layout_from_backend(backend));
-  type_obj.dtype = torch::getTHPDtype(scalarType);
+  type_obj.layout =
+      (THPLayout*)Py_NewRef(torch::getTHPLayout(layout_from_backend(backend)));
+  type_obj.dtype = (THPDtype*)Py_NewRef(torch::getTHPDtype(scalarType));
   type_obj.is_cuda =
       (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
   type_obj.is_xpu =
@@ -313,8 +316,8 @@ static void set_default_storage_type(Backend backend, ScalarType dtype) {
 }
 
 static void set_default_tensor_type(
-    c10::optional<Backend> backend,
-    c10::optional<ScalarType> dtype) {
+    std::optional<Backend> backend,
+    std::optional<ScalarType> dtype) {
   if (backend.has_value()) {
     TORCH_CHECK_TYPE(
         *backend != Backend::Undefined, "default type cannot be undefined");
@@ -448,7 +451,7 @@ void py_set_default_dtype(PyObject* obj) {
       THPDtype_Check(obj),
       "invalid dtype object: only floating-point types are supported as the default type");
   auto scalar_type = ((THPDtype*)obj)->scalar_type;
-  set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
+  set_default_tensor_type(/*backend=*/std::nullopt, scalar_type);
 }
 
 c10::DispatchKey get_default_dispatch_key() {

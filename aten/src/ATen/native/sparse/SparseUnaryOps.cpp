@@ -71,6 +71,8 @@
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
+#include <ATen/ops/is_pinned_native.h>
+#include <ATen/ops/_pin_memory_native.h>
 #endif
 
 namespace at::native {
@@ -165,42 +167,42 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
     });                                                                 \
   }
 
-COALESCED_UNARY_UFUNC(abs);
-COALESCED_UNARY_UFUNC(asin);
-COALESCED_UNARY_UFUNC(asinh);
-COALESCED_UNARY_UFUNC(atan);
-COALESCED_UNARY_UFUNC(atanh);
-COALESCED_UNARY_UFUNC(ceil);
-COALESCED_UNARY_UFUNC(deg2rad);
-COALESCED_UNARY_UFUNC(erf);
-COALESCED_UNARY_UFUNC(erfinv);
-COALESCED_UNARY_UFUNC(expm1);
-COALESCED_UNARY_UFUNC(floor);
-COALESCED_UNARY_UFUNC(frac);
-COALESCED_UNARY_UFUNC(log1p);
-COALESCED_UNARY_UFUNC(round);
-COALESCED_UNARY_UFUNC(rad2deg);
-COALESCED_UNARY_UFUNC(sign);
-COALESCED_UNARY_UFUNC(sgn);
-COALESCED_UNARY_UFUNC(sin);
-COALESCED_UNARY_UFUNC(sinh);
-COALESCED_UNARY_UFUNC(sqrt);
-COALESCED_UNARY_UFUNC(tan);
-COALESCED_UNARY_UFUNC(tanh);
-COALESCED_UNARY_UFUNC(trunc);
+COALESCED_UNARY_UFUNC(abs)
+COALESCED_UNARY_UFUNC(asin)
+COALESCED_UNARY_UFUNC(asinh)
+COALESCED_UNARY_UFUNC(atan)
+COALESCED_UNARY_UFUNC(atanh)
+COALESCED_UNARY_UFUNC(ceil)
+COALESCED_UNARY_UFUNC(deg2rad)
+COALESCED_UNARY_UFUNC(erf)
+COALESCED_UNARY_UFUNC(erfinv)
+COALESCED_UNARY_UFUNC(expm1)
+COALESCED_UNARY_UFUNC(floor)
+COALESCED_UNARY_UFUNC(frac)
+COALESCED_UNARY_UFUNC(log1p)
+COALESCED_UNARY_UFUNC(round)
+COALESCED_UNARY_UFUNC(rad2deg)
+COALESCED_UNARY_UFUNC(sign)
+COALESCED_UNARY_UFUNC(sgn)
+COALESCED_UNARY_UFUNC(sin)
+COALESCED_UNARY_UFUNC(sinh)
+COALESCED_UNARY_UFUNC(sqrt)
+COALESCED_UNARY_UFUNC(tan)
+COALESCED_UNARY_UFUNC(tanh)
+COALESCED_UNARY_UFUNC(trunc)
 // relu function has no declaration, it may be unused in Pytorch.
 // But we keep it and ignore the warning here until verified in the future.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
-COALESCED_UNARY_UFUNC(relu);
+COALESCED_UNARY_UFUNC(relu)
 #pragma clang diagnostic pop
 
-COALESCED_UNARY_UFUNC_NO_INPLACE(signbit);
-COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf);
-COALESCED_UNARY_UFUNC_NO_INPLACE(isposinf);
+COALESCED_UNARY_UFUNC_NO_INPLACE(signbit)
+COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf)
+COALESCED_UNARY_UFUNC_NO_INPLACE(isposinf)
 
-COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan);
-COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf);
+COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan)
+COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 Tensor isinf_sparse_meta(const Tensor& self) {
   TORCH_CHECK_NOT_IMPLEMENTED(0, "nyi isinf for SparseMeta");
@@ -257,16 +259,16 @@ Tensor& threshold_backward_sparse_out(
 }
 
 Tensor nan_to_num_sparse(
-    const Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf) {
+    const Tensor &self, std::optional<double> nan,
+    std::optional<double> posinf, std::optional<double> neginf) {
   return coalesced_unary_ufunc(
       self, [&](const Tensor &t) {
         return at::nan_to_num(t, nan, posinf, neginf);
       });
 }
 Tensor& nan_to_num_sparse_out(
-    const Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf,
+    const Tensor &self, std::optional<double> nan,
+    std::optional<double> posinf, std::optional<double> neginf,
     Tensor &out) {
   return coalesced_unary_ufunc_out(
       self, out, [&](const Tensor &t, Tensor &out) {
@@ -274,8 +276,8 @@ Tensor& nan_to_num_sparse_out(
       });
 }
 Tensor& nan_to_num_sparse_(
-    Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf) {
+    Tensor &self, std::optional<double> nan,
+    std::optional<double> posinf, std::optional<double> neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
 }

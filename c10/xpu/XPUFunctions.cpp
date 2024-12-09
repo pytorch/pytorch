@@ -2,8 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 namespace c10::xpu {
@@ -46,24 +44,50 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
 }
 
 inline void initGlobalDevicePoolState() {
-  // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  // Attempt to initialize XPU devices. If no device is found or the driver is
+  // not installed correctly, issue a warning message instead of raising an
+  // exception to avoid disrupting the user experience.
+  try {
+    // Enumerate all GPU devices and record them.
+    enumDevices(gDevicePool.devices);
+  } catch (const sycl::exception& e) {
+    TORCH_WARN(
+        "Failed to initialize XPU devices. The driver may not be installed, installed incorrectly, or incompatible with the current setup. ",
+        "Please refer to the guideline (https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support) for proper installation and configuration.");
+    return;
+  }
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
   }
+  // Ensures that the number of GPU devices does not exceed the maximum
+  // allowable value for DeviceIndex.
+  TORCH_CHECK(
+      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many XPU devices, DeviceIndex overflowed!");
 
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  // The default context feature is disabled by default on Windows for SYCL
+  // compiler versions earlier than 2025.0.0.
+  std::vector<sycl::device> deviceList;
+  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
+       ++it) {
+    deviceList.push_back(*(*it));
+  }
+  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
+#else
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   gDevicePool.context = std::make_unique<sycl::context>(
       gDevicePool.devices[0]->get_platform().ext_oneapi_get_default_context());
+#endif
 }
 
 inline void initDevicePoolCallOnce() {
   c10::call_once(init_flag, initGlobalDevicePoolState);
 }
 
-void initDeviceProperties(DeviceProp* device_prop, int device) {
+void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
   using namespace sycl::info;
   using namespace sycl::ext;
   // Get raw sycl device associated with device index.
@@ -78,39 +102,42 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
       ? raw_device.get_info<intel::info::device::property>()                 \
       : default_value;
 
+#define ASSIGN_DEVICE_ASPECT(member) \
+  device_prop->has_##member = raw_device.has(sycl::aspect::member);
+
+#define ASSIGN_EXP_CL_ASPECT(member)                                       \
+  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
+      "cl_intel_" #member, &cl_version);
+
+#define ASSIGN_EXP_DEVICE_PROP(property) \
+  device_prop->property =                \
+      raw_device.get_info<oneapi::experimental::info::device::property>();
+
   AT_FORALL_XPU_DEVICE_PROPERTIES(ASSIGN_DEVICE_PROP);
 
   device_prop->platform_name =
       raw_device.get_info<device::platform>().get_info<platform::name>();
 
   AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(ASSIGN_EXT_DEVICE_PROP);
-  return;
-}
 
-inline void check_device(DeviceIndex device) {
-  // TODO: Use c10::Device::MAX_NUM_DEVICES directly. DeviceIndex is a int8_t
-  // value, and the maximum number of GPUs that PyTorch recognizes is 64. So, we
-  // have to check if there is an overflow happen. When DeviceIndex changes to
-  // int16_t and c10::Device::MAX_NUM_DEVICES is provided, we should use it
-  // directly to check if too many XPU devices are detected.
-  TORCH_CHECK(
-      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
-      "Too many XPU devices, DeviceIndex overflowed");
-  auto total = static_cast<DeviceIndex>(gDevicePool.devices.size());
-  TORCH_CHECK(
-      device >= 0 && device < total,
-      "device is out of range, device is ",
-      device,
-      ", total number of device is ",
-      total,
-      ".");
+  AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
+
+  // TODO: Remove cl_version since it is unnecessary.
+  sycl::ext::oneapi::experimental::cl_version cl_version;
+  AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
+
+#if SYCL_COMPILER_VERSION >= 20250000
+  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(ASSIGN_EXP_DEVICE_PROP);
+#endif
+
+  return;
 }
 
 } // anonymous namespace
 
 sycl::device& get_raw_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(device);
+  check_device_index(device);
   return *gDevicePool.devices[device];
 }
 
@@ -125,7 +152,7 @@ sycl::context& get_device_context() {
 void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
-  check_device(device);
+  check_device_index(device);
   initDeviceProperties(device_prop, device);
 }
 
@@ -168,7 +195,7 @@ DeviceIndex current_device() {
 
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(device);
+  check_device_index(device);
   curDeviceIndex = device;
 }
 

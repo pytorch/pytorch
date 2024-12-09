@@ -285,11 +285,11 @@ std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
 // given (sizes, strides, storage_offset) returns the maximum location that
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
-static optional<c10::SymInt> maximum_indexable_location(
-    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, c10::SymInt storage_offset) {
+static std::optional<c10::SymInt> maximum_indexable_location(
+    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   return result + storage_offset;
 }
@@ -303,7 +303,7 @@ static void checkBasicAsStridedValidForSlice(
     int64_t num_batch_dims,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> maybe_storage_offset) {
+    const std::optional<c10::SymInt>& maybe_storage_offset) {
   auto slice_sizes = physical_tensor.sym_sizes().slice(num_batch_dims);
   auto slice_strides = physical_tensor.sym_strides().slice(num_batch_dims);
   auto base_offset = physical_tensor.sym_storage_offset();
@@ -361,7 +361,7 @@ Tensor as_strided_batching_rule(
     const Tensor& tensor,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset) {
+    std::optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::as_strided_symint(tensor, sizes, strides, std::move(storage_offset));
@@ -536,7 +536,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   // we'll just slice the tensor to get a Tensor of shape [0] to pass to at::cat.
   std::vector<Tensor> tensors_to_cat;
   tensors_to_cat.reserve(tensors.size());
-  c10::optional<int64_t> bdim_size = c10::nullopt;
+  std::optional<int64_t> bdim_size = std::nullopt;
 
   // find the bdim size. Might not exist if all BatchedTensors should be skipped
   // by cat's special case.
@@ -573,7 +573,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   }
 
   auto new_dim = bdim_size.has_value() ? dim + 1 : dim;
-  c10::optional<int64_t> new_bdim = bdim_size.has_value() ? c10::make_optional((int64_t)0) : nullopt;
+  std::optional<int64_t> new_bdim = bdim_size.has_value() ? std::make_optional((int64_t)0) : std::nullopt;
   auto result = at::cat(tensors_to_cat, new_dim);
   return makeBatched(result, new_bdim, get_current_level());
 }
@@ -628,10 +628,10 @@ Tensor new_empty_strided_batching_rule(
     const Tensor& self,
     SymIntArrayRef sym_size,
     SymIntArrayRef sym_stride,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
-    optional<bool> pin_memory) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
 
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   auto stride = C10_AS_INTARRAYREF_SLOW(sym_stride);
@@ -693,17 +693,17 @@ Tensor new_empty_strided_batching_rule(
 }
 
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+  TORCH_CHECK(!tensors.empty(), "cat() not supported on empty tensor list");
 
   std::vector<std::vector<Tensor>> unbound;
-  for (auto tensor_iter = tensors.begin(); tensor_iter != tensors.end(); ++tensor_iter) {
-    auto* maybe_batched_impl = maybeGetBatchedImpl(*tensor_iter);
+  for (const auto & tensor : tensors) {
+    auto* maybe_batched_impl = maybeGetBatchedImpl(tensor);
     TORCH_CHECK(maybe_batched_impl, "Tried to run batching rule for cat() on a non-batched tensor");
     auto nt = maybe_batched_impl->value();
     TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = nt.unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "cat() not supported for differently-sized nested arguments");
     }

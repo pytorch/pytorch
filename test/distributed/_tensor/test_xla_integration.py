@@ -7,6 +7,7 @@ from functools import wraps
 from typing import Any, Callable, Dict, Tuple
 
 import numpy as np
+
 import torch
 from torch import nn
 from torch.distributed._tensor import (
@@ -42,7 +43,7 @@ def with_xla(func: Callable) -> Callable:
 
 class DTensorXLAIntegrationTest(TestCase):
     class SimpleLinear(nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super(DTensorXLAIntegrationTest.SimpleLinear, self).__init__()
             self.fc1 = nn.Linear(128, 64)
             self.relu = nn.ReLU()

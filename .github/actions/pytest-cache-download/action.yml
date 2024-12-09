@@ -10,14 +10,14 @@ inputs:
     description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
   s3_bucket:
-    description: S3 bucket to upload/download PyTest cache
+    description: S3 bucket to download PyTest cache
     required: false
-    default: ""
+    default: "gha-artifacts"
 
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+    - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
         shell: bash
@@ -26,7 +26,7 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.35.42
 
     - name: Download the cache
       shell: bash

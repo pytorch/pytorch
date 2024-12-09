@@ -19,6 +19,10 @@ on:
     branches: [gh/**/base]
 
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to check labels for'
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -26,6 +30,9 @@ concurrency:
 
 jobs:
   check-labels:
+    permissions:
+      contents: read
+      pull-requests: write
     name: Check labels
     if: github.repository_owner == 'pytorch'
     runs-on: linux.20_04.4x
@@ -39,7 +46,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip
@@ -54,7 +61,7 @@ jobs:
       - name: Check labels
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUM: ${{ github.event.number }}
+          PR_NUM: ${{ github.event.number || github.event.inputs.pr_number }}
         run: |
           set -ex
-          python3 .github/scripts/check_labels.py "${PR_NUM}"
+          python3 .github/scripts/check_labels.py --exit-non-zero "${PR_NUM}"

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import inspect
@@ -8,7 +9,6 @@ import warnings
 from typing import Dict, List, Set, Type
 
 import torch
-
 import torch._jit_internal as _jit_internal
 from torch._sources import fake_range
 from torch.jit._builtins import _find_builtin
@@ -102,7 +102,7 @@ def make_stubs_from_exported_methods(mod):
 
 def jit_ignored_properties(module):
     user_annotated_ignored_attributes = getattr(
-        module, "__jit_ignored_attributes__", list()
+        module, "__jit_ignored_attributes__", []
     )
 
     def get_properties_names(module):
@@ -205,7 +205,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
     # Get user-annotated ignored attributes.
     user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
+        nn_module, "__jit_ignored_attributes__", []
     )
     concrete_type_builder.add_ignored_attributes(user_annotated_ignored_attributes)
     ignored_properties = jit_ignored_properties(nn_module)
@@ -374,7 +374,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                     f"\nThe error stack is reproduced here:\n{e}"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
-                pass
 
             continue
 
@@ -425,7 +424,7 @@ class ConcreteTypeStore:
     type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
     methods_compiled: Set[torch._C.ConcreteModuleType]
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
         # ConcreteTypes that have had their methods already compiled
@@ -571,10 +570,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     method_stubs = stubs_fn(nn_module)
     property_stubs = get_property_stubs(nn_module)
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
-
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
     def init_fn(script_module):
@@ -824,16 +819,12 @@ def check_module_initialized(mod):
         for name, param in mod._parameters.items():
             if param is not None and torch.nn.parameter.is_lazy(param):
                 raise RuntimeError(
-                    "'{}' has uninitialized parameters {}. Did you forget to run a forward pass?".format(
-                        torch.typename(type(mod)), name
-                    )
+                    f"'{torch.typename(type(mod))}' has uninitialized parameters {name}. Did you forget to run a forward pass?"
                 )
         for name, buf in mod._buffers.items():
             if buf is not None and torch.nn.parameter.is_lazy(buf):
                 raise RuntimeError(
-                    "'{}' has uninitialized buffers {}. Did you forget to run a forward pass?".format(
-                        torch.typename(type(mod)), name
-                    )
+                    f"'{torch.typename(type(mod))}' has uninitialized buffers {name}. Did you forget to run a forward pass?"
                 )
 
 
@@ -843,9 +834,6 @@ def infer_methods_to_compile(nn_module):
     (TODO add a link when the rules are published).
     """
     check_module_initialized(nn_module)
-    user_annotated_ignored_attributes = getattr(
-        nn_module, "__jit_ignored_attributes__", list()
-    )
     ignored_properties = jit_ignored_properties(nn_module)
 
     methods: List[str] = []
@@ -893,9 +881,7 @@ def infer_methods_to_compile(nn_module):
         uniqued_methods.append(name)
         uniquer.add(name)
 
-    stubs = []
-    for method in uniqued_methods:
-        stubs.append(make_stub_from_method(nn_module, method))
+    stubs = [make_stub_from_method(nn_module, method) for method in uniqued_methods]
     return overload_stubs + stubs
 
 
@@ -971,9 +957,10 @@ def interface_script(mod_interface, nn_module):
 
         It is used to know which methods need to act as starting points for compilation.
         """
-        stubs = []
-        for method in mod_interface.getMethodNames():
-            stubs.append(make_stub_from_method(nn_module, method))
+        stubs = [
+            make_stub_from_method(nn_module, method)
+            for method in mod_interface.getMethodNames()
+        ]
         return stubs
 
     return create_script_module(nn_module, infer_interface_methods_to_compile)

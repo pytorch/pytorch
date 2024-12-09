@@ -1,19 +1,27 @@
+# mypy: allow-untyped-defs
 import copy
-import io
-from typing import List, Union
+import functools
+from typing import List, TYPE_CHECKING, Union
 
 import torch
 
-# TODO: Remove after https://github.com/huggingface/safetensors/pull/318
-try:
-    # safetensors is not an exporter requirement, but needed for some huggingface models
-    import safetensors  # type: ignore[import]  # noqa: F401
-    import transformers  # type: ignore[import]
-    from safetensors import torch as safetensors_torch  # noqa: F401
 
-    has_safetensors_and_transformers = True
-except ImportError:
-    has_safetensors_and_transformers = False
+if TYPE_CHECKING:
+    import io
+
+
+# TODO: Remove after https://github.com/huggingface/safetensors/pull/318
+@functools.lru_cache(None)
+def has_safetensors_and_transformers():
+    try:
+        # safetensors is not an exporter requirement, but needed for some huggingface models
+        import safetensors  # type: ignore[import]  # noqa: F401
+        import transformers  # type: ignore[import]  # noqa: F401
+        from safetensors import torch as safetensors_torch  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 class ONNXTorchPatcher:
@@ -45,7 +53,7 @@ class ONNXTorchPatcher:
         `torch.fx._symbolic_trace._wrapped_methods_to_patch`
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # List of file paths processed by torch.load.
         self.paths: List[Union[str, io.BufferedIOBase]] = []
 
@@ -61,7 +69,9 @@ class ONNXTorchPatcher:
         # Wrapper or modified version of torch functions.
         self.torch_load_wrapper = torch_load_wrapper
 
-        if has_safetensors_and_transformers:
+        if has_safetensors_and_transformers():
+            import safetensors
+            import transformers
 
             def safetensors_load_file_wrapper(filename, device="cpu"):
                 # Record path for later serialization into ONNX proto
@@ -109,7 +119,10 @@ class ONNXTorchPatcher:
             desired_wrapped_methods.append((torch.Tensor, "__getitem__"))
         torch.fx._symbolic_trace._wrapped_methods_to_patch = desired_wrapped_methods
 
-        if has_safetensors_and_transformers:
+        if has_safetensors_and_transformers():
+            import safetensors
+            import transformers
+
             safetensors.torch.load_file = self.safetensors_torch_load_file_wrapper
             transformers.modeling_utils.safe_load_file = (
                 self.safetensors_torch_load_file_wrapper
@@ -120,7 +133,10 @@ class ONNXTorchPatcher:
         torch.fx._symbolic_trace._wrapped_methods_to_patch = (
             self.torch_fx__symbolic_trace__wrapped_methods_to_patch
         )
-        if has_safetensors_and_transformers:
+        if has_safetensors_and_transformers():
+            import safetensors
+            import transformers
+
             safetensors.torch.load_file = self.safetensors_torch_load_file
             transformers.modeling_utils.safe_load_file = (
                 self.transformers_modeling_utils_safe_load_file

@@ -10,7 +10,7 @@
 #define THPStorageStr "torch.UntypedStorage"
 
 struct THPStorage {
-  PyObject_HEAD;
+  PyObject_HEAD
   c10::MaybeOwned<c10::Storage> cdata;
   bool is_hermetic;
 };
@@ -23,11 +23,11 @@ TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
     bool allow_preexisting_pyobj = false);
 extern PyTypeObject* THPStorageClass;
 
-static inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
+inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
   return tp == THPStorageClass;
 }
 
-static inline bool THPStorage_CheckExact(PyObject* obj) {
+inline bool THPStorage_CheckExact(PyObject* obj) {
   return THPStorage_CheckTypeExact(Py_TYPE(obj));
 }
 

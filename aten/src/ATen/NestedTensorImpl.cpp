@@ -81,7 +81,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   std::vector<int64_t> result(1, sizes.sizes()[0]);
   if (sizes.dim() > 0) {
     size_t nested_dim = result.size();
-    int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+    const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
     result.resize(nested_dim + sizes.sizes()[1]);
     int64_t sizes_size_0 = sizes.sizes()[0];
     int64_t sizes_size_1 = sizes.sizes()[1];
@@ -114,7 +114,7 @@ at::Tensor construct_nested_strides(const at::Tensor& sizes) {
     return sizes;
   }
   at::Tensor strides = sizes.new_empty(sizes.sizes());
-  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
   int64_t* strides_ptr = strides.data_ptr<int64_t>();
   for (int64_t i = 0; i < sizes.size(0); i++) {
     strides_ptr[orig_dim - 1] = 1;
@@ -152,7 +152,7 @@ at::Tensor construct_offsets(const at::Tensor& sizes) {
     std::iota(offsets_ptr, offsets_ptr + ntensors, 0);
     return offsets;
   }
-  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
     const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies());
@@ -173,11 +173,13 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(c10::nullopt) {
+      opt_sizes_(std::nullopt) {
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
-      "in the near future.");
+      "in the near future. We recommend specifying layout=torch.jagged when constructing "
+      "a nested tensor, as this layout receives active development, has better operator "
+      "coverage, and works with torch.compile.");
   auto storage_device = storage_.device();
   TORCH_INTERNAL_ASSERT(
       storage_device.is_cpu() || storage_device.is_cuda() || storage_device.is_xpu() || storage_device.is_privateuseone(),
@@ -230,20 +232,20 @@ NestedTensorImpl::NestedTensorImpl(
       nested_sizes_(std::move(nested_sizes)),
       nested_strides_(std::move(nested_strides)),
       storage_offsets_(std::move(storage_offsets)),
-      opt_sizes_(c10::nullopt) {
+      opt_sizes_(std::nullopt) {
   validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
-c10::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
+std::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
   if (C10_UNLIKELY(!opt_sizes_.has_value())) {
     // Cache the metadata to avoid recomputing it each time.
-    opt_sizes_ = c10::make_optional(construct_opt_sizes(nested_sizes_));
+    opt_sizes_ = construct_opt_sizes(nested_sizes_);
   }
   d = at::maybe_wrap_dim(d, dim(), false);
   if ((*opt_sizes_)[d] == -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return (*opt_sizes_)[d];
 }
@@ -344,7 +346,7 @@ int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor) {
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
       static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
 
-  const int64_t* sizes_ptr = tensor.data_ptr<int64_t>();
+  const int64_t* sizes_ptr = tensor.const_data_ptr<int64_t>();
   const auto nt_dim = tensor.size(1);
   uint64_t num_elements{0};
 

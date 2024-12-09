@@ -7,26 +7,21 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-
 from torch.distributed._tensor import DeviceMesh, DTensor
-
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import (
-    run_tests,
-    suppress_warnings,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, suppress_warnings
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
+
 
 # rewrite common size variables to sth can be sharded evenly
 # we can enable uneven shards later, but need to adjust more on
@@ -102,6 +97,7 @@ dtensor_fails = {
     xfail("addr"),
     xfail("all"),
     xfail("allclose"),
+    xfail("alias_copy"),
     xfail("amax"),
     xfail("amin"),
     xfail("aminmax"),
@@ -112,6 +108,7 @@ dtensor_fails = {
     xfail("argsort"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
+    xfail("as_strided_copy"),
     xfail("as_strided_scatter"),
     xfail("bernoulli"),
     xfail("_batch_norm_with_update"),
@@ -129,26 +126,20 @@ dtensor_fails = {
     xfail("combinations"),
     xfail("complex"),
     xfail("constant_pad_nd"),
-    xfail("corrcoef"),
     xfail("count_nonzero"),
     xfail("cross"),
     xfail("cummax"),
     xfail("cummin"),
     xfail("cumsum"),
     xfail("cumulative_trapezoid"),
-    xfail("diag"),
-    xfail("diag_embed"),
-    xfail("diagflat"),
-    xfail("diagonal"),
-    xfail("diagonal_copy"),
     xfail("diagonal_scatter"),
     xfail("dist"),
     xfail("dot"),
-    xfail("einsum"),
     xfail("empty"),
     xfail("empty_strided"),
     xfail("empty_like"),
     xfail("empty_permuted"),
+    xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
     xfail("eye"),
@@ -190,24 +181,20 @@ dtensor_fails = {
     xfail("index_copy"),
     xfail("index_fill"),
     xfail("index_put"),
-    xfail("index_reduce"),
+    xfail("index_reduce", "prod"),
+    xfail("index_reduce", "mean"),
+    xfail("index_reduce", "amax"),
+    xfail("index_reduce", "amin"),
     xfail("index_select"),
     xfail("isin"),
-    xfail("isinf"),
-    xfail("isneginf"),
-    xfail("isposinf"),
     xfail("kthvalue"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
-    xfail("linalg.cond"),
     xfail("linalg.cross"),
     xfail("linalg.det"),
     xfail("linalg.det", "singular"),
-    xfail("linalg.diagonal"),
     xfail("linalg.eig"),
-    xfail("linalg.eigh"),
     xfail("linalg.eigvals"),
-    xfail("linalg.eigvalsh"),
     xfail("linalg.householder_product"),
     xfail("linalg.inv"),
     xfail("linalg.inv_ex"),
@@ -229,13 +216,10 @@ dtensor_fails = {
     xfail("linalg.norm", "subgradients_at_zero"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
-    xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("linalg.svd"),
-    xfail("linalg.svdvals"),
     xfail("linalg.tensorinv"),
     xfail("linalg.tensorsolve"),
     xfail("linalg.vander"),
@@ -316,7 +300,6 @@ dtensor_fails = {
     xfail("nn.functional.elu"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
-    xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
@@ -327,12 +310,8 @@ dtensor_fails = {
     xfail("nn.functional.huber_loss"),
     xfail("nn.functional.instance_norm"),
     xfail("nn.functional.interpolate", "area"),
-    xfail("nn.functional.interpolate", "bicubic"),
-    xfail("nn.functional.interpolate", "bilinear"),
-    xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
-    xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.leaky_relu"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
@@ -362,7 +341,6 @@ dtensor_fails = {
     xfail("nn.functional.pdist"),
     xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.pixel_unshuffle"),
-    xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
@@ -375,20 +353,18 @@ dtensor_fails = {
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.unfold"),
-    xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     xfail("nonzero"),
-    xfail("norm", "nuc"),
     xfail("normal"),
     xfail("normal", "number_mean"),
     xfail("normal", "in_place"),
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
+    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
-    xfail("qr"),
     xfail("quantile"),
     xfail("rand_like"),
     xfail("randint_like"),
@@ -404,7 +380,6 @@ dtensor_fails = {
     xfail("rsub"),
     xfail("scalar_tensor"),
     xfail("scatter_add"),
-    xfail("scatter"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
@@ -443,6 +418,7 @@ dtensor_fails = {
     xfail("special.xlog1py"),
     xfail("special.zeta"),
     xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
@@ -460,19 +436,15 @@ dtensor_fails = {
     xfail("std_mean"),
     xfail("std_mean", "unbiased"),
     xfail("stft"),
-    xfail("svd"),
     xfail("svd_lowrank"),
-    xfail("t"),
+    xfail("t_copy"),
     xfail("take"),
     xfail("tensor_split"),
     xfail("to_sparse"),
-    xfail("topk"),
     xfail("trace"),
     xfail("trapezoid"),
     xfail("trapz"),
     xfail("triangular_solve"),
-    xfail("tril"),
-    xfail("triu"),
     xfail("unbind"),
     xfail("unfold"),
     xfail("unfold_copy"),
@@ -482,11 +454,12 @@ dtensor_fails = {
     xfail("unique"),
     xfail("unsafe_split"),
     xfail("unsafe_chunk"),
+    xfail("_unsafe_masked_index"),
+    xfail("_unsafe_masked_index_put_accumulate"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
     xfail("view_copy"),
-    xfail("view_as_complex"),
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
@@ -552,7 +525,6 @@ class TestDTensorOps(DTensorOpTestBase):
 
     # only allow float dytpe for now, we can relax this constraint
     # when feel necessary later (i.e when adding quantization support).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)

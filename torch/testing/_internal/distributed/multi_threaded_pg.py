@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs
 
 import sys
 import threading
@@ -76,6 +76,42 @@ class AllToAll:
                 _, input_tensor_list = data[src_rank]
                 output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
 
+class AllToAllBase:
+    @torch.no_grad()
+    def work(self, data):
+        world_size = len(data)
+        for dest_rank in range(world_size):
+            output_buffer, _, output_split_sizes, _ = data[dest_rank]
+
+            output_indexes = self._size_cumsum(output_buffer.size(0), output_split_sizes, world_size)
+
+            for src_rank in range(world_size):
+                _, input_buffer, _, input_split_sizes = data[src_rank]
+                input_indexes = self._size_cumsum(input_buffer.size(0), input_split_sizes, world_size)
+
+                output_buffer[output_indexes[src_rank]:output_indexes[src_rank + 1]].copy_(
+                    input_buffer[input_indexes[dest_rank]:input_indexes[dest_rank + 1]]
+                )
+
+    def _size_cumsum(self, buf_size: int, sizes: Union[torch.Tensor, List[int], None], world_size: int) -> torch.Tensor:
+        if sizes is None or len(sizes) == 0:
+            sizes = torch.full(
+                (world_size,), buf_size // world_size, dtype=torch.int64
+            )
+        if not isinstance(sizes, torch.Tensor):
+            sizes = torch.tensor(sizes, dtype=torch.int64)
+        assert sizes.dtype == torch.int64
+        sizes = torch.cumsum(
+            torch.cat(
+                (
+                    torch.tensor([0], dtype=torch.int64, device=sizes.device), sizes
+                ),
+                dim=0
+            ),
+            dim=0
+        )
+        return sizes
+
 class AllReduce:
     def __init__(self, op):
         if op.op not in _reduce_ops:
@@ -87,13 +123,11 @@ class AllReduce:
     @torch.no_grad()
     def work(self, data):
         for i in range(len(data[0])):
-            tensors = []
             # use rank0 as the device for sum
             rank_0_device = data[0][i].device
             # collect all data to the list and make them
             # all on rank 0 device
-            for src_rank in range(0, len(data)):
-                tensors.append(data[src_rank][i].to(rank_0_device))
+            tensors = [data[src_rank][i].to(rank_0_device) for src_rank in range(0, len(data))]
 
             # now mimic reduce across all ranks
             res = _reduce_ops[self.op](tensors)
@@ -278,6 +312,19 @@ class ProcessLocalGroup(dist.ProcessGroup):
             cls._cur_coll_on_pgs = {}
             cls._terminate.clear()
 
+    def alltoall_base(
+        self,
+        output_buffer: torch.Tensor,
+        input_buffer: torch.Tensor,
+        output_split_sizes: Optional[List[int]],
+        input_split_sizes: Optional[List[int]],
+        opts=AllToAllOptions()
+    ) -> torch.Tensor:
+        coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
+        res = coll.join(self._rank, (output_buffer, input_buffer, output_split_sizes, input_split_sizes))
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
     def alltoall(self, output_tensor_list, input_tensor_list, opts=AllToAllOptions()):
         coll = ProcessLocalGroup._start_coll(AllToAll(), self)
         res = coll.join(self._rank, (output_tensor_list, input_tensor_list))
@@ -416,7 +463,6 @@ class WorldData:
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
     pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
-    pg_default_device: Dict[dist.ProcessGroup, torch.device]
 
 
 class ThreadLocalWorld:
@@ -424,7 +470,7 @@ class ThreadLocalWorld:
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -470,10 +516,6 @@ class ThreadLocalWorld:
     @property
     def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
-
-    @property
-    def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
-        return self._get_world().pg_default_device
 
 
 _old_pg_world = None

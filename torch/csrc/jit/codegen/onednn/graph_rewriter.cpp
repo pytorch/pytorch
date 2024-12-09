@@ -5,10 +5,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 void GraphRewriter::cleanupSubgraphs() {
   auto curNode = *block_->nodes().rbegin();
@@ -127,18 +124,15 @@ std::pair<graph_node_list::iterator, bool> GraphRewriter::scanNode(
 
 // Try to merge `producer` into `consumer`. If successful, this destroys
 // `producer` and returns the `consumer` group.
-c10::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
+std::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
   AT_ASSERT(llgaHelper_.isLlgaSubgraph(consumer));
   bool canMerge = llgaHelper_.shouldMerge(producer, consumer) &&
       aliasDb_.moveBeforeTopologicallyValid(producer, consumer);
   if (!canMerge) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   llgaHelper_.mergeNodeIntoSubgraph(producer, consumer, aliasDb_);
   return consumer;
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

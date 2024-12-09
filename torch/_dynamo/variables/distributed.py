@@ -1,19 +1,24 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 import torch
-from ...fx.experimental._backward_state import BackwardState
+from torch.fx.experimental._backward_state import BackwardState
+
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
+
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
 class DistributedVariable(VariableTracker):
@@ -27,7 +32,7 @@ class DistributedVariable(VariableTracker):
     and hold the tracking value for the corresponding distributed object.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
@@ -45,7 +50,7 @@ class DistributedVariable(VariableTracker):
 def is_from_local(value):
     if not DistributedVariable.is_available():
         return False
-    from torch.distributed._tensor import DTensor
+    from torch.distributed.tensor import DTensor
 
     return inspect.isfunction(value) and value is DTensor.from_local
 
@@ -73,6 +78,33 @@ def is_constant_pg_functions(value):
     return inspect.isfunction(value) and value in constant_processgroup_functions
 
 
+class WorldMetaClassVariable(DistributedVariable):
+    """
+    Tracks torch.distributed.GroupMember and torch.distributed.group, which are
+    instances of the metaclass _WorldMeta.
+    """
+
+    @classmethod
+    def is_group_member_type(cls, value):
+        if not cls.is_available():
+            return False
+
+        from torch.distributed.distributed_c10d import _WorldMeta
+
+        return type(value) is _WorldMeta
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "WORLD":
+            source = AttrSource(base=self.source, member="WORLD")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return ProcessGroupVariable(self.value.WORLD)
+        elif name == "NON_GROUP_MEMBER":
+            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return EnumVariable(self.value.NON_GROUP_MEMBER)
+        return super().var_getattr(tx, name)
+
+
 class PlacementClassVariable(DistributedVariable):
     @staticmethod
     def is_placement_type(value):
@@ -80,12 +112,18 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return type(value) is type and issubclass(value, Placement)
 
+    def as_python_constant(self):
+        return self.value
+
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
@@ -109,14 +147,14 @@ class PlacementVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed._tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import Placement
 
         return isinstance(value, Placement)
 
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "dim":
             return ConstantVariable.create(self.value.dim)
         return super().var_getattr(tx, name)
@@ -180,7 +218,7 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
@@ -201,7 +239,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_coordinate":
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
-            return ConstantVariable.create(self.value.get_group())
+            return ProcessGroupVariable(self.value.get_group())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
@@ -240,10 +278,12 @@ class ProcessGroupVariable(DistributedVariable):
             return variables.ConstantVariable.create(self.value.rank())
         if name == "size":
             return variables.ConstantVariable.create(self.value.size())
+        if name == "_get_backend_name":
+            return variables.ConstantVariable.create(self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
@@ -262,33 +302,6 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
-
-    @staticmethod
-    def get_global_pg_variable():
-        """
-        Make a ProcessGroupVariable from torch.distributed.group.WORLD and
-        intall guards.
-        """
-        import torch.distributed as dist
-
-        source = AttrSource(
-            AttrSource(
-                base=AttrSource(
-                    base=GlobalSource(global_name="torch"),
-                    member="distributed",
-                    get_static=False,
-                ),
-                member="group",
-                get_static=False,
-            ),
-            member="WORLD",
-            get_static=False,
-        )
-        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-        return ProcessGroupVariable(
-            dist.group.WORLD,
-            source=source,
-        )
 
 
 class BackwardHookVariable(VariableTracker):
@@ -355,7 +368,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
         **options,
-    ):
+    ) -> None:
         super().__init__(**options)
         self.proxy = proxy
         self.module = module
@@ -376,7 +389,7 @@ class BackwardHookVariable(VariableTracker):
             return self._setup_hook(tx, name, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def _setup_hook(self, tx, hook_method_name, args):
+    def _setup_hook(self, tx: "InstructionTranslator", hook_method_name, args):
         from .builder import wrap_fx_proxy
 
         return wrap_fx_proxy(

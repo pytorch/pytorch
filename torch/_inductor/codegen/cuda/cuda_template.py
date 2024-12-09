@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -7,13 +8,14 @@ from unittest.mock import patch
 import sympy
 
 import torch
+
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
-
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ class CUDATemplate(KernelTemplate):
         input_nodes: List[Buffer],
         layout: Layout,
         input_reorder: Optional[List[int]] = None,
-    ):
+    ) -> None:
         """
 
         Baseclass for CUDA C++ Templates, derived from KernelTemplate. Not to be instantiated directly.
@@ -41,12 +43,13 @@ class CUDATemplate(KernelTemplate):
         """
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: Buffer = Buffer("buf_out", layout)
+        self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
 
     def generate(  # type: ignore[override]
         self,
+        description,
         **kwargs,
     ) -> CUDATemplateCaller:
         """
@@ -66,7 +69,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
         ) as kernel:
             code = self.render(kernel=kernel, **kwargs)
-            _, call_args, _ = kernel.args.python_argdefs()
+            _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
@@ -90,6 +93,7 @@ class CUDATemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
+        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
 
@@ -98,7 +102,7 @@ class CUDATemplate(KernelTemplate):
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
-            extra_args=extra_args,
+            extra_args=size_args,
             source_code=code,
         )
 
@@ -127,6 +131,7 @@ class CUDATemplate(KernelTemplate):
             bmreq,
             self,
             kwargs,
+            description,
         )
 
     def header(self) -> IndentedBuffer:
@@ -228,11 +233,17 @@ class CUTLASSTemplate(CUDATemplate):
         torch.float32: "float",
         torch.float64: "double",
         torch.float16: "cutlass::half_t",
-        torch.int32: "int",
+        torch.int32: "int32_t",
+        torch.int16: "int16_t",
         torch.int8: "int8_t",
         torch.uint8: "uint8_t",
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
+    }
+
+    _DTYPE_TO_CUTLASS_SPARSE_META = {
+        torch.int32: "uint32_t",
+        torch.int16: "uint16_t",
     }
 
     def cutlass_type_cast(self, node: IRNode, ptr: str) -> str:
@@ -240,3 +251,11 @@ class CUTLASSTemplate(CUDATemplate):
             return ptr
         else:
             return f"({self._DTYPE_TO_CUTLASS.get(node.get_dtype())}*)({ptr})"
+
+    def cutlass_sparse_meta_type_cast(self, node: IRNode, ptr: str) -> str:
+        if node is None:
+            return ptr
+        else:
+            return (
+                f"({self._DTYPE_TO_CUTLASS_SPARSE_META.get(node.get_dtype())}*)({ptr})"
+            )

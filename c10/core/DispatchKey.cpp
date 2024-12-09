@@ -66,8 +66,8 @@ const char* toString(DispatchKey t) {
       return "Dense";
     case DispatchKey::FPGA:
       return "FPGA";
-    case DispatchKey::ORT:
-      return "ORT";
+    case DispatchKey::MAIA:
+      return "MAIA";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
@@ -84,6 +84,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Quantized:
       return "Quantized";
+    case DispatchKey::QuantizedPrivateUse1:
+      return "QuantizedPrivateUse1";
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
     case DispatchKey::MkldnnCPU:
@@ -149,6 +151,8 @@ const char* toString(DispatchKey t) {
       return "AutocastXLA";
     case DispatchKey::AutocastPrivateUse1:
       return "AutocastPrivateUse1";
+    case DispatchKey::AutocastMPS:
+      return "AutocastMPS";
 
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
@@ -263,7 +267,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
-      {"ORT", c10::DispatchKey::ORT},
+      {"MAIA", c10::DispatchKey::MAIA},
       {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
@@ -297,6 +301,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
       {"AutocastXLA", c10::DispatchKey::AutocastXLA},
       {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
+      {"AutocastMPS", c10::DispatchKey::AutocastMPS},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"BatchedNestedTensor", c10::DispatchKey::BatchedNestedTensor},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -325,6 +330,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
+      {"NestedTensorXPU", c10::DispatchKey::NestedTensorXPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},

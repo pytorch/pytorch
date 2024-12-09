@@ -15,7 +15,11 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import all_types_and, floating_types
-from torch.testing._internal.common_utils import TEST_SCIPY, torch_to_numpy_dtype_dict
+from torch.testing._internal.common_utils import (
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+    torch_to_numpy_dtype_dict,
+)
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     DecorateInfo,
@@ -126,7 +130,6 @@ op_db: List[OpInfo] = [
         ref=scipy.special.i0e if TEST_SCIPY else None,
         decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
         dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-        backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -137,8 +140,8 @@ op_db: List[OpInfo] = [
         ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.i1)
         if TEST_SCIPY
         else None,
-        dtypes=all_types_and(torch.bool),
-        dtypesIfCUDA=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         decorators=(
             DecorateInfo(
@@ -165,8 +168,8 @@ op_db: List[OpInfo] = [
         "special.i1e",
         aten_name="special_i1e",
         ref=scipy.special.i1e if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool),
-        dtypesIfCUDA=all_types_and(torch.bool),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -463,6 +466,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: inf
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.skip("Hangs on ROCm 6.1"), active_if=TEST_WITH_ROCM),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,

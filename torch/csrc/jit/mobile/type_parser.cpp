@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 
-#include <queue>
-
 #include <ATen/core/jit_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
@@ -122,7 +120,7 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
       }
     }
     expect("]");
-    return DynamicTypeFactory::create<TupleType>(std::move(types));
+    return DynamicTypeFactory::create<TupleType>(types);
   }
   return nullptr;
 }
@@ -186,7 +184,6 @@ TypePtr TypeParser::parse() {
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
   std::vector<c10::string_view> field_names;
   std::vector<TypePtr> field_types;
-  std::string ns;
   expect(",");
   expect("[");
   while (cur() != "]") {
@@ -213,7 +210,7 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
 //   ]
 // ]"
 TypePtr TypeParser::parseCustomType() {
-  c10::string_view token = cur();
+  std::string_view token = cur();
   std::string qualified_name = "__torch__.";
   qualified_name.reserve(qualified_name.size() + token.size());
   qualified_name.append(token.begin(), token.end());
@@ -273,7 +270,7 @@ TypePtr TypeParser::parseTorchbindClassType() {
 }
 
 void TypeParser::expect(const char* s) {
-  c10::string_view token = cur();
+  std::string_view token = cur();
   TORCH_CHECK(
       token == s,
       "Error when parsing type ",
@@ -288,7 +285,7 @@ void TypeParser::expect(const char* s) {
 // c10::string_view::operator== calls memcmp to compare against the target
 // string; we can do better if we specialize for a single character.
 void TypeParser::expectChar(char c) {
-  c10::string_view token = cur();
+  std::string_view token = cur();
   TORCH_CHECK(
       token.size() == 1 && token[0] == c,
       "Error when parsing type ",
@@ -306,25 +303,25 @@ void TypeParser::lex() {
     ++start_;
   if (start_ < pythonStr_.size()) {
     if (isSpecialChar(pythonStr_[start_])) {
-      next_token_ = c10::string_view(pythonStr_.data() + start_++, 1);
+      next_token_ = std::string_view(pythonStr_.data() + start_++, 1);
     } else { // A word
       size_t end = start_;
       for (; end < pythonStr_.size() && !isSpecialChar(pythonStr_[end]) &&
            pythonStr_[end] != ' ';
            ++end)
         ;
-      next_token_ = c10::string_view(pythonStr_.data() + start_, end - start_);
+      next_token_ = std::string_view(pythonStr_.data() + start_, end - start_);
       start_ = end;
     }
   }
 }
 
-c10::string_view TypeParser::nextView() {
+std::string_view TypeParser::nextView() {
   TORCH_CHECK(
       !next_token_.empty(),
       "Empty token queue in mobile type parser.",
       "Check the format of the type string and make sure it's correct.");
-  c10::string_view token = cur();
+  std::string_view token = cur();
   advance();
   return token;
 }
@@ -339,7 +336,7 @@ void TypeParser::advance() {
   lex();
 }
 
-C10_NODISCARD c10::string_view TypeParser::cur() const {
+[[nodiscard]] std::string_view TypeParser::cur() const {
   return next_token_;
 }
 

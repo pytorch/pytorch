@@ -12,7 +12,7 @@ from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.linear = torch.nn.Linear(10, 10)
         self.relu = torch.nn.ReLU()
@@ -46,7 +46,10 @@ class InPlaceCompilationTests(TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(model, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
             loaded_model(torch.randn(1, 10))
 
     def test_state_dict_save(self):
@@ -58,7 +61,8 @@ class InPlaceCompilationTests(TestCase):
             torch.save(model.state_dict(), os.path.join(tmpdirname, "model.pt"))
             loaded_model = ToyModel()
             loaded_model.load_state_dict(
-                torch.load(os.path.join(tmpdirname, "model.pt"))
+                # weights_only=False as this is a legacy use case that loads a module
+                torch.load(os.path.join(tmpdirname, "model.pt"), weights_only=False)
             )
             loaded_model(torch.randn(1, 10))
 
@@ -93,6 +97,19 @@ class InPlaceCompilationTests(TestCase):
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(printed_output, "Compilation started.\nCompilation ended.")
+
+    def test_compile_eager_options(self):
+        @torch.compile(backend="eager", options={"foo": 2})
+        def f(x):
+            return x + x
+
+        f(torch.randn(3))
+
+        @torch.compile(backend="aot_eager", options={"foo": 2})
+        def g(x):
+            return x + x
+
+        g(torch.randn(3))
 
     def test_compilation_callback_with_graph_break(self):
         torch._dynamo.reset()

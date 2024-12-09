@@ -43,6 +43,10 @@ TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
+TORCH_API void validate_outputs(
+    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error);
 
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;
@@ -181,7 +185,7 @@ struct TORCH_API Engine {
 
   void initialize_device_threads_pool();
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
+      const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
 

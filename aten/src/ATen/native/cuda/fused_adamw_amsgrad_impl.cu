@@ -6,8 +6,7 @@
 #include <ATen/native/cuda/fused_adam_utils.cuh>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void _fused_adamw_amsgrad_cuda_impl_(
     at::TensorList params,
@@ -22,8 +21,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(),
       grads.vec(),
@@ -73,8 +72,8 @@ void _fused_adamw_amsgrad_cuda_impl_(
     const double weight_decay,
     const double eps,
     const bool maximize,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   std::vector<std::vector<at::Tensor>> tensor_lists{
       params.vec(),
       grads.vec(),
@@ -86,7 +85,7 @@ void _fused_adamw_amsgrad_cuda_impl_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   const float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
-  const float* lr_ptr = lr.data_ptr<float>();
+  const float* lr_ptr = lr.const_data_ptr<float>();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -110,5 +109,4 @@ void _fused_adamw_amsgrad_cuda_impl_(
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

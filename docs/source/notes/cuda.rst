@@ -471,6 +471,13 @@ Available options:
   set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
+* ``max_non_split_rounding_mb`` will allow non-split blocks for better reuse, eg,
+   a 1024MB cached block can be re-used for a 512MB allocation request. In the default
+   case, we only allow up to 20MB of rounding of non-split blocks, so a 512MB block
+   can only be served with between 512-532 MB size block. If we set the value of this
+   option to 1024, it will alow 512-1536 MB size blocks to be used for a 512MB block
+   which increases reuse of larger blocks. This will also help in reducing the stalls
+   in avoiding expensive cudaMalloc calls.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
@@ -526,6 +533,10 @@ Available options:
   using more threads to parallelize the page mapping operations to reduce the overall
   allocation time of pinned memory. A good value for this option is 8 based on
   benchmarking results.
+
+  `pinned_use_background_threads` option is a boolean flag to enable background thread
+  for processing events. This avoids any slow path associated with querying/processing of
+  events in the fast allocation path. This feature is disabled by default.
 
 .. note::
 

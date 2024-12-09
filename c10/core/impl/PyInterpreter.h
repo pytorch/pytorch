@@ -124,6 +124,8 @@ struct C10_API PyInterpreterVTable {
   // Report the name of this interpreter
   virtual std::string name() const = 0;
 
+  // Run Py_INCREF on a PyObject.
+  virtual void incref(PyObject* pyobj) const = 0;
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
   // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
   virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
@@ -148,7 +150,10 @@ struct C10_API PyInterpreterVTable {
   virtual void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,
-      torch::jit::Stack* stack) const = 0;
+      c10::DispatchKeySet keyset,
+      torch::jit::Stack* stack,
+      bool with_keyset,
+      bool with_op) const = 0;
 
   virtual void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -177,18 +182,37 @@ struct C10_API PyInterpreterVTable {
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
 
-  virtual void trace_gpu_event_creation(uintptr_t event) const = 0;
-  virtual void trace_gpu_event_deletion(uintptr_t event) const = 0;
-  virtual void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
-      const = 0;
-  virtual void trace_gpu_event_wait(uintptr_t event, uintptr_t stream)
-      const = 0;
-  virtual void trace_gpu_memory_allocation(uintptr_t ptr) const = 0;
-  virtual void trace_gpu_memory_deallocation(uintptr_t ptr) const = 0;
-  virtual void trace_gpu_stream_creation(uintptr_t stream) const = 0;
-  virtual void trace_gpu_device_synchronization() const = 0;
-  virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
-  virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
+  virtual void trace_gpu_event_creation(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
+  virtual void trace_gpu_event_deletion(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
+  virtual void trace_gpu_event_record(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_event_wait(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_memory_allocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr) const = 0;
+  virtual void trace_gpu_memory_deallocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr) const = 0;
+  virtual void trace_gpu_stream_creation(
+      c10::DeviceType device_type,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_device_synchronization(
+      c10::DeviceType device_type) const = 0;
+  virtual void trace_gpu_stream_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_event_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 };
@@ -196,7 +220,7 @@ struct C10_API PyInterpreterVTable {
 struct C10_API PyInterpreter {
   const PyInterpreterVTable* vtable_;
 
-  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable){};
+  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable) {}
 
   const PyInterpreterVTable& operator*() const noexcept {
     return *vtable_;

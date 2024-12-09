@@ -1,7 +1,12 @@
-import torch
-from torch._prims import _make_prim, RETURN_TYPE
-from torch._prims_common import clone_preserve_strides
+import threading
+from contextlib import contextmanager
+from typing import Any, Generator, Tuple
 
+import torch
+
+
+# See [Note: Metadata mutation in proxy tracing] for why sacrificial parameter mutates
+# metadata during proxy tracing and we should remove the sacrificial parameter logic.
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
 with AOTAutograd.  We instead create a placeholder torch.nn.Parameter before the graph, which
@@ -11,35 +16,30 @@ to flow into the parameter as if it were an input to the graph (which is the onl
 allowed to compute gradients on).
 """.strip()
 
-_bind_nn_parameter = _make_prim(
-    schema="_bind_nn_parameter(Tensor self, Tensor placeholder) -> Tensor",
-    return_type=RETURN_TYPE.NEW,
-    meta=lambda self, placeholder: torch.nn.Parameter(
-        clone_preserve_strides(self), placeholder.requires_grad
-    ),
-    impl_aten=lambda self, placeholder: placeholder.set_(self),
-    doc=doc,
-)
-torch.fx.node.has_side_effect(_bind_nn_parameter)
-
 
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, tensor, placeholder):
+    def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
         assert not tensor.requires_grad
-        return _bind_nn_parameter(tensor, placeholder)
+        return placeholder.set_(tensor)
 
     @staticmethod
-    def backward(ctx, grad):
+    def backward(ctx: Any, *grad_outputs: torch.Tensor) -> Tuple[None, torch.Tensor]:
+        grad = grad_outputs[0]
         return None, grad  # grad flows to placeholder
 
 
-def tracable_create_parameter(tensor, placeholder):
+def tracable_create_parameter(
+    tensor: torch.Tensor, placeholder: torch.nn.Parameter
+) -> torch.nn.Parameter:
     with torch.set_grad_enabled(placeholder.requires_grad):
-        return TracableCreateParameter.apply(tensor, placeholder)
+        out = TracableCreateParameter.apply(tensor, placeholder)
+    return out
 
 
-def new_parameter_placeholder(size, dtype, device, requires_grad):
+def new_parameter_placeholder(
+    size: Tuple[int, ...], dtype: torch.dtype, device: torch.device, requires_grad: bool
+) -> torch.nn.Parameter:
     """Create a placeholder to be passed to the above functions"""
     result = torch.nn.Parameter(
         torch.empty(size, dtype=dtype, device=device), requires_grad=requires_grad
@@ -48,3 +48,20 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     # Allocating a zero tensor would causes assert failures in autograd.
     result.untyped_storage().resize_(0)
     return result
+
+
+_TLS = threading.local()
+
+
+@contextmanager
+def do_not_convert_to_tracable_parameter() -> Generator[bool, None, None]:
+    old_flag = getattr(_TLS, "convert_tracable_parameter", True)
+    _TLS.convert_tracable_parameter = False
+    try:
+        yield False
+    finally:
+        _TLS.convert_tracable_parameter = old_flag
+
+
+def can_convert_to_tracable_parameter() -> bool:
+    return getattr(_TLS, "convert_tracable_parameter", True)

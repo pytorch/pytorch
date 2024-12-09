@@ -71,7 +71,7 @@ TORCH_META_FUNC(topk)
 }
 
 TORCH_META_FUNC2(sort, stable)
-(const Tensor& self, c10::optional<bool> stable, int64_t dim, bool descending) {
+(const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
@@ -185,7 +185,7 @@ void quick_select_template(
 namespace {
 
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   if (interpolation == "linear") {
     return QUANTILE_INTERPOLATION_MODE::LINEAR;
   } else if (interpolation == "lower") {
@@ -219,7 +219,7 @@ void quantile_checks(const Tensor& self, const Tensor& q) {
 }
 
 std::vector<int64_t> quantile_output_shape(
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const Tensor& self,
     const Tensor& q,
     const bool keepdim,
@@ -246,7 +246,7 @@ std::vector<int64_t> quantile_output_shape(
 Tensor quantile_compute(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> orginal_dim,
+    const std::optional<int64_t> orginal_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan,
@@ -372,7 +372,7 @@ void quantile_out_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -397,7 +397,7 @@ void quantile_out_impl(
 Tensor quantile_impl(
     const Tensor& self,
     const Tensor& q,
-    const optional<int64_t> original_dim,
+    const std::optional<int64_t> original_dim,
     const bool keepdim,
     const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
@@ -653,9 +653,9 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   quantile_out_impl(
       out,
@@ -671,9 +671,9 @@ Tensor& quantile_out(
 Tensor& quantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -689,9 +689,9 @@ Tensor& quantile_out(
 Tensor quantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   return quantile_impl(
       self,
       q,
@@ -704,9 +704,9 @@ Tensor quantile(
 Tensor quantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
@@ -716,9 +716,9 @@ Tensor quantile(
 Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   quantile_out_impl(
       out,
@@ -734,9 +734,9 @@ Tensor& nanquantile_out(
 Tensor& nanquantile_out(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -752,9 +752,9 @@ Tensor& nanquantile_out(
 Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   return quantile_impl(
       self,
       q,
@@ -767,9 +767,9 @@ Tensor nanquantile(
 Tensor nanquantile(
     const Tensor& self,
     double q,
-    optional<int64_t> dim,
+    std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(
@@ -939,7 +939,7 @@ Tensor nanmedian_cpu(const Tensor& self) {
 
 TORCH_IMPL_FUNC(sort_stable_out)
 (const Tensor& self,
- c10::optional<bool> stable,
+ std::optional<bool> stable,
  int64_t dim,
  bool descending,
  const Tensor& values,
@@ -984,8 +984,14 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descending) {
+Tensor argsort(const Tensor & self, bool stable, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, stable, dim, descending));
+}
+
+Tensor& argsort_out(const Tensor & self, bool stable, int64_t dim, bool descending, Tensor& out) {
+  auto values = at::empty({0}, self.options());
+  at::sort_outf(self, stable, dim, descending, values, out);
+  return out;
 }
 
 

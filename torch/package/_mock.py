@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 _magic_methods = [
     "__subclasscheck__",
     "__hex__",

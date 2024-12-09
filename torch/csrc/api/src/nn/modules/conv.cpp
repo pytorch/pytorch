@@ -37,8 +37,7 @@ static F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
   return pad_mode;
 }
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 Conv1dImpl::Conv1dImpl(Conv1dOptions options_)
     : ConvNdImpl(detail::ConvNdOptions<1>(
                      /*in_channels=*/options_.in_channels(),
@@ -169,14 +168,14 @@ template class ConvNdImpl<3, Conv3dImpl>;
 template <size_t D, typename Derived>
 std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
     const Tensor& input,
-    const c10::optional<at::IntArrayRef>& output_size,
+    const std::optional<at::IntArrayRef>& output_size,
     const ExpandingArray<D>& stride,
     const ExpandingArray<D>& padding,
     const ExpandingArray<D>& kernel_size) {
   std::vector<int64_t> ret;
-  c10::optional<at::IntArrayRef> output_size_ = output_size;
+  std::optional<at::IntArrayRef> output_size_ = output_size;
 
-  if (output_size_ == c10::nullopt) {
+  if (output_size_ == std::nullopt) {
     ret = at::IntArrayRef(this->options.output_padding()).vec();
   } else {
     auto k = input.dim() - 2;
@@ -248,7 +247,7 @@ ConvTranspose1dImpl::ConvTranspose1dImpl(ConvTranspose1dOptions options_)
 
 Tensor ConvTranspose1dImpl::forward(
     const Tensor& input,
-    const c10::optional<at::IntArrayRef>& output_size) {
+    const std::optional<at::IntArrayRef>& output_size) {
   if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose1d");
@@ -285,7 +284,7 @@ ConvTranspose2dImpl::ConvTranspose2dImpl(ConvTranspose2dOptions options_)
 
 Tensor ConvTranspose2dImpl::forward(
     const Tensor& input,
-    const c10::optional<at::IntArrayRef>& output_size) {
+    const std::optional<at::IntArrayRef>& output_size) {
   if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose2d");
@@ -322,7 +321,7 @@ ConvTranspose3dImpl::ConvTranspose3dImpl(ConvTranspose3dOptions options_)
 
 Tensor ConvTranspose3dImpl::forward(
     const Tensor& input,
-    const c10::optional<at::IntArrayRef>& output_size) {
+    const std::optional<at::IntArrayRef>& output_size) {
   if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose3d");
@@ -347,5 +346,4 @@ template class ConvTransposeNdImpl<1, ConvTranspose1dImpl>;
 template class ConvTransposeNdImpl<2, ConvTranspose2dImpl>;
 template class ConvTransposeNdImpl<3, ConvTranspose3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

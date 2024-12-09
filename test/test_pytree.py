@@ -1,11 +1,16 @@
 # Owner(s): ["module: pytree"]
 
 import collections
+import enum
 import inspect
+import os
 import re
+import subprocess
+import sys
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
+from enum import auto
 from typing import Any, NamedTuple
 
 import torch
@@ -21,6 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
 
 if IS_FBCODE:
     # optree is not yet enabled in fbcode, so just re-test the python implementation
@@ -723,7 +729,7 @@ class TestPythonPytree(TestCase):
                 self.y = y
 
         with self.assertWarnsRegex(
-            UserWarning, "torch.utils._pytree._register_pytree_node"
+            FutureWarning, "torch.utils._pytree._register_pytree_node"
         ):
             py_pytree._register_pytree_node(
                 DummyType,
@@ -736,6 +742,35 @@ class TestPythonPytree(TestCase):
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
                 lambda xs, _: DummyType(*xs),
+            )
+
+    def test_import_pytree_doesnt_import_optree(self):
+        # importing torch.utils._pytree shouldn't import optree.
+        # only importing torch.utils._cxx_pytree should.
+        script = """
+import sys
+import torch
+import torch.utils._pytree
+assert "torch.utils._pytree" in sys.modules
+if "torch.utils._cxx_pytree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+if "optree" in sys.modules:
+    raise RuntimeError("importing torch.utils._pytree should not import optree")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(
+                msg=(
+                    "Subprocess exception while attempting to run test: "
+                    + e.output.decode("utf-8")
+                )
             )
 
     def test_treespec_equality(self):
@@ -914,16 +949,54 @@ TreeSpec(tuple, None, [*,
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
+    def test_pytree_serialize_enum(self):
+        class TestEnum(enum.Enum):
+            A = auto()
+
+        spec = py_pytree.TreeSpec(dict, TestEnum.A, [py_pytree.LeafSpec()])
+
+        serialized_spec = py_pytree.treespec_dumps(spec)
+        self.assertIsInstance(serialized_spec, str)
+
     def test_pytree_serialize_namedtuple(self):
-        Point = namedtuple("Point", ["x", "y"])
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        Point1 = namedtuple("Point1", ["x", "y"])
+        py_pytree._register_namedtuple(
+            Point1,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point1",
         )
 
+        spec = py_pytree.TreeSpec(
+            namedtuple, Point1, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
-        # The context in the namedtuple is different now because we recreated
-        # the namedtuple type.
-        self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
+        self.assertEqual(spec, roundtrip_spec)
+
+        class Point2(NamedTuple):
+            x: int
+            y: int
+
+        py_pytree._register_namedtuple(
+            Point2,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point2",
+        )
+
+        spec = py_pytree.TreeSpec(
+            namedtuple, Point2, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
+        roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
+        self.assertEqual(spec, roundtrip_spec)
+
+    def test_pytree_serialize_namedtuple_bad(self):
+        DummyType = namedtuple("DummyType", ["x", "y"])
+
+        spec = py_pytree.TreeSpec(
+            namedtuple, DummyType, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "Please register using `_register_namedtuple`"
+        ):
+            py_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
@@ -1015,6 +1088,10 @@ TreeSpec(tuple, None, [*,
         spec = py_pytree.TreeSpec(
             namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
         )
+        py_pytree._register_namedtuple(
+            Point,
+            serialized_type_name="test_pytree.test_pytree_serialize_bad_protocol.Point",
+        )
 
         with self.assertRaisesRegex(ValueError, "Unknown protocol"):
             py_pytree.treespec_dumps(spec, -1)
@@ -1087,14 +1164,7 @@ TreeSpec(tuple, None, [*,
             z: Any
 
         tree1 = [ACustomPytree(x=12, y={"cin": [1, 4, 10], "bar": 18}, z="leaf"), 5]
-        tree2 = [
-            ACustomPytree(
-                x=2,
-                y={"cin": [2, 2, 2], "bar": 2},
-                z="leaf",
-            ),
-            2,
-        ]
+        tree2 = [ACustomPytree(x=2, y={"cin": [2, 2, 2], "bar": 2}, z="leaf"), 2]
 
         py_pytree.register_pytree_node(
             ACustomPytree,
@@ -1249,10 +1319,7 @@ class TestCxxPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
         _, spec = cxx_pytree.tree_flatten(pytree)
-        self.assertEqual(
-            repr(spec),
-            ("PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)"),
-        )
+        self.assertEqual(repr(spec), "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)")
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):
@@ -1296,12 +1363,20 @@ class TestCxxPytree(TestCase):
         self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
+        py_pytree._register_namedtuple(
+            GlobalPoint,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.GlobalPoint",
+        )
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
         LocalPoint = namedtuple("LocalPoint", ["x", "y"])
+        py_pytree._register_namedtuple(
+            LocalPoint,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.LocalPoint",
+        )
         spec = cxx_pytree.tree_structure(LocalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))

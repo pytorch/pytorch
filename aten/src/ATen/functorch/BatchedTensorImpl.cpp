@@ -70,7 +70,7 @@ void BatchedTensorImpl::refreshTensorMetadata() {
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
     const auto ndim = sizes_and_strides_.size();
-    dim = maybe_wrap_dim(dim, ndim);
+    dim = maybe_wrap_dim(dim, static_cast<int64_t>(ndim));
   }
   if (bdim_ <= dim) {
     return dim + 1;
@@ -160,6 +160,7 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
 }
 
 c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
@@ -170,18 +171,18 @@ void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& 
   TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
 }
 
-Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
+Tensor makeBatched(Tensor tensor, int64_t bdim, int64_t level) {
   DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
     auto batched_level = batched->level();
     TORCH_INTERNAL_ASSERT(level > batched_level, " batched_level: ", batched_level, " level: ", level);
   }
-  return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, bdim, level);
+  return at::detail::make_tensor<BatchedTensorImpl>(key_set, std::move(tensor), bdim, level);
 }
 
-Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
-  return makeBatched(tensor, dim, level);
+Tensor addBatchDim(Tensor tensor, int64_t dim, int64_t level) {
+  return makeBatched(std::move(tensor), dim, level);
 }
 
 } // namespace at::functorch

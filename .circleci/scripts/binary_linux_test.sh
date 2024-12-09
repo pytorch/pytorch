@@ -22,17 +22,13 @@ fi
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  retry conda create -qyn testenv python="$DESIRED_PYTHON"
-  source activate testenv >/dev/null
-elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
+if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  # Prior to Python 3.8 paths were suffixed with an 'm'
-  if [[ -d  "\${python_path}/bin" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  elif [[ -d "\${python_path}m/bin" ]]; then
-    export PATH="\${python_path}m/bin:\$PATH"
+  if [[ "\$python_nodot" = *t ]]; then
+    python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
+    python_path="/opt/python/cp\$python_digits-cp\${python_digits}t"
   fi
+  export PATH="\${python_path}/bin:\$PATH"
 fi
 
 EXTRA_CONDA_FLAGS=""
@@ -46,13 +42,11 @@ if [[ "\$python_nodot" = *310* ]]; then
   PROTOBUF_PACKAGE="protobuf>=3.19.0"
 fi
 
-if [[ "\$python_nodot" = *39*  ]]; then
+if [[ "\$python_nodot" = *39* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
 fi
-
-
 
 # Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
@@ -72,32 +66,22 @@ else
     CHANNEL="test"
 fi
 
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  (
-    # For some reason conda likes to re-activate the conda environment when attempting this install
-    # which means that a deactivate is run and some variables might not exist when that happens,
-    # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
-    # it comes to the conda installation commands
-    set +u
-    retry conda install \${EXTRA_CONDA_FLAGS} -yq \
-      "numpy\${NUMPY_PIN}" \
-      mkl>=2018 \
-      ninja \
-      sympy \
-      typing-extensions \
-      ${PROTOBUF_PACKAGE}
-    if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
-      retry conda install -c pytorch -y cpuonly
+if [[ "$PACKAGE_TYPE" != libtorch ]]; then
+  if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+      pkg_no_python="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
+      pkg_torch="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
+      # todo: after folder is populated use the pypi_pkg channel instead
+      pip install "\$pkg_no_python" "\$pkg_torch" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
+      retry pip install -q numpy protobuf typing-extensions
     else
-      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE="pytorch-cuda"
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "pytorch-\${CHANNEL}" "pytorch-cuda=\${cu_ver}"
+      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+      retry pip install -q numpy protobuf typing-extensions
     fi
-    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
-  )
-elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-  retry pip install -q numpy protobuf typing-extensions
+  else
+    pip install "\$pkg"
+    retry pip install -q numpy protobuf typing-extensions
+  fi
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"
@@ -107,6 +91,14 @@ fi
 
 # Test the package
 /builder/check_binary.sh
+
+if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
+  # Exclude s390, xpu, rocm and libtorch builds from smoke testing
+  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+fi
+
+# Clean temp files
+cd /builder && git clean -ffdx
 
 # =================== The above code will be executed inside Docker container ===================
 EOL

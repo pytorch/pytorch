@@ -16,8 +16,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
@@ -54,8 +53,8 @@ void compute_fused_params(
 template <bool ReluFused>
 Tensor q_batch_norm1d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -80,8 +79,8 @@ Tensor q_batch_norm1d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -91,8 +90,8 @@ Tensor q_batch_norm1d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   if (ndim == 2) {
     // create a fake H and W dimension so we can use NHWC
@@ -111,7 +110,7 @@ Tensor q_batch_norm1d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -162,8 +161,8 @@ Tensor q_batch_norm1d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm2d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -189,8 +188,8 @@ Tensor q_batch_norm2d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -200,8 +199,8 @@ Tensor q_batch_norm2d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
@@ -212,7 +211,7 @@ Tensor q_batch_norm2d_impl(
         .memory_format(MemoryFormat::ChannelsLast),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -256,8 +255,8 @@ Tensor q_batch_norm2d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm3d_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -285,8 +284,8 @@ Tensor q_batch_norm3d_impl(
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
 
-  const float* weight_data = weight.template data_ptr<float>();
-  const float* bias_data = bias.template data_ptr<float>();
+  const float* weight_data = weight.template const_data_ptr<float>();
+  const float* bias_data = bias.template const_data_ptr<float>();
 
   TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
   TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
@@ -296,8 +295,8 @@ Tensor q_batch_norm3d_impl(
   float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  const float* mean_data = mean.template data_ptr<float>();
-  const float* var_data = var.template data_ptr<float>();
+  const float* mean_data = mean.template const_data_ptr<float>();
+  const float* var_data = var.template const_data_ptr<float>();
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast3d);
@@ -308,7 +307,7 @@ Tensor q_batch_norm3d_impl(
         .memory_format(MemoryFormat::ChannelsLast3d),
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      std::nullopt);
 
   compute_fused_params(
       C,
@@ -353,8 +352,8 @@ Tensor q_batch_norm3d_impl(
 template <bool ReluFused>
 Tensor q_batch_norm_impl(
     Tensor qx,
-    c10::optional<Tensor> mb_weight,
-    c10::optional<Tensor> mb_bias,
+    std::optional<Tensor> mb_weight,
+    std::optional<Tensor> mb_bias,
     Tensor mean,
     Tensor var,
     double eps,
@@ -380,7 +379,7 @@ Tensor q_batch_norm_impl(
 } // namespace
 
 Tensor quantized_batch_norm(
-    const Tensor& qx, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    const Tensor& qx, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     const Tensor& mean /* optional */,
     const Tensor& var /* optional */,
     double eps,
@@ -389,14 +388,14 @@ Tensor quantized_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
 
   Tensor qy;
   // TODO: this should arguably support 3d as well
   qy = q_batch_norm2d_impl<false>(
       qx,
-      weight.defined() ? c10::make_optional(weight) : c10::nullopt,
-      bias.defined() ? c10::make_optional(bias) : c10::nullopt,
+      weight.defined() ? std::make_optional(weight) : std::nullopt,
+      bias.defined() ? std::make_optional(bias) : std::nullopt,
       mean, var, eps, output_scale, output_zero_point);
   return qy;
 }
@@ -412,5 +411,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
