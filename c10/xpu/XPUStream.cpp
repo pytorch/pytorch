@@ -33,34 +33,6 @@ std::deque<
 
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
-// Note [StreamId assignment]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~
-// How do we assign stream IDs?
-//
-// -- 55 bits --    -- 5 bits --     -- 3 bits --     -- 1 bit --
-//     zeros       StreamIdIndex     StreamIdType    Ext/native stream
-//                ignored for ext   ignored for ext
-//
-// Where StreamIdType:
-//  000 = normal priority queue
-//  001 = high priority queue
-//  111 = external queue
-//
-// For external stream, StreamID is a sycl::queue* pointer. This means that last
-// bit will always be 0. So when constructing StreamId for a native stream we
-// set last bit to 1 to distinguish between native and external streams.
-//
-// StreamId is 64-bit, so we can just rely on regular promotion rules.
-// We rely on StreamIdIndex and StreamIdType being non-negative;
-
-using StreamIdIndex = uint8_t;
-enum class StreamIdType : uint8_t {
-  // The higher the type number, the higher the priority for the native stream.
-  NORMAL = 0x0,
-  HIGH = 0X1,
-  // For an external stream, the last bit of StreamId is 0, whose priority is
-  // queried at runtime.
-  EXT = 0x7,
 /*
  * Note [StreamId assignment]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -75,6 +47,10 @@ enum class StreamIdType : uint8_t {
  *  001 = normal priority queue
  *  010 = high priority queue
  *  111 = external queue
+ *
+ * For external stream, StreamID is a sycl::queue* pointer. This means that last
+ * bit will always be 0. So when constructing StreamId for a native stream we
+ * set last bit to 1 to distinguish between native and external streams.
  *
  * StreamId is 64-bit, so we can just rely on regular promotion rules.
  * We rely on StreamIdIndex and StreamIdType being non-negative;
@@ -232,19 +208,6 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  if (C10_UNLIKELY(st == StreamIdType::EXT)) {
-    // Query external stream priority
-    using namespace sycl::ext::oneapi::property;
-    // Default priority for SYCL queue is normal.
-    st = StreamIdType::NORMAL;
-    if (queue().has_property<queue::priority_normal>()) {
-      st = StreamIdType::NORMAL;
-    } else if (queue().has_property<queue::priority_high>()) {
-      st = StreamIdType::HIGH;
-    }
-  }
-  // StreamIdType and priority number are inversely related.
-  return -static_cast<int>(st);
   if (C10_UNLIKELY(st == StreamIdType::EXT)) {
     // Query external stream priority
     using namespace sycl::ext::oneapi::property;
