@@ -442,7 +442,7 @@ class GraphLowering(torch.fx.Interpreter):
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
         # since cpp_wrapper flag is OrderedSet to false for the first pass of codegen.
         self.record_multi_kernel_choice = cpp_wrapper
-        self.multi_kernel_to_choice: Dict[str, int] = {}
+        self.multi_kernel_to_choice: Dict[str, str] = {}
 
         self.aot_mode = aot_mode
         self.graph_id = graph_id
