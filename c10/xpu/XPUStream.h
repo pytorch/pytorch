@@ -165,7 +165,7 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
  * purposes
  */
 C10_API XPUStream
-getStreamFromExternal(sycl::queue* ext_stream, DeviceIndex device_index);
+getStreamFromExternal(sycl::queue* ext_queue, DeviceIndex device_index);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current
