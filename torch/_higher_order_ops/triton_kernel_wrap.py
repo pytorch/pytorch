@@ -1180,7 +1180,7 @@ class TritonHOPifier:
             # args and kwargs aren't real values yet
             # e.g., LazyVariableTracker
             # If a user wants to access them, we should realize them
-            def maybe_lazy_unwrap(
+            def realize_var(
                 var: VariableTracker,
             ) -> Union[Any, VariableTracker, LazyVariableTracker]:
                 while isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
@@ -1193,28 +1193,17 @@ class TritonHOPifier:
                 else:
                     return var
 
-            # we want to lazily realize values if possible
-            class LazyRealizeArgsKwargs(dict):
-                def __init__(self, *args: Any, **kwargs: Any) -> None:
-                    super().__init__(*args, **kwargs)
-
-                def __getitem__(self, key: Any) -> Any:
-                    item = super().__getitem__(key)
-                    # TensorVariable is an instance of LazyVariableTracker
-                    # But we have to handle it differently (there may be no value)
-                    return maybe_lazy_unwrap(item)
-
             # We only do this for prune_configs_by
             # We have to eagerly realize kwargs
             # This is because the dict gets unpacked in prune_configs, so we can't rely on __getitem__
-            lazyKwargs = LazyRealizeArgsKwargs(
-                {key: maybe_lazy_unwrap(kwarg) for key, kwarg in kwargs.items()}
-            )
+            realizedKwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
             # set up nargs
-            lazyArgs = LazyRealizeArgsKwargs(zip(variable.kernel.arg_names, args))
-            variable.kernel.nargs = lazyArgs
+            realizedArgs = zip(
+                variable.kernel.arg_names, [realize_var(arg) for arg in args]
+            )
+            variable.kernel.nargs = dict(realizedArgs)
 
-            variable.kernel.prune_configs(lazyKwargs)
+            variable.kernel.prune_configs(realizedKwargs)
             # Reset Autotuner vars to the default so we don't run prune_configs again
             variable.kernel.perf_model = None
             variable.kernel.configs_top_k = 1.0
