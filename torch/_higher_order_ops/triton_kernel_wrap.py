@@ -1181,17 +1181,17 @@ class TritonHOPifier:
             # e.g., LazyVariableTracker
             # If a user wants to access them, we should realize them
             def maybe_lazy_unwrap(
-                var: LazyVariableTracker,
+                var: VariableTracker,
             ) -> Union[Any, VariableTracker, LazyVariableTracker]:
-                if isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
-                    realized = var.realize()
-                    if hasattr(realized, "value"):
-                        # if we can return the value, do it
-                        return realized.value
-                    # if we realized we might as well return the realized var
-                    return realized
-                # If we can't realize, just return as is
-                return var
+                while isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
+                    var = var.realize()
+                # if we can return the value, do it
+                if hasattr(var, "value"):
+                    return var.value
+                elif hasattr(var, "get_real_value"):
+                    return var.get_real_value()
+                else:
+                    return var
 
             # we want to lazily realize values if possible
             class LazyRealizeArgsKwargs(dict):
