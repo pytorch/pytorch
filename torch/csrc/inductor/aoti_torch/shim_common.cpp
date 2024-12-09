@@ -200,6 +200,8 @@ AOTI_TORCH_ITEM_IMPL(int64, int64_t)
 AOTI_TORCH_ITEM_IMPL(bool, bool)
 AOTI_TORCH_ITEM_IMPL(bfloat16, c10::BFloat16)
 AOTI_TORCH_ITEM_IMPL(complex64, c10::complex<float>)
+AOTI_TORCH_ITEM_IMPL(float8_e4m3fn, c10::Float8_e4m3fn)
+AOTI_TORCH_ITEM_IMPL(float8_e5m2, c10::Float8_e5m2)
 #undef AOTI_TORCH_ITEM_IMPL
 
 #define AOTI_TORCH_SCALAR_TO_TENSOR_IMPL(dtype, ctype, ttype)                  \
