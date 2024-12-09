@@ -1,16 +1,21 @@
 #pragma once
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <istream>
+#include <memory>
 #include <mutex>
-#include <ostream>
+#include <string>
+#include <tuple>
 #include <unordered_set>
+#include <vector>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/Backend.h>
+#include <c10/macros/Export.h>
 
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
@@ -90,8 +95,7 @@ typedef struct mz_zip_archive mz_zip_archive;
 // model.json as the last file when writing after we have accumulated all
 // other information.
 
-namespace caffe2 {
-namespace serialize {
+namespace caffe2::serialize {
 
 static constexpr const char* kSerializationIdRecordName =
     ".data/serialization_id";
@@ -198,7 +202,6 @@ class TORCH_API PyTorchStreamReader final {
   }
 
  private:
-  void init();
   size_t read(uint64_t pos, char* buf, size_t n);
   void valid(const char* what, const char* info = "");
   size_t getRecordID(const std::string& name);
@@ -213,7 +216,7 @@ class TORCH_API PyTorchStreamReader final {
   std::mutex reader_lock_;
   bool load_debug_symbol_ = true;
   std::string serialization_id_;
-  size_t additional_reader_size_threshold_;
+  size_t additional_reader_size_threshold_{0};
 };
 
 class TORCH_API PyTorchStreamWriter final {
@@ -222,10 +225,10 @@ class TORCH_API PyTorchStreamWriter final {
       const std::string& archive_name,
       bool compute_crc32 = true);
   explicit PyTorchStreamWriter(
-      const std::function<size_t(const void*, size_t)> writer_func,
+      std::function<size_t(const void*, size_t)> writer_func,
       bool compute_crc32 = true);
 
-  void setMinVersion(const uint64_t version);
+  void setMinVersion(uint64_t version);
 
   void writeRecord(
       const std::string& name,
@@ -291,5 +294,4 @@ size_t getPadding(
     std::string& padding_buf);
 } // namespace detail
 
-} // namespace serialize
-} // namespace caffe2
+} // namespace caffe2::serialize

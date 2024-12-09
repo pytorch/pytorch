@@ -60,7 +60,7 @@ readability-redundant-smartptr-get,
 readability-simplify-subscript-expr,
 readability-string-compare,
 '
-HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
+HeaderFilterRegex: '^(aten/|caffe2/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
