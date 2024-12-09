@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import itertools
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -55,8 +57,13 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: dict[str, ir.Buffer],
         outputs: dict[str, ir.Buffer],
-        aliases: Optional[dict[str, str]] = None,
+        aliases: dict[str, str] | None = None,
+        function_name: str = "",
+        extra_sizevars: list[sympy.Expr] | None = None,
+        placeholder: str = "<DEF_KERNEL>",
     ) -> str:
+        if len(function_name) == 0:
+            function_name = str(self.kernel_name)
         for name, inp in inputs.items():
             if inp is not None:
                 self.args.input_buffers[inp.get_name()] = name
@@ -74,6 +81,12 @@ class CppTemplateKernel(CppKernel):
             for input in inputs.values()
             if input is not None
             for sym in itertools.chain(input.get_size(), input.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        }
+        unique_sizevars |= {
+            s
+            for sym in extra_sizevars or []
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         }
@@ -97,9 +110,8 @@ class CppTemplateKernel(CppKernel):
                     if alias in self.args.output_buffers:
                         self.args.output_buffers[alias] = "REMOVED"
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
-            return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
+            return f"void {function_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
@@ -151,6 +163,15 @@ class CppTemplateKernel(CppKernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
+        return sliced.data
+
+    def select(self, node, dim: int, idx: int) -> ir.ReinterpretView:
+        # We avoid using L.select here because we need clamp=False so the dim after slicing
+        # is 1 instead of a sympy expression of symbol - dim_size.
+        node = wrap_with_tensorbox(node)
+        idx = ir.View.handle_negative_index(idx, node.get_size()[dim])
+        sliced = L.squeeze(L.slice_(node, dim, idx, idx + 1, clamp=False), dim)
         assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
@@ -207,8 +228,8 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         nodes: list[ir.IRNode],
-        offsets: Optional[list[sympy.Expr]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        offsets: list[sympy.Expr] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -262,10 +283,10 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        orig_src: ir.Buffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -338,15 +359,14 @@ class CppTemplateCaller(ir.ChoiceCaller):
             [
                 ir.CppTemplateBuffer,
                 bool,
-                Optional[list[ir.IRNode]],
+                list[ir.IRNode] | None,
             ],
             str,
         ],
         bmreq: CppBenchmarkRequest,
-        template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
-        info_kwargs: Optional[
-            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
-        ] = None,
+        template: CppTemplate,  # type: ignore[name-defined]  # noqa: F821
+        info_kwargs: None
+        | (dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]) = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -373,7 +393,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:

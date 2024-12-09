@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import collections
 import itertools
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -32,7 +32,7 @@ class NodeScheduleMarker:
         return False
 
 
-NodeScheduleEntry = Union[SchedulerNode, type[NodeScheduleMarker]]
+NodeScheduleEntry = SchedulerNode | type[NodeScheduleMarker]
 
 
 class DisableReduction(NodeScheduleMarker):

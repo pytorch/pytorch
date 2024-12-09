@@ -606,7 +606,7 @@ def check_permute(node: torch.fx.Node) -> bool:
         and node.kwargs["permutation"] is not None
         and len(node.kwargs["permutation"]) > 2  # type: ignore[arg-type]
     ):
-        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[union-attr]
+        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[operator, union-attr]
     else:
         return False
     allowed_permutation = list(range(ranks))

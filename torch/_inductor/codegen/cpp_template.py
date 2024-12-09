@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import ctypes
 import functools
 import itertools
 import logging
 import sys
-from typing import Callable, Optional
+from typing import Callable
 from unittest.mock import patch
 
 import sympy
@@ -29,7 +31,7 @@ class CppTemplate(KernelTemplate):
         input_nodes,
         layout: ir.Layout,
         num_threads: int,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
@@ -83,7 +85,7 @@ class CppTemplate(KernelTemplate):
         def make_kernel_render(
             template_node: ir.CppTemplateBuffer,
             flag_template_buffer_has_other_users: bool,
-            epilogue_nodes: Optional[list[ir.IRNode]] = None,
+            epilogue_nodes: list[ir.IRNode] | None = None,
         ):
             kernel = CppTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME), num_threads=self.num_threads

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import enum
@@ -10,7 +12,7 @@ import operator
 import re
 from enum import auto, Enum
 from itertools import chain
-from typing import Any, Callable, ClassVar, NamedTuple, Optional, Union
+from typing import Any, Callable, ClassVar, NamedTuple
 
 import sympy
 
@@ -169,7 +171,7 @@ class TensorArg:
     buffer: str
     dtype: torch.dtype
     offset: sympy.Expr = sympy.S.Zero  # c++ only
-    alias_of: Optional[str] = None  # halide only
+    alias_of: str | None = None  # halide only
 
 
 @dataclasses.dataclass
@@ -194,7 +196,7 @@ class DeviceCodegen:
     cpp_wrapper_codegen: type = type(None)
 
 
-KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg]
+KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
@@ -300,7 +302,7 @@ class BackendFeature(Enum):
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
-def get_backend_features(device: Union[torch.device, str, None]):
+def get_backend_features(device: torch.device | str | None):
     if device is None:
         return {}
     init_backend_registration()
@@ -356,7 +358,9 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -448,7 +452,7 @@ def deduce_output_dtype_by_name(
     op_name: str,
     *args,
     **kwargs,
-) -> Optional[torch.dtype]:
+) -> torch.dtype | None:
     """
     Given op name and a list of input dtypes, deduce the output dtype
     """
@@ -490,7 +494,7 @@ def deduce_output_dtype_by_name(
 class DataTypePropagation:
     def __init__(self, body) -> None:
         self.body = body
-        self.graphs: dict[Union[Callable[..., Any], str], Any] = {
+        self.graphs: dict[Callable[..., Any] | str, Any] = {
             "root": body.root_block.graph
         }
         for k, v in body.subblocks.items():
@@ -797,9 +801,9 @@ class OverridesData:
     name: str
     cpp: Callable[..., str]
     # None when not impl in libdevice/triton
-    triton: Optional[Callable[..., str]] = None
+    triton: Callable[..., str] | None = None
     # None when not impl in aten/.../vec
-    cppvec: Optional[Callable[..., str]] = None
+    cppvec: Callable[..., str] | None = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -1175,7 +1179,7 @@ class KernelArgs:
             zero_fill (bool): Whether to initialize the buffer to zero.
 
         Returns:
-            Tuple[str, int]: A tuple containing:
+            tuple[str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
                 - offset: An integer representing the byte offset in the workspace.
         """
@@ -1297,7 +1301,7 @@ class KernelArgs:
         arg_defs: list[str] = []
         call_args: list[str] = []
         arg_types: list[torch.dtype] = []
-        precompile_args: list[Union[TensorArg, SizeArg, WorkspaceArg]] = []
+        precompile_args: list[TensorArg | SizeArg | WorkspaceArg] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
@@ -1390,7 +1394,7 @@ class CSEVariable:
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ):
         assert isinstance(bounds, ValueRanges)
         self.name = name
@@ -1470,7 +1474,7 @@ class CSE:
     def contains(self, cache_key) -> bool:
         return self.augment_key(cache_key) in self._cache
 
-    def try_get(self, cache_key: object) -> Optional[CSEVariable]:
+    def try_get(self, cache_key: object) -> CSEVariable | None:
         return self._cache.get(self.augment_key(cache_key), None)
 
     def get(self, cache_key: object) -> CSEVariable:
@@ -1479,12 +1483,12 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
+        expr: str | CSEVariable | OpsValue | IndentedBuffer | DeferredLineBase,
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1538,7 +1542,7 @@ class CSE:
     def newvar(
         self,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
         var = V.kernel.create_cse_var(var_name, bounds, dtype)
@@ -1549,9 +1553,11 @@ class CSE:
         self,
         name: str,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> CSEVariable:
-        assert name not in self.varname_map, "duplicate name"
+        torch._check_value(
+            name not in self.varname_map, lambda: f"duplicate name: {name}"
+        )
         var = V.kernel.create_cse_var(name, bounds, dtype)
         self.varname_map[name] = var
         return var
@@ -1595,7 +1601,7 @@ class ScopedDict:
 class Kernel(CodeGen):
     newvar_prefix = ""
     suffix = ""
-    overrides: Optional[Callable[[OpsHandler[Any]], OpsHandler[Any]]] = None
+    overrides: Callable[[OpsHandler[Any]], OpsHandler[Any]] | None = None
     # TODO: these look dead, but with all the getattr it's hard to tell...
     load_format: None = None
     store_format: None = None
@@ -1619,7 +1625,7 @@ class Kernel(CodeGen):
         self._load_other = None
         # OrderedSet in set_current_node
         self.current_node = None
-        self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
+        self.node_to_bounds: dict[torch.fx.Node, ValueRanges[Any]] | None = None
 
         self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
         self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
@@ -1695,8 +1701,8 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def scan(
@@ -1728,8 +1734,8 @@ class Kernel(CodeGen):
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[CSEVariable] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: CSEVariable | None = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -1742,10 +1748,10 @@ class Kernel(CodeGen):
 
     def indirect_assert(
         self,
-        var: Union[CSEVariable, str],
-        lower: Optional[str],
-        upper: Optional[str],
-        mask: Optional[Union[CSEVariable, str]] = None,
+        var: CSEVariable | str,
+        lower: str | None,
+        upper: str | None,
+        mask: CSEVariable | str | None = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
@@ -1895,7 +1901,7 @@ class Kernel(CodeGen):
             @staticmethod
             def indirect_indexing(
                 var: CSEVariable,
-                size: Union[sympy.Expr, int],
+                size: sympy.Expr | int,
                 check: bool = True,
                 wrap_neg=True,
             ):
@@ -1999,8 +2005,8 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 src_dtype: torch.dtype,
                 reduction_type: ReductionType,
-                value: Union[CSEVariable, tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+                value: CSEVariable | tuple[CSEVariable, ...],
+            ) -> CSEVariable | tuple[CSEVariable, ...]:
                 self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
@@ -2031,8 +2037,8 @@ class Kernel(CodeGen):
                 boundary_indices: CSEVariable,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
-                sorter_indices: Optional[CSEVariable] = None,
+                sorter: tuple[str, sympy.Expr] | None = None,
+                sorter_indices: CSEVariable | None = None,
             ) -> CSEVariable:
                 """
                 [Note: Inductor bucketize op]
@@ -2201,7 +2207,7 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    dtype: Optional[torch.dtype] = None
+    dtype: torch.dtype | None = None
     ops_name: str = ""
 
 
@@ -2306,7 +2312,7 @@ class KernelTemplate:
         except NotImplementedError as e:
             return e
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

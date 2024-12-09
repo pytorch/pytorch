@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import copy
 import enum
 import logging
@@ -415,7 +417,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     @staticmethod
     @abstractmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> List[cutlass_library.gemm_operation.GemmOperation]:  # type: ignore[name-defined]  # noqa: F821
         raise NotImplementedError
 
     @staticmethod
@@ -430,7 +432,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     @abstractmethod
     def _get_template_args(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, Optional[str]]:
         raise NotImplementedError
 
@@ -441,35 +443,35 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     @abstractmethod
     def _shape_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
     def _alignment_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
     def _set_bias_layout_and_alignment(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, str]:
         raise NotImplementedError
 
     @abstractmethod
     def _get_extra_inputs_and_names(
         self,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_gemm_op.GemmOperation = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
         raise NotImplementedError
 
@@ -553,7 +555,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         return res
 
     @staticmethod
-    def cutlass_layout(torch_layout: ir.Layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]  # noqa: F821
+    def cutlass_layout(torch_layout: ir.Layout) -> Optional[cutlass_lib.LayoutType]:  # type: ignore[name-defined]  # noqa: F821
         """
         Converts an ir.Layout instance into the corresponding cutlass_library.LayoutType enum value
         (RowMajor, ColumnMajor, or None if no matching value is found ).
@@ -577,8 +579,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     @staticmethod
     def flip_cutlass_layout(
-        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]  # noqa: F821
-    ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]  # noqa: F821
+        cutlass_layout: cutlass_lib.LayoutType,  # type: ignore[name-defined]  # noqa: F821
+    ) -> cutlass_lib.LayoutType:  # type: ignore[name-defined]  # noqa: F821
         """Helper method: Flips a given cutlass layout (cutlass_lib.LayoutType) from RowMajor
         to ColumnMajor or vice versa"""
         assert cutlass_utils.try_import_cutlass()
@@ -592,7 +594,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     @staticmethod
     def layout_match(
         torch_layout: ir.Layout,
-        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined] # noqa: F821
+        cutlass_layout: cutlass_lib.LayoutType,  # type: ignore[name-defined] # noqa: F821
     ) -> bool:
         """Helper Method: Determines whether a given torch layout matches a given Cutlass layout"""
         return CUTLASSGemmTemplate.cutlass_layout(torch_layout) == cutlass_layout
@@ -646,8 +648,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     @staticmethod
     def swap_XW(
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
+    ) -> cutlass_library.gemm_op.GemmOperation:  # type: ignore[name-defined]  # noqa: F821
         """
         Swap operands X and W (aka operans A and B) of the GEMM operation. This
         requires transposing the operands, which is done by swapping the strides.
@@ -664,12 +666,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def fix_op_layout(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined] # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined] # noqa: F821
         X: Buffer,
         W: Buffer,
         Bias: Optional[Buffer],
         Y: Union[Buffer, ReinterpretView],
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+    ) -> cutlass_library.gemm_op.GemmOperation:  # type: ignore[name-defined]  # noqa: F821
         # This is a workaround to deal with cases where the input layouts have changed
         # between autotuning and rendering. This happens if the inputs layout
         # are FlexibleLayout instances. In this case, we need to update the
@@ -711,8 +713,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def filter_op(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
-    ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
+    ) -> cutlass_library.gemm_op.GemmOperation:  # type: ignore[name-defined]  # noqa: F821
         """
         Helper method:
 
@@ -807,7 +809,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         return op
 
-    def gen_ops(self) -> "List[Tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
+    def gen_ops(self) -> List[Tuple[str, cutlass_gemm_op.GemmOperation]]:  # type: ignore[name-defined]  # noqa: F821
         """
         Creates a list of Cutlass GemmOperation instances that match the operation this template is designed to represent.
         The matching is carried out with respect to the input and output specifications of the operation.
@@ -856,7 +858,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_gemm_op.GemmOperation = None,  # type: ignore[name-defined]  # noqa: F821
         template_buffer_node: Optional[CUDATemplateBuffer] = None,
         **kwargs,
     ) -> str:
@@ -1024,7 +1026,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> List[cutlass_library.gemm_operation.GemmOperation]:  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
         return [cutlass_lib.GemmKind.Universal3x]
@@ -1034,13 +1036,13 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _get_template_args(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, Optional[str]]:
         return (GEMM_ARGS_CUTLASS_3X, GEMM_ARGS_CUTLASS_3X_EPILOGUE)
 
     @staticmethod
     def _has_tma_epilogue(  # noqa: F821 # type: ignore[arg-type,name-defined]
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined,arg-type] # noqa: F821
     ) -> bool:  # type: ignore[name-defined]
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
         assert cutlass_utils.try_import_cutlass()
@@ -1128,20 +1130,20 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _shape_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         X, W = self.input_nodes[0], self.input_nodes[1]
         return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         return True
 
     def _set_bias_layout_and_alignment(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
@@ -1165,7 +1167,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
@@ -1205,7 +1207,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     def _get_extra_inputs_and_names(
         self,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_gemm_op.GemmOperation = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
         Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
         inputs: list[Optional[Buffer]] = []
@@ -1332,7 +1334,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         )
 
     @staticmethod
-    def _get_supported_ops() -> "List[cutlass_library.gemm_operation.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def _get_supported_ops() -> List[cutlass_library.gemm_operation.GemmOperation]:  # type: ignore[name-defined]  # noqa: F821
         import cutlass_library.library as cutlass_lib
 
         return [cutlass_lib.GemmKind.Universal, cutlass_lib.GemmKind.Sparse]
@@ -1346,7 +1348,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _get_template_args(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, Optional[str]]:
         import cutlass_library.library as cutlass_lib
 
@@ -1386,7 +1388,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _shape_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
@@ -1399,7 +1401,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _alignment_match(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
@@ -1416,7 +1418,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _set_bias_layout_and_alignment(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         import cutlass_library.library as cutlass_lib
 
@@ -1438,7 +1440,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _define_gemm_instance(
         self,
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_library.gemm_op.GemmOperation,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[str, str]:
         """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
 
@@ -1478,7 +1480,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
 
     def _get_extra_inputs_and_names(
         self,
-        op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
+        op: cutlass_gemm_op.GemmOperation = None,  # type: ignore[name-defined]  # noqa: F821
     ) -> tuple[Optional[Buffer], list[Optional[Buffer]], list[str]]:
         import cutlass_library.library as cutlass_lib
 

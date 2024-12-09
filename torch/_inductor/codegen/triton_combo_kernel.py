@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import itertools
 import logging
 import textwrap
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast
 
 import sympy
 from sympy import Integer, Symbol
@@ -277,7 +279,7 @@ class ComboKernel(Kernel):
 
         @classmethod
         def codegen_pid_range(
-            cls, kernel: "ComboKernel", num: int, code: IndentedBuffer
+            cls, kernel: ComboKernel, num: int, code: IndentedBuffer
         ) -> None:
             if num == 0:
                 cls._calculate_xblocks(kernel, code)
@@ -290,9 +292,7 @@ class ComboKernel(Kernel):
                     code.splice(f"pid_offset = pid - num_xblocks_{num - 1}")
 
         @classmethod
-        def _calculate_xblocks(
-            cls, kernel: "ComboKernel", code: IndentedBuffer
-        ) -> None:
+        def _calculate_xblocks(cls, kernel: ComboKernel, code: IndentedBuffer) -> None:
             x_numels_list = kernel.x_numels_list
             for i in range(len(x_numels_list)):
                 xnumels, no_x_dim = (
@@ -317,7 +317,7 @@ class ComboKernel(Kernel):
         def grid(
             cls,
             sub_kernel_numels: list[list[int]],
-            x_blocks_list: list[Union[str, int]],
+            x_blocks_list: list[str | int],
             dynamic_shape: bool,
         ) -> tuple[Any, ...]:
             xnumel = list(x_blocks_list)
@@ -362,7 +362,7 @@ class ComboKernel(Kernel):
 
         @classmethod
         def codegen_pid_range(
-            cls, kernel: "ComboKernel", num: int, code: IndentedBuffer
+            cls, kernel: ComboKernel, num: int, code: IndentedBuffer
         ) -> None:
             num_kernels = len(kernel.sub_kernels)
             if num == 0:
@@ -377,7 +377,7 @@ class ComboKernel(Kernel):
         def grid(
             cls,
             sub_kernel_numels: list[list[int]],
-            x_blocks_list: list[Union[str, int]],
+            x_blocks_list: list[str | int],
             dynamic_shape: bool,
         ) -> tuple[Any, ...]:
             xnumel = x_blocks_list
@@ -425,13 +425,13 @@ class ComboKernel(Kernel):
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
-        self.min_x_blocks_list: list[Union[int, str]] = []
-        self.x_numels_list: list[Union[int, str]] = []
+        self.min_x_blocks_list: list[int | str] = []
+        self.x_numels_list: list[int | str] = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
-        self.dispatch_class: Optional[
-            type[Union[ComboKernel.SequentialDispatch, ComboKernel.RoundRobinDispatch]]
-        ] = None
+        self.dispatch_class: None | (
+            type[ComboKernel.SequentialDispatch | ComboKernel.RoundRobinDispatch]
+        ) = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled
         self.block_size_1d = 1024  # Try tuning this value
@@ -525,8 +525,8 @@ class ComboKernel(Kernel):
         Kernels with no_x_dim being true has no tunable XBLOCK. They have a fixed number of X blocks.
         Grid calculation needs to make sure that they are assigned with enough number of blocks.
         """
-        min_x_blocks: Union[int, str] = 0
-        x_numels: Union[int, str] = 0
+        min_x_blocks: int | str = 0
+        x_numels: int | str = 0
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if tree.prefix == "x":
@@ -782,7 +782,7 @@ class ComboKernel(Kernel):
                     arg_types.append(type(expr))
 
     def add_numel_to_call_args_and_grid_benchmark(
-        self, extra_args: list[Any], grid: Union[list[Any], tuple[Any, ...]]
+        self, extra_args: list[Any], grid: list[Any] | tuple[Any, ...]
     ) -> None:
         for num, sub_kernel in enumerate(self.sub_kernels):
             for i, tree in enumerate(sub_kernel.range_trees):
@@ -802,7 +802,7 @@ class ComboKernel(Kernel):
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
         for subkernel in self.sub_kernels:
@@ -868,7 +868,7 @@ class ComboKernel(Kernel):
         return code.getvalue()
 
     def codegen_kernel_benchmark(
-        self, num_gb: float, grid: Optional[list[Any]] = None
+        self, num_gb: float, grid: list[Any] | None = None
     ) -> IndentedBuffer:
         result = IndentedBuffer()
         argdefs, call_args, signature, _ = self.args.python_argdefs()
@@ -1086,7 +1086,7 @@ class ComboKernel(Kernel):
 
     def grid_no_autotune(
         self,
-        grid: Union[tuple[Any], list[Any]],
+        grid: tuple[Any] | list[Any],
         num_kernels: int,
         min_blocks: int,
         is_sequential: bool,

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import functools
@@ -6,7 +8,7 @@ import math
 import sys
 from collections import namedtuple
 from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 from unittest.mock import patch
 
 import sympy
@@ -182,7 +184,7 @@ class CppCSEVariable(CSEVariable):
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
@@ -263,7 +265,7 @@ def value_to_cpp(value, cpp_type):
 
 
 def rewrite_index_for_function(
-    localize_buffer_handler: "LocalizeBufferHandler",
+    localize_buffer_handler: LocalizeBufferHandler,
     index: sympy.Expr,
     global_buf_name: str,
 ):
@@ -290,7 +292,7 @@ def rewrite_index_for_function(
 
 
 def rewrite_index_for_nodes(
-    localize_buffer_handler: "LocalizeBufferHandler",
+    localize_buffer_handler: LocalizeBufferHandler,
     index: sympy.Expr,
     global_buf_name: str,
 ):
@@ -309,7 +311,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         self,
         inner,
         global_to_local: dict[str, ir.Buffer],
-        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
+        rewrite_index: Callable[[LocalizeBufferHandler, sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
@@ -401,7 +403,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[list[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: list[ir.Buffer] | None = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer
@@ -420,7 +422,7 @@ class LocalBufferContext:
         self,
         fn: Callable[..., Any],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+            [LocalizeBufferHandler, sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_function,
     ):
         def inner(*args, **kwargs):
@@ -439,7 +441,7 @@ class LocalBufferContext:
         self,
         nodes: list[ir.IRNode],
         rewrite_index: Callable[
-            ["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr
+            [LocalizeBufferHandler, sympy.Expr, str], sympy.Expr
         ] = rewrite_index_for_nodes,
     ) -> list[ir.IRNode]:
         """
