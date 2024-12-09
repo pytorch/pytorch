@@ -9,7 +9,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
         todo: List[torch.Tensor] = list(tensors)
         for tp, meta, inner_tensors in reversed(self.rebuild_stack):
             nb_tensor: int = len(inner_tensors)
-            d = {a: b for a, b in zip(inner_tensors, todo[-nb_tensor:])}  # noqa: C416
+            d = {a: b for a, b in zip(inner_tensors, todo[:nb_tensor])}  # noqa: C416
             todo = todo[nb_tensor:]
             rebuilt = tp.__tensor_unflatten__(d, meta, None, None)  # type: ignore[attr-defined]
             todo.append(rebuilt)
