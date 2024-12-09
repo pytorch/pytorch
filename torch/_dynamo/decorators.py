@@ -128,6 +128,7 @@ class set_stance(_DecoratorContextManager):
 
 
 def assume_constant_result(fn):
+    fn.__torch_dynamo_can_constant_fold_through__ = True
     fn._dynamo_marked_constant = True
     return fn
 
