@@ -3289,6 +3289,7 @@ MOD_INLINELIST = [
     "torch._library.custom_ops",
     "torch._prims",
     "torch._refs",
+    "torch._subclasses.meta_utils",
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
