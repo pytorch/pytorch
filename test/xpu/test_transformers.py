@@ -1,18 +1,17 @@
 # Owner(s): ["module: intel"]
-
-from functools import partial
 from collections import namedtuple
+from functools import partial
+
 import torch
 import torch.nn.functional as F
-from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
 import torch.utils.cpp_extension
+from torch.nn.attention import sdpa_kernel, SDPBackend
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
-    skipIfTorchDynamo,
-    run_tests,
     parametrize,
+    run_tests,
+    skipIfTorchDynamo,
 )
 
 SdpaShape = namedtuple('Sdpa_Shape', ['batch', 'num_heads', 'seq_len', 'head_dim'])

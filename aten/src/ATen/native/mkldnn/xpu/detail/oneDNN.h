@@ -134,7 +134,7 @@ at::Tensor quantized_convolution(
     std::optional<std::string_view> unary_algorithm);
 
 namespace graph {
-TORCH_API void gpu_float_sdpa(
+void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
     int seq_len_k,
