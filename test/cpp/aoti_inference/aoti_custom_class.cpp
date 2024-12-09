@@ -37,6 +37,11 @@ MyAOTIClass::MyAOTIClass(
     runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
         model_path.c_str());
 #endif
+#if defined(USE_XPU)
+  } else if (device_ == "xpu") {
+    runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerXpu>(
+        model_path.c_str());
+#endif
   } else {
     throw std::runtime_error("invalid device: " + device);
   }
