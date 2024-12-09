@@ -305,44 +305,6 @@ def _prelu_kernel_backward(
     return (input_grad, weight_grad)
 
 
-@register_decomposition(aten.rrelu_with_noise)
-@aten.rrelu_with_noise.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
-@pw_cast_for_opmath
-def rrelu_with_noise(
-    self: Tensor,
-    noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
-    training: bool = False,
-    generator: Optional[torch.Generator] = None,
-) -> Tensor:
-    assert generator is None
-    if training:
-        not_positive = self <= 0
-        r = aten.uniform(self, lower, upper)
-        output = torch.where(not_positive, self * r, self)
-        noise.copy_(torch.where(not_positive, r, 1))
-        return output
-    else:
-        negative_slope = (lower + upper) / 2
-        return aten.leaky_relu(self, negative_slope)
-
-
-@register_decomposition(aten.rrelu_with_noise_)
-@aten.rrelu_with_noise_.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
-def rrelu_with_noise_(
-    self: Tensor,
-    noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
-    training: bool = False,
-    generator: Optional[torch.Generator] = None,
-) -> Tensor:
-    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
-
-
 @register_decomposition(aten.rrelu_with_noise_backward)
 @out_wrapper()
 @pw_cast_for_opmath
