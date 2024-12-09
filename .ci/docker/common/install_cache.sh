@@ -88,17 +88,6 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-write_sccache_stub cc
-write_sccache_stub c++
-write_sccache_stub gcc
-write_sccache_stub g++
-
-# NOTE: See specific ROCM_VERSION case below.
-if [ "x$ROCM_VERSION" = x ]; then
-  write_sccache_stub clang
-  write_sccache_stub clang++
-fi
-
 if [ -n "$CUDA_VERSION" ]; then
   # TODO: This is a workaround for the fact that PyTorch's FindCUDA
   # implementation cannot find nvcc if it is setup this way, because it
