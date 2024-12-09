@@ -309,7 +309,7 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
   const std::string& string() const {
     return str_;
   }
-  c10::string_view string_view() const {
+  std::string_view string_view() const {
     return str_;
   }
 
@@ -1742,7 +1742,7 @@ DEFINE_TO(c10::impl::GenericList, toList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
-DEFINE_TO(c10::string_view, toStringView)
+DEFINE_TO(std::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Await>, toAwait)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
@@ -1962,11 +1962,11 @@ inline T IValue::to() && {
 }
 
 template <>
-inline std::optional<c10::string_view> IValue::to() && {
+inline std::optional<std::string_view> IValue::to() && {
   // In the default implementation, the IValue is destroyed with std::move.
   // But if the unboxed type is std::optional<string_view> we cannot destroy
   // the IValue.
-  return generic_to(*this, _fake_type<std::optional<c10::string_view>>{});
+  return generic_to(*this, _fake_type<std::optional<std::string_view>>{});
 }
 
 template <typename T>
@@ -2390,7 +2390,7 @@ inline std::optional<std::reference_wrapper<const std::string>> IValue::
           ->string());
 }
 
-inline c10::string_view IValue::toStringView() const {
+inline std::string_view IValue::toStringView() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
