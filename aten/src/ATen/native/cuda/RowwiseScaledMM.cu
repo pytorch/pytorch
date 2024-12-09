@@ -174,7 +174,7 @@ void f8f8bf16_rowwise_impl(
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
-  constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
+  constexpr int RowBroadcastStages = 0;
 
   using XScale = cutlass::epilogue::fusion::
       Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
