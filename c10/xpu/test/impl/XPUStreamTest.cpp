@@ -202,6 +202,7 @@ TEST(XPUStreamTest, ExternalTest) {
   at::xpu::setCurrentXPUStream(myStream);
   at::xpu::XPUStream curStream = at::xpu::getCurrentXPUStream();
 
+  EXPECT_TRUE(myStream.priority() == 0);
   ASSERT_TRUE(curStream == myStream);
   ASSERT_TRUE(&(curStream.queue()) == stream);
 
