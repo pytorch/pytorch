@@ -10,19 +10,20 @@ class Benchmark(BenchmarkBase):
     def __init__(self, *, training, subclass):
         self._training = training
         self._subclass = subclass
-        self._device = "cpu"
+        super().__init__(
+            category="aotdispatcher",
+            backend="aot_eager_decomp_partition",
+            device="cpu",
+            mode="training" if self._training else "inference",
+        )
 
     def name(self):
-        prefix = "aotdispatcher"
-        if self._training:
-            prefix += "_training"
-        else:
-            prefix += "_inference"
+        prefix = f"{self.category()}_{self.mode()}"
         if self._subclass:
             prefix += "_subclass"
         else:
             prefix += "_nosubclass"
-        if self._device == "cpu":
+        if self.device() == "cpu":
             prefix += "_cpu"
         return prefix
 
@@ -31,7 +32,7 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         _args = [
-            torch.ones(100, requires_grad=self._training, device=self._device)
+            torch.ones(100, requires_grad=self._training, device=self.device())
             for _ in range(100)
         ]
         if self._subclass:
@@ -45,7 +46,7 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        @torch.compile(backend=self.backend(), fullgraph=True)
         def f(*args):
             outs = [torch.add(x, x) for x in args]
             return outs

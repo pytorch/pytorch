@@ -705,6 +705,8 @@ class Vectorized<BFloat16>: public Vectorized16<BFloat16> {
 public:
   using Vectorized16::Vectorized16;
 
+  using value_type = BFloat16;
+
   Vectorized<BFloat16> frac() const;
 
   Vectorized<BFloat16> eq(const Vectorized<BFloat16>& other) const;
@@ -1370,6 +1372,8 @@ class Vectorized<Half>: public Vectorized16<Half> {
 public:
   using Vectorized16::Vectorized16;
 
+  using value_type = Half;
+
   Vectorized<Half> frac() const;
 
   Vectorized<Half> eq(const Vectorized<Half>& other) const;
@@ -1590,8 +1594,8 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(c
 inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
  return cvt_from_fp32<type>(__m512(a), __m512(b)); \
 }
-CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_VECTORIZED_INIT(Half, half);
+CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_VECTORIZED_INIT(Half, half)
 
 #else //defined(CPU_CAPABILITY_AVX512)
 
@@ -1620,8 +1624,8 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   } \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_NON_VECTORIZED_INIT(Half, half)
 
 #endif // defined(CPU_CAPABILITY_AVX512)
 
@@ -1659,8 +1663,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   data += Vectorized<float>::size(); \
   load_fp32_from_##name(data, out2); \
 }
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
 }}}

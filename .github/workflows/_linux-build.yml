@@ -120,7 +120,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build-environment == 'linux-s390x-binary-manywheel' }}
+          no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -212,6 +212,7 @@ jobs:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
         run: |
+          START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
             USED_IMAGE="${DOCKER_IMAGE_S390X}"
@@ -222,9 +223,13 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
-            # Fetch aws credential from IMDs
-            eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           fi
+
+          # Leaving 1GB for the runner and other things
+          TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" * 2))
+
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
           # shellcheck disable=SC2086
@@ -232,9 +237,6 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e AWS_SESSION_TOKEN \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
@@ -248,7 +250,10 @@ jobs:
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
+            -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e USE_SPLIT_BUILD \
+            --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
+            --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -260,6 +265,9 @@ jobs:
             "${USED_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
+
+          END_TIME=$(date +%s)
+          echo "build_time=$((END_TIME - START_TIME))" >> "$GITHUB_OUTPUT"
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
@@ -306,14 +314,10 @@ jobs:
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
-        uses: seemethere/upload-artifact-s3@v5
+        uses: ./.github/actions/upload-sccache-stats
         with:
-          s3-prefix: |
-            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
-          retention-days: 365
-          if-no-files-found: warn
-          path: sccache-stats-*.json
-          s3-bucket: ${{ inputs.s3-bucket }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
