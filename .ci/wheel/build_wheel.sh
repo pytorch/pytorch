@@ -238,9 +238,10 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
         pip install "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new" -v
 
         echo "$(date) :: Running tests"
-        pushd "$pytorch_rootdir"
-        "${SOURCE_DIR}/../run_tests.sh" 'wheel' "$desired_python" 'cpu'
-        popd
+        # TODO: Add real tests, as run_test.sh from builder is a glorified no-op
+        # pushd "$pytorch_rootdir"
+        # "${SOURCE_DIR}/../run_tests.sh" 'wheel' "$desired_python" 'cpu'
+        # popd
         echo "$(date) :: Finished tests"
     fi
 else
