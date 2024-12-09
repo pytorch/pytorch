@@ -90,6 +90,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
+from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -632,7 +633,7 @@ def _compile_fx_inner(
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
+                and is_gpu(input.device.type)
                 and i in static_input_idxs
             ):
                 input._is_inductor_static = True  # type: ignore[attr-defined]
@@ -971,6 +972,7 @@ class _InProcessFxCompile(FxCompile):
                     const_output_index=const_output_index,
                     const_code=const_code,
                     const_module=const_graph,
+                    inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
                 with V.set_graph_handler(graph):
@@ -1486,7 +1488,7 @@ def get_cpp_wrapper_config() -> Dict[str, object]:
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        else True,
+        else has_triton(),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
