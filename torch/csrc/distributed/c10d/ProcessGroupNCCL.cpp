@@ -1482,44 +1482,66 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (!terminateProcessGroup_.load()) {
-    if (rank_ % localDeviceCount_ == 0) {
-      TORCH_WARN_ONCE(
-          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL operations have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          "but this warning has only been added since PyTorch 2.4");
-    }
-    // If user haven't explicitly destroy/shutdown process group, destructor
-    // needs to do so
-    // Note: we have rewritten `shutdown` to represent the destroy behavior.
-    // Here we route to `abort()` explicitly to maintain the old behavior, until
-    // we fix everything.
-    abort();
+  if (terminateProcessGroup_.load())
+    // `shutdown()` or `abort` already called. Skip the favor of disposing
+    // communicators.
+    goto join_threads;
+
+  // If user haven't explicitly destroy/shutdown process group, destructor
+  // needs to do so
+  // First print warning on first rank of each node
+  if (rank_ % localDeviceCount_ == 0) {
+    TORCH_WARN_ONCE(
+        "WARNING: destroy_process_group() was not called before program exit, "
+        "which can leak resources. For more info, please see "
+        "https://pytorch.org/docs/stable/distributed.html#shutdown");
   }
+
+  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+  // context. Therefore, we are here only when the global context is tearing
+  // down, which means the entire program is exiting.  At this point, user will
+  // no longer care about the result of any collective, thus we can use abort
+  // instead of destroy to make the destruction non-blocking.
+
+  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+  // does not have the global context mentioned. In that case, calling `abort()`
+  // here could lead to corrupted result. We should consider not doing anything
+  // and just let things leak.
+  // Adversarial example:
+  /*
+    Work routine(Tensor& t) {
+      pg = ProcessGroupNCCL(…);
+      w = pg.allReduce(t);
+      return w;
+    }
+  */
+  abort();
+
+join_threads:
+  // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
+  // Tell watchdog and onCompletionHook:
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  // Tell heartbeat thread:
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 
   // Wait for all threads to finish before returning
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (!blockingWait_) {
-    if (ncclCommWatchdogThread_.joinable()) {
-      ncclCommWatchdogThread_.join();
-      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-    }
-    if (ncclHeartbeatMonitorThread_.joinable()) {
-      ncclHeartbeatMonitorThread_.join();
-      VLOG(2) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
-    }
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-#endif
+  if (ncclHeartbeatMonitorThread_.joinable()) {
+    ncclHeartbeatMonitorThread_.join();
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
+  }
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    VLOG(2) << logPrefix()
-            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
