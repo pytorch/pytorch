@@ -58,8 +58,8 @@ class Device:
 @dataclass(repr=False)
 class SymExprHint(_Union):
     as_int: Annotated[int, 10]
-    as_float: Annotated[float, 20]
-    as_bool: Annotated[bool, 30]
+    as_bool: Annotated[bool, 20]
+    as_float: Annotated[float, 30]
 
 
 # This is for storing the symbolic expressions behind symints/symfloats/symbools

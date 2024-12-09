@@ -100,6 +100,4 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-      # disable monitor in perf smoke tests for more investigation
-      disable-monitor: true
     secrets: inherit
