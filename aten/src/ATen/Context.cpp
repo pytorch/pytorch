@@ -86,7 +86,7 @@ void Context::setDeterministicFillUninitializedMemory(bool b) {
   _deterministic_fill_uninitialized_memory = b;
 }
 
-void Context::alertNotDeterministic(c10::string_view const& caller) {
+void Context::alertNotDeterministic(std::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
       TORCH_WARN(
