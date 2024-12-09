@@ -1779,15 +1779,15 @@ namespace {
         constexpr int dst_n = mask_n * size / dst_size;                     \
         if constexpr(dst_n * dst_size >= mask_n * size) {                   \
             CACHE_ALIGN dst_t x[mask_n * size];                             \
+            CACHE_ALIGN dst_t y[mask_n * size];                             \
+            CACHE_ALIGN dst_t ref[mask_n * size];                           \
             auto seed = TestSeed();                                         \
             ValueGen<dst_t> generator(dst_t(-100), dst_t(100), seed);       \
             for (const auto i : c10::irange(mask_n * size)) {               \
               x[i] = generator.get();                                       \
             }                                                               \
-            CACHE_ALIGN dst_t y[mask_n * size];                             \
-            CACHE_ALIGN dst_t ref[mask_n * size];                           \
-            constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
             auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);        \
+            constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
             auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
             x_vec.store(y);                                                 \
             for (const auto i : c10::irange(mask_n * size)) {               \
