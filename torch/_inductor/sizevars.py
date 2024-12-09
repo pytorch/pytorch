@@ -491,7 +491,7 @@ class SizeVarAllocator:
             raise TypeError(
                 f"evaluate_min({left}, {right}) with unbacked symints"
             ) from None
-        if lv <= rv:
+        if lv < rv:
             self.guard_leq(left, right)
             return left
         else:
