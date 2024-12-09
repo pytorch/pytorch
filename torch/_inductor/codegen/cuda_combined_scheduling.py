@@ -66,13 +66,13 @@ class CUDACombinedScheduling(BaseScheduling):
             assert not epilogue_nodes
             assert not prologue_nodes
             return self._cuda_cpp_scheduling.codegen_template(
-                template_node, epilogue_nodes
+                template_node, epilogue_nodes, prologue_nodes
             )
         elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
             assert not epilogue_nodes
             assert not prologue_nodes
             return self._rocm_cpp_scheduling.codegen_template(
-                template_node, epilogue_nodes
+                template_node, epilogue_nodes, prologue_nodes
             )
         else:
             return self._triton_scheduling.codegen_template(
