@@ -657,8 +657,8 @@ class SkipFunctionVariable(VariableTracker):
                 ):
                     msg = (
                         f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
-                        f" Consider using torch.utils._pytree - "
-                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                        f" Consider using torch.utils.pytree - "
+                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py"
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)

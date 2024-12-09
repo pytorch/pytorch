@@ -34,6 +34,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils._pytree as python_pytree
 import torch.utils.cpp_extension
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -307,7 +308,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         first_graph_break = list(counters["graph_break"].keys())[0]
         self.assertExpectedInline(
             first_graph_break,
-            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py",
+            "Graph break for an optree C/C++ function optree._C.PyCapsule.flatten. Consider using torch.utils.pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py",
         )
 
     def test_scalar_device_movement(self):
@@ -8726,9 +8727,9 @@ def ___make_guard_fn():
 
     def test_tracing_py_tree(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
 
@@ -8739,9 +8740,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = [xs, xs, xs, xs]
@@ -8755,9 +8756,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_tuples(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = (xs, xs, xs, xs)
@@ -8771,9 +8772,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_dicts(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsl = {
@@ -8807,9 +8808,9 @@ def ___make_guard_fn():
 
     def test_tracing_nested_py_tree_mixed_all(self):
         def fn(xs):
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             res = [x.clone() for x in flat_xs]
-            return python_pytree.tree_unflatten(res, spec)
+            return pytree.tree_unflatten(res, spec)
 
         xs = [torch.tensor(i) for i in range(3)]
         xsa = (xs, xs)
@@ -8859,7 +8860,7 @@ def ___make_guard_fn():
 
         def fn(xs):
             nested_xs = [[xs]]
-            flat_xs, spec = python_pytree.tree_flatten(xs)
+            flat_xs, spec = pytree.tree_flatten(xs)
             return flat_xs[0].clone()
 
         # use checkpoint to trigger a "sourceless" tensor subclass
@@ -8878,7 +8879,7 @@ def ___make_guard_fn():
             def mapper(x):
                 return x.clone()
 
-            y = python_pytree.tree_map_only(torch.Tensor, mapper, xs)
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
             return y
 
         xs = [torch.tensor(i) for i in range(3)] + ["hi"]
@@ -10228,7 +10229,7 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
 
     def test_pytree_tree_leaves(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -10262,7 +10263,7 @@ def ___make_guard_fn():
                 self.assertEqual(actual, expected)
 
     def test_pytree_tree_flatten_unflatten(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
@@ -10313,7 +10314,7 @@ def ___make_guard_fn():
             self.assertEqual(actual, expected)
 
     def test_pytree_tree_map(self):
-        implemtations = [("python", python_pytree)]
+        implemtations = [("generic", pytree), ("python", python_pytree)]
         if cxx_pytree is not None:
             implemtations.append(("cxx", cxx_pytree))
 
