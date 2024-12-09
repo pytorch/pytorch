@@ -3,6 +3,7 @@
 import _codecs
 import io
 import os
+import sys
 import tempfile
 import types
 import unittest
@@ -322,6 +323,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
+    )
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
@@ -585,7 +590,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         with safe_globals(
             [
-                np.core.multiarray._reconstruct,
+                (np.core.multiarray._reconstruct, "numpy.core.multiarray._reconstruct")
+                if np.__version__ >= "2.1"
+                else np.core.multiarray._reconstruct,
                 np.ndarray,
                 np.dtype,
                 _codecs.encode,
