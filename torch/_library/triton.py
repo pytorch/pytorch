@@ -130,14 +130,40 @@ def triton_op(
         # - With torch.compile, this means that the backend (usually Inductor)
         #   can see a call to the triton kernel(s) and so it can directly optimize
         #   them by inlining them into the lowering process.
-        # - With post-dispatch torch.export, this means that there will
-        #   be a call(s) to the triton_kernel_wrapper_functional HOP in the
-        #   graph (that we have yet to figure out how to serialize).
         def functional_decomp(  # type: ignore[no-untyped-def]
-            mode, _, types, args, kwargs
+            mode, op, types, args, kwargs
         ):
-            with mode:
-                return fn(*args, **kwargs)
+            # NOTE [Export custom triton op]
+            # For torch.export (strict and non-strict), we don't do the decomposition.
+            # Instead, we preserve the custom op as they're . This is because we want
+            # the exported program to be high-level and serializable. If we decompose
+            # the custom op to a functional hop, we need to figure out ways of serializing
+            # its arguments, which inculde triton kernels and triton dtypes, which exposes
+            # triton as the BC surface of an exported program, which is not desirable.
+            # - In the short term, we expect users to have a seperate aot_compile stage to
+            #   turn the custom triton kernel into a Cubin file for better BC guarantees.
+            # - In the long term, we may export multiple cubins for the triton op directly.
+            from torch.compiler import is_exporting
+
+            if is_exporting():
+                from torch._higher_order_ops.auto_functionalize import (
+                    can_auto_functionalize,
+                    do_auto_functionalize,
+                )
+                from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
+
+                if can_auto_functionalize(op):
+                    return do_auto_functionalize(op, args, kwargs)
+
+                assert (
+                    not op._schema.is_mutable
+                ), "custom triton op need to be auto_funcationlized is it's mutable"
+                ctx = PythonFunctionalizeAPI(mode, mode.pre_dispatch)
+                unwrapped_args, unwrapped_kwargs = ctx.unwrap_tensors((args, kwargs))
+                return ctx.wrap_tensors(op(*unwrapped_args, **unwrapped_kwargs))
+            else:
+                with mode:
+                    return fn(*args, **kwargs)
 
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result

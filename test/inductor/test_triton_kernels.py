@@ -3118,6 +3118,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         x = torch.randn(3, device=GPU_TYPE)
         y = torch.randn(3, device=GPU_TYPE)
 
+        breakpoint()
         out = f(x, y)
         expected = x + y
         self.assertEqual(out, expected)
