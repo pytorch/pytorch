@@ -102,6 +102,12 @@ class ExternalStream(Stream):
     This class is used to wrap SYCL queue created in other libraries in order
     to facilitate data exchange and multi-library interactions.
 
+    .. note:: This class doesn't manage the queue life-cycle, it is the user
+       responsibility to keep the referenced queue alive while this class is
+       being used. The different SYCL queue pointers will result in distinct
+       ExternalStream objects, even if they reference the same underlying SYCL
+       queue object.
+
     Args:
         queue_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
         device(torch.device or int, optional): the device where the queue was originally created.
