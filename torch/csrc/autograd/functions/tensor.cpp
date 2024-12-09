@@ -41,30 +41,30 @@ static variable_list CopyBackwards_apply_functional(
   return grad_inputs;
 }
 
-ivalue_list CopyBackwards::retrieve_saved(SwapSavedVariables& saved) {
-  saved.before(src_options);
-  SavedState state;
-  state.enqueue(src_options);
-  saved.after(src_options);
-  return state.stack;
-}
+// ivalue_list CopyBackwards::retrieve_saved(SwapSavedVariables& saved) {
+//   saved.before(src_options);
+//   SavedState state;
+//   state.enqueue(src_options);
+//   saved.after(src_options);
+//   return state.stack;
+// }
 
-c10::optional<functional_apply_t> CopyBackwards::get_functional() {
-  auto needs_input_grad = std::array<bool, 2>{
-      task_should_compute_output(0), task_should_compute_output(1)};
-  return [needs_input_grad](
-             const variable_list& inputs,
-             const ivalue_list& stack) -> variable_list {
-    SavedState state;
-    state.stack = stack;
-    at::TensorOptions src_options;
-    state.dequeue(src_options);
-    auto inputs_copy = inputs;
-
-    return CopyBackwards_apply_functional(
-        std::move(inputs_copy), needs_input_grad, src_options);
-  };
-}
+// c10::optional<functional_apply_t> CopyBackwards::get_functional() {
+//   auto needs_input_grad = std::array<bool, 2>{
+//       task_should_compute_output(0), task_should_compute_output(1)};
+//   return [needs_input_grad](
+//              const variable_list& inputs,
+//              const ivalue_list& stack) -> variable_list {
+//     SavedState state;
+//     state.stack = stack;
+//     at::TensorOptions src_options;
+//     state.dequeue(src_options);
+//     auto inputs_copy = inputs;
+//
+//     return CopyBackwards_apply_functional(
+//         std::move(inputs_copy), needs_input_grad, src_options);
+//   };
+// }
 
 auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   return CopyBackwards_apply_functional(
@@ -80,6 +80,7 @@ variable_list CopyBackwards::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   saved.before(src_options);
+  // TODO(rzou): this is busted
   auto result = apply(variable_list(inputs));
   saved.after(src_options);
   return result;
@@ -264,99 +265,19 @@ variable_list CopySlices::apply_with_saved(
     TORCH_INTERNAL_ASSERT(!view_fn);
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
     variable_list stuff = interface->call_copy_slices_prologue(
-        saved.get_py_compiler(),
-        grads,
-        base,
-        view);
+        saved.get_py_compiler(), grads, base, view);
     TORCH_INTERNAL_ASSERT(stuff.size() == 3);
     auto result = stuff[0];
     auto grad_slice = stuff[1];
     auto grad_slice_clone = stuff[2];
     auto res = fn->apply_with_saved({grad_slice_clone}, saved);
     results = interface->call_copy_slices_epilogue(
-        saved.get_py_compiler(),
-        needs_input_grad,
-        result,
-        res,
-        grad_slice);
+        saved.get_py_compiler(), needs_input_grad, result, res, grad_slice);
   }
 
   saved.after(base);
   saved.after(view);
   return results;
-
-  // apply_with_saved
-  //
-
-
-  /*
-  int call_count = 0;
-  variable_list result = apply_impl(
-      variable_list(grads),
-      [this, &saved, &call_count](const variable_list& inputs2) {
-        call_count++;
-        return fn->apply_with_saved(inputs2, saved);
-      });
-  TORCH_INTERNAL_ASSERT(call_count == 1);
-  saved.after(base);
-  saved.after(view);
-  return result;
-  */
-}
-
-ivalue_list CopySlices::retrieve_saved(SwapSavedVariables& saved) {
-  saved.before(base);
-  saved.before(view);
-
-  SavedState state;
-  state.enqueue(base);
-  state.enqueue(view);
-
-  auto fn_state = fn->retrieve_saved(saved);
-  state.stack.insert(state.stack.end(), fn_state.begin(), fn_state.end());
-
-  saved.after(base);
-  saved.after(view);
-
-  return state.stack;
-}
-
-c10::optional<functional_apply_t> CopySlices::get_functional() {
-  TORCH_INTERNAL_ASSERT(
-      !view_fn, "NYI: compiled autograd with CopySlices with view_fn");
-  auto num_out = num_outputs();
-  std::vector<bool> needs_input_grad;
-  for (const auto i : c10::irange(num_outputs())) {
-    needs_input_grad.emplace_back(task_should_compute_output(i));
-  }
-  auto fn2 = fn;
-
-  return [fn2, num_out, needs_input_grad](
-             const variable_list& inputs,
-             const std::vector<c10::IValue>& saved) -> variable_list {
-    SavedState state;
-    state.stack = saved;
-    at::TensorGeometry base;
-    at::TensorGeometry view;
-    state.dequeue(base);
-    state.dequeue(view);
-
-    // TODO(rzou): somehow we need to restore the state...
-    auto call_fn = [fn2](variable_list&& inputs2) -> variable_list {
-      return (*fn2)(std::move(inputs2));
-    };
-    // TODO(rzou): wut
-    variable_list copied_inputs = inputs;
-
-    return CopySlices_apply_functional(
-        std::move(copied_inputs),
-        needs_input_grad,
-        base,
-        view,
-        num_out,
-        call_fn,
-        {});
-  };
 }
 
 auto CopySlices::apply(variable_list&& inputs1) -> variable_list {

@@ -65,8 +65,6 @@ struct TORCH_API ${op} : public ${superclass} {
   ${will_release_variables}
   void compiled_args(CompiledNodeArgs& args) override;
   ivalue_list get_state();
-  ivalue_list retrieve_saved(SwapSavedVariables& saved) override;
-  c10::optional<functional_apply_t> get_functional() override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -106,6 +104,15 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+static variable_list ${op}_apply_functional_boxed(const variable_list& grads, const ivalue_list& stack)
+{
+  SavedState state;
+  state.stack = stack;
+  std::array<bool, ${num_vars}> needs_input_grad;
+  state.dequeue(needs_input_grad);
+  ${saved_var_dequeues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,unpacked_saved_vars});
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
@@ -127,7 +134,7 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
     variable_list result = interface->call_function(
         saved.get_py_compiler(),
         "apply_functional",
-        get_functional().value(),
+        ${op}_apply_functional_boxed,
         grads,
         state,
         num_outputs(),
@@ -145,23 +152,7 @@ ivalue_list ${op}::get_state() {
   ${get_state}
   return saved_state.stack;
 }
-ivalue_list ${op}::retrieve_saved(SwapSavedVariables& saved) {
-  ${apply_with_saved_before}
-  auto state = get_state();
-  ${apply_with_saved_after}
-  return state;
-}
 
-c10::optional<functional_apply_t> ${op}::get_functional() {
-  return [](const variable_list& inputs, const std::vector<c10::IValue>& saved) {
-    SavedState state;
-    state.stack = saved;
-    std::array<bool, ${num_vars}> needs_input_grad;
-    state.dequeue(needs_input_grad);
-    ${saved_var_dequeues}
-    return ${op}_apply_functional(variable_list(inputs), needs_input_grad${,unpacked_saved_vars});
-  };
-}
 """
 )
 

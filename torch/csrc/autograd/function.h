@@ -608,18 +608,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
         std::string("apply_with_saved not implemented: ") + name());
   }
 
-  virtual ivalue_list retrieve_saved(SwapSavedVariables& saved) {
-    throw std::runtime_error(
-        std::string("retrieve_saved not implemented: ") + name());
-  }
-  virtual c10::optional<functional_apply_t> get_functional() {
-    throw std::runtime_error(
-        std::string("get_functional not implemented: ") + name());
-  }
-  virtual bool use_apply_with_saved() {
-    return false;
-  }
-
  protected:
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;

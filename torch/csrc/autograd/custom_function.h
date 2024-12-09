@@ -226,31 +226,26 @@ struct CppNode : public Node {
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
-    // saved.before(ctx_.saved_data);
-    // TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    // TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    // saved.before(ctx_.saved_variables_);
-    // TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    // saved.before(ctx_.materialize_grads_);
-    // saved.before(ctx_.has_freed_buffers_);
-    // saved.before(input_info_);
-    // saved.before(output_info_);
+    saved.before(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.before(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.before(ctx_.materialize_grads_);
+    saved.before(ctx_.has_freed_buffers_);
+    saved.before(input_info_);
+    saved.before(output_info_);
 
     // auto results = apply(variable_list(inputs));
 
-    // saved.after(ctx_.saved_data);
-    // TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    // TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    // saved.after(ctx_.saved_variables_);
-    // TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    // saved.after(ctx_.materialize_grads_);
-    // saved.after(ctx_.has_freed_buffers_);
-    // saved.after(input_info_);
-    // saved.after(output_info_);
-    // return results;
-
-    auto stack = retrieve_saved(saved);
-
+    SavedState state;
+    state.enqueue(ctx_.saved_data);
+    variable_list saved_variables = ctx_.get_saved_variables();
+    state.enqueue(saved_variables);
+    state.enqueue(ctx_.materialize_grads_);
+    state.enqueue(output_info_);
+    state.enqueue(is_variable_input_);
+    auto& stack = state.stack;
     std::vector<at::TypePtr> schema;
     schema.reserve(stack.size());
     for (const auto& ivalue : stack) {
@@ -273,10 +268,20 @@ struct CppNode : public Node {
         name(),
         schema,
         /*builtin*/ false);
+
+    saved.after(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.after(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.after(ctx_.materialize_grads_);
+    saved.after(ctx_.has_freed_buffers_);
+    saved.after(input_info_);
+    saved.after(output_info_);
     return results;
   }
 
-  c10::optional<functional_apply_t> get_functional() override {
+  c10::optional<functional_apply_t> get_functional() {
     auto name = this->name();
 
     // TODO(rzou): probably need to pre compute needs_input_grad
@@ -357,49 +362,6 @@ struct CppNode : public Node {
       }
       return results;
     };
-  }
-  ivalue_list retrieve_saved(SwapSavedVariables& saved) override {
-    saved.before(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.before(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.before(ctx_.materialize_grads_);
-    saved.before(ctx_.has_freed_buffers_);
-    saved.before(input_info_);
-    saved.before(output_info_);
-
-    SavedState state;
-    // std::cout << "start, stack=" << state.stack.size() << std::endl;
-    state.enqueue(ctx_.saved_data);
-    // std::cout << "enqueued saved_data, stack=" << state.stack.size() <<
-    // std::endl;
-
-    variable_list saved_variables = ctx_.get_saved_variables();
-    state.enqueue(saved_variables);
-    // std::cout << "enqueued saved_variables_, stack=" << state.stack.size() <<
-    // std::endl;
-    state.enqueue(ctx_.materialize_grads_);
-    // std::cout << "enqueued materialize_grads_, stack=" << state.stack.size()
-    // << std::endl;
-    state.enqueue(output_info_);
-    // std::cout << "enqueued output_info_, stack=" << state.stack.size() <<
-    // std::endl;
-    state.enqueue(is_variable_input_);
-    // std::cout << "enqueued is_variable_input_, stack=" << state.stack.size()
-    // << std::endl;
-
-    saved.after(ctx_.saved_data);
-    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
-    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
-    saved.after(ctx_.saved_variables_);
-    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
-    saved.after(ctx_.materialize_grads_);
-    saved.after(ctx_.has_freed_buffers_);
-    saved.after(input_info_);
-    saved.after(output_info_);
-
-    return state.stack;
   }
 };
 
