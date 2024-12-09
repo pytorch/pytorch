@@ -8,7 +8,7 @@ from typing import Annotated, Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 1)
+SCHEMA_VERSION = (8, 2)
 TREESPEC_VERSION = 1
 
 
@@ -27,8 +27,6 @@ class ScalarType(IntEnum):
     COMPLEXDOUBLE = 11
     BOOL = 12
     BFLOAT16 = 13
-    FLOAT8_E5M2 = 23
-    FLOAT8_E4M3FN = 24
     UINT16 = 28
 
 
@@ -60,8 +58,8 @@ class Device:
 @dataclass(repr=False)
 class SymExprHint(_Union):
     as_int: Annotated[int, 10]
-    as_float: Annotated[float, 20]
-    as_bool: Annotated[bool, 30]
+    as_bool: Annotated[bool, 20]
+    as_float: Annotated[float, 30]
 
 
 # This is for storing the symbolic expressions behind symints/symfloats/symbools
@@ -78,6 +76,11 @@ class SymExpr:
 class SymInt(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_int: Annotated[int, 20]
+
+@dataclass(repr=False)
+class SymFloat(_Union):
+    as_expr: Annotated[SymExpr, 10]
+    as_float: Annotated[float, 20]
 
 
 @dataclass(repr=False)
@@ -108,6 +111,16 @@ class SymIntArgument(_Union):
     as_name: Annotated[str, 10]
     as_int: Annotated[int, 20]
 
+# In most cases we will use the "as_name" field to store arguments which are
+# SymFloats.
+# The "as_float" field is used in the case where we have a list containing a mix
+# of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
+# be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
+# to the "as_float" field.
+@dataclass(repr=False)
+class SymFloatArgument(_Union):
+    as_name: Annotated[str, 10]
+    as_float: Annotated[float, 20]
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
@@ -179,7 +192,8 @@ class Argument(_Union):
     as_optional_tensors: Annotated[List[OptionalTensorArgument], 190]
     as_custom_obj: Annotated[CustomObjArgument, 210]
     as_operator: Annotated[str, 220]
-
+    as_sym_float: Annotated[SymFloatArgument, 230]
+    as_sym_floats: Annotated[List[SymFloatArgument], 240]
 
 @dataclass
 class NamedArgument:
@@ -210,7 +224,7 @@ class Graph:
     # list.
     is_single_tensor_return: Annotated[bool, 70] = False
     custom_obj_values: Annotated[Dict[str, CustomObjArgument], 80] = field(default_factory=dict)
-
+    sym_float_values: Annotated[Dict[str, SymFloat], 90] = field(default_factory=dict)
 
 @dataclass
 class UserInputSpec:
