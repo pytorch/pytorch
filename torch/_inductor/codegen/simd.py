@@ -1453,7 +1453,6 @@ class SIMDScheduling(BaseScheduling):
                                         prologue_node.get_ranges()
                                     )
                                 )
-
                             kernel.cse.invalidate(set())
 
         if not isinstance(partial_code, str):
