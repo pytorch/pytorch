@@ -389,17 +389,15 @@ test_inductor_cpp_wrapper_shard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  if [[ "$1" -eq "2" ]]; then
+    # For now, manually put the opinfo tests in shard 2, and all other tests in
+    # shard 1.
+    python test/run_test.py --include inductor/test_torchinductor_opinfo --verbose
+  fi
+
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
   # should be able to run all the inductor unit tests with cpp_wrapper.
-  python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
-
-  # Only run benchmarks on shard 1.
-  if [[ "$1" -ne "1" ]]; then
-    return
-  fi
+  python test/run_test.py --include inductor/test_torchinductor --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
