@@ -4559,6 +4559,9 @@ class TestLinalg(TestCase):
         # could impact subsequent tests.
         import os
 
+        # Release unused cached memory to reduce flakiness on some platforms
+        torch.cuda.empty_cache()
+
         try:
             os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
             os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
