@@ -28,6 +28,11 @@ def should_check(filename: Path) -> bool:
 if __name__ == "__main__":
     errors_found = False
     files = [f for f in WORKFLOWS.glob("*.yml") if should_check(f)]
+
+    # DEBUG
+    print(files)
+    sys.exit(0)
+
     names = set()
     for filename in files:
         with open(filename) as f:

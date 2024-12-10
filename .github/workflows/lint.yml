@@ -148,8 +148,7 @@ jobs:
         fi
 
         # Check that jobs will be cancelled
-        # DEBUG
-        # .github/scripts/ensure_actions_will_cancel.py
+        .github/scripts/ensure_actions_will_cancel.py
 
         exit $RC
 
