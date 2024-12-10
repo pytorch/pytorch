@@ -72,6 +72,7 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
+    @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -252,7 +253,7 @@ class DeviceMeshTest(DTensorTestBase):
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Device type with GPU index is not supported",
+            "Device type with index is not supported",
         ):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
