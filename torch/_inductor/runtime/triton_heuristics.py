@@ -535,14 +535,12 @@ class CachingAutotuner(KernelInterface):
             3. It isn't in the compile_meta signature
         """
         known_constants = OrderedSet(
-            [arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs]
+            arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
         )
         none_args = OrderedSet(
-            [
-                k
-                for k, v in compile_meta["constants"].items()
-                if v is None and k not in known_constants
-            ]
+            k
+            for k, v in compile_meta["constants"].items()
+            if v is None and k not in known_constants
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 

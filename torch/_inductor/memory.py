@@ -10,13 +10,14 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import MultiOutputLayout, NoneLayout
+from .scheduler import BaseSchedulerNode
 from .utils import get_dtype_size
 from .virtualized import V
 
 
 if TYPE_CHECKING:
     from .dependencies import Dep
-    from .scheduler import BaseSchedulerNode, SchedulerBuffer
+    from .scheduler import SchedulerBuffer
 
 
 torch_log = logging.getLogger(__name__)
@@ -217,31 +218,21 @@ def assign_memory_planning_info_for_scheduler_nodes(
 
     for index, node in enumerate(nodes):
         size_alloc = sum(buffer.mpi_buffer.size_alloc for buffer in node.get_outputs())
-        pred_buffers: OrderedSet[
-            Union[SchedulerBuffer, FreeableInputBuffer]
-        ] = OrderedSet()
+        pred_buffers = OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]]()
         for dep in node.read_writes.reads:
             if dep.name in name_to_buf and dep in node.unmet_dependencies:
                 pred_buffers.add(name_to_buf[dep.name])
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
-            OrderedSet(
-                [
-                    name_to_fused_node[pred_buffer.defining_op.get_name()]
-                    for pred_buffer in pred_buffers
-                    if (isinstance(pred_buffer, SchedulerBuffer))
-                ]
-            )
+            name_to_fused_node[pred_buffer.defining_op.get_name()]
+            for pred_buffer in pred_buffers
+            if (isinstance(pred_buffer, SchedulerBuffer))
         )
         succ_nodes = OrderedSet(
-            OrderedSet(
-                [
-                    succ_node
-                    for buffer in node.get_outputs()
-                    for succ_node in buffer.mpi_buffer.succ_nodes
-                ]
-            )
+            succ_node
+            for buffer in node.get_outputs()
+            for succ_node in buffer.mpi_buffer.succ_nodes
         )
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
@@ -387,7 +378,7 @@ def topological_sort_lpmf(
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled
-    nodes_to_schedule: OrderedSet[BaseSchedulerNode] = OrderedSet()
+    nodes_to_schedule = OrderedSet[BaseSchedulerNode]()
     for node in nodes:
         node_info[node] = {
             "indegree": len(node.mpi_node.pred_nodes),
@@ -505,10 +496,7 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
         assert node_info[node]["indegree"] == 0
         exec_orders = sorted(
             OrderedSet(
-                [
-                    node_info[pred_node]["order"]
-                    for pred_node in node.mpi_node.pred_nodes
-                ]
+                node_info[pred_node]["order"] for pred_node in node.mpi_node.pred_nodes
             )
         )
         return exec_orders
@@ -558,7 +546,7 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     compute the total memory of all buffers it reads from or writes to, and we visit
     the nodes in ascending order of this priority.
     """
-    seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
+    seen = OrderedSet[BaseSchedulerNode]()
     name_to_node: Dict[str, BaseSchedulerNode] = dict()
     result: List[BaseSchedulerNode] = []
     size_with_reads: Dict[BaseSchedulerNode, int] = dict()

@@ -569,7 +569,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     # is not supported. An example of this is conditional statements.
     single_graph = None
     if len(inductor_nodes):
-        unique_graphs = OrderedSet([n.graph for n in inductor_nodes])
+        unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
@@ -766,23 +766,22 @@ def get_first_incompatible_cudagraph_node(
     )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
-            OrderedSet(
-                [
-                    "aten._unsafe_index_put.default",
-                    "aten._unsafe_masked_index_put_accumulate.default",
-                    "aten.index_put.default",
-                    "aten.index_put_.default",
-                    "aten.scatter.src",
-                    "aten.scatter.reduce",
-                    "aten.scatter.value_reduce",
-                    "aten.scatter_add_",
-                    "aten.scatter_add.default",
-                    "aten.scatter_reduce.two",
-                    "aten.scatter_reduce_.two",
-                    "aten.scatter_reduce.two_out",
-                ]
+            (
+                "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
             )
         )
+
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
@@ -1933,8 +1932,13 @@ def device_need_guard(device: str):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
+    # tl.atomic add has bfloat16 support in fbcode
+    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
+    # we will fallback until the code is upstreamed to OSS
+    if config.is_fbcode() and dtype == torch.bfloat16:
+        return False
+    else:
+        return dtype in (torch.int64, torch.bool, torch.bfloat16)
 
 
 def use_scatter_fallback(
@@ -1957,7 +1961,7 @@ def use_scatter_fallback(
     )
 
     return (
-        reduction_type not in OrderedSet([None, reduce_ty])
+        reduction_type not in (None, reduce_ty)
         or (
             src_is_tensor
             and is_gpu(src_device_type)
@@ -1971,10 +1975,7 @@ def use_scatter_fallback(
             and config.cpp.fallback_scatter_reduce_sum
             and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
-        or (
-            reduction_type == reduce_ty
-            and self_dtype in OrderedSet([torch.bool, torch.int64])
-        )
+        or (reduction_type == reduce_ty and self_dtype in (torch.bool, torch.int64))
         or torch.are_deterministic_algorithms_enabled()
     )
 

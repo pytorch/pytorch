@@ -719,7 +719,7 @@ class SplitCatSimplifier:
         """
         user_inputs_list: List[List[Union[torch.fx.Node, _Range]]] = []
         for user in next_users:
-            if user.target in OrderedSet([torch.cat, torch.stack]):
+            if user.target in (torch.cat, torch.stack):
                 user_inputs_list.append(self.get_merged_user_inputs(split_node, user))
             else:
                 user_inputs_list.append(self.get_non_cat_node_input(split_node, user))  # type: ignore[arg-type]
@@ -790,12 +790,10 @@ class SplitCatSimplifier:
     ) -> Optional[List[_Range]]:
         ranges = OrderedSet[Any]()
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            ranges |= OrderedSet(
-                [
-                    user_input
-                    for user_input in user_inputs
-                    if isinstance(user_input, tuple)
-                ]
+            ranges.update(
+                user_input
+                for user_input in user_inputs
+                if isinstance(user_input, tuple)
             )
         cumulative_sizes = [0] + torch.cumsum(torch.tensor(split_sections), 0).tolist()
         split_ranges = sorted(
@@ -849,7 +847,7 @@ class SplitCatSimplifier:
         transform_params_list: List[List[_TransformParam]] = []
 
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            if user_node.target not in OrderedSet([torch.cat, torch.stack]):
+            if user_node.target not in (torch.cat, torch.stack):
                 transform_params_list.append([])
                 continue
 
@@ -964,7 +962,7 @@ class SplitCatSimplifier:
         for user_node, user_inputs_new, transform_params in zip(
             next_users, user_inputs_list_new, transform_params_list
         ):
-            if user_node.target not in OrderedSet([torch.cat, torch.stack]):
+            if user_node.target not in (torch.cat, torch.stack):
                 # Change the args and kwargs of non-cat/stack nodes. Replace old getitems (belonging to
                 # the original split node) with the newer getitems
                 next_cat_input = 0
@@ -1093,7 +1091,7 @@ class SplitCatSimplifier:
         counters["inductor"]["scmerge_split_removed"] += 1
         to_remove.extend(split_node.users.keys())
         for next_user in next_users:
-            if next_user.target not in OrderedSet([torch.cat, torch.stack]):
+            if next_user.target not in (torch.cat, torch.stack):
                 continue
             counters["inductor"]["scmerge_cat_removed"] += 1
             to_remove.append(next_user)

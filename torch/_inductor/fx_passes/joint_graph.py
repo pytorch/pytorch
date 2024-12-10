@@ -512,7 +512,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
     Rewrite the arange to use CUDA.
     """
     (node,) = match.nodes
-    user_devices: OrderedSet[torch.device] = OrderedSet()
+    user_devices = OrderedSet[torch.device]()
     for user in node.users:
         if (
             user.op == "call_function"
@@ -559,7 +559,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()
-    allowed = OrderedSet([torch.float16, torch.bfloat16, torch.float32, torch.float64])
+    allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
     if dtype1 in allowed and dtype2 in allowed:
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

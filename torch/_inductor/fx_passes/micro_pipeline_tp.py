@@ -598,7 +598,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     # ag_res_node and the matmul above fused_node.
     order = {node: idx for idx, node in enumerate(graph.nodes)}
     nodes_to_raise = sorted(
-        OrderedSet([x for matmul in matmuls for x in matmul.arg_ancestor_nodes]),
+        OrderedSet(x for matmul in matmuls for x in matmul.arg_ancestor_nodes),
         key=lambda x: order[x],
     )
     for node in nodes_to_raise:
@@ -818,7 +818,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> List[torch.fx.Node]:
     for collective, overlappable_nodes in collective_to_overlappable_nodes.items():
         candidates = [x for x in overlappable_nodes if _is_compute_intensive(x)]
         collective_to_overlapping_candidates[collective] = candidates
-        available_nodes |= OrderedSet(candidates)
+        available_nodes.update(candidates)
 
     unexposed_collectives = []
     for (

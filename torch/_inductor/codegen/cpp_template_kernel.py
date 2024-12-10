@@ -83,13 +83,13 @@ class CppTemplateKernel(CppKernel):
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         )
-        unique_sizevars |= OrderedSet(
+        unique_sizevars.update(
             s
             for sym in extra_sizevars or []
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         )
-        unique_sizevars |= OrderedSet(
+        unique_sizevars.update(
             s
             for output in outputs.values()
             for sym in itertools.chain(output.get_size(), output.get_stride())

@@ -1406,7 +1406,7 @@ def register_replacement(
         return pattern.pattern
 
 
-_serialized_patterns: OrderedSet[str] = OrderedSet()
+_serialized_patterns = OrderedSet[str]()
 
 
 def _serialize_pattern(
@@ -2039,7 +2039,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return CopyGraph(input_graph).transform()
 
 
-_seen_patterns: OrderedSet[str] = OrderedSet()
+_seen_patterns = OrderedSet[str]()
 
 
 def get_arg_value(

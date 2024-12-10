@@ -147,7 +147,7 @@ class DtypePropagationOpsHandler:
 
         from torch._inductor.ops_handler import OpsHandler
 
-        ops_set = OrderedSet([s for s in dir(OpsHandler) if s[0] != "_"])
+        ops_set = OrderedSet(s for s in dir(OpsHandler) if s[0] != "_")
         unimplemented_ops = ops_set - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,

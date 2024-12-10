@@ -44,6 +44,7 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
+from ..graph import GraphLowering
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -68,8 +69,6 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 if TYPE_CHECKING:
     import triton
-
-    from ..graph import GraphLowering
 
 
 pexpr = PythonPrinter().doprint
@@ -632,11 +631,11 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
-        self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
+        self.kernel_autotune_names = OrderedSet[str]()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: OrderedSet[Tuple[str, GraphLowering]] = OrderedSet()
+        self.kernel_numel_expr = OrderedSet[Tuple[str, GraphLowering]]()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -648,10 +647,8 @@ class PythonWrapperCodegen(CodeGen):
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
-        self.unbacked_symbol_decls: OrderedSet[
-            str
-        ] = OrderedSet()  # str of sympy.Symbol
-        self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
+        self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
+        self.computed_sizes = OrderedSet[sympy.Symbol]()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -672,8 +669,8 @@ class PythonWrapperCodegen(CodeGen):
                 # include a hash so our code cache puts different constants into different files
                 self.write_constant(name, hashed)
 
-        self.allocated: OrderedSet[BufferName] = OrderedSet()
-        self.freed: OrderedSet[BufferName] = OrderedSet()
+        self.allocated = OrderedSet[BufferName]()
+        self.freed = OrderedSet[BufferName]()
 
         # maps from reusing buffer to reused buffer
         self.reuses: Dict[BufferName, BufferName] = {}
@@ -690,9 +687,9 @@ class PythonWrapperCodegen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas: Dict[str, str] = {}
-        self._meta_vars: OrderedSet[str] = OrderedSet()
+        self._meta_vars = OrderedSet[str]()
         self.multi_kernel_state = MultiKernelState()
-        self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
+        self.already_codegened_subgraphs = OrderedSet[str]()
         self.allocated_workspaces: Dict[str, Any] = {}
 
         # intermediate tensor value printing utility

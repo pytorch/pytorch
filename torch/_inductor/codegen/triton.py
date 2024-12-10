@@ -714,7 +714,7 @@ class TritonCSEVariable(CSEVariable):
     def __init__(self, name, bounds: ValueRanges[Any], dtype: torch.dtype) -> None:
         super().__init__(name, bounds, dtype)
         # We'll use this to track which masks the variable needs when used for indirect indexing
-        self.mask_vars: OrderedSet[str] = OrderedSet()
+        self.mask_vars = OrderedSet[str]()
         assert dtype is not None, "TritonCSEVariable must have dtype"
 
     def update_on_args(self, name, args, kwargs):
@@ -738,13 +738,7 @@ def maybe_upcast_float32(convert_output: bool = True):
         return (
             not config.triton.codegen_upcast_to_fp32
             and isinstance(var, CSEVariable)
-            and var.dtype
-            in OrderedSet(
-                [
-                    torch.float16,
-                    torch.bfloat16,
-                ]
-            )
+            and var.dtype in (torch.float16, torch.bfloat16)
         )
 
     def maybe_upcast_arg(var) -> str:
@@ -779,7 +773,7 @@ def maybe_upcast_float32(convert_output: bool = True):
             needs_downcast = (
                 convert_output
                 and any(needs_upcast(var) for var in all_args)
-                and result_dtype not in OrderedSet([torch.float32, None])
+                and result_dtype not in (torch.float32, None)
             )
             downcast_string = (
                 f".to({triton_type(result_dtype)})"
@@ -1534,14 +1528,14 @@ class TritonKernel(SIMDKernel):
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
-        self.outside_loop_vars: OrderedSet[Any] = OrderedSet()
+        self.outside_loop_vars = OrderedSet[Any]()
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
         self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
-        self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
+        self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: Optional[Dict[str, Any]] = None
 
         if self.cooperative_reduction:
@@ -1642,7 +1636,7 @@ class TritonKernel(SIMDKernel):
         index_vars = index.free_symbols
         has_rindex = False
 
-        mask_vars: OrderedSet[str] = OrderedSet()
+        mask_vars = OrderedSet[str]()
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)
@@ -1679,7 +1673,7 @@ class TritonKernel(SIMDKernel):
 
         have_dense = True
         have_loop_vars = False
-        dense_mask_vars: OrderedSet[str] = OrderedSet()
+        dense_mask_vars = OrderedSet[str]()
 
         for tree in self.active_range_trees():
             if index_vars.intersection(tree.var_list):
@@ -2447,7 +2441,7 @@ class TritonKernel(SIMDKernel):
 
         if isinstance(result_var, tuple):
             assert all(isinstance(x, TritonCSEVariable) for x in result_var)
-            self.outside_loop_vars |= OrderedSet(result_var)
+            self.outside_loop_vars.update(result_var)
         else:
             assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
@@ -3097,7 +3091,7 @@ class TritonKernel(SIMDKernel):
                         arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
                     )
 
-        mutated_args: OrderedSet[str] = OrderedSet()
+        mutated_args = OrderedSet[str]()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])

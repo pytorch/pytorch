@@ -185,7 +185,7 @@ class CppCSEVariable(CSEVariable):
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dependent_itervars: OrderedSet[sympy.Symbol] = OrderedSet()
+        self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
     def __repr__(self) -> str:
         return (
@@ -294,7 +294,7 @@ def rewrite_index_for_nodes(
     global_buf_name: str,
 ):
     used_vars = OrderedSet(
-        [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)]
+        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
     )
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]

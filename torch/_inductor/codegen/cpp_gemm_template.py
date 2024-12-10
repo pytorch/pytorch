@@ -1172,7 +1172,7 @@ class CppGemmTemplate(CppTemplate):
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
         epilogue_creators: List[Callable[[ir.Buffer], ir.Pointwise]] = []
         fake_buffers: List[ir.Buffer] = []
-        Y_aliases: OrderedSet[str] = OrderedSet()
+        Y_aliases = OrderedSet[str]()
 
         use_local_acc = (
             self.layout.dtype != torch.float

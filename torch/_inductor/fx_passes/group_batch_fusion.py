@@ -1234,8 +1234,8 @@ def find_independent_subset_greedy(
     # Compute all the children of `node` which are members of
     # `interesting_nodes`.
     def find_dependent_nodes(node, interesting_nodes):
-        visited_node_set: OrderedSet[torch.fx.Node] = OrderedSet([node])
-        dep_set: OrderedSet[torch.fx.Node] = OrderedSet()
+        visited_node_set = OrderedSet[torch.fx.Node]()
+        dep_set = OrderedSet[torch.fx.Node]()
 
         work = [node]
         while work:
@@ -1261,7 +1261,7 @@ def find_independent_subset_greedy(
     cache: Dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
     while node_list:
         subset: List[torch.fx.Node] = []
-        subset_deps: OrderedSet[torch.fx.Node] = OrderedSet()
+        subset_deps = OrderedSet[torch.fx.Node]()
 
         next_round_node_list = _OrderedSet()
         for node in node_list:
@@ -1309,7 +1309,7 @@ def get_fusion_candidates(
     if root_node.target in SEARCH_EXCLUSIONS:
         return candidate_dict
 
-    visited_set: OrderedSet[torch.fx.Node] = OrderedSet()
+    visited_set = OrderedSet[torch.fx.Node]()
 
     for next_node in root_node.all_input_nodes:
         q.append((1, next_node))
@@ -1338,7 +1338,7 @@ def get_fusion_candidates(
 
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
     stable_topological_sort(graph)  # type: ignore[arg-type]
-    fused_set: OrderedSet[torch.fx.Node] = OrderedSet()
+    fused_set = OrderedSet[torch.fx.Node]()
     log_to_scuba = False
 
     for node in reversed(graph.nodes):  # type: ignore[arg-type]

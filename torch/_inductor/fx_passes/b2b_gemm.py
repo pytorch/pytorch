@@ -620,7 +620,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         (1) the Boolean value
         (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
-        visited: OrderedSet[torch.fx.Node] = OrderedSet()
+        visited = OrderedSet[torch.fx.Node]()
         input_counter: Dict[torch.fx.Node, int] = {}
 
         all_reachable = True

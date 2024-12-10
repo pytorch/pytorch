@@ -556,7 +556,7 @@ def is_valid_splitwithsizes_cat(match):
     if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
         return False
     get_item_args = OrderedSet(
-        [get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes]
+        get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
     )
     assert None not in get_item_args
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
@@ -1205,7 +1205,7 @@ class ConstructorMoverPass:
         cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
         # which constructors cannot be moved to gpu
-        cannot_move_to_gpu: OrderedSet[fx.Node] = OrderedSet()
+        cannot_move_to_gpu = OrderedSet[fx.Node]()
 
         # For any node in the graph, which constructors does it have a dependency on
         constructor_dependencies: Dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(

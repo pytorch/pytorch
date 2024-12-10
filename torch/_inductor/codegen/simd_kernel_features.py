@@ -109,7 +109,7 @@ class SIMDKernelFeatures:
         return bool(self.op_counts().get(op_name))
 
     def get_mutations(self) -> OrderedSet[str]:
-        mutations: OrderedSet[str] = OrderedSet()
+        mutations = OrderedSet[str]()
         for node in self.scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
@@ -118,7 +118,7 @@ class SIMDKernelFeatures:
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
-        buffer_names: OrderedSet[str] = OrderedSet()
+        buffer_names = OrderedSet[str]()
         for node in self.scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
