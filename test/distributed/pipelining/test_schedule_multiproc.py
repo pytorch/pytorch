@@ -712,19 +712,19 @@ class ScheduleTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
-        "ScheduleClass", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
+        "schedule_class", [ScheduleVShaped, ScheduleUnbalanced, ScheduleZBVZeroBubble]
     )
     @parametrize("use_new_runtime", [False, True])
-    def test_non_symmetric_stage_ids(self, ScheduleClass, use_new_runtime):
-        if ScheduleClass is ScheduleZBVZeroBubble:
+    def test_non_symmetric_stage_ids(self, schedule_class, use_new_runtime):
+        if schedule_class is ScheduleZBVZeroBubble:
             n_stages = 4
             rank_stages = {
                 0: [0, 3],
                 1: [1, 2],
             }
         else:
-            n_stages = ScheduleClass.n_stages
-            rank_stages = ScheduleClass.rank_stages
+            n_stages = schedule_class.n_stages
+            rank_stages = schedule_class.rank_stages
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(self.device)
 
@@ -766,7 +766,7 @@ class ScheduleTest(MultiProcContinousTest):
         stage_index_to_group_rank = {
             value: key for key, values in rank_stages.items() for value in values
         }
-        schedule = ScheduleClass(
+        schedule = schedule_class(
             stages,
             num_microbatches,
             stage_index_to_group_rank=stage_index_to_group_rank,
