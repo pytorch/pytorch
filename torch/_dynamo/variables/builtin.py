@@ -80,7 +80,6 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-
 log = logging.getLogger(__name__)
 
 
@@ -1626,14 +1625,6 @@ class BuiltinVariable(VariableTracker):
         name_var: VariableTracker,
         default=None,
     ):
-        from .. import trace_rules
-        from . import (
-            ConstantVariable,
-            GetAttrVariable,
-            TorchInGraphFunctionVariable,
-            UserFunctionVariable,
-        )
-
         name = name_var.as_python_constant()
 
         if not name_var.is_python_constant():
@@ -1703,14 +1694,14 @@ class BuiltinVariable(VariableTracker):
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
-                return GetAttrVariable(obj, name, source=source)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
+                return variables.GetAttrVariable(obj, name, source=source)
+        elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
-            ) and trace_rules.is_aten_op_or_tensor_method(member):
-                return TorchInGraphFunctionVariable(member, source=source)
+            ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+                return variables.TorchInGraphFunctionVariable(member, source=source)
         elif isinstance(obj, DummyModule):
             # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
@@ -1722,13 +1713,16 @@ class BuiltinVariable(VariableTracker):
                 tx.exec_recorder.record_module_access(obj.value, name, member)
             return VariableTracker.build(tx, member, source)
 
-        elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
+        elif istype(obj, variables.UserFunctionVariable) and name in (
+            "__name__",
+            "__module__",
+        ):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
-                return GetAttrVariable(obj, name, source=source)
+                return variables.GetAttrVariable(obj, name, source=source)
 
     def call_setattr(
         self,
