@@ -3,24 +3,9 @@ import contextlib
 
 import torch
 import torch.fx
-from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._dynamo.test_case import TestCase
+from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
-
-
-def extract_graph_and_tracker(fn, *args, **kwargs):
-    gm = None
-    region_tracker = None
-
-    def extract_graph_backend(_gm, *args, **kwargs):
-        nonlocal gm
-        nonlocal region_tracker
-        gm = _gm
-        region_tracker = InstructionTranslator.current_tx().output.region_tracker
-        return _gm
-
-    torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
-    return gm.graph, region_tracker
 
 
 def get_nodes_by_name(graph, names):
