@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 
 """ Implementation of reduction operations, to be wrapped into arrays, dtypes etc
 in the 'public' layer.

@@ -1,4 +1,4 @@
-# mypy: ignore-errors
+
 import copy
 import itertools
 from typing import Callable, Dict, List

@@ -318,7 +318,7 @@ command = [
     """--error-description=\
         follow_imports = skip is forbidden from mypy.ini configuration as it \
         is extremely easy to accidentally turn off type checking unintentionally.  If \
-        you need to suppress type errors, use a top level # mypy: ignore-errors.  \
+        you need to suppress type errors, use a top level .  \
         Do not rely on automatic Any substitution; instead, manually # type: ignore \
         at use sites or define a pyi type stub with more relaxed types. \
     """,

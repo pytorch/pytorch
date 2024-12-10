@@ -1,13 +1,9 @@
 """Collect instruction counts for continuous integration."""
-
-# mypy: ignore-errors
-
 import argparse
 import hashlib
 import json
 import time
 from typing import Dict, List, Union
-
 from core.expand import materialize
 from definitions.standard import BENCHMARKS
 from execution.runner import Runner
