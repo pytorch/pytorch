@@ -574,6 +574,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.erfc(one_d).shape)
         self.assertEqual((1,), torch.reciprocal(one_d).shape)
 
+        zero_d_bool = torch.tensor(True, device=device)
+        one_d_bool = torch.tensor([True], device=device)
+
         # clamp
         self.assertEqual((), torch.clamp(zero_d, min=0, max=1).shape)
         self.assertEqual((), torch.clamp(zero_d, min=0).shape)
@@ -581,6 +584,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, min=0, max=1).shape)
         self.assertEqual((1,), torch.clamp(one_d, min=0).shape)
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
+        self.assertEqual((), torch.clamp(zero_d_bool, min=torch.tensor(False, device=device), 
+                                 max=torch.tensor(True, device=device)).shape)
+        self.assertEqual((), torch.clamp(zero_d_bool, min=torch.tensor(True, device=device)).shape)
+        self.assertEqual((), torch.clamp(zero_d_bool, max=torch.tensor(True, device=device)).shape)
+        self.assertEqual((1,), torch.clamp(one_d_bool, min=torch.tensor([False], device=device), 
+                                   max=torch.tensor([True], device=device)).shape)
+        self.assertEqual((1,), torch.clamp(one_d_bool, min=torch.tensor([True], device=device)).shape)
+        self.assertEqual((1,), torch.clamp(one_d_bool, max=torch.tensor([False], device=device)).shape)
 
         # cumsum, cumprod, cummax, cummin
         self.assertEqual((), torch.logcumsumexp(zero_d, 0).shape)
@@ -635,9 +646,6 @@ class TestTorchDeviceType(TestCase):
 
         # clone
         self.assertEqual((), zero_d.clone().shape)
-
-        zero_d_bool = torch.tensor(True, device=device)
-        one_d_bool = torch.tensor([True], device=device)
 
         # masked_select
         self.assertEqual((1,), torch.masked_select(zero_d_bool, zero_d_bool).shape)
@@ -6619,7 +6627,7 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(x[3], y)
 
     # FIXME: move to an elementwise ternary test suite
-    @dtypes(torch.int64, torch.float32, torch.float64)
+    @dtypes(torch.bool, torch.int64, torch.float32, torch.float64)
     def test_clamp(self, device, dtype):
         test_args = [
             *product(

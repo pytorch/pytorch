@@ -40,7 +40,7 @@ void isneginf_kernel_impl(TensorIteratorBase &iter) {
 }
 
 void clamp_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "clamp_cuda", [&] {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t v, scalar_t lower, scalar_t upper) -> scalar_t {
       // Propagate nan, which doesn't propagate automatically for ROCm
       if (at::_isnan(v)) {
@@ -57,7 +57,7 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 }
 
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     auto lim0_val = lim0.to<opmath_t>();
     auto lim1_val = lim1.to<opmath_t>();
