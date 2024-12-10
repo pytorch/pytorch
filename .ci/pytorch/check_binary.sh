@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# shellcheck disable=SC2086,SC2006,SC2207,SC2076,SC2155,SC2046,SC1091,SC2143
+# TODO: Re-enable shellchecks above
+
 set -eux -o pipefail
 
 # This script checks the following things on binaries
@@ -340,7 +344,7 @@ if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" !=
     python ${TEST_CODE_DIR}/rnn_smoke.py
 
     echo "Checking that basic CNN works"
-    python ${TEST_CODE_DIR}/cnn_smoke.py
+    python "${TEST_CODE_DIR}/cnn_smoke.py"
 
     echo "Test that linalg works"
     python -c "import torch;x=torch.rand(3,3,device='cuda');print(torch.linalg.svd(torch.mm(x.t(), x)))"

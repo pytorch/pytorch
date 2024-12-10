@@ -1,15 +1,17 @@
+import argparse
+import importlib
+import json
 import os
 import re
-import sys
-import argparse
-import torch
-import json
-import importlib
 import subprocess
+import sys
+from pathlib import Path
+
+import torch
 import torch._dynamo
 import torch.nn as nn
 import torch.nn.functional as F
-from pathlib import Path
+
 
 if "MATRIX_GPU_ARCH_VERSION" in os.environ:
     gpu_arch_ver = os.getenv("MATRIX_GPU_ARCH_VERSION")
@@ -19,7 +21,7 @@ gpu_arch_type = os.getenv("MATRIX_GPU_ARCH_TYPE")
 channel = os.getenv("MATRIX_CHANNEL")
 package_type = os.getenv("MATRIX_PACKAGE_TYPE")
 target_os = os.getenv("TARGET_OS", sys.platform)
-BASE_DIR =  Path(__file__).parent.parent.parent
+BASE_DIR = Path(__file__).parent.parent.parent
 
 is_cuda_system = gpu_arch_type == "cuda"
 NIGHTLY_ALLOWED_DELTA = 3
@@ -57,6 +59,7 @@ class Net(nn.Module):
         output = self.fc1(x)
         return output
 
+
 def load_json_from_basedir(filename: str):
     try:
         with open(BASE_DIR / filename) as fptr:
@@ -66,18 +69,22 @@ def load_json_from_basedir(filename: str):
     except json.JSONDecodeError as exc:
         raise ImportError(f"Invalid JSON {filename}") from exc
 
+
 def read_release_matrix():
     return load_json_from_basedir("release_matrix.json")
 
+
 def test_numpy():
     import numpy as np
+
     x = np.arange(5)
     torch.tensor(x)
+
 
 def check_version(package: str) -> None:
     release_version = os.getenv("RELEASE_VERSION")
     # if release_version is specified, use it to validate the packages
-    if(release_version):
+    if release_version:
         release_matrix = read_release_matrix()
         stable_version = release_matrix["torch"]
     else:
@@ -102,7 +109,7 @@ def check_version(package: str) -> None:
                             {release_matrix[module['name']]} for channel {channel}. But its {module_version}"
                     )
                 else:
-                     print(f"{module['name']} version actual: {module_version} expected: \
+                    print(f"{module['name']} version actual: {module_version} expected: \
                         {release_matrix[module['name']]} for channel {channel}.")
 
     else:
@@ -111,7 +118,8 @@ def check_version(package: str) -> None:
 
 def check_nightly_binaries_date(package: str) -> None:
     from datetime import datetime
-    format_dt = '%Y%m%d'
+
+    format_dt = "%Y%m%d"
 
     date_t_str = re.findall("dev\\d+", torch.__version__)
     date_t_delta = datetime.now() - datetime.strptime(date_t_str[0][3:], format_dt)
@@ -125,7 +133,9 @@ def check_nightly_binaries_date(package: str) -> None:
             imported_module = importlib.import_module(module["name"])
             module_version = imported_module.__version__
             date_m_str = re.findall("dev\\d+", module_version)
-            date_m_delta = datetime.now() - datetime.strptime(date_m_str[0][3:], format_dt)
+            date_m_delta = datetime.now() - datetime.strptime(
+                date_m_str[0][3:], format_dt
+            )
             print(f"Nightly date check for {module['name']} version {module_version}")
             if date_m_delta.days > NIGHTLY_ALLOWED_DELTA:
                 raise RuntimeError(
@@ -149,11 +159,13 @@ def test_cuda_runtime_errors_captured() -> None:
         raise RuntimeError("Expected CUDA RuntimeError but have not received!")
 
 
-def smoke_test_cuda(package: str, runtime_error_check: str, torch_compile_check: str) -> None:
+def smoke_test_cuda(
+    package: str, runtime_error_check: str, torch_compile_check: str
+) -> None:
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
 
-    if package == 'all' and is_cuda_system:
+    if package == "all" and is_cuda_system:
         for module in MODULES:
             imported_module = importlib.import_module(module["name"])
             # TBD for vision move extension module to private so it will
@@ -165,9 +177,12 @@ def smoke_test_cuda(package: str, runtime_error_check: str, torch_compile_check:
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-     # torch.compile is available on macos-arm64 and Linux for python 3.8-3.13
-    if (torch_compile_check == "enabled" and sys.version_info < (3, 13, 0)
-        and target_os in ["linux", "linux-aarch64", "macos-arm64", "darwin"]):
+    # torch.compile is available on macos-arm64 and Linux for python 3.8-3.13
+    if (
+        torch_compile_check == "enabled"
+        and sys.version_info < (3, 13, 0)
+        and target_os in ["linux", "linux-aarch64", "macos-arm64", "darwin"]
+    ):
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
 
     if torch.cuda.is_available():
@@ -187,7 +202,7 @@ def smoke_test_cuda(package: str, runtime_error_check: str, torch_compile_check:
             print(f"Device {i}: {torch.cuda.get_device_name(i)}")
 
         # nccl is availbale only on Linux
-        if (sys.platform in ["linux", "linux2"]):
+        if sys.platform in ["linux", "linux2"]:
             print(f"torch nccl version: {torch.cuda.nccl.version()}")
 
         if runtime_error_check == "enabled":
@@ -204,7 +219,9 @@ def smoke_test_conv2d() -> None:
     m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
     assert m is not None
     # non-square kernels and unequal stride and with padding and dilation
-    basic_conv = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
+    basic_conv = nn.Conv2d(
+        16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
+    )
     input = torch.randn(20, 16, 50, 100)
     output = basic_conv(input)
 
@@ -229,11 +246,19 @@ def test_linalg(device="cpu") -> None:
     print(f"Testing smoke_test_linalg on {device}")
     A = torch.randn(5, 3, device=device)
     U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    assert U.shape == A.shape and S.shape == torch.Size([3]) and Vh.shape == torch.Size([3, 3])
+    assert (
+        U.shape == A.shape
+        and S.shape == torch.Size([3])
+        and Vh.shape == torch.Size([3, 3])
+    )
     torch.dist(A, U @ torch.diag(S) @ Vh)
 
     U, S, Vh = torch.linalg.svd(A)
-    assert U.shape == torch.Size([5, 5]) and S.shape == torch.Size([3]) and Vh.shape == torch.Size([3, 3])
+    assert (
+        U.shape == torch.Size([5, 5])
+        and S.shape == torch.Size([3])
+        and Vh.shape == torch.Size([3, 3])
+    )
     torch.dist(A, U[:, :3] @ torch.diag(S) @ Vh)
 
     A = torch.randn(7, 5, 3, device=device)
@@ -264,6 +289,7 @@ def smoke_test_compile(device: str = "cpu") -> None:
     # Check that SIMD were detected for the architecture
     if device == "cpu":
         from torch._inductor.codecache import pick_vec_isa
+
         isa = pick_vec_isa()
         if not isa:
             raise RuntimeError("Can't detect vectorized ISA for CPU")
@@ -272,7 +298,7 @@ def smoke_test_compile(device: str = "cpu") -> None:
     # Reset torch dynamo since we are changing mode
     torch._dynamo.reset()
     dtype = torch.float32
-    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision("high")
     print(f"Testing smoke_test_compile with mode 'max-autotune' for {dtype}")
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
@@ -297,13 +323,18 @@ def smoke_test_modules():
                     ) from exc
             try:
                 smoke_test_command = f"python3 {module['smoke_test']}"
-                if target_os == 'windows':
+                if target_os == "windows":
                     smoke_test_command = f"python {module['smoke_test']}"
                 output = subprocess.check_output(
-                    smoke_test_command, stderr=subprocess.STDOUT, shell=True,
-                    universal_newlines=True)
+                    smoke_test_command,
+                    stderr=subprocess.STDOUT,
+                    shell=True,
+                    universal_newlines=True,
+                )
             except subprocess.CalledProcessError as exc:
-                raise RuntimeError(f"Module {module['name']} FAIL: {exc.returncode} Output: {exc.output}") from exc
+                raise RuntimeError(
+                    f"Module {module['name']} FAIL: {exc.returncode} Output: {exc.output}"
+                ) from exc
             else:
                 print(f"Output: \n{output}\n")
 
@@ -345,7 +376,9 @@ def main() -> None:
     if options.package == "all":
         smoke_test_modules()
 
-    smoke_test_cuda(options.package, options.runtime_error_check, options.torch_compile_check)
+    smoke_test_cuda(
+        options.package, options.runtime_error_check, options.torch_compile_check
+    )
 
 
 if __name__ == "__main__":

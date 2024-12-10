@@ -1,4 +1,7 @@
 #!/bin/bash
+# shellcheck disable=SC2086,SC2048,SC2068,SC2145,SC2034,SC2207,SC2143
+# TODO: Re-enable shellchecks above
+
 set -eux -o pipefail
 
 # Essentially runs pytorch/test/run_test.py, but keeps track of which tests to
