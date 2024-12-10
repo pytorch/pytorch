@@ -4,7 +4,6 @@ import _weakrefset
 import abc
 import builtins
 import collections
-import contextlib
 import copy
 import copyreg
 import dataclasses
@@ -47,6 +46,8 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
@@ -3151,7 +3152,6 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     abc,
     collections,
-    contextlib,
     copy,
     copyreg,
     enum,
@@ -3512,7 +3512,14 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 
 def check_verbose(obj, is_inlined_call=False):
     if isinstance(
-        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        obj,
+        (
+            UserFunctionVariable,
+            UserMethodVariable,
+            NestedUserFunctionVariable,
+            GeneratorFunctionVariable,
+            GeneratorObjectVariable,
+        ),
     ):
         try:
             py_obj = obj.get_function()
@@ -3531,7 +3538,10 @@ def check_verbose(obj, is_inlined_call=False):
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
     reasons: Set[str] = set()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
-    if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
+    if issubclass(
+        rule,
+        (UserFunctionVariable, GeneratorFunctionVariable, PolyfilledFunctionVariable),
+    ):
         return SkipResult(
             False,
             f"inlined according trace_rules.lookup {reasons.pop()}",

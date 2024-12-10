@@ -8,17 +8,32 @@ import itertools
 import types
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
+from unittest.mock import patch
 
 import torch
 
 from .. import polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented, Unsupported
+from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..exc import (
+    handle_observed_exception,
+    ObservedException,
+    ObservedUserStopIteration,
+    SkipFrame,
+    unimplemented,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    LocalSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -315,6 +330,194 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class GeneratorFunctionVariable(BaseUserFunctionVariable):
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is a wrapper around (Nested)UserFunctionVariable
+    """
+
+    def __init__(self, vt: VariableTracker, **kwargs):
+        self.vt = vt
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert is_generator(self.vt.get_code())
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            args,
+            kwargs,
+        )
+
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
+        torch._C._dynamo.eval_frame.skip_code(code)
+
+        # calling a generator returns a generator object
+        return GeneratorObjectVariable(
+            code, f_globals, inline_tracer, source=self.source
+        )
+
+
+class GeneratorObjectVariable(VariableTracker):
+    def __init__(
+        self,
+        code: types.CodeType,
+        f_globals,
+        inline_tracer: Optional["InstructionTranslator"],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.code = code
+        self.f_globals = f_globals
+        self.inline_tracer = inline_tracer
+
+    def get_code(self):
+        return self.code
+
+    def get_filename(self):
+        return self.get_code().co_filename
+
+    def get_name(self):
+        return self.get_code().co_name
+
+    def get_function(self):
+        raise NotImplementedError
+
+    def has_self(self):
+        return False
+
+    def __name__(self):
+        return self.get_name()
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.get_name()})"
+
+    __repr__ = __str__
+
+    # def reconstruct(self, codegen):
+    #     unimplemented(f"reconstruct {self.__class__.__name__}")
+
+    # if self.generatorstate != "GEN_CREATED":
+    #     unimplemented(f"Cannot reconstruct advanced generator {self.get_name()}")
+
+    # codegen.append_output(codegen.create_load_deref(self.get_name()))
+    # f_locals = self.gen.gi_frame.f_locals
+
+    # for var_name, vt in f_locals.items():
+    #     if not isinstance(vt, VariableTracker):
+    #         unimplemented(
+    #             f"Cannot reconstruct generator {self.get_name()} due to local "
+    #             f"variable {var_name}"
+    #         )
+
+    # for vt in f_locals.values():
+    #     if vt:
+    #         codegen(vt)
+    # codegen.extend_output(create_call_function(len(f_locals), False))
+
+    def bind_args(self, tx, args, kwargs):
+        return {}
+
+    def get_globals(self):
+        return self.f_globals
+
+    def python_type(self):
+        return types.GeneratorType
+
+    def _get_inline_tracer(self, tx):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        if self.inline_tracer is None:
+            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+                tx, self, [], {}
+            )
+            # self.inline_tracer.instruction_pointer = self.value.gi_frame.f_lasti + 1
+            # self.accept_prefix_inst = False
+            # for name, value in self.value.gi_frame.f_locals.items():
+            #     var = variables.LazyVariableTracker.create(
+            #         value, LocalSource(name, is_input=True),
+            #     )
+            #     self.inline_tracer.symbolic_locals[name] = var
+        return self.inline_tracer
+
+    def _raise_if_generator_is_argument(self, tx):
+        if isinstance(self.source, LocalSource) and self.source.is_input:
+            if tx.inline_depth == 0:
+                # skip current frame
+                raise SkipFrame
+            unimplemented("Generator as graph argument is not supported")
+
+    def next_variable(self, tx):
+        self._raise_if_generator_is_argument(tx)
+
+        tracer = self._get_inline_tracer(tx)
+        # self.generatorstate = "GEN_RUNNING"
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_()
+        except ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
+        except Unsupported as e:
+            # if "graph_break" not in e.msg:
+            #     raise e
+
+            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            raise SkipFrame from e
+
+    def has_unpack_var_sequence(self, tx):
+        return False
+
+    def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
+        return True
+
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        result = []
+        while True:
+            try:
+                result.append(self.next_variable(tx))
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # iter(gen) -> gen
+        if name == "__iter__":
+            return self
+        elif name == "__next__":
+            return self.next_variable(tx)
+        elif name == "send":
+            tracer = self._get_inline_tracer(tx)
+            tracer.push_many(args)
+            return self.next_variable(tx)
+        super().call_method(tx, name, args, kwargs)
 
 
 class UserMethodVariable(UserFunctionVariable):

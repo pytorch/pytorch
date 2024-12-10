@@ -84,6 +84,8 @@ from .variables.ctx_manager import (
 from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
+    GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
@@ -100,6 +102,7 @@ from .variables.lists import (
 )
 from .variables.misc import (
     CellVariable,
+    ExceptionVariable,
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
@@ -304,6 +307,13 @@ class BlockStackEntry:
 
 class ReturnValueOp(Exception):
     pass
+
+
+class YieldValueOp(Exception):
+    """
+    Signal to the symbolic tracer to stop and return control flow to the
+    caller
+    """
 
 
 def stack_op(fn: typing.Callable[..., object]):
@@ -897,11 +907,22 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
+    def inline_generator_function(self, fn, args, kwargs):
+        """
+        Redirect the call to the generator "call_function"
+        """
+        if not isinstance(fn, GeneratorFunctionVariable):
+            fn = GeneratorFunctionVariable(fn)
+        return fn.call_function(self, args, kwargs)
+
     def inline_user_function_return(self, fn, args, kwargs):
         """
         A call to some user defined function by inlining it.
         """
-        return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        if config.enable_yield_on_generator and is_generator(fn.get_code()):
+            return self.inline_generator_function(fn, args, kwargs)
+        else:
+            return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -967,7 +988,7 @@ class InstructionTranslatorBase(
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
-        except ReturnValueOp:
+        except (ReturnValueOp, YieldValueOp):
             return False
         except Unsupported:
             if self.current_speculation is None:
@@ -2177,6 +2198,16 @@ class InstructionTranslatorBase(
     def LIST_TO_TUPLE(self, inst):
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
+    def STOPITERATION_ERROR(self, inst):
+        # wrap the generator body in a try: ... except StopIteration: ... which
+        # converts the StopIteration into a RuntimeError
+        # https://peps.python.org/pep-0479/
+        # https://github.com/python/cpython/pull/99006
+        # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
+        assert isinstance(inst, ExceptionVariable)
+        if inst.exc_type is StopIteration:
+            exc.raise_observed_exception(RuntimeError, self)
+
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -2461,7 +2492,10 @@ class InstructionTranslatorBase(
             self._load_attr(inst)
 
     def CALL_INTRINSIC_1(self, inst):
-        if inst.argval == 5:
+        if inst.argval == 3:
+            # INTRINSIC_STOPITERATION_ERROR
+            self.STOPITERATION_ERROR(self.pop())
+        elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
@@ -3017,7 +3051,20 @@ class InstructionTranslator(InstructionTranslatorBase):
                 return True
         return False
 
+    def replace_tos_if_return_is_generator(self):
+        if (
+            len(self.stack)
+            and (tos := self.stack[-1])
+            and isinstance(tos, GeneratorObjectVariable)
+        ):
+            self.stack[-1] = ListIteratorVariable(
+                tos.force_unpack_var_sequence(self),
+                mutation_type=ValueMutationNew(),
+            )
+
     def _return(self, inst):
+        self.replace_tos_if_return_is_generator()
+
         if (
             self.output.count_calls() == 0
             and not self.inconsistent_side_effects
@@ -3025,6 +3072,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.export
         ):
             raise exc.SkipFrame("because no content in function call")
+
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
@@ -3065,12 +3113,13 @@ if sys.version_info >= (3, 11):
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
-    symbolic_result: Optional[TensorVariable]
+    symbolic_result: Optional[VariableTracker]
 
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            return cls.inline_call_(parent, func, args, kwargs)
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            return tracer.inline_call_()
 
     @staticmethod
     def check_inlineable(func):
@@ -3105,14 +3154,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return result
 
     @staticmethod
-    def inline_call_(
-        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    def build_inline_tracer(
+        parent,
+        func: VariableTracker,
+        args: List[VariableTracker],
+        kwargs,
     ):
         if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
+            (
+                UserFunctionVariable,
+                NestedUserFunctionVariable,
+                GeneratorFunctionVariable,
+                GeneratorObjectVariable,
+            ),
         )
         result = InliningInstructionTranslator.check_inlineable(func)
         assert result.skipped is False
@@ -3182,6 +3239,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
+            # need the line below to make MyPy happy
+            assert not isinstance(func, GeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -3190,18 +3249,24 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_torch_function_state,
                 func,
             )
+        return tracer
+
+    def inline_call_(self):
+        parent = self.parent
+        code = self.f_code
+        func = self.funcvar
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
-            strict_ctx = tracer.strict_translation_mode(parent.strict_checks_fn)
+            strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
         try:
             with strict_ctx:
-                tracer.run()
+                self.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             # TODO(anijain2305) - This works but we should probably have a
             # global/central data structure for the exception stack.
-            parent.exn_vt_stack.extend(tracer.exn_vt_stack)
+            parent.exn_vt_stack.extend(self.exn_vt_stack)
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
@@ -3212,25 +3277,39 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except Exception as e:
             log.debug("FAILED INLINING %s", code)
             raise
-        assert tracer.symbolic_result is not None
+        assert self.symbolic_result is not None
 
-        if tracer.f_globals is parent.f_globals:
+        if self.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
-            parent.symbolic_globals.update(tracer.symbolic_globals)
+            parent.symbolic_globals.update(self.symbolic_globals)
 
-        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
+        parent.inconsistent_side_effects |= self.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
 
-        if is_generator(code):
-            assert isinstance(tracer, InliningGeneratorInstructionTranslator)
-            assert tracer.symbolic_result.as_python_constant() is None
-            return ListIteratorVariable(
-                tracer.generated_items,
-                mutation_type=ValueMutationNew(),
-            )
+        if config.enable_yield_on_generator:
+            if (
+                is_generator(code)
+                and isinstance(self, InliningGeneratorInstructionTranslator)
+                and self.generator_exhausted
+            ):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                # When the generator returns None, we raise StopIteration
+                r = self.symbolic_result
+                assert r.as_python_constant() is None
+                exc.raise_observed_exception(StopIteration, self)
+            else:
+                return self.symbolic_result
         else:
-            return tracer.symbolic_result
+            if is_generator(code):
+                assert isinstance(self, InliningGeneratorInstructionTranslator)
+                assert self.symbolic_result.as_python_constant() is None
+                return ListIteratorVariable(
+                    self.generated_items,
+                    mutation_type=ValueMutationNew(),
+                )
+            else:
+                return self.symbolic_result
 
     def __init__(
         self,
@@ -3263,6 +3342,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             speculation_log=parent.speculation_log,
             distributed_state=parent.distributed_state,
         )
+        self.funcvar = funcvar
         self.parent = parent
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
@@ -3342,19 +3422,26 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
+    # Flag wether or not the InlineGenerator should consume the entire iterator
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.generated_items = []
+        self.generator_exhausted = False
 
     def YIELD_VALUE(self, inst: Instruction):
-        self.generated_items.append(self.pop())
+        top = self.pop()
+        self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             unimplemented(
                 "Too many yield values in generator. Maybe you are inlining an infinite generator. "
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
+        if config.enable_yield_on_generator:
+            self.symbolic_result = top
+            # Stop tracing
+            raise YieldValueOp
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]
@@ -3362,6 +3449,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
+
+    def RETURN_VALUE(self, inst):
+        self.generator_exhausted = True
+        return super().RETURN_VALUE(inst)
+
+    def RETURN_CONST(self, inst):
+        self.generator_exhausted = True
+        return super().RETURN_CONST(inst)
 
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2
@@ -3385,10 +3480,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             self.push(ConstantVariable.create(ex.value))
         else:
-            self.push(val)
-            # Add the value to yield into generated_items and replace the top of the stack with None
-            self.YIELD_VALUE(inst)
-
             # Repeat the YIELD_FROM instruction in the next eval loop
             assert (
                 isinstance(self.instruction_pointer, int)
@@ -3396,11 +3487,15 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             )
             self.instruction_pointer -= 1
 
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
+
     def SEND(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable) or (
+        if isinstance(tos, (ListIteratorVariable, GeneratorObjectVariable)) or (
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):

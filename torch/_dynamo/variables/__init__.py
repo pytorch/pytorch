@@ -32,6 +32,8 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
+    GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,

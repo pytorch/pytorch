@@ -435,6 +435,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from torch.overrides import TorchFunctionMode
 
             from .ctx_manager import GenericContextWrappingVariable
+            from .functions import BaseUserFunctionVariable, GeneratorFunctionVariable
             from .torch_function import TorchFunctionModeVariable
 
             if issubclass(
@@ -445,6 +446,39 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var_cls = TorchFunctionModeVariable
             else:
                 var_cls = GenericContextWrappingVariable
+
+            # graph break on any contextlib.* that it is not contextlib.contextmanager
+            # Some of the APIs below are not supported because they rely on features
+            # that Dynamo doesn't play well today (i.e. contextlib.suppress)
+            if self.value in (
+                contextlib._AsyncGeneratorContextManager,
+                contextlib.closing,
+                contextlib.redirect_stdout,
+                contextlib.redirect_stderr,
+                contextlib.suppress,
+                contextlib.ExitStack,
+                contextlib.AsyncExitStack,
+            ):
+                # We are not changing the behavior of Dynamo as these function were
+                # already ignored on trace_rules.py before #136033 landed
+                unimplemented(
+                    f"{self.value} not supported. This may be due to its use of "
+                    "context-specific operations that are not supported in "
+                    "Dynamo yet (i.e. Exception handling)"
+                )
+
+            if self.value is contextlib._GeneratorContextManager and isinstance(
+                args[0], BaseUserFunctionVariable
+            ):
+                if not torch._dynamo.config.enable_trace_contextlib:
+                    unimplemented("contextlib.contextmanager")
+                # Replace UserFunctionVariable by GeneratorFunctionVariable
+                # if the function is annotated with @contextlib.contextmanager
+                # This shouldn't be necessary once generator functions are fully
+                # supported in dynamo
+                args = [GeneratorFunctionVariable(args[0], source=self.source)] + args[
+                    1:
+                ]
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, var_cls, {}
@@ -799,6 +833,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if method is object.__ne__:
                     func_var = VariableTracker.build(tx, polyfills.object_ne)
                     return func_var.call_function(tx, [self, *args], kwargs)
+
+            if torch._dynamo.config.enable_yield_on_generator and isinstance(
+                self.value, types.GeneratorType
+            ):
+                return variables.GeneratorObjectVariable(
+                    self.value.gi_code,
+                    self.value.gi_frame.f_globals,
+                    None,
+                    source=self.source,
+                ).call_method(tx, name, args, kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
