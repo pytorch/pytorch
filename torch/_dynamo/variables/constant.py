@@ -8,7 +8,6 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -17,38 +16,30 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-_type_to_assert_reason = {
-    # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
-    # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
-    # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
-    # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
-    # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
-    # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
-    # As this does not exist, we cannot add sets to this invariant.
-    list: "List types must use ListVariable.",
-    dict: "Dict types must use ConstDictVariable.",
-    torch.Tensor: "Tensor types must use TensorVariable.",
-    torch.SymInt: "SymInts must use SymNodeVariable. "
-    "If the underlying value is static, we will create a ConstantVariable and specialize.",
-    torch.SymFloat: "SymInts must use SymNodeVariable",
-}
-
-
 class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
+        """
+        Create a `ConstantVariable` based on the given value, and supports
+        automatic routing for collection types like `tuple` (in which case we'd
+        create `ConstantVariable` for the leaf items).
+
+        NOTE: the caller must install the proper guards if needed; most often
+        the guard will be `CONSTANT_MATCH`.
+        """
         source = kwargs.get("source", None)
 
         # Routing for supported collection literals.
-        if isinstance(value, (set, frozenset)):
+        if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
+        elif isinstance(value, frozenset):
+            items = [ConstantVariable.create(x) for x in value]
+            return variables.FrozensetVariable(items, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                if item_source:
-                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
@@ -61,10 +52,17 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not ConstantVariable.is_base_literal(value):
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
+        assert ConstantVariable.is_base_literal(
+            value
+        ), f"""
+Cannot construct `ConstantVariable` for value of type {type(value)}.
 
+This failure likely due to PyTorch-internal use of `ConstantVariable` on
+non-literal python values, please try using `VariableTracker.build` instead. If
+you believe it's a necessary and legitimate use case (the value is immutable and
+can't easily be represented with another `VariableTracker` class), please add
+its type to `common_constant_types`.
+"""
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
