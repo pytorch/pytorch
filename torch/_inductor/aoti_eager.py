@@ -20,10 +20,9 @@ def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
 
 
 def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
-    from filelock import FileLock
-
     # Avoid circular import
     from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT
+    from torch.utils._filelock import FileLock
 
     op_conf_lock_file = f"{op_func_name_with_overload}.lock"
     lock_dir = get_lock_dir()
