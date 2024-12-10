@@ -22,6 +22,7 @@ class CachedTensor(torch.Tensor):
     # __torch_dispatch__ logic to construct tensor subclasses (which can be tricky to do
     # otherwise because the subclass constructor op itself usually does not take the
     # subclass itself as input!). See NestedTensor for an example.
+    @torch._disable_dynamo(recursive=True)
     @staticmethod
     def __new__(
         cls,
@@ -40,6 +41,7 @@ class CachedTensor(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)  # type: ignore[attr-defined]
         return out
 
+    @torch._disable_dynamo(recursive=True)
     def __init__(
         self,
         metadata: Dict[str, torch.Tensor],
