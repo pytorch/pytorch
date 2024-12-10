@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import numpy as np
+import onnxscript
 import torchvision
 
 import torch
+from torch._ops import OpOverload
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
@@ -144,8 +147,61 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = torch.onnx.export(VisionModel(), args, dynamo=True)
         onnx_testing.assert_onnx_program(onnx_program)
 
-    # TODO(justinchuby): Test multi-output HOPs
+    def test_custom_op(self):
+        def onnx_test_numpy_sin(x: torch.Tensor) -> torch.Tensor:
+            assert x.device.type == "cpu"
+            x_np = x.numpy()
+            return torch.from_numpy(np.sin(x_np))
 
+
+        class ModuleWithACustomOperator(torch.nn.Module):
+            def forward(self, x):
+                return onnx_test_numpy_sin(x)
+
+
+        model = ModuleWithACustomOperator()
+        x = torch.randn(1, 3)
+        expected = model(x)
+
+        def register(fct, fct_shape, namespace, fname):
+            schema_str = torch.library.infer_schema(fct, mutates_args=())
+            custom_def = torch.library.CustomOpDef(namespace, fname, schema_str, fct)
+            custom_def.register_kernel("cpu")(fct)
+            custom_def._abstract_fn = fct_shape
+
+        register(onnx_test_numpy_sin, lambda x: torch.empty_like(x), "mylib", "onnx_test_numpy_sin")
+
+        class ModuleWithACustomOperator(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.mylib.onnx_test_numpy_sin(x)
+
+        model = ModuleWithACustomOperator()
+        torch.testing.assert_allclose(model(x), expected)
+        ep = torch.export.export(model, (x,))
+        for node in ep.graph.nodes:
+            assert not isinstance(
+                node.target, OpOverload
+            ) or node.target == torch.ops.mylib.onnx_test_numpy_sin.default
+
+        op = onnxscript.opset18
+
+
+        @onnxscript.script()
+        def onnx_test_numpy_sin_to_onnx(x):
+            return op.Sin(x)
+
+        ep = torch.onnx.export(
+            model,
+            (x,),
+            custom_translation_table={
+                torch.ops.mylib.onnx_test_numpy_sin.default: onnx_test_numpy_sin_to_onnx
+            },
+            dynamo=True,
+
+        )
+        onnx_testing.assert_onnx_program(ep)
+
+    # TODO(justinchuby): Test multi-output HOPs
 
 if __name__ == "__main__":
     common_utils.run_tests()
