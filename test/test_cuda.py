@@ -1,5 +1,4 @@
 # Owner(s): ["module: cuda"]
-
 import contextlib
 import ctypes
 import gc
@@ -3354,6 +3353,40 @@ print(f"{{r1}}, {{r2}}")
         with TemporaryFileName() as f:
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 file = torch.cuda.gds._GdsFile(f, os.O_CREAT | os.O_RDWR)
+
+    def _test_copy(self, x, non_blocking):
+        # Perform the copy operation, either blocking or non-blocking
+        event = torch.cuda.Event()
+        x_gpu = x.to(device="cuda", non_blocking=non_blocking)
+        event.record()
+
+        if non_blocking:
+            event.synchronize()
+
+        self.assertEqual(x, x_gpu.cpu())
+
+    def test_1d_copy(self):
+        # Contiguous 1D tensor
+        x = torch.ones(10000000, dtype=torch.uint8)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+        # Discontiguous 1D tensor
+        x = torch.ones(1000000, dtype=torch.uint8)[::2]
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+
+    def test_2d_copy(self):
+        rows, cols = 1000, 1000
+        # Contiguous 2D tensor
+        x = torch.ones((rows, cols), dtype=torch.float32)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+        # Discontiguous 2D tensor
+        x = torch.randn(rows, cols)[:, :512]
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
