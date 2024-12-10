@@ -61,6 +61,7 @@ class Instruction:
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
+    argrepr: Optional[str] = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -123,7 +124,7 @@ class _NotProvided:
 if sys.version_info >= (3, 12):
 
     def inst_has_op_bits(name):
-        return (name == "LOAD_GLOBAL") or (name in ("LOAD_ATTR", "LOAD_SUPER_ATTR"))
+        return name in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_SUPER_ATTR")
 
 elif sys.version_info >= (3, 11):
 
@@ -1456,7 +1457,7 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
     return list(_uncached_cleaned_instructions(code, safe))
 
 
-@functools.lru_cache
+@functools.cache
 def _uncached_cleaned_instructions(code, safe=False) -> Tuple[Instruction, ...]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)

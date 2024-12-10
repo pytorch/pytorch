@@ -1,107 +1,115 @@
 #include <torch/csrc/utils/python_compat.h>
+#include <stdexcept>
 
-namespace torch::impl {
+namespace torch::pyptr {
 
-struct OwnedPyObjectPtr;
+struct Owned;
 
 /// Represents a borrowed PyObject*. The object won't incref'd on acquire or
 /// decref'd on release.
-struct BorrowedPyObjectPtr {
-  ~BorrowedPyObjectPtr() = default;
-  BorrowedPyObjectPtr() : m_value(nullptr) {}
-  BorrowedPyObjectPtr(PyObject* p) : m_value(p) {}
-  BorrowedPyObjectPtr(const BorrowedPyObjectPtr& o) = default;
-  BorrowedPyObjectPtr(BorrowedPyObjectPtr&& o) = default;
-  BorrowedPyObjectPtr& operator=(const BorrowedPyObjectPtr& o) = default;
-  BorrowedPyObjectPtr& operator=(BorrowedPyObjectPtr&& o) = default;
+struct Borrowed {
+  ~Borrowed() = default;
+  Borrowed() : m_value(nullptr) {}
+  Borrowed(PyObject* p) : m_value(p) {}
+  Borrowed(const Borrowed& o) = default;
+  Borrowed& operator=(const Borrowed& o) = default;
 
-  static BorrowedPyObjectPtr none() {
-    return BorrowedPyObjectPtr(Py_None);
+  Borrowed(Borrowed&& o) = delete;
+  Borrowed& operator=(Borrowed&& o) = delete;
+
+  static Borrowed none() {
+    return Borrowed(Py_None);
   }
 
-  static BorrowedPyObjectPtr false_() {
-    return BorrowedPyObjectPtr(Py_False);
+  static Borrowed false_() {
+    return Borrowed(Py_False);
   }
 
-  static BorrowedPyObjectPtr true_() {
-    return BorrowedPyObjectPtr(Py_True);
+  static Borrowed true_() {
+    return Borrowed(Py_True);
   }
 
   PyObject* ptr() const {
     return m_value;
   }
 
-  /// Take ownership of the borrowed reference.
-  OwnedPyObjectPtr own() const;
+  Py_hash_t hash() const {
+    return PyObject_Hash(m_value);
+  }
 
- private:
+  bool equal(Borrowed other) const {
+    auto result = PyObject_RichCompareBool(m_value, other.m_value, Py_EQ);
+    switch (result) {
+      case 0:
+        return false;
+      case 1:
+        return true;
+      default:
+        throw std::runtime_error("PyObject_RichCompareBool failed");
+    }
+  }
+
+  /// Take ownership of the borrowed reference.
+  Owned to_owned() const;
+
+ protected:
   PyObject* m_value;
 };
 
 /// Represents an owned PyObject*. You must be explicit on acquire (either with
-/// OwnedPyObjectPtr::own() or OwnedPyObjectPtr::steal()). Releases the
+/// Owned::own() or Owned::steal()). Releases the
 /// reference on release.
-struct OwnedPyObjectPtr {
-  ~OwnedPyObjectPtr() {
+struct Owned : Borrowed {
+  ~Owned() {
     Py_CLEAR(m_value);
   }
 
-  OwnedPyObjectPtr() : m_value(nullptr) {}
+  Owned() = default;
 
-  OwnedPyObjectPtr(const OwnedPyObjectPtr& o)
-      : m_value(Py_XNewRef(o.m_value)) {}
+  Owned(const Owned& o) : Borrowed(o) {
+    Py_XINCREF(m_value);
+  }
 
-  OwnedPyObjectPtr(OwnedPyObjectPtr&& o) noexcept : m_value(nullptr) {
+  Owned(Owned&& o) noexcept : Borrowed() {
     std::swap(m_value, o.m_value);
   }
 
-  OwnedPyObjectPtr& operator=(const OwnedPyObjectPtr& o) {
+  Owned& operator=(const Owned& o) {
     if (this != &o) {
       Py_XSETREF(m_value, Py_XNewRef(o.m_value));
     }
     return *this;
   }
 
-  OwnedPyObjectPtr& operator=(OwnedPyObjectPtr&& o) noexcept {
+  Owned& operator=(Owned&& o) noexcept {
     std::swap(m_value, o.m_value);
     Py_CLEAR(o.m_value);
     return *this;
   }
 
-  OwnedPyObjectPtr(const BorrowedPyObjectPtr& o)
-      : m_value(Py_XNewRef(o.ptr())) {}
-
-  OwnedPyObjectPtr& operator=(const BorrowedPyObjectPtr& o) {
-    Py_XSETREF(m_value, Py_XNewRef(o.ptr()));
-    return *this;
+  /// Take ownership of the passed PyObject* without incrementing the refcount.
+  static Owned from_owned_ptr(PyObject* o) {
+    return Owned(o);
   }
 
-  /// Take ownership of the passed PyObject*.
-  static OwnedPyObjectPtr steal(PyObject* o) {
-    return OwnedPyObjectPtr(o);
+  /// Take ownership of the passed PyObject* incrementing the refcount.
+  static Owned from_borrowed_ptr(PyObject* o) {
+    return Owned(Py_XNewRef(o));
   }
 
-  /// Take ownership of the passed PyObject* (incrementing the refcount).
-  static OwnedPyObjectPtr own(PyObject* o) {
-    return OwnedPyObjectPtr(Py_XNewRef(o));
+  static Owned none() {
+    return Owned(Py_None);
   }
 
-  static OwnedPyObjectPtr none() {
-    return OwnedPyObjectPtr(Py_None);
+  static Owned false_() {
+    return Owned(Py_False);
   }
 
-  static OwnedPyObjectPtr false_() {
-    return OwnedPyObjectPtr(Py_False);
+  static Owned true_() {
+    return Owned(Py_True);
   }
 
-  static OwnedPyObjectPtr true_() {
-    return OwnedPyObjectPtr(Py_True);
-  }
-
-  PyObject* ptr() const {
-    return m_value;
-  }
-
+  /// Release the internal PyObject* without modifying the refcount.
   PyObject* release() {
     PyObject* tmp = nullptr;
     std::swap(tmp, m_value);
@@ -109,13 +117,11 @@ struct OwnedPyObjectPtr {
   }
 
  private:
-  PyObject* m_value;
-
-  OwnedPyObjectPtr(PyObject* value) : m_value(value) {}
+  Owned(PyObject* value) : Borrowed(value) {}
 };
 
-inline OwnedPyObjectPtr BorrowedPyObjectPtr::own() const {
-  return OwnedPyObjectPtr::own(m_value);
+inline Owned Borrowed::to_owned() const {
+  return Owned::from_borrowed_ptr(m_value);
 }
 
-} // namespace torch::impl
+} // namespace torch::pyptr

@@ -21,8 +21,7 @@ PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
-using torch::impl::BorrowedPyObjectPtr;
-using torch::impl::OwnedPyObjectPtr;
+namespace pyptr = torch::pyptr;
 
 #if IS_PYTHON_3_11_PLUS
 
@@ -51,8 +50,8 @@ bool unicode_is_literal_none(const T* start, const T* end) {
 }
 
 template <typename T>
-OwnedPyObjectPtr strip_function_call_helper(
-    BorrowedPyObjectPtr original,
+pyptr::Owned strip_function_call_helper(
+    pyptr::Borrowed original,
     const T* start,
     size_t length) {
   // This function is... not great.
@@ -64,8 +63,7 @@ OwnedPyObjectPtr strip_function_call_helper(
     } else if (*p == ')' || *p == ',' || *p == '[' || *p == ']') {
       if ((p > curr) && !unicode_is_literal_none(curr, p) &&
           (Py_UNICODE_ISALPHA(*curr) || *curr == '_')) {
-        return strip_function_call_helper(
-            BorrowedPyObjectPtr(), curr, p - curr);
+        return strip_function_call_helper(pyptr::Borrowed(), curr, p - curr);
       }
       // The original code skipped adding these chars...
     }
@@ -79,21 +77,21 @@ OwnedPyObjectPtr strip_function_call_helper(
   }
 
   if (p == end && original.ptr() != nullptr) {
-    return original.own();
+    return original.to_owned();
   }
 
-  return OwnedPyObjectPtr::own(
+  return pyptr::Owned::from_owned_ptr(
       PyUnicode_FromKindAndData(sizeof(*start), start, p - start));
 }
 
-OwnedPyObjectPtr strip_function_call(BorrowedPyObjectPtr name) {
+pyptr::Owned strip_function_call(pyptr::Borrowed name) {
   if (!PyUnicode_Check(name.ptr())) {
     PyErr_SetString(PyExc_TypeError, "String expected");
-    return OwnedPyObjectPtr::none();
+    return pyptr::Owned::none();
   }
 
   if (PyUnicode_READY(name.ptr()) != 0)
-    return OwnedPyObjectPtr::none();
+    return pyptr::Owned::none();
 
   auto length = PyUnicode_GET_LENGTH(name.ptr());
   switch (PyUnicode_KIND(name.ptr())) {
@@ -122,33 +120,33 @@ bool _checkParamCount(size_t nargs, size_t expected) {
 }
 
 template <typename T>
-OwnedPyObjectPtr is_valid_var_name_helper(const T* start, size_t length) {
+pyptr::Owned is_valid_var_name_helper(const T* start, size_t length) {
   if (length < 1)
-    return OwnedPyObjectPtr::false_();
+    return pyptr::Owned::false_();
 
   // TODO: the original code is a bit odd... check it. It just checked that the
   // string starts with alnum. Then if it's all digits then it logs a warning.
 
   if (!Py_UNICODE_ISALNUM(*start))
-    return OwnedPyObjectPtr::false_();
+    return pyptr::Owned::false_();
   while (length-- > 0) {
     if (!Py_UNICODE_ISDIGIT(*start++)) {
-      return OwnedPyObjectPtr::true_();
+      return pyptr::Owned::true_();
     }
   }
 
   // 2 == warning
-  return OwnedPyObjectPtr::own(PyLong_FromLong(2));
+  return pyptr::Owned::from_owned_ptr(PyLong_FromLong(2));
 }
 
-OwnedPyObjectPtr is_valid_var_name(BorrowedPyObjectPtr name) {
+pyptr::Owned is_valid_var_name(pyptr::Borrowed name) {
   if (!PyUnicode_Check(name.ptr())) {
     PyErr_SetString(PyExc_TypeError, "String expected");
-    return OwnedPyObjectPtr::none();
+    return pyptr::Owned::none();
   }
 
   if (PyUnicode_READY(name.ptr()) != 0)
-    return OwnedPyObjectPtr::none();
+    return pyptr::Owned::none();
 
   auto length = PyUnicode_GET_LENGTH(name.ptr());
   switch (PyUnicode_KIND(name.ptr())) {
@@ -169,7 +167,7 @@ PyObject* _strip_function_call(
     Py_ssize_t nargs) {
   if (!_checkParamCount(nargs, 1))
     return Py_None;
-  return strip_function_call(BorrowedPyObjectPtr(args[0])).release();
+  return strip_function_call(pyptr::Borrowed(args[0])).release();
 }
 
 PyObject* _is_valid_var_name(
@@ -178,7 +176,7 @@ PyObject* _is_valid_var_name(
     Py_ssize_t nargs) {
   if (!_checkParamCount(nargs, 1))
     return Py_None;
-  return is_valid_var_name(BorrowedPyObjectPtr(args[0])).release();
+  return is_valid_var_name(pyptr::Borrowed(args[0])).release();
 }
 
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)

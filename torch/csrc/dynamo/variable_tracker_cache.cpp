@@ -6,24 +6,22 @@
 
 namespace {
 
-using torch::impl::OwnedPyObjectPtr;
-using torch::impl::BorrowedPyObjectPtr;
+namespace pyptr = torch::pyptr;
 
 struct VariableTrackerCacheKey {
   uintptr_t m_value;
-  OwnedPyObjectPtr m_source;
+  pyptr::Owned m_source;
 
-  VariableTrackerCacheKey(BorrowedPyObjectPtr value, BorrowedPyObjectPtr source)
-      : m_value(reinterpret_cast<uintptr_t>(value.ptr())), m_source(source) {}
+  VariableTrackerCacheKey(pyptr::Borrowed value, pyptr::Borrowed source)
+      : m_value(reinterpret_cast<uintptr_t>(value.ptr())),
+        m_source(source.to_owned()) {}
 
   bool operator==(const VariableTrackerCacheKey& other) const {
-    return (m_value == other.m_value) &&
-        (PyObject_RichCompareBool(
-             m_source.ptr(), other.m_source.ptr(), Py_EQ) == 1);
+    return (m_value == other.m_value) && m_source.equal(other.m_source);
   }
 
   size_t hash() const {
-    return std::hash<uintptr_t>()(m_value) ^ PyObject_Hash(m_source.ptr());
+    return std::hash<uintptr_t>()(m_value) ^ m_source.hash();
   }
 };
 
@@ -38,7 +36,7 @@ struct VariableTrackerCache {
 
   std::unordered_map<
       VariableTrackerCacheKey,
-      OwnedPyObjectPtr,
+      pyptr::Owned,
       VariableTrackerCacheKeyHasher>
       m_cache;
 
@@ -71,11 +69,8 @@ struct VariableTrackerCache {
     Py_TYPE(self)->tp_free((PyObject*)self);
   }
 
-  void add(
-      BorrowedPyObjectPtr value,
-      BorrowedPyObjectPtr source,
-      BorrowedPyObjectPtr vt_) {
-    auto vt = vt_.own();
+  void add(pyptr::Borrowed value, pyptr::Borrowed source, pyptr::Borrowed vt_) {
+    auto vt = vt_.to_owned();
     auto key = VariableTrackerCacheKey(value, source);
     m_cache.emplace(std::move(key), vt);
   }
@@ -84,15 +79,14 @@ struct VariableTrackerCache {
     m_cache.clear();
   }
 
-  OwnedPyObjectPtr clone() {
+  pyptr::Owned clone() {
     throw std::runtime_error("unimplemented VariableTrackerCache::clone");
   }
 
-  OwnedPyObjectPtr lookup(BorrowedPyObjectPtr value, BorrowedPyObjectPtr source)
-      const {
+  pyptr::Owned lookup(pyptr::Borrowed value, pyptr::Borrowed source) const {
     auto it = m_cache.find(VariableTrackerCacheKey(value, source));
     if (it == m_cache.end()) {
-      return OwnedPyObjectPtr::none();
+      return pyptr::Owned::none();
     } else {
       return it->second;
     }

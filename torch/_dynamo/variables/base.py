@@ -187,9 +187,10 @@ class VariableTrackerMeta(type):
         """Make isinstance work with LazyVariableTracker"""
         # This is super expensive - just having it costs over 4% of tracing
         # time!
-        if type(instance) is variables.LazyVariableTracker:
-            if cls not in (VariableTracker, variables.LazyVariableTracker):
-                instance = instance.realize()
+        if (type(instance) is variables.LazyVariableTracker) and (
+            cls not in (VariableTracker, variables.LazyVariableTracker)
+        ):
+            instance = instance.realize()
         return type.__instancecheck__(cls, instance)
 
     def __init__(cls, name, bases, attrs) -> None:
