@@ -15,6 +15,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -28,6 +29,8 @@ from torch.utils._sympy.functions import (
 )
 
 
+# int64_t is long long on MacOS, but long on 64-bit Linux
+LONG_SUFFIX = "LL" if IS_MACOS else "L"
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
@@ -321,12 +324,14 @@ class ExprPrinterTests(InductorTestCase):
         x = sympy.Symbol("x", integer=True)
         expr = Mod(x - 1, 2)
         self.assertExpectedInline(pexpr(expr), """((-1) + x) % 2""")
-        self.assertExpectedInline(cexpr(expr), """((-1L) + x) % 2L""")
+        self.assertExpectedInline(
+            cexpr(expr), f"""((-1{LONG_SUFFIX}) + x) % 2{LONG_SUFFIX}"""
+        )
         self.assertExpectedInline(texpr(expr), """((-1) + x) % 2""")
 
         expr = (x - 10) % x
         self.assertExpectedInline(pexpr(expr), """(-10) % x""")
-        self.assertExpectedInline(cexpr(expr), """(-10L) % x""")
+        self.assertExpectedInline(cexpr(expr), f"""(-10{LONG_SUFFIX}) % x""")
         self.assertExpectedInline(texpr(expr), """(-10) % x""")
 
     def test_print_mod_index(self):
@@ -337,7 +342,7 @@ class ExprPrinterTests(InductorTestCase):
         self.assertExpectedInline(
             cexpr(expr),
             """(static_cast<int64_t>(c10::div_floor_integer("""
-            """static_cast<int64_t>((-10L) + x), static_cast<int64_t>(ks))) % static_cast<int64_t>(ks))""",
+            f"""static_cast<int64_t>((-10{LONG_SUFFIX}) + x), static_cast<int64_t>(ks))) % static_cast<int64_t>(ks))""",
         )
         self.assertExpectedInline(texpr(expr), """((((-10) + x) // ks) % ks)""")
 
@@ -345,7 +350,7 @@ class ExprPrinterTests(InductorTestCase):
         x = sympy.Symbol("x", integer=True)
         expr = PythonMod(x - 10, x)
         self.assertExpectedInline(pexpr(expr), """((-10) + x) % x""")
-        self.assertExpectedInline(cexpr(expr), """((-10L) + x) % x""")
+        self.assertExpectedInline(cexpr(expr), f"""((-10{LONG_SUFFIX}) + x) % x""")
         self.assertExpectedInline(
             texpr(expr), """triton_helpers.remainder_integer((-10) + x, x)"""
         )
