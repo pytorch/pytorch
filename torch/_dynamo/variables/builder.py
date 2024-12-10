@@ -60,7 +60,7 @@ from torch.utils.weak import TensorWeakRef
 from .. import config, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
-from ..guards import GuardBuilder, install_guard, install_guards, make_dupe_guard
+from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
     auto_unset,
@@ -426,7 +426,7 @@ class VariableBuilder:
             tmp = [source.make_guard(guard) for guard in guards]
         except NotImplementedError:
             return None
-        install_guards(tmp, skip=1)
+        install_guard(*tmp, skip=1)
         return {}
 
     @classmethod
@@ -793,7 +793,7 @@ class VariableBuilder:
                             self.tx, GetItemSource(saved_tensors_source, i)
                         )(v)
                     )
-            install_guards(guards)
+            install_guard(*guards)
 
             return self.tx.output.side_effects.track_object_existing(
                 value,
@@ -1308,7 +1308,7 @@ class VariableBuilder:
                 )
                 guards.append(source_i.make_guard(guard))
 
-            install_guards(guards, skip=1)
+            install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
                 source,

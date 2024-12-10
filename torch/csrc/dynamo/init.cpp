@@ -12,6 +12,7 @@
 #include <torch/csrc/dynamo/variable_tracker_cache.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_ptr.h>
 
 static struct PyModuleDef _module =
@@ -136,7 +137,7 @@ pyptr::Owned is_valid_var_name_helper(const T* start, size_t length) {
   }
 
   // 2 == warning
-  return pyptr::Owned::from_owned_ptr(PyLong_FromLong(2));
+  return pyptr::Owned::from_owned_ptr(THPUtils_packInt32(2));
 }
 
 pyptr::Owned is_valid_var_name(pyptr::Borrowed name) {

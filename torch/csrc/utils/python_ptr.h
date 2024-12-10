@@ -98,15 +98,15 @@ struct Owned : Borrowed {
   }
 
   static Owned none() {
-    return Owned(Py_None);
+    return Borrowed::none().to_owned();
   }
 
   static Owned false_() {
-    return Owned(Py_False);
+    return Borrowed::false_().to_owned();
   }
 
   static Owned true_() {
-    return Owned(Py_True);
+    return Borrowed::true_().to_owned();
   }
 
   /// Release the internal PyObject* without modifying the refcount.

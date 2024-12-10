@@ -6,7 +6,18 @@ import functools
 import itertools
 import sys
 import types
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
@@ -1481,19 +1492,25 @@ def _clone_instructions(instructions):
         for i in instructions
     ]
 
-    remap = {instr: copy for instr, copy in zip(instructions, copied)}
+    remap = dict(zip(instructions, copied))
     # Handle `None` in the remapper so we don't need an extra `if`.
     remap[None] = None
 
     for i in copied:
         i.target = remap[i.target]
         if entry := i.exn_tab_entry:
-            i.exn_tab_entry = InstructionExnTabEntry(remap[entry.start], remap[entry.end], remap[entry.target], entry.depth, entry.lasti)
+            i.exn_tab_entry = InstructionExnTabEntry(
+                remap[entry.start],
+                remap[entry.end],
+                remap[entry.target],
+                entry.depth,
+                entry.lasti,
+            )
     return copied
 
 
 @functools.cache
-def _cached_cleaned_instructions(code, safe=False) -> Tuple[Instruction, ...]:
+def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     if sys.version_info >= (3, 11):

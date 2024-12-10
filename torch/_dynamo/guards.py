@@ -67,7 +67,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    TracingContext,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -2933,21 +2932,12 @@ def install_guard(*guards, skip=0):
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
     """
-    install_guards(guards, skip)
+    from torch._guards import TracingContext
 
-
-def install_guards(guards, skip=0):
-    """
-    Add dynamo guards to the current tracing context.
-
-    Args:
-        guards: guard(s) to add
-        skip: number of stack frames to ignore for debug stack trace
-    """
     collect_debug_stack = guards_log.isEnabledFor(
         logging.DEBUG
     ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
-    dynamo_guards = TracingContext.get().guards_context.dynamo_guards
+    add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
-        dynamo_guards.add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
+        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
