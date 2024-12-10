@@ -292,7 +292,14 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     if (NOT OpenMP_libomp_LIBRARY)
       # We prefer gomp over omp if possible, since we've configured MKL DNN
       # to link in gomp. Linking in multiple OpenMP implementations can cause
-      # performance issues and sporadic runtime failures.
+      # performance issues and sporadic runtime failures. This priority order
+      # is purely to avoid linking conflicting symbols. We have not considered
+      # any other reasons to prefer one OpenMP implementation over another.
+      #
+      # These implementations are
+      # * libgomp -> GNU OpenMP
+      # * libomp -> LLVM OpenMP
+      # * libiomp5 -> Intel OpenMP
       find_library(OpenMP_libomp_LIBRARY
         NAMES gomp omp iomp5
         HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
