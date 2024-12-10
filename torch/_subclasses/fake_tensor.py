@@ -64,6 +64,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -74,6 +75,8 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.nested._internal.cached_tensor import CachedTensor
+
 
 log = logging.getLogger(__name__)
 
@@ -629,10 +632,8 @@ class FakeTensor(Tensor):
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
 
-    # We expect nested_int_memo to be None when an offsets is a graph
-    # intermediate, or an input that has never been associated with a
-    # nested int.
-    nested_int_memo = SymNumberMemoDescriptor(is_nested_int=True)
+    nested_int_id: Optional[int] = None
+    source: Any = None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -730,7 +731,6 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
-        self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -901,17 +901,16 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
-    def get_nested_int(
-        self,
-        *,
-        coeff: Union[int, torch.SymInt] = 1,
-    ) -> torch.SymInt:
-        if self.nested_int_memo is None:
-            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
-                nt_tensor_id=None
-            )
-        assert isinstance(self.nested_int_memo, torch.SymInt)
-        return self.nested_int_memo * coeff
+    # For the purpose of equality comparison
+    def try_get_nested_int_id(self) -> Optional[int]:
+        return self.nested_int_id
+
+    def register_nested_int_id(self, nid: Optional[int] = None) -> int:
+        if nid is None:
+            self.nested_int_id = self.fake_mode.get_next_nested_int_id()
+        else:
+            self.nested_int_id = nid
+        return self.nested_int_id
 
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:
@@ -921,6 +920,12 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+    def detach(self) -> torch.Tensor:  # type: ignore[override]
+        out = torch.ops.aten.detach.default(self)
+        if (t_id := self.try_get_nested_int_id()) is not None:
+            out.register_nested_int_id(t_id)
+        return out
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1125,6 +1130,8 @@ class FakeTensorMode(TorchDispatchMode):
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
 
+    nt_cache_to_nested_int: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+
     def __init__(
         self,
         *,
@@ -1213,10 +1220,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-        import torch.nested._internal.nested_tensor
+        import torch.nested._internal.tensor_registry
 
         self.nt_tensor_id_initial_count = (
-            torch.nested._internal.nested_tensor._tensor_id_counter
+            torch.nested._internal.tensor_registry._global_tensor_registry._next_id
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
@@ -2513,21 +2520,44 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
-    def create_symbolic_nested_int(
-        self, *, nt_tensor_id: Optional[int] = None
+    def get_nested_int(
+        self,
+        *,
+        cache: CachedTensor,
+        coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
+        # The cache holds a weakref to the nested int
+        # cache is 1:1 with symbolic nested int
+        # a single offsets can be part of multiple cache and thus have
+        # multiple nested int.
+        # comparing two of those nested ints can generate a guard
+        # so we make sure that they have proper source.
+        # during hint comparison, we check the nested_int which is the same.
+        ref = self.nt_cache_to_nested_int.get(cache)
+        if ref is None or (ret := ref()) is None:
+            ret = self.create_symbolic_nested_int(cache=cache)
+            self.nt_cache_to_nested_int[cache] = weakref.ref(ret)
+        assert isinstance(ret, torch.SymInt)
+        return ret * coeff
+
+    def create_symbolic_nested_int(self, *, cache: CachedTensor) -> torch.SymInt:
+        # Precondition: The cache, upon creation has already registered tensors to have
+        # id using get_next_nested_id.
         # See Note: [Creating symbolic nested int]
-        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+        # there are two cases (maybe this should be split out?)
+        # Returned nested int always has coeff=1; caller should multiply result by coeff if needed
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
+        from torch.nested._internal.utils import _try_get_source
 
-        if nt_tensor_id is None:
-            nt_tensor_id = self.nt_tensor_id_counter
-            assert self.enter_stack, "should only called while FakeTensorMode is active"
-            self.nt_tensor_id_counter += 1
-        hint = torch.SymInt(NestedIntNode(nt_tensor_id, 1))
-
-        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+        src = _try_get_source(cache)
+        if src is None:
+            src = torch._dynamo.source.EphemeralSource(
+                "intermediate_offsets_or_lengths"
+            )
+        else:
+            src = torch._dynamo.source.NestedIntSource(src)
+        hint = torch.SymInt(NestedIntNode(cache, coeff=1))
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
@@ -2537,6 +2567,13 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
+        assert isinstance(ret, torch.SymInt)
+        return ret
+
+    def get_next_nested_int_id(self) -> int:
+        ret = self.nt_tensor_id_counter
+        # assert self.enter_stack, "should only called while FakeTensorMode is active"
+        self.nt_tensor_id_counter += 1
         return ret
 
     _cpp_meta_supports_symint = ordered_set(
