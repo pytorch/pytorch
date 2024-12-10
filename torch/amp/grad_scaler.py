@@ -384,11 +384,12 @@ class GradScaler:
         .. warning::
             Closure use is not currently supported.
         """
+        retval: Optional[float] = None
         if not self._enabled:
-            res = optimizer.step(*args, **kwargs)
+            retval = optimizer.step(*args, **kwargs)
             if not return_found_inf:
-                return res
-            return res, False
+                return retval
+            return retval, False
 
         if "closure" in kwargs:
             raise RuntimeError(
@@ -404,7 +405,6 @@ class GradScaler:
                 "step() has already been called since the last update()."
             )
 
-        retval: Optional[float] = None
         found_inf: Optional[Union[torch.Tensor, bool]] = None
 
         if getattr(optimizer, "_step_supports_amp_scaling", False):
@@ -510,7 +510,7 @@ class GradScaler:
         if new_scale is not None:
             assert self._scale is not None
             # Accept a new user-defined scale.
-            if isinstance(new_scale, float):
+            if not isinstance(new_scale, torch.Tensor):
                 self._scale.fill_(new_scale)
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
