@@ -9641,16 +9641,16 @@ class TestLinalgMPS(TestCaseMPS):
             self.assertLess(mean_err, 0.05)
 
     def test_solve_triangular_device_check(self, device="mps", dtype=torch.float32):
-        A = torch.tensor([[4, 0, 0],
+        a = torch.tensor([[4, 0, 0],
                           [1, 3, 0],
                           [2, 1, 2]], device=device, dtype=dtype)
-        B = torch.tensor([[2, 3],
+        b = torch.tensor([[2, 3],
                           [4, 5],
-                          [6, 7]], device="cpu", dtype=torch.float32)
+                          [6, 7]], device="cpu", dtype=dtype)
 
         if device != "cpu":
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                torch.linalg.solve_triangular(A, B, upper=False)
+                torch.linalg.solve_triangular(a, b, upper=False)
 
 
 class TestSDPA(TestCaseMPS):
