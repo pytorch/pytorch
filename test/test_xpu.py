@@ -299,6 +299,14 @@ print(torch.xpu.device_count())
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
         self.assertTrue(torch.Event in type(xpu_event).mro())
 
+    def test_stream_compatibility(self):
+        s1 = torch.xpu.Stream()
+        s2 = torch.xpu.Stream()
+        torch.accelerator.set_stream(s1)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        torch.accelerator.set_stream(s2)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+
     def test_generator(self):
         torch.manual_seed(2024)
         g_state0 = torch.xpu.get_rng_state()
