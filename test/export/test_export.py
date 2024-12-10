@@ -6177,7 +6177,7 @@ graph():
             def forward(self, x, y):
                 a = x.item()
                 torch._check_is_size(a)
-                torch._check(a <= y.size(0))
+                torch._check(a < y.size(0))
                 return y[:a]
 
         ep = export(
