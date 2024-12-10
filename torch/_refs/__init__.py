@@ -8,7 +8,6 @@ import math
 import operator
 import warnings
 from collections.abc import Iterable
-from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
 from typing import (
     Any,
@@ -2022,7 +2021,8 @@ def _to_will_alias(
     layout: Optional[torch.layout] = None,
     memory_format: Optional[torch.memory_format] = None,
     pin_memory: Optional[bool] = False,
-    non_blocking: bool = False,  # not using non_blocking
+    # not using non_blocking
+    **kwargs: Any,
 ) -> bool:
     return (
         not copy

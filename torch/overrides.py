@@ -1380,7 +1380,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.real.__get__: lambda self: -1,
         Tensor.imag.__get__: lambda self: -1,
         Tensor.__cuda_array_interface__.__get__: lambda self: -1,
-        Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
+        Tensor.type: lambda self, *args, **kwargs: -1,
         Tensor._dimI: lambda self: -1,
         Tensor._dimV: lambda self: -1,
         Tensor._indices: lambda self: -1,
@@ -1407,7 +1407,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.coalesce: lambda self: -1,
         Tensor._coalesced_: lambda self, coalesced: -1,
         Tensor.contiguous: lambda self, memory_format=torch.contiguous_format: -1,
-        Tensor.copy_: lambda self, src, non_blocking=False: -1,
+        Tensor.copy_: lambda self, *args, **kwargs: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.mtia: lambda self, memory_format=torch.preserve_format: -1,
@@ -1493,7 +1493,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.storage_type: lambda self: -1,
         Tensor.sum_to_size: lambda self, size: -1,
         Tensor.tile: lambda self, *reps: -1,
-        Tensor.to: lambda self, dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format: -1,
+        Tensor.to: lambda self, *args, **kwargs: -1,
         Tensor.to_dense: lambda self, dtype=None, *, masked_grad=None: -1,
         Tensor._to_dense: lambda self, dtype=None, masked_grad=None: -1,
         Tensor.to_sparse: lambda self: -1,
@@ -1516,7 +1516,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     )
     if hasattr(Tensor, privateuse1_backend_name):
         ret[getattr(Tensor, privateuse1_backend_name)] = (
-            lambda self, device=None, non_blocking=False, **kwargs: -1
+            lambda self, *args, **kwargs: -1
         )
         ret[getattr(Tensor, f"is_{privateuse1_backend_name}").__get__] = lambda self: -1
 
