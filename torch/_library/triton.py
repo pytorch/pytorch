@@ -134,15 +134,22 @@ def triton_op(
             mode, op, types, args, kwargs
         ):
             # NOTE [Export custom triton op]
-            # For torch.export (strict and non-strict), we don't do the decomposition.
-            # Instead, we preserve the custom op as they're . This is because we want
+            # For torch.export (strict and non-strict), we don't do functional decomposition.
+            # Instead, we preserve the custom triton ops as custom ops. This is because we want
             # the exported program to be high-level and serializable. If we decompose
-            # the custom op to a functional hop, we need to figure out ways of serializing
-            # its arguments, which inculde triton kernels and triton dtypes, which exposes
-            # triton as the BC surface of an exported program, which is not desirable.
-            # - In the short term, we expect users to have a seperate aot_compile stage to
-            #   turn the custom triton kernel into a Cubin file for better BC guarantees.
-            # - In the long term, we may export multiple cubins for the triton op directly.
+            # the custom op to a functional hop and make it a node in exported program,
+            # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
+            # functions and triton dtypes. This is undesireble because:
+            # - it's tedious to maintain layer that serialize the jited function
+            #   (e.g. with a string) and dtypes.
+            # - exported program will expose the implementation detail (i.e. triton source code) for
+            #   a specific backend (GPU) to users, making it less portable.
+            # - changes to triton or the serialization logic for triton arguments can be BC breaking
+            #
+            # In the short term, we expect users to have a seperate aot_compile stage that
+            # compiles the exported program into a Cubin file, which does autotuning and
+            # removes triton dependency.
+            # In the long term, we may export multiple cubins for the triton op directly.
             from torch.compiler import is_exporting
 
             if is_exporting():
