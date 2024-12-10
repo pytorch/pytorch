@@ -164,7 +164,7 @@ def triton_op(
 
                 assert (
                     not op._schema.is_mutable
-                ), "custom triton op need to be auto_funcationlized is it's mutable"
+                ), "custom triton op need to be auto_functionalized if it's mutable"
                 ctx = PythonFunctionalizeAPI(mode, mode.pre_dispatch)
                 unwrapped_args, unwrapped_kwargs = ctx.unwrap_tensors((args, kwargs))
                 return ctx.wrap_tensors(op(*unwrapped_args, **unwrapped_kwargs))
