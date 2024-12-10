@@ -16,7 +16,6 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
-    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8
 )
@@ -35,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocmVersionLessThan,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     skipIfRocm,
     TestCase,
@@ -560,7 +560,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.get_device_capability(0)[0] != 9, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -666,7 +666,7 @@ class TestFP8MatmulCuda(TestCase):
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not TEST_CUDA or torch.cuda.get_device_capability(0)[0] != 9, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
