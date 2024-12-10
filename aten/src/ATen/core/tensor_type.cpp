@@ -293,10 +293,8 @@ TensorTypePtr TensorType::create(
   } else {
     // strides are all null, but still have number of strides equal to number of ranks
     TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto symbol_sizes = SymbolicShape(*sizes.sizes());
     return TensorType::create(
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
   }
 }
@@ -304,12 +302,12 @@ TensorTypePtr TensorType::create(
 TensorTypePtr TensorType::create(
     std::optional<at::ScalarType> scalar_type,
     std::optional<Device> device,
-    const SymbolicShape& sizes,
-    const VaryingShape<Stride>& strides,
+    SymbolicShape sizes,
+    VaryingShape<Stride> strides,
     std::optional<bool> requires_grad,
     std::optional<bool> undefined) {
   auto pt = TensorTypePtr(new TensorType(
-      scalar_type, device, sizes, strides, requires_grad, undefined));
+      scalar_type, device, std::move(sizes), std::move(strides), requires_grad, undefined));
   return pt;
 }
 
@@ -412,17 +410,16 @@ bool TensorType::equals(const c10::Type& rhs) const {
 }
 
 VaryingShape<int64_t> TensorType::strides() const {
-  auto strides_size = strides_.size();
-  if (!strides_size.has_value()) {
+  auto const strides_sizes = strides_.sizes();
+  if (!strides_sizes.has_value()) {
     return VaryingShape<int64_t>();
   }
-  std::vector<std::optional<int64_t>> ss(*strides_size);
-  for (size_t i = 0; i < *strides_size; i++) {
-    auto const& stride = strides_[i];
+  std::vector<std::optional<int64_t>> ss(strides_sizes->size());
+  for (auto const& stride:strides_sizes.value()) {
     if (!stride.has_value()) {
       continue;
     }
-    auto s = *stride;
+    const auto& s = *stride;
     if (s.stride_index_.has_value() && s.stride_.has_value()) {
       ss[*s.stride_index_] = *s.stride_;
     }

@@ -205,7 +205,7 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   // TODO(ezyang): I don't think this branch is actually necessary
   // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
   // the memory format?
-  auto data = tensor_->CurrentTensorData();
+  const auto data = tensor_->CurrentTensorData();
   if (data.has_value()) {
     return data->is_contiguous();
   }
