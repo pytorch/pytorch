@@ -1846,9 +1846,9 @@ class CommonTemplate:
         from torch._inductor.runtime.runtime_utils import next_power_of_2
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        size_hints = [67108864, 8192]
+        size_hints = {"x": 67108864, "r": 8192}
         for i in range(4):
-            size_hints[0] = next_power_of_2(size_hints[0])
+            size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
@@ -2491,6 +2491,13 @@ class CommonTemplate:
     def test_linspace3(self):
         def fn(x):
             return torch.linspace(0, 2, 0, device=x.device)
+
+        self.common(fn, (torch.Tensor([]),))
+
+    @requires_multigpu()
+    def test_linspace4(self):
+        def fn(x):
+            return torch.linspace(0, 2, 0, device=f"{GPU_TYPE}:1")
 
         self.common(fn, (torch.Tensor([]),))
 
@@ -3756,7 +3763,12 @@ class CommonTemplate:
         with torch.no_grad():
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
-            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+            if config.cpp_wrapper:
+                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                    code[0]
+                )
+            else:
+                FileCheck().check_not(".run(").check(".convolution(").run(code[0])
 
         # in out should do channels last in inference
         in_channels = 8
@@ -3776,7 +3788,7 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check(".convolution(").run(code[0])
+                FileCheck().check(".run(").check("convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -8835,7 +8847,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8895,7 +8906,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8935,11 +8945,8 @@ class CommonTemplate:
 
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
-        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(len(source_codes), 1)
         self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
-        if config.cpp_wrapper:
-            # The second pass should not involve triton at all.
-            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -11742,7 +11749,6 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
-    @skip_if_triton_cpu("Triton CPU: Cannot xfail because it crashes process")
     def test_large_grid(self):
         # If this is running with cpp_wrapper, the auto-tuning step will generate an
         # additional array of the same size as the input.  Numbers derived
@@ -12360,7 +12366,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
@@ -12492,37 +12497,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             # it does not move the tensor constructor to cuda and keeps it on CPU.
             self.assertFalse("empty_strided_cuda(()" in code)
 
-        @requires_gpu()
-        @parametrize("upcast_to_fp32", [False, True])
-        @config.patch("triton.use_block_ptr", True)
-        def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
-            @torch.compile
-            def func(a, b, c, d):
-                return a * b * c * d
-
-            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
-            with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-                func_opt = torch._dynamo.optimize("inductor")(func)
-                code = run_and_get_triton_code(func_opt, *inps)
-                fp32_cast_in_code = "to(tl.float32)" in code
-                self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
-
-        @requires_gpu()
-        @parametrize("load_upcast_to_fp32", [False, True])
-        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-        @config.patch("triton.use_block_ptr", True)
-        def test_dtype_aware_codegen(self, load_upcast_to_fp32, input_dtype):
-            @torch.compile
-            def func(a, b, c, d):
-                return torch.sqrt(a * b * c * d)
-
-            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * 4
-            with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
-                func_opt = torch._dynamo.optimize("inductor")(func)
-                code = run_and_get_triton_code(func_opt, *inps)
-                libdevice_cast_in_code = "libdevice.sqrt(tmp3.to(tl.float32))" in code
-                self.assertNotEqual(libdevice_cast_in_code, load_upcast_to_fp32)
-
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
             @torch.compile
@@ -12604,6 +12578,50 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 or "tl.load(in_ptr0 + (tmp0), (xmask).to(tl.int1)" in code
             )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
+
+        @config.patch("triton.prefer_nd_tiling", True)
+        @config.patch("triton.max_tiles", 3)
+        @parametrize(
+            "block_multiple, ynumel_exceed_ygrid_size",
+            [
+                # xdim has constant mask, ydim does not
+                [True, True],
+                # xdim, ydim both have a constant mask
+                [True, False],
+                # if numel not a block multiple, no constant mask
+                [False, False],
+                # TODO: test zdim too
+            ],
+        )
+        def test_has_constant_mask(self, block_multiple, ynumel_exceed_ygrid_size):
+            from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
+            from torch._inductor.runtime.runtime_utils import get_max_y_grid
+
+            shape = [TRITON_MAX_BLOCK["Y"], TRITON_MAX_BLOCK["X"]]
+
+            if not block_multiple:
+                shape = [s + 1 for s in shape]
+
+            if ynumel_exceed_ygrid_size:
+                shape[0] = (
+                    shape[0] * (math.ceil(get_max_y_grid() / shape[0])) + shape[0]
+                )
+
+            a = torch.zeros(shape, device=GPU_TYPE, dtype=torch.bool)
+            b = torch.zeros((shape[0], 1), device=GPU_TYPE, dtype=torch.bool)
+
+            opt_fn = torch.compile(torch.add)
+            code = run_and_get_triton_code(opt_fn, a, b)
+
+            if block_multiple:
+                self.assertTrue("xmask = tl.full" in code)
+                if ynumel_exceed_ygrid_size:
+                    self.assertTrue("ymask = yindex < ynumel" in code)
+                else:
+                    self.assertTrue("ymask = tl.full" in code)
+            else:
+                self.assertTrue("ymask = yindex < ynumel" in code)
+                self.assertTrue("xmask = xindex < xnumel" in code)
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
@@ -12695,15 +12713,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             inp = torch.randn(4, 4, device=GPU_TYPE)
             code = run_and_get_triton_code(fn, inp)
             fn(inp)
-            self.assertTrue("Graph fragment" in code)
-            self.assertTrue(
-                "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
-                in code
-            )
-            self.assertTrue(
-                "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
-                in code
-            )
+            if config.cpp_wrapper:
+                self.assertTrue("fused_relu_sin" in code)
+            else:
+                self.assertTrue("Graph fragment" in code)
+                self.assertTrue(
+                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                    in code
+                )
+                self.assertTrue(
+                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                    in code
+                )
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
@@ -12761,7 +12782,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
         @patch("torch._inductor.config.comment_origin", True)
         @patch("torch._functorch.config.max_dist_from_bw", 0)
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self) -> None:
@@ -12887,7 +12907,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_non_blocking_copy_codegen(self):
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
@@ -12956,13 +12975,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-
-            if config.cpp_wrapper:
-                # when using cpp_wrapper, backward triton code is in code[2]
-                self.assertTrue("in_out_ptr" in code[2])
-            else:
-                # when not using cpp_wrapper, backward triton code is in code[1]
-                self.assertTrue("in_out_ptr" in code[1])
+            self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
@@ -12994,14 +13007,13 @@ if HAS_GPU and not TEST_WITH_ASAN:
             actual, code = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
 
-            if config.cpp_wrapper:
-                code_cpp = code[1]
-                self.assertIn("aoti_torch_check_inf_and_nan", code_cpp)
-
             code = code[0]
-            self.assertIn("# make sure graph inputs are not nan/inf", code)
-            self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-            self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+            if config.cpp_wrapper:
+                self.assertIn("aoti_torch_check_inf_and_nan", code)
+            else:
+                self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
