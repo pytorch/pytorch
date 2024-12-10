@@ -3746,6 +3746,7 @@ class ShapeEnv:
             ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
+            is_contiguous= ex.is_contiguous(),
             symbolic_context=symbolic_context,
         )
 
@@ -3804,6 +3805,7 @@ class ShapeEnv:
         ex_storage_offset: Union[int, SymInt],
         is_dim_dynamic: Sequence[bool],
         source: Source,
+        is_contiguous: bool,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
     ) -> Tuple[
@@ -3870,9 +3872,14 @@ class ShapeEnv:
             ex_size, source, symbolic_context
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
+        if is_contiguous:
+            stride = [sympy.Integer(1)] * len(size)
+            for i in range(len(size) - 2, -1, -1):
+                stride[i] = stride[i + 1] * size[i + 1]
+        else:
+            for i, val in enumerate(ex_stride):
+                if val in (0, 1):
+                    stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]

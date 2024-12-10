@@ -251,6 +251,7 @@ class MetaTensorDescriber:
     ) -> MetaTensorDesc:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
+        is_contiguous = t.is_contiguous()
         is_sparse = t.is_sparse
         layout = t.layout
         is_nested = t.is_nested
@@ -368,6 +369,7 @@ class MetaTensorDescriber:
             is_legacy_batchedtensor=is_legacy_batchedtensor_v,
             is_gradtrackingtensor=is_gradtrackingtensor_v,
             is_view=is_view,
+            is_contiguous=is_contiguous,
             is_conj=t.is_conj(),
             is_neg=t.is_neg(),
             is_parameter=isinstance(t, torch.nn.Parameter),
@@ -509,6 +511,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     is_legacy_batchedtensor: bool = False
     is_gradtrackingtensor: bool = False
     is_view: bool = False
+    is_contiguous: bool = False
     is_nested: bool = False
     # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
     # metadata if that offsets is already associated with a nested int.
@@ -843,6 +846,7 @@ class MetaConverter(Generic[_TensorT]):
                         t_storage_offset,
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
+                        is_contiguous=t.is_contiguous,
                         symbolic_context=symbolic_context,
                     )
             else:
