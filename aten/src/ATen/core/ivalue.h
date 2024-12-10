@@ -1536,12 +1536,12 @@ struct WeakOrStrongCompilationUnit {
       : strong_ptr_(std::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(strong_ptr_ != std::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_.has_value());
     return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != std::nullopt);
+    TORCH_INTERNAL_ASSERT(weak_ptr_.has_value());
     return *weak_ptr_;
   }
 
