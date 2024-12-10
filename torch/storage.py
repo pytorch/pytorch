@@ -10,6 +10,7 @@ import threading
 import warnings
 from typing import (
     Any,
+    Callable as _Callable,
     cast,
     Dict as _Dict,
     Optional as _Optional,
@@ -18,7 +19,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self
+from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec, Self
 
 import torch
 from torch._utils import _to, _type
@@ -45,6 +46,9 @@ _share_memory_lock = threading.Lock()
 _share_memory_map: _Dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
+_U = TypeVar("_U")
+_R = TypeVar("_R")
+_P = _ParamSpec("_P")
 
 
 class _StorageBase:
@@ -426,9 +430,11 @@ class _StorageBase:
         self._byteswap(elem_size)
 
 
-def _share_memory_lock_protected(fn):
+def _share_memory_lock_protected(
+    fn: _Callable[_Concatenate[_U, _P], _R],
+) -> _Callable[_Concatenate[_U, _P], _R]:
     @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: _U, *args: _P.args, **kwargs: _P.kwargs):
         to_free = None
         to_wait = None
         with _share_memory_lock:
@@ -463,7 +469,7 @@ def _share_memory_lock_protected(fn):
 
 
 class UntypedStorage(torch._C.StorageBase, _StorageBase):
-    def __getitem__(self, *args, **kwargs):
+    def __getitem__(self, *args: _P.args, **kwargs: _P.kwargs):
         if self.device.type == "meta":
             raise NotImplementedError("Not available for 'meta' device type")
         return super().__getitem__(*args, **kwargs)
@@ -486,7 +492,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         return self._get_filename()
 
     @_share_memory_lock_protected
-    def share_memory_(self, *args, **kwargs):
+    def share_memory_(self, *args: _P.args, **kwargs: _P.kwargs):
         """
         Moves the storage to shared memory.
 
@@ -521,11 +527,11 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         return super().share_memory_(*args, **kwargs)
 
     @_share_memory_lock_protected
-    def _share_fd_cpu_(self, *args, **kwargs):
+    def _share_fd_cpu_(self, *args: _P.args, **kwargs: _P.kwargs):
         return super()._share_fd_cpu_(*args, **kwargs)
 
     @_share_memory_lock_protected
-    def _share_filename_cpu_(self, *args, **kwargs):
+    def _share_filename_cpu_(self, *args: _P.args, **kwargs: _P.kwargs):
         return super()._share_filename_cpu_(*args, **kwargs)
 
 
@@ -1258,14 +1264,14 @@ class TypedStorage:
         self._untyped_storage.resize_(size * self._element_size())
 
     @classmethod
-    def _free_weak_ref(cls, *args, **kwargs):
+    def _free_weak_ref(cls, *args: _P.args, **kwargs: _P.kwargs):
         return UntypedStorage._free_weak_ref(*args, **kwargs)
 
-    def _weak_ref(self, *args, **kwargs):
+    def _weak_ref(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._weak_ref(*args, **kwargs)
 
     @classmethod
-    def from_buffer(cls, *args, **kwargs):
+    def from_buffer(cls, *args: _P.args, **kwargs: _P.kwargs):
         _warn_typed_storage_removal()
         return cls._from_buffer(*args, **kwargs)
 
@@ -1424,19 +1430,19 @@ class TypedStorage:
         return storage
 
     @classmethod
-    def _expired(cls, *args, **kwargs):
+    def _expired(cls, *args: _P.args, **kwargs: _P.kwargs):
         return UntypedStorage._expired(*args, **kwargs)
 
-    def _write_file(self, *args, **kwargs):
+    def _write_file(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._write_file(*args, **kwargs)
 
-    def _set_from_file(self, *args, **kwargs):
+    def _set_from_file(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._set_from_file(*args, **kwargs)
 
-    def _set_cdata(self, *args, **kwargs):
+    def _set_cdata(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._set_cdata(*args, **kwargs)
 
-    def _share_cuda_(self, *args, **kwargs):
+    def _share_cuda_(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._share_cuda_(*args, **kwargs)
 
     def is_shared(self):
@@ -1448,10 +1454,10 @@ class TypedStorage:
         return self._untyped_storage.is_shared()
 
     @classmethod
-    def _new_shared_cuda(cls, *args, **kwargs):
+    def _new_shared_cuda(cls, *args: _P.args, **kwargs: _P.kwargs):
         return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
 
-    def _share_filename_cpu_(self, *args, **kwargs):
+    def _share_filename_cpu_(self, *args: _P.args, **kwargs: _P.kwargs):
         (
             manager_handle,
             storage_handle,
@@ -1467,10 +1473,10 @@ class TypedStorage:
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
         return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
-    def _shared_incref(self, *args, **kwargs):
+    def _shared_incref(self, *args: _P.args, **kwargs: _P.kwargs):
         return self._untyped_storage._shared_incref(*args, **kwargs)
 
-    def _share_fd_cpu_(self, *args, **kwargs):
+    def _share_fd_cpu_(self, *args: _P.args, **kwargs: _P.kwargs):
         fd, size = self._untyped_storage._share_fd_cpu_(*args, **kwargs)
         return fd, size // self._element_size()
 
@@ -1524,7 +1530,7 @@ class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
         return cls(wrap_storage=untyped_storage)
 
     @classmethod
-    def _release_ipc_counter(cls, *args, **kwargs):
+    def _release_ipc_counter(cls, *args: _P.args, **kwargs: _P.kwargs):
         return torch.UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     @classmethod
