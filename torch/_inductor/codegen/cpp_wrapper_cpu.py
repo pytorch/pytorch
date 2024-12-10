@@ -256,11 +256,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_symbol_assignment(
         self,
-        code: IndentedBuffer,
         name: str,
         value: ir.TensorBox,
         bound_vars: Set[sympy.Symbol],
     ):
+        code = self.prefix
+
         @functools.lru_cache(None)
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
@@ -521,7 +522,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
@@ -538,10 +539,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"auto {name}_size = {name}.sizes();")
+        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"auto {name}_stride = {name}.strides();")
+        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1257,10 +1258,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
-
-    @cache_on_self
-    def write_triton_header_once(self) -> None:
-        pass
 
     def generate_start_graph(self):
         pass

@@ -683,6 +683,8 @@ def _should_use_fused_all_gather_matmul_native(
     group_name: str,
 ) -> bool:
     group = c10d._resolve_process_group(group_name)
+    if not A_shard.is_contiguous():
+        return False
     A_shard = A_shard.flatten(0, -2)
     return (
         "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
