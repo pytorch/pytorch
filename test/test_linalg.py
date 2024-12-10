@@ -67,16 +67,17 @@ def set_tunableop_defaults():
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
 
-def tunableop_matmul(filename, device, dtype):
+def tunableop_matmul(device, dtype):
     # Helper function to test TunableOp in a subprocess
     # requires helper function since lambda function
     # not supported by multiprocessing module
-    torch.cuda.tunable.enable(True)
+    import os
+    os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
     torch.cuda.tunable.set_max_tuning_duration(1)
-    torch.cuda.tunable.set_filename(filename)
     A = torch.randn((17, 17), device=device, dtype=dtype)
     B = torch.randn((17, 17), device=device, dtype=dtype)
     C = torch.matmul(A, B)
+    del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -5124,7 +5125,7 @@ class TestLinalg(TestCase):
         filename = f"tunableop_results{ordinal}.csv"
 
         mp.set_start_method("spawn")
-        p = mp.Process(target=tunableop_matmul, args=(filename, device, dtype))
+        p = mp.Process(target=tunableop_matmul, args=(device, dtype))
         p.start()
         p.join()
 
