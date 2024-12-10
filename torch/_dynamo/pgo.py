@@ -19,6 +19,7 @@ import torch.distributed as dist
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+import gc
 
 
 if TYPE_CHECKING:
@@ -638,6 +639,8 @@ def put_code_state() -> None:
 
     put_local_code_state(cache_key)
     put_remote_code_state(cache_key)
+    with dynamo_timed("pgo.put_code_state.gc.collect", log_pt2_compile_event=True):
+        gc.collect()
 
 
 def put_local_code_state(cache_key: str) -> None:
