@@ -519,6 +519,13 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_device = prior
 
+    def get_training_phase(self) -> str:
+        if self.is_inference:
+            return "inference"
+        if self.is_backward:
+            return "backward"
+        return "forward"
+
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
         """
