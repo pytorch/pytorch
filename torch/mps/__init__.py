@@ -142,13 +142,13 @@ def recommended_max_memory() -> int:
 
 def _compile_shader(source: str):
     r"""Compiles compute shader from source and allows one to invoke kernels
-        defined there from the comfort of Python runtime
-        Example::
+    defined there from the comfort of Python runtime
+    Example::
 
-            >>> lib = torch.mps._compile_shader(
-            >>>     "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }")
-            >>> x = torch.zeros(16, device="mps")
-            >>> lib.full(x, 3.14)
+        >>> lib = torch.mps._compile_shader(
+        >>>     "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }")
+        >>> x = torch.zeros(16, device="mps")
+        >>> lib.full(x, 3.14)
     """
     if not hasattr(torch._C, "_mps_compileShader"):
         raise RuntimeError("MPS is not available")

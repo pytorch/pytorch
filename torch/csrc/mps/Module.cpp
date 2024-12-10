@@ -339,10 +339,46 @@ struct OptionalArgCaster {
     } else if (cast_str == "int16") {
       std::vector<int16_t> cast_values(values.begin(), values.end());
       f.setArg(idx, cast_values);
+    } else if (cast_str == "int8") {
+      std::vector<int8_t> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
+    } else if (cast_str == "uint8") {
+      std::vector<uint8_t> cast_values(values.begin(), values.end());
+      f.setArg(idx, cast_values);
     } else {
       TORCH_CHECK(false, "Unsupported cast instruction ", default_cast);
     }
   }
+
+  template <
+      typename T,
+      typename = std::enable_if_t<
+          std::is_same_v<float, T> || std::is_same_v<int64_t, T>>>
+  void setValue(
+      ::at::native::mps::MetalKernelFunction& f,
+      unsigned idx,
+      const T& value) {
+    auto cast_str =
+        cast_map.find(idx) != cast_map.end() ? cast_map[idx] : default_cast;
+    if (cast_str.size() == 0) {
+      f.setArg(idx, value);
+    } else if (cast_str == "fp16") {
+      f.setArg(idx, static_cast<c10::Half>(value));
+    } else if (cast_str == "bf16") {
+      f.setArg(idx, static_cast<c10::BFloat16>(value));
+    } else if (cast_str == "int32") {
+      f.setArg(idx, static_cast<int32_t>(value));
+    } else if (cast_str == "int16") {
+      f.setArg(idx, static_cast<int16_t>(value));
+    } else if (cast_str == "int8") {
+      f.setArg(idx, static_cast<int8_t>(value));
+    } else if (cast_str == "uint8") {
+      f.setArg(idx, static_cast<uint8_t>(value));
+    } else {
+      TORCH_CHECK(false, "Unsupported cast instruction ", default_cast);
+    }
+  }
+
   void setValue(
       ::at::native::mps::MetalKernelFunction& f,
       unsigned idx,
@@ -363,7 +399,10 @@ struct OptionalArgCaster {
       }
     } else if (py::isinstance<py::float_>(arg)) {
       auto value = arg.cast<float>();
-      f.setArg(idx, value);
+      setValue(f, idx, value);
+    } else if (py::isinstance<py::int_>(arg)) {
+      auto value = arg.cast<int64_t>();
+      setValue(f, idx, value);
     } else {
       TORCH_CHECK(false, "Unsupported argument type");
     }

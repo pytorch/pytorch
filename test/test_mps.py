@@ -12533,14 +12533,22 @@ class TestMetalLibrary(TestCaseMPS):
 
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
+        y = torch.zeros(12, device="mps", dtype=torch.half)
         lib = torch.mps._compile_shader("""
-            kernel void arange(device half* x, constant half2& start_step,
+            kernel void arange_all_half(device half* x, constant half2& start_step,
                                uint idx [[thread_position_in_grid]]) {
               x[idx] = start_step.x + idx * start_step.y;
             }
+
+            kernel void arange_half_float(device half* x, constant half& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
         """)
-        lib.arange(x, [3.14, .5], arg_casts={1: "fp16"})
-        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=torch.half))
+        lib.arange_all_half(x, [3.14, .5], arg_casts="fp16")
+        lib.arange_half_float(y, 3.14, .5, arg_casts={1: "fp16"})
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
 
     def test_metal_error_checking(self):
         # Syntax error asserts
