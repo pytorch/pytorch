@@ -13,7 +13,7 @@
 namespace torch {
 namespace jit {
 
-static constexpr c10::string_view moduleInterfaceSrc = R"JIT(
+static constexpr std::string_view moduleInterfaceSrc = R"JIT(
 class OneInterface(ModuleInterface):
     def one(self, x: Tensor, y: Tensor) -> Tensor:
         pass
