@@ -348,7 +348,7 @@ class GradScaler:
         **kwargs: Any,
     ) -> tuple[Optional[float], bool]:
         retval: Optional[float] = None
-        found_inf = any(
+        found_inf: bool = any(
             v.item() for v in optimizer_state["found_inf_per_device"].values()
         )
         if not found_inf:
