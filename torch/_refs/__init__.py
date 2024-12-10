@@ -3415,7 +3415,6 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3704,7 +3703,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
     # Creates a valid shape
     shape = utils.extract_shape_from_varargs(shape, validate=False)
