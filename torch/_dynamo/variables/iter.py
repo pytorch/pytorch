@@ -48,9 +48,9 @@ class ItertoolsVariable(VariableTracker):
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item)))
+            items = [
+                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+            ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )

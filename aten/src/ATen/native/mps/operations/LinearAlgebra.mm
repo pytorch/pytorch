@@ -25,7 +25,6 @@
 #include <ATen/ops/triangular_solve_native.h>
 #endif
 
-#include <c10/util/env.h>
 #include <algorithm>
 
 namespace at::native {
@@ -51,11 +50,7 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
                                        static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
           self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
-      mtl_setBuffer(computeEncoder, self, 0);
-      mtl_setBuffer(computeEncoder, other, 1);
-      mtl_setBuffer(computeEncoder, output, 2);
-      mtl_setBytes(computeEncoder, strides, 3);
-      mtl_setBytes(computeEncoder, sizes, 4);
+      mtl_setArgs(computeEncoder, self, other, output, strides, sizes);
       mtl_dispatch1DJob(computeEncoder, matmulPSO, output.numel());
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -79,7 +74,7 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  static bool always_use_metal = std::getenv("PYTORCH_MPS_PREFER_METAL") != nullptr;
   constexpr auto max_stride_size = 32768;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   return always_use_metal ||

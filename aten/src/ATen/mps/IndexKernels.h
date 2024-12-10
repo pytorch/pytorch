@@ -2,7 +2,7 @@
 
 namespace at::mps {
 
-static const char *SCATTER_OPS_TEMPLATE = R"METAL_SCATTER(
+static const char* SCATTER_OPS_TEMPLATE = R"METAL_SCATTER(
 struct __attribute__ ((packed)) packed_uint5{{
   uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
 }};
@@ -120,7 +120,7 @@ kernel void scatter_kernel_1(uint linear_index              [[thread_position_in
 }}
 )METAL_SCATTER";
 
-static const char *GATHER_OPS_TEMPLATE = R"METAL_GATHER(
+static const char* GATHER_OPS_TEMPLATE = R"METAL_GATHER(
 struct __attribute__ ((packed)) packed_uint5{{
   uint32_t x; uint32_t y; uint32_t z; uint32_t w; uint32_t u;
 }};

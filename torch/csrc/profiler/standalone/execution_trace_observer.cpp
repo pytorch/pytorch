@@ -529,7 +529,10 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   }
 
   // get NcclMeta from record function, this used ParamCommsDebugInfo above
-  auto meta = saveNcclMeta(fn, false /*truncate*/);
+  // since we currently have this read called in onFunctionExit flow, we should
+  // only introspect output tensors to prevent an INTERNAL ASSERT FAILED in
+  // RecordFunction when we try to read input in RecordFunction exit methods.
+  auto meta = saveNcclMeta(fn, SaveNcclMetaConfig(false, true, false, true));
 
   auto addAttr =
       [&](const char* commsMetaName, const char* etMetaName, const char* type) {
@@ -595,7 +598,7 @@ static void recordOperatorStart(
     }
 
     fc.name = fn.name();
-    if (!checkFunctionInputsForLogging(fn, fn.name())) {
+    if (!checkFunctionInputsForLogging(fn)) {
       return;
     }
     auto num_inputs = fn.num_inputs();
@@ -690,7 +693,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       return;
     }
     auto& fc = *fc_ptr;
-    if (!checkFunctionOutputsForLogging(fn, fn.name())) {
+    if (!checkFunctionOutputsForLogging(fn)) {
       return;
     }
     auto outputs = fn.outputs();

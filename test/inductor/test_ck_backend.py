@@ -280,13 +280,22 @@ class TestCKBackend(TestCase):
     @parametrize("dtype", (torch.bfloat16,))
     @parametrize("use_fast_accum", (True,))
     @parametrize("quantize_type", ("tensorwise", "rowwise"))
+    @parametrize("has_bias", (True, False))
     def test_max_autotune_scaled_mm(
-        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type
+        self, max_autotune_gemm_backends, dtype, use_fast_accum, quantize_type, has_bias
     ):
         tensor_options = {"device": "cuda", "dtype": dtype}
 
-        x = torch.randn(2240, 256, **tensor_options)
-        w = torch.randn(2048, 256, **tensor_options)
+        M = 2240
+        N = 2048
+        K = 256
+
+        x = torch.randn(M, K, **tensor_options)
+        w = torch.randn(N, K, **tensor_options)
+
+        bias = None
+        if has_bias:
+            bias = torch.randn(N, **tensor_options)
 
         dtype_float8 = torch.float8_e4m3fnuz
 
@@ -303,8 +312,6 @@ class TestCKBackend(TestCase):
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
         assert "rocm" in dir(config)
-
-        bias = None
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
@@ -402,10 +409,52 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))
+    def test_max_autotune_precompile_bmm(
+        self,
+        max_autotune_gemm_backends,
+    ):
+        """
+        Test gemm-max-autotune torch.bmm with CK backend
+        """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
+
+        a = torch.randn(16, 2240, 256, **tensor_options)
+        b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "compile_threads": 2,
+                "rocm.n_max_profiling_configs": 2,
+                "rocm.ck_dir": self.ck_dir,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def compiled_bmm(x, w):
+                return bmm(x, w)
+
+            Y_compiled = compiled_bmm(a, b)
+
+            Y_eager = bmm(a=a, b=b)
+            torch.testing.assert_close(Y_compiled, Y_eager)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_CUDA and HAS_CPU and is_big_gpu():
         run_tests()

@@ -6,7 +6,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._C as _C
@@ -78,6 +78,8 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    _is_param: bool
+
     def _clear_non_serializable_cached_data(self):
         r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
         from being serialized.
@@ -1488,31 +1490,122 @@ class Tensor(torch._C.TensorBase):
         """
         return self.to_sparse()
 
-    def dim_order(self):
+    def dim_order(
+        self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
+    ):
         """
+        dim_order(ambiguity_check=False) -> tuple
 
-        dim_order() -> tuple
+        Returns the uniquely determined tuple of int describing the dim order or
+        physical layout of :attr:`self`.
 
-        Returns a tuple of int describing the dim order or physical layout of :attr:`self`.
-
-        Args:
-            None
-
-        Dim order represents how dimensions are laid out in memory,
+        The dim order represents how dimensions are laid out in memory,
         starting from the outermost to the innermost dimension.
 
-        Example::
+        Note that the dim order may not always be uniquely determined.
+        If `ambiguity_check` is True, this function raises a RuntimeError when the dim order cannot be uniquely determined;
+        If `ambiguity_check` is a list of memory formats, this function raises a RuntimeError when tensor can not be interpreted
+        into exactly one of the given memory formats, or it cannot be uniquely determined.
+        If `ambiguity_check` is False, it will return one of legal dim order(s) without checking its uniqueness.
+        Otherwise, it will raise TypeError.
+
+        Args:
+            ambiguity_check (bool or List[torch.memory_format]): The check method for ambiguity of dim order.
+
             >>> torch.empty((2, 3, 5, 7)).dim_order()
             (0, 1, 2, 3)
+            >>> torch.empty((2, 3, 5, 7)).transpose(1, 2).dim_order()
+            (0, 2, 1, 3)
             >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).dim_order()
             (0, 2, 3, 1)
-
+            >>> torch.empty((1, 2, 3, 4)).dim_order()
+            (0, 1, 2, 3)
+            >>> try:
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check=True)
+            ... except RuntimeError as e:
+            ...     print(e)
+            The tensor does not have unique dim order, or cannot map to exact one of the given memory formats.
+            >>> torch.empty((1, 2, 3, 4)).dim_order(
+            ...     ambiguity_check=[torch.contiguous_format, torch.channels_last]
+            ... )  # It can be mapped to contiguous format
+            (0, 1, 2, 3)
+            >>> try:
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL")
+            ... except TypeError as e:
+            ...     print(e)
+            The ambiguity_check argument must be a bool or a list of memory formats.
         .. warning::
             The dim_order tensor API is experimental and subject to change.
-
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        # Sanity check ambiguity_check data types
+        if not isinstance(ambiguity_check, bool):
+            if not isinstance(ambiguity_check, list):
+                raise TypeError(
+                    "The ambiguity_check argument must be a bool or a list of memory formats."
+                )
+            for memory_format in ambiguity_check:
+                if not isinstance(memory_format, torch.memory_format):
+                    raise TypeError(
+                        "The ambiguity_check argument must be a bool or a list of memory formats."
+                    )
+
+        def invalid_unique_memory_format(tensor, valid_memory_formats):
+            """
+            Returns True if the tensor cannot be uniquely mapped to any of the given memory formats, False otherwise.
+            """
+
+            n_legality = 0
+
+            for memory_format in valid_memory_formats:
+                if tensor.is_contiguous(memory_format=memory_format):
+                    n_legality += 1
+
+            return n_legality != 1
+
+        def has_multiple_dim_order(tensor):
+            """
+            Returns True if there're multiple legal dim orders for given tensor, False otherwise.
+
+            The tensor is considered to have multiple legal dim orders if either of the following conditions is met:
+
+            * Singleton Dimensions: There's at least one singleteon dimension in the tensor.
+              Since their size is 1, they don't affect the memory offset (stride * index
+              is zero because index is always zero). Therefore, they can be placed anywhere
+              in the dimension order without changing how data is accessed.
+            * Same strides: Strides reflect how the tensor is stored in memory.
+              If any two dimensions have the same stride, swapping these dimensions won't
+              change how data is accessed, leading to multiple correct dimension orders.
+            """
+
+            sizes = tensor.size()
+            strides = tensor.stride()
+
+            # Check if there are any duplicate strides
+            has_duplicate_strides = any(
+                earlier == later for earlier, later in zip(strides, strides[1:])
+            )
+
+            # Check if there are any singleton dimensions
+            has_singleton_dims = any(size == 1 for size in sizes)
+
+            return has_duplicate_strides or has_singleton_dims
+
+        valid_memory_formats = (
+            ambiguity_check if isinstance(ambiguity_check, list) else []
+        )
+        check_multiple_dim_order = (
+            ambiguity_check if isinstance(ambiguity_check, bool) else True
+        )
+
+        if (
+            check_multiple_dim_order and has_multiple_dim_order(self)
+        ) and invalid_unique_memory_format(self, valid_memory_formats):
+            raise RuntimeError(
+                "The tensor does not have unique dim order, or cannot map to exact one of the given memory formats."
+            )
 
         import torch._prims_common as utils
 
@@ -1616,6 +1709,18 @@ class Tensor(torch._C.TensorBase):
                     event = torch.cuda.Event()
                     event.record(sync_stream)
                     stream.wait_event(event)
+        if self.device.type == "xla":
+            import torch_xla
+            import torch_xla.utils.dlpack as xla_dlpack
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                raise RuntimeError(
+                    "Can't export to dlpack an XLA tensor that is not on CUDA."
+                )
+            return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
@@ -1635,8 +1740,20 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
-        elif self.device.type == "xpu":
+        elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
+        elif self.device.type == "privateuse1":
+            device_type = DLDeviceType.kDLExtDev
+        elif torch_device_type == "xla":
+            import torch_xla
+
+            if (
+                len(torch_xla.real_devices()) <= 0
+                or "cuda" not in torch_xla.real_devices()[0].lower()
+            ):
+                raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
+
+            device_type = DLDeviceType.kDLGPU
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
