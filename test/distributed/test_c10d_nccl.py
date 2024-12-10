@@ -4464,7 +4464,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
         dist.destroy_process_group()
-    
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_barrier_profiling(self):
