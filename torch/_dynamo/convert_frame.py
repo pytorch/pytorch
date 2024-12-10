@@ -77,10 +77,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
-    RecompileLimitExceeded,
     FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    RecompileLimitExceeded,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -1089,6 +1089,7 @@ def _compile(
                     "inject_BUILD_SET_unimplemented_TESTING_ONLY",
                     "_autograd_backward_strict_mode_banned_ops",
                     "reorderable_logging_functions",
+                    "ignore_logger_methods",
                     "traceable_tensor_subclasses",
                     "_custom_ops_profile",
                 }

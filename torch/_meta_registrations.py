@@ -536,6 +536,12 @@ def meta__cslt_sparse_mm(
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
     compression_factor = 10 if is_8bit_input_type else 9
+
+    if is_8bit_input_type:
+        assert (
+            not dense_B.is_contiguous()
+        ), "dense input must be transposed for 8bit dtypes"
+
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
@@ -554,8 +560,7 @@ def meta__cslt_sparse_mm(
             }
         ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype)
-    return result
+    return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
 @register_meta(aten.index_reduce.default)
@@ -2408,6 +2413,19 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
+    @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
+    @register_meta(torch.ops.onednn.linear_relu_dynamic_fp16.default)
+    def meta_linear_dynamic_fp16(
+        x,
+        w,
+        bias,
+    ):
+        output_shape = list(x.shape)
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
+        out = x.new_empty(output_shape)
+        return out
+
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )
@@ -3729,6 +3747,28 @@ def meta__add_relu(self, other, alpha=1) -> Tensor:
     )
 
 
+@register_meta([aten.rrelu_with_noise])
+@out_wrapper()
+def meta_rrelu_with_noise(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self)
+
+
+@register_meta([aten.rrelu_with_noise_functional])
+def meta_rrelu_with_noise_functional(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self), torch.empty_like(noise)
+
+
+@register_meta([aten.rrelu_with_noise_])
+def meta_rrelu_with_noise_(
+    self, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return self
+
+
 @register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
@@ -4780,6 +4820,8 @@ def zeros_like(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     ndim = self.dim()
     torch._check_index(
         ndim != 0,
@@ -4790,7 +4832,9 @@ def meta_select(self, dim, index):
     size = self.size(dim)
 
     torch._check_index(
-        not (-index > size or index >= size),
+        not (
+            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
+        ),
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
     )
@@ -5598,13 +5642,16 @@ def meta_scaled_mm(
         def is_col_major(stride):
             return stride[0] == 1 and stride[1] > 1
 
+        def has_zero_dim(tensor_2d):
+            return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
+
         torch._check(
-            is_row_major(self.stride()),
-            lambda: "self must be row_major",
+            is_row_major(self.stride()) or has_zero_dim(self),
+            lambda: f"self must be row_major, got stride {self.stride()}",
         )
         torch._check(
-            is_col_major(mat2.stride()),
-            lambda: "mat2 must be col_major",
+            is_col_major(mat2.stride()) or has_zero_dim(mat2),
+            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
         )
         torch._check(
             self.size(1) % 16 == 0,
@@ -6020,6 +6067,11 @@ def argmax_argmin_meta(self, dim=None, keepdim=False):
 
 @register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    # NB: It's always wrong to try to create a scalar tensor with the jagged layout.
+    # Rather than fix this everywhere, just use the strided layout and let NJT handle
+    # scalar tensor broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
