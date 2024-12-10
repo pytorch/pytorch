@@ -561,6 +561,22 @@ def jagged_from_tensor_and_lengths(
     return (ret_nt, offsets, None if is_contiguous else length_list)
 
 
+def make_cached_tensor_for_nested(metadata):
+    assert any(
+        metadata.get(k) is not None for k in SOURCE_FIELDS
+    ), f"At least one of {SOURCE_FIELDS} must be passed"
+
+    return CachedTensor(
+        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None)
+    )
+
+
+def make_nested_meta_with_offsets(offsets) -> CachedTensor:
+    prefix = "_host" if offsets.is_cpu else "_device"
+    metadata = {f"{prefix}_offsets": offsets}
+    return make_cached_tensor_for_nested(metadata)
+
+
 def _make_nested_meta(
     *,
     offsets: Union[torch.Tensor, CachedTensor],
@@ -579,10 +595,6 @@ def _make_nested_meta(
     # 3. Optionally returns non_contig_offsets if lengths is present
     #    This means that it is not possible to construct a contiguous
     #    NestedTensor with lengths metadata today.
-
-    # Avoid circular import (dynamo allow_in_graph)
-    from torch.nested._internal.wrappers import make_cached_tensor_for_nested
-
     assert offsets is not None
 
     metadata: Dict[str, torch.Tensor] = {}
@@ -631,24 +643,6 @@ def _make_nested_meta(
 
     metadata_tensor = make_cached_tensor_for_nested(metadata)
     return metadata_tensor, non_contig_offsets
-
-
-def make_nested_meta_with_offsets(offsets) -> CachedTensor:
-    from torch.nested._internal.wrappers import make_cached_tensor_for_nested
-
-    prefix = "_host" if offsets.is_cpu else "_device"
-    metadata = {f"{prefix}_offsets": offsets}
-    return make_cached_tensor_for_nested(metadata)
-
-
-def make_cached_tensor_for_nested_impl(metadata):
-    assert any(
-        metadata.get(k) is not None for k in SOURCE_FIELDS
-    ), f"At least one of {SOURCE_FIELDS} must be passed"
-
-    return CachedTensor(
-        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None)
-    )
 
 
 # Useful for tests that previously constructed the NestedTensor directly via
