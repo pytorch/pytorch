@@ -210,7 +210,7 @@ class ForeachTests(TestCase):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
-        fn_opt = torch._dynamo.optimize()(fn)
+        fn_opt = torch.compile(fn)
 
         inputs = (
             torch.rand(10, 1, device="cuda:0"),
@@ -255,7 +255,7 @@ class ForeachTests(TestCase):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
 
-        fn_opt = torch._dynamo.optimize()(fn)
+        fn_opt = torch.compile(fn)
 
         max32 = torch.iinfo(torch.int32).max
         max64 = torch.iinfo(torch.int64).max
@@ -278,7 +278,7 @@ class ForeachTests(TestCase):
         def fn(a, b):
             return op(a, b)
 
-        fn_opt = torch._dynamo.optimize()(fn)
+        fn_opt = torch.compile(fn)
 
         max_args = 370
         max_list_len = (max_args // 3) + 1
@@ -301,7 +301,7 @@ class ForeachTests(TestCase):
         def fn(a):
             return op(a, 3.3)
 
-        fn_opt = torch._dynamo.optimize()(fn)
+        fn_opt = torch.compile(fn)
 
         max_args = 370
         max_list_len = (max_args // 2) + 1

@@ -389,7 +389,7 @@ class OptimizeForInferenceTemplate(TestCase):
         def fn(a):
             return a.cos(), torch.zeros(a.shape[0], a.shape[1])
 
-        fn_opt = torch._dynamo.optimize("inductor", dynamic=True)(fn)
+        fn_opt = torch.compile(fn, backend="inductor", dynamic=True)
         inp = torch.randn(2, 4, 6).to(self.device)
         torch._dynamo.mark_dynamic(inp, 0)
         torch._dynamo.mark_dynamic(inp, 1)
