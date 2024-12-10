@@ -15,8 +15,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
-
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON_GPU
+from torch.testing._internal.triton_utils import HAS_TRITON_CUDA
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -70,8 +69,8 @@ def compile(
     )
     + (
         [
-            {"device": GPU_TYPE, "package_cpp_only": False},
-            {"device": GPU_TYPE, "package_cpp_only": True},
+            {"device": "cuda", "package_cpp_only": False},
+            {"device": "cuda", "package_cpp_only": True},
         ]
         if sys.platform != "darwin"
         else []
@@ -370,10 +369,11 @@ class TestAOTInductorPackage(TestCase):
         buffer = torch._inductor.aoti_compile_and_package(
             ep, package_path=buffer
         )  # type: ignore[arg-type]
-        loaded = load_package(buffer)
-        self.assertTrue(
-            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
-        )
+        for _ in range(2):
+            loaded = load_package(buffer)
+            self.assertTrue(
+                torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+            )
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
@@ -446,6 +446,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-
-    if HAS_TRITON_GPU or sys.platform == "darwin":
+    if HAS_TRITON_CUDA or sys.platform == "darwin":
         run_tests(needs="filelock")
