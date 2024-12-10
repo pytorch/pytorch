@@ -25,9 +25,16 @@ void MPSGuardImpl::record(void** event,
               stream.device_index(),
               ".");
 
-  auto mps_event = static_cast<mpsEvent_t>(*event);
+  // Check if the MPS event ID is valid. If not, acquire a new event from the
+  // MPS event pool and assign it to the event pointer. Then record the event in
+  // the MPS event pool.
+  auto mps_event_id = (__bridge id_t)(*event);
+  if (!mps_event_id) {
+    mps_event_id = at::mps::getMPSEventPool()->acquireEvent(EventFlag);
+    *event = (__birdge void*)(mps_event_id);
+  }
   MPSStream mps_stream{stream};
-  mps_event->record(true);
+  at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
