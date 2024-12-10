@@ -38,10 +38,7 @@ if __name__ == "__main__":
             print("ERROR: duplicate workflow name:", name, file=sys.stderr)
             errors_found = True
         names.add(name)
-        print(f"==== {name}")
-        print(filename.name)
         actual = data.get("concurrency", {})
-        print(actual)
         if filename.name == "create_release.yml":
             if not actual.get("group", "").startswith(EXPECTED_GROUP_PREFIX):
                 print(
