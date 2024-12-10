@@ -183,6 +183,14 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
       - name: Test PyTorch binary
         shell: bash
         run: |
