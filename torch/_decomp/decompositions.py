@@ -740,8 +740,10 @@ def slice_forward(
 
     if guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
+    elif (
+        statically_known_true(end_val == sys.maxsize)
+        or statically_known_true(end_val >= sizes[dim])
+        or guard_size_oblivious(end_val > sizes[dim])
     ):
         end_val = sizes[dim]
 
