@@ -2825,12 +2825,12 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals())
-instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_mps=True)
+instantiate_device_type_tests(TestMathBits, globals(), allow_mps=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals())
-instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_mps=True)
+instantiate_device_type_tests(TestTags, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
