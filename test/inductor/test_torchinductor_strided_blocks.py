@@ -606,7 +606,7 @@ class TritonBlockPointerTestCPU(InductorTestCase):
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
 
 
-@unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
+@unittest.skipIf(not HAS_TRITON_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
 class TritonBlockPointerTestGPU(InductorTestCase):
     device = GPU_TYPE

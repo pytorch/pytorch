@@ -12,10 +12,7 @@ from functorch import make_fx
 from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-HAS_CUDA = torch.cuda.is_available()
+from torch.testing._internal.common_utils import run_tests, TestCase, HAS_CUDA
 
 
 def _num_args(fn: Callable):

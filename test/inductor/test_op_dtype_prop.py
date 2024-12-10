@@ -29,7 +29,7 @@ importlib.import_module("filelock")
 
 from torch._inductor.lowering import lowerings
 from torch.testing._internal.common_device_type import ops
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_TRITON_GPU
 
 
 unique_pointwise_op_names = set()
@@ -237,5 +237,5 @@ instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU:
+    if HAS_TRITON_GPU:
         run_tests(needs="filelock")

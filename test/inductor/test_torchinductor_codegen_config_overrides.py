@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
-    HAS_GPU,
+    HAS_TRITON_GPU,
     requires_gpu,
 )
 
@@ -111,5 +111,5 @@ class CodegenInductorTest(InductorTestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_GPU or HAS_CPU:
+    if HAS_TRITON_GPU or HAS_CPU:
         run_tests(needs="filelock")

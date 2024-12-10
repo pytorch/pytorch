@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     skipIfRocm,
+    HAS_CUDA,
 )
 
 try:
@@ -27,7 +28,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-HAS_CUDA = torch.cuda.is_available()
 
 
 def FlopCounterMode(*args, **kwargs):

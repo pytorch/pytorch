@@ -8,6 +8,7 @@ import warnings
 import operator
 from collections.abc import Iterable
 from torch.nn.utils import stateless
+from torch.testing._internal.common_utils import HAS_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
@@ -33,8 +34,6 @@ import functools
 import itertools
 
 aten = torch.ops.aten
-
-HAS_CUDA = torch.cuda.is_available()
 
 
 def strip_end(s, suffix):
