@@ -18,15 +18,6 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-if [[ "${TEST_CONFIG}" == "default" ]]; then
-  # See https://github.com/pytorch/pytorch/issues/142206
-  # Temporarily turn on CONTINUE_THROUGH_ERROR for all mac default tests in
-  # order to find all test failures.  Red signal will show up later than usual,
-  # but failing tests can also be found on HUD when clicking additional test
-  # info button
-  export CONTINUE_THROUGH_ERROR=True
-fi
-
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
