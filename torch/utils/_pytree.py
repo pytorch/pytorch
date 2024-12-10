@@ -479,7 +479,7 @@ def _dict_unflatten(values: Iterable[Any], context: Context) -> Dict[Any, Any]:
 
 
 def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
-    return list(d), type(d)
+    return list(d), {"type": type(d), "fields": list(d._fields)}
 
 
 def _namedtuple_flatten_with_keys(
@@ -487,44 +487,78 @@ def _namedtuple_flatten_with_keys(
 ) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
     return (
-        [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
+        [(GetAttrKey(field), v) for field, v in zip(context["fields"], values)],
         context,
     )
 
 
 def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple:
-    return cast(NamedTuple, context(*values))
+    if isinstance(context, dict):
+        return cast(NamedTuple, context["type"](*values))
+    else:
+        # For BC purposes
+        warnings.warn(
+            "Having the NamedTuple context as just the class name is now "
+            "deprecated. Please construct a new spec which contains the field "
+            "names."
+        )
+        return cast(NamedTuple, context(*values))
 
 
 def _namedtuple_serialize(context: Context) -> DumpableContext:
-    if context not in SUPPORTED_SERIALIZED_TYPES:
-        raise NotImplementedError(
-            f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "didn't register a serializated_type_name. Please register using "
-            "`_register_namedtuple`."
-        )
+    def get_serialized_type_name(context: Type[Any]) -> str:
+        if context not in SUPPORTED_SERIALIZED_TYPES:
+            raise NotImplementedError(
+                f"Can't serialize TreeSpec of namedtuple class {context} because we "
+                "didn't register a serializated_type_name. Please register using "
+                "`_register_namedtuple`."
+            )
 
-    serialize_node_def = SUPPORTED_SERIALIZED_TYPES[context]
-    serialized_type_name = serialize_node_def.serialized_type_name
+        serialize_node_def = SUPPORTED_SERIALIZED_TYPES[context]
+        serialized_type_name = serialize_node_def.serialized_type_name
 
-    if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
-        raise NotImplementedError(
-            f"Can't serialize TreeSpec of namedtuple class {context} because we "
-            "couldn't find a serializated_type_name. Please register using "
-            "`_register_namedtuple`."
+        if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
+            raise NotImplementedError(
+                f"Can't serialize TreeSpec of namedtuple class {context} because we "
+                "couldn't find a serializated_type_name. Please register using "
+                "`_register_namedtuple`."
+            )
+        return serialized_type_name
+
+    if isinstance(context, dict):
+        return {
+            "type": get_serialized_type_name(context["type"]),
+            "fields": context["fields"],
+        }
+    else:
+        # For BC purposes
+        warnings.warn(
+            "Having the NamedTuple context as just the class name is now "
+            "deprecated. Please construct a new spec which contains the field "
+            "names."
         )
-    return serialized_type_name
+        return get_serialized_type_name(context)
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
-        raise NotImplementedError(
-            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
-            "because we couldn't find a serializated name."
-        )
+    def get_deserialized_type_name(dumpable_context: str) -> Type[Any]:
+        if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+            raise NotImplementedError(
+                f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+                "because we couldn't find a serializated name."
+            )
 
-    typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
-    return typ
+        typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+        return typ
+
+    if isinstance(dumpable_context, dict):
+        return {
+            "type": get_deserialized_type_name(dumpable_context["type"]),
+            "fields": dumpable_context["fields"],
+        }
+    else:
+        # For BC purposes
+        return get_deserialized_type_name(dumpable_context)
 
 
 def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
