@@ -74,6 +74,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    triton_type,
     triton_type_to_torch,
     unique,
 )
@@ -747,15 +748,20 @@ class TritonTemplateKernel(TritonKernel):
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessariliy be 0 any more
                         # so we need to reapply the mask.
-                        if template_mask == "None" or (
-                            name in V.kernel.prologue_fused_inputs_preserve_zero
-                            and other == 0
+                        value_dtype = value.dtype
+                        value_str = str(value)
+                        if template_mask != "None" and (
+                            name not in V.kernel.prologue_fused_inputs_preserve_zero
+                            or other != 0
                         ):
-                            V.kernel.compute.writeline(f"{output_name} = {value}")
-                        else:
-                            V.kernel.compute.writeline(
-                                f"{output_name} = tl.where({template_mask}, {value}, {other})"
+                            value_str = (
+                                f"tl.where({template_mask}, {value_str}, {other})"
                             )
+
+                        if value_dtype != V.graph.get_buffer(name).dtype:
+                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+
+                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
 
             self.ops_handler = StoreOutputSubstitution
 
