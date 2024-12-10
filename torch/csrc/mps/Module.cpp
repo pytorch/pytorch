@@ -299,7 +299,7 @@ std::optional<std::vector<T>> optional_vec_from_pyobject(
     return std::vector({py_value.cast<T>()});
   }
   auto vec = py_value.cast<std::vector<T>>();
-  TORCH_CHECK(vec.size() > 0 && vec.size() < 3);
+  TORCH_CHECK(vec.size() > 0 && vec.size() < 4);
   return vec;
 }
 
@@ -416,8 +416,8 @@ void initModule(PyObject* module) {
                 caster.setValue(self, idx, args[idx]);
               }
               TORCH_CHECK(
-                  threads.has_value() && threads->size() < 3,
-                  "Number of threads is undefined");
+                  threads.has_value() && threads->size() < 4,
+                  "Number of threads is undefined or has wrong dimention");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
@@ -431,13 +431,21 @@ void initModule(PyObject* module) {
                 if (group_size.has_value()) {
                   self.dispatch(
                       {threads->at(0), threads->at(1)},
-                      std::array<uint64_t, 2>(
-                          {group_size->at(0), group_size->at(1)}));
+                      {group_size->at(0), group_size->at(1)});
                 } else {
                   self.dispatch({threads->at(0), threads->at(1)});
                 }
               } else {
-                TORCH_CHECK(false, "3D shaders are not supported yet");
+                if (group_size.has_value()) {
+                  self.dispatch(
+                      {threads->at(0), threads->at(1), threads->at(2)},
+                      {group_size->at(0),
+                       group_size->at(1),
+                       group_size->at(2)});
+                } else {
+                  self.dispatch(
+                      {threads->at(0), threads->at(1), threads->at(2)});
+                }
               }
             });
           },

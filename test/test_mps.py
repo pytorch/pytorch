@@ -12489,7 +12489,31 @@ class TestMetalLibrary(TestCaseMPS):
             }
         """)
         lib.arange(x)
-        self.assertEqual(x, torch.arange(12.0, device='mps', dtype=torch.half))
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+
+    def test_metal_dispatch_3d(self):
+        x = torch.empty(12, device="mps")
+        y = torch.empty_like(x)
+        z = torch.empty_like(x)
+        lib = torch.mps._compile_shader("""
+            kernel void arange_x(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.x;
+            }
+
+            kernel void arange_y(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.y;
+            }
+
+            kernel void arange_z(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.z;
+            }
+        """)
+        lib.arange_x(x)
+        lib.arange_y(y, threads=(1, y.numel()))
+        lib.arange_z(z, threads=(1, 1, z.numel()))
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
+        self.assertEqual(x, z)
 
     def test_metal_arange_with_arg(self):
         x = torch.zeros(12, device="mps")
