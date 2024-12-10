@@ -33,10 +33,12 @@ from ._activation_checkpointing.knapsack import (
     greedy_knapsack,
     ilp_knapsack,
 )
+from ._activation_checkpointing.commercial_solvers import (
+    backwards_pass_aware_graph_solver
+)
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target
-
 
 if TYPE_CHECKING:
     import sympy
@@ -1404,9 +1406,13 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
-    elif callable(SOLVER):
-        saved_node_idx, recomp_node_idx = SOLVER(
-            memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
+    elif SOLVER == "bwpa":
+        saved_node_idx, recomp_node_idx = backwards_pass_aware_graph_solver(
+            memory=memory,
+            joint_graph=joint_graph,
+            max_memory=max_memory,
+            node_info=node_info,
+            all_recomputable_banned_nodes=all_recomputable_banned_nodes,
         )
         return (0.0, saved_node_idx, recomp_node_idx)
     else:
