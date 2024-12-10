@@ -302,10 +302,6 @@ def _offload_state_dict_to_cpu(
 
     Args:
         state_dict (Dict[str, Any]): the target state_dict.
-        pg (Optional[dist.ProcessGroup]): the process group that is used to
-            gather ShardedTensor. Note that gathering a DTensor will use
-            the DeviceMesh. So this argument will be ignored when gathering a
-            DTensor.
         ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
             have the same state_dicts. Otherwise only ranks that in ``ranks_only``
             have the same state_dicts. Other ranks will get empty state_dicts.

@@ -180,6 +180,7 @@ def _get_fqns(
         module (nn.Module): the root model.
         name (str): the name
         skip_ddp_prefix (bool): whether to skip DDP's `module` prefix
+        skip_compiler_prefix (bool): whether to skip compiler's prefix
 
     Returns:
         The canonical FQNs based on the model traversal.
