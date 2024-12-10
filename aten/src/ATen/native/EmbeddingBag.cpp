@@ -1241,9 +1241,9 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  bool needs_grad_path = weight.requires_grad() || 
+  bool needs_grad_path = weight.requires_grad() ||
                       weight._fw_grad(/*level=*/0).defined() ||
-                      (per_sample_weights_opt.has_value() && 
+                      (per_sample_weights_opt.has_value() &&
                        per_sample_weights_opt.value().defined() &&
                        per_sample_weights_opt.value().requires_grad());
 
