@@ -189,10 +189,9 @@ def gen_config_key(a_values, a_offsets, max_M, tensor_b):
 
 
 @torch.library.custom_op("triton_kernels::group_gemm_fn", mutates_args=())
-def group_gemm_fn(a_values: torch.Tensor,
-                  a_offsets: torch.Tensor,
-                  max_M: int,
-                  tensor_b: torch.Tensor) -> torch.Tensor:
+def group_gemm_fn(
+    a_values: torch.Tensor, a_offsets: torch.Tensor, max_M: int, tensor_b: torch.Tensor
+) -> torch.Tensor:
     assert not tensor_b.is_nested
     group_size = a_offsets.size(0)
 
@@ -261,10 +260,9 @@ def group_gemm_fn(a_values: torch.Tensor,
 
 
 @group_gemm_fn.register_fake
-def group_gemm_fn_meta(a_values: torch.Tensor,
-                       a_offsets: torch.Tensor,
-                       max_M: int,
-                       tensor_b: torch.Tensor) -> torch.Tensor:
+def group_gemm_fn_meta(
+    a_values: torch.Tensor, a_offsets: torch.Tensor, max_M: int, tensor_b: torch.Tensor
+) -> torch.Tensor:
     B, K, N = tensor_b.shape
     c_values = a_values.new_empty((a_values.size(0), N))
     return c_values
@@ -285,8 +283,6 @@ def grouped_mm(tensor_a, tensor_b):
 
     max_M = tensor_a._max_seqlen
 
-    c_values = group_gemm_fn(
-        a_values, a_offsets, max_M, tensor_b
-    )
+    c_values = group_gemm_fn(a_values, a_offsets, max_M, tensor_b)
 
     return torch.nested.nested_tensor_from_jagged(c_values, offsets=a_offsets)
