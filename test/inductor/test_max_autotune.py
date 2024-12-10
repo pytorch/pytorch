@@ -1257,15 +1257,14 @@ class TestPrologueFusion(TestCase):
         def foo(x, y):
             return x @ y
 
-        # cat will turn into masked load
-        # TODO - we should not attempt fusion if it turns an aligned load
-        # into an unaligned load
         x = torch.rand([250, 245], device="cuda")
         y = torch.rand([245, 128], device="cuda")
 
+        # we should not attempt prologue fusion if it turns an aligned load
+        # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
 
 if __name__ == "__main__":
