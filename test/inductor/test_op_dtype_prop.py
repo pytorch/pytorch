@@ -90,7 +90,7 @@ class TestCase(InductorTestCase):
 
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
         with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
-            func_opt = torch._dynamo.optimize("inductor")(func)
+            func_opt = torch.compile(func, backend="inductor")
             code = run_and_get_triton_code(func_opt, *inps)
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
@@ -176,7 +176,7 @@ class TestCase(InductorTestCase):
         inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * num_args
         tl_dtype_str = str(input_dtype).replace("torch", "tl")
         with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
-            compiled = torch._dynamo.optimize("inductor")(op)
+            compiled = torch.compile(op, backend="inductor")
             code = run_and_get_triton_code(compiled, *inps)
 
             # Search the code with a regex.
