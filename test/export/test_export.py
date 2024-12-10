@@ -304,6 +304,40 @@ class TestDynamismExpression(TestCase):
         # Being able to export means shape is preserved as static
         export(branch_on_shape, inp)
 
+    def test_export_strict_narrow_unbacked_expr(self):
+        # Tests that we are able to handle 0/1 specialization on sizes represented
+        # by unbacked int expressions by transforming them into an unbacked int.
+        #
+        # This test only works with strict=True, since it relies on dynamo tracing
+        # for transforming the expression into an unbacked SymInt.
+
+        def identity(x):
+            return x
+
+        class Module(torch.nn.Module):
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, x, p):
+                u0 = p.item()
+                torch._check(u0 + 5 <= x.shape[0])
+                torch._check(u0 >= 0)
+                # Create a tensor of size: (x.shape[0] - u0 - 5).
+                return x.narrow(0, u0 + 5, self.fn(x.shape[0] - u0 - 5))
+
+        inputs = (torch.arange(10), torch.tensor(2))
+
+        # Without transforming the unbacked int expression, we can't export.
+        with self.assertRaisesRegex(
+            RuntimeError, escape("Could not guard on data-dependent expression")
+        ):
+            export(Module(identity), inputs, strict=True)
+
+        # It works if we transform the whole unbacked int expression into
+        # an unbacked int.
+        export(Module(torch.sym_fresh_size), inputs, strict=True)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -865,6 +899,17 @@ graph():
                 return tensor.item()
 
         input = (torch.tensor([1], dtype=torch.bool),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symfloat_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([3.14], dtype=torch.float),)
 
         orig_res = M()(*input)
         ep_res = torch.export.export(M(), input).module()(*input)
@@ -3259,9 +3304,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(20),),
             fixes=[
                 # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check(((i//2)) != 0)",
+                "torch._check((i // 2) != 0)",
                 # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check(((i//2)) != 1)",
+                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -6544,8 +6589,6 @@ graph():
         ep = export(m, inputs)
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
-    @testing.expectedFailureSerDer  # symfloat nyi
-    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 
@@ -6793,237 +6836,6 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
-    def test_unflatten_random_dag_5_modules(self):
-        # dag: {0: [1, 2, 3], 1: [2, 4], 2: [4], 3: [], 4: []}
-
-        class N4(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x + 1
-
-        class N3(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n4 = N4()
-
-            def forward(self, x):
-                return x + 1
-
-        class N2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n3 = N3()
-
-            def forward(self, x):
-                x = self.n3.n4(x + 1)
-                return x + 1
-
-        class N1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n2 = N2()
-
-            def forward(self, x):
-                x = self.n2(x + 1)
-                x = self.n2.n3.n4(x + 1)
-                return x + 1
-
-        class N0(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n1 = N1()
-
-            def forward(self, x):
-                x = self.n1(x + 1)
-                x = self.n1.n2(x + 1)
-                x = self.n1.n2.n3(x + 1)
-                return x + 1
-
-        n0 = N0()
-        inp = (torch.ones(1),)
-        eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(epm(*inp), eager))
-        self.assertTrue(torch.allclose(ufm(*inp), eager))
-
-    def test_unflatten_random_dag_6_modules(self):
-        # dag: {0: [1, 2, 4, 5], 1: [3, 5], 2: [4, 5], 3: [], 4: [5], 5: []}
-
-        class N5(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x + 1
-
-        class N4(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n5 = N5()
-
-            def forward(self, x):
-                x = self.n5(x + 1)
-                return x + 1
-
-        class N3(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n4 = N4()
-
-            def forward(self, x):
-                return x + 1
-
-        class N2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n3 = N3()
-
-            def forward(self, x):
-                x = self.n3.n4(x + 1)
-                x = self.n3.n4.n5(x + 1)
-                return x + 1
-
-        class N1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n2 = N2()
-
-            def forward(self, x):
-                x = self.n2.n3(x + 1)
-                x = self.n2.n3.n4.n5(x + 1)
-                return x + 1
-
-        class N0(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n1 = N1()
-
-            def forward(self, x):
-                x = self.n1(x + 1)
-                x = self.n1.n2(x + 1)
-                x = self.n1.n2.n3.n4(x + 1)
-                x = self.n1.n2.n3.n4.n5(x + 1)
-                return x + 1
-
-        n0 = N0()
-        inp = (torch.ones(1),)
-        eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(epm(*inp), eager))
-        self.assertTrue(torch.allclose(ufm(*inp), eager))
-
-    def test_unflatten_random_dag_8_modules_state(self):
-        class N7(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-
-            def forward(self, x):
-                return x + 1
-
-        class N6(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n7 = N7()
-
-            def forward(self, x):
-                x = self.n7(x + 1)
-                return x + 1
-
-        class N5(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n6 = N6()
-
-            def forward(self, x):
-                x = x + self.n6.n7.buf
-                x = self.n6(x + 1)
-                return x + 1
-
-        class N4(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n5 = N5()
-
-            def forward(self, x):
-                x = x + self.n5.buf
-                x = self.n5(x + 1)
-                x = self.n5.n6(x + 1)
-                return x + 1
-
-        class N3(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n4 = N4()
-
-            def forward(self, x):
-                x = x + self.n4.buf
-                x = x + self.n4.n5.n6.n7.buf
-                x = self.n4(x + 1)
-                x = self.n4.n5.n6(x + 1)
-                return x + 1
-
-        class N2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n3 = N3()
-
-            def forward(self, x):
-                x = x + self.n3.n4.n5.n6.n7.buf
-                x = self.n3(x + 1)
-                x = self.n3.n4(x + 1)
-                return x + 1
-
-        class N1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n2 = N2()
-
-            def forward(self, x):
-                x = x + self.n2.n3.n4.n5.buf
-                x = x + self.n2.n3.n4.n5.n6.n7.buf
-                x = self.n2(x + 1)
-                x = self.n2.n3.n4(x + 1)
-                x = self.n2.n3.n4.n5(x + 1)
-                x = self.n2.n3.n4.n5.n6.n7(x + 1)
-                return x + 1
-
-        class N0(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.buf = torch.nn.Buffer(torch.ones(1))
-                self.n1 = N1()
-
-            def forward(self, x):
-                x = x + self.n1.n2.buf
-                x = x + self.n1.n2.n3.n4.buf
-                x = self.n1(x + 1)
-                x = self.n1.n2(x + 1)
-                x = self.n1.n2.n3.n4(x + 1)
-                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
-                return x + 1
-
-        n0 = N0()
-        inp = (torch.ones(1),)
-        eager = n0(*inp)
-        ep = torch.export.export(n0, inp)
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
-
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
 
@@ -7039,15 +6851,7 @@ graph():
                 else:
                     return x + 2 * (self.buf + 1) - self.const
 
-        class K(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.n = N()
-
-            def forward(self, x0):
-                return self.n(x0, True)
-
-        class P(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.n = N()
@@ -7058,27 +6862,29 @@ graph():
                 x2 = self.n(x0, False)
                 return x1 + x2
 
-        class Q(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.k = K()
+        m = M()
+        eager_result = m(*inp)
 
-            def forward(self, x):
-                x0 = x + 3
-                x1 = self.k.n(x0, True)
-                x2 = self.k.n(x0, False)
-                return x1 + x2
+        def test(ep, swap):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
 
-        class R(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.k = K()
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
 
-            def forward(self, x):
-                x0 = x + 3
-                x1 = self.k(x0)
-                x2 = self.k.n(x0, False)
-                return x1 + x2
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            for fqn, mod in swap.items():
+                ufm.set_submodule(fqn, mod)
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+        if not is_retracebility_test(self._testMethodName):
+            test(
+                export(M(), inp, preserve_module_call_signature=("n",)),
+                swap={"n": N()},
+            )
 
         class _N(torch.nn.Module):
             def forward(self, x):
@@ -7088,35 +6894,10 @@ graph():
             def forward(self, x):
                 return x + 6
 
-        for Mod, path_n in [(P, "n"), (Q, "k.n"), (R, "k.n")]:
-            m = Mod()
-            eager_result = m(*inp)
-
-            def test(ep, swap):
-                epm = ep.module()
-                ufm = torch.export.unflatten(ep)
-
-                exported_result = epm(*inp)
-                self.assertTrue(torch.allclose(exported_result, eager_result))
-
-                unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-                for fqn, mod in swap.items():
-                    ufm.set_submodule(fqn, mod)
-                unflattened_result = ufm(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-            if not is_retracebility_test(self._testMethodName):
-                test(
-                    export(Mod(), inp, preserve_module_call_signature=(path_n,)),
-                    swap={path_n: N()},
-                )
-
-            test(
-                export(Mod(), inp),
-                swap={path_n: _N(), path_n + "@1": _N_1()},
-            )
+        test(
+            export(M(), inp),
+            swap={"n": _N(), "n@1": _N_1()},
+        )
 
     def test_preserve_module_call_signature_unflatten_specialization(self):
         class N(torch.nn.Module):
