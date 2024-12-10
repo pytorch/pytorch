@@ -6177,7 +6177,7 @@ graph():
             def forward(self, x, y):
                 a = x.item()
                 torch._check_is_size(a)
-                torch._check(a < y.size(0))
+                torch._check(a <= y.size(0))
                 return y[:a]
 
         ep = export(
@@ -9500,7 +9500,7 @@ class GraphModule(torch.nn.Module):
                 return x[:out_size]
 
         dim_min = 5
-        dim_max = 8
+        dim_max = 10
         dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
 
         module = ModuleWithSymRound()
