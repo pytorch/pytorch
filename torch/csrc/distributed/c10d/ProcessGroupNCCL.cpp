@@ -1297,8 +1297,8 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
     try {
       bool result = fut.get();
       if (result) {
-        VLOG(2) << logPrefix()
-                << "future is successfully executed for: " << futDescription;
+        LOG(INFO) << logPrefix()
+                  << "future is successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
