@@ -11,7 +11,7 @@ void MPSGuardImpl::destroyEvent(void* event, const DeviceIndex device_index) con
   if (!event)
     return;
 
-  auto mps_event_id = (__bridge id_t)(event);
+  auto mps_event_id = (__bridge id_t)(intptr_t)(event);
   at::mps::getMPSEventPool()->releaseEvent(mps_event_id);
 }
 
@@ -29,24 +29,24 @@ void MPSGuardImpl::record(void** event,
   // Check if the MPS event ID is valid. If not, acquire a new event from the
   // MPS event pool and assign it to the event pointer. Then record the event in
   // the MPS event pool.
-  auto mps_event_id = (__bridge id_t)(*event);
+  auto mps_event_id = (__bridge id_t)(intptr_t)(*event);
   if (!mps_event_id) {
     mps_event_id = at::mps::getMPSEventPool()->acquireEvent(EventFlag);
-    *event = (__birdge void*)(mps_event_id);
+    *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
   MPSStream mps_stream{stream};
   at::mps::getMPSEventPool()->recordEvent(mps_event_id, true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
-  auto mps_event_id = (__bridge id_t)(event);
+  auto mps_event_id = (__bridge id_t)(intptr_t)(event);
   MPSStream mps_stream{stream};
 
   at::mps::getMPSEventPool()->waitForEvent(mps_event_id, false);
 }
 
 bool MPSGuardImpl::queryEvent(void* event) const {
-  auto mps_event_id = (__bridge id_t)(event);
+  auto mps_event_id = (__bridge id_t)(intptr_t)(event);
   return at::mps::getMPSEventPool()->queryEvent(mps_event_id);
 }
 
