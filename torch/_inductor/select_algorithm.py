@@ -344,7 +344,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=self.index_dtype, argdefs=argdefs
             ),
