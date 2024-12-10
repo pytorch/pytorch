@@ -1460,6 +1460,63 @@ def forward(self, x, y):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
 
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    def test_subclasses_parameterization(self):
+        from torch.testing._internal.custom_tensor import CustomTensorPlainOut
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(torch.ones(3, 4), torch.ones(3, 4))
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        ep_training = torch.export.export_for_training(m, (ref_x,))
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_1,)""",
+        )
+
+        ep = export(m, (ref_x,)).run_decompositions({})
+        self.assertExpectedInline(
+            str(ep.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_parametrizations_p2_original0 : [num_users=1] = placeholder[target=p_parametrizations_p2_original0]
+    %p_parametrizations_p2_original1 : [num_users=1] = placeholder[target=p_parametrizations_p2_original1]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=2] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original0), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_parametrizations_p2_original1), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %add_1), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_2,), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_1), kwargs = {})
+    return (add_3,)""",
+        )
+        res = ep.module()(ref_x)
+
+        self.assertEqual(res, ref_out)
+
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -7592,7 +7649,6 @@ def forward(self, x, b_t, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
-    @testing.expectedFailureRetraceability
     def test_layer_sharing(self):
         N, C, H, W = 1, 2, 2, 3
 
@@ -8525,7 +8581,6 @@ def forward(self, x, y):
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
-    @testing.expectedFailureRetraceability
     def test_unused_aliases(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
