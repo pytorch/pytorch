@@ -51,6 +51,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
+    prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -76,10 +77,6 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 pexpr = PythonPrinter().doprint
 
 all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
-
-
-def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
 
 
 @dataclasses.dataclass

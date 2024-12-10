@@ -61,6 +61,7 @@ from ..utils import (
     get_kernel_metadata,
     is_welford_reduction,
     Placeholder,
+    prefix_is_reduction,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -89,7 +90,6 @@ from .simd import (
     IterationRangesEntry,
     IterationRangesRoot,
     pexpr,
-    prefix_is_reduction,
     SIMDKernel,
     SIMDScheduling,
 )
@@ -2963,8 +2963,11 @@ class TritonKernel(SIMDKernel):
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
-        size_hints = []
-        for numel in self.numels.values():
+        size_hints = {}
+        for prefix, numel in self.numels.items():
+            if prefix_is_reduction(prefix) and not self.inside_reduction:
+                continue
+
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
@@ -2981,10 +2984,7 @@ class TritonKernel(SIMDKernel):
                 size_hint = 8192
             else:
                 size_hint = next_power_of_2(int(numel_hint))
-            size_hints.append(size_hint)
-
-        if not self.inside_reduction:
-            size_hints.pop()
+            size_hints[prefix] = size_hint
 
         if name is None:
             code.splice(gen_common_triton_imports())

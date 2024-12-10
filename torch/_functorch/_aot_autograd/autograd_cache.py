@@ -30,6 +30,7 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     write_atomic,
 )
+from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -204,6 +205,8 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+    if torch._inductor.config.freezing:
+        raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
@@ -217,6 +220,19 @@ def check_cacheable(gm: torch.fx.GraphModule):
         )
     for node in nodes:
         check_node_safe(node)
+
+
+def check_metadata_cacheable(metadata: ViewAndMutationMeta):
+    """
+    When view replay is turned on, we bypass autograd cache if
+    the output is aliased.
+    """
+    if config.view_replay_for_aliased_outputs:
+        for info in metadata.output_info:
+            if info.functional_tensor is not None:
+                raise BypassAOTAutogradCache(
+                    "Cannot cache a graph with functional tensor"
+                )
 
 
 class AOTAutogradCacheDetails(FxGraphHashDetails):
@@ -329,6 +345,7 @@ class FXGraphCacheLoadable:
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
         remote_cache = None
+        constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
 
@@ -339,6 +356,7 @@ class FXGraphCacheLoadable:
             local=True,
             remote_cache=remote_cache,
             is_backward=self.is_backward(),
+            constants=constants,
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
@@ -355,8 +373,7 @@ class FXGraphCacheLoadable:
         )
 
         # TODO: How come cudagraphs could be None here?
-        # TODO: How come gm is None here?
-        result.post_compile(example_inputs, fx_config["cudagraphs"], None)  # type: ignore[arg-type]
+        result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
         return result
 
 
@@ -815,7 +832,10 @@ class AOTAutogradCache:
                         # cache hit, because we never save it to the cache
                         # If we need to do that, we should do it here
                         return pickle.loads(content)
-                except Exception:
+                except Exception as e:
+                    log_cache_bypass(
+                        "bypass_aot_autograd", "Unable to deserialize: " + str(e)
+                    )
                     log.warning(
                         "remote autograd cache unable to load compiled graph",
                         exc_info=True,
@@ -828,9 +848,20 @@ class AOTAutogradCache:
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
+            check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
+        except BypassAOTAutogradCache as e:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.warning("Bypassing autograd cache due to: %s", e)
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
+            return None
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
             if config.strict_autograd_cache:
                 raise e
             return None

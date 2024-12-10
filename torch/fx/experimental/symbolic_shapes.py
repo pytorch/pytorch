@@ -131,6 +131,7 @@ __all__ = [
     "create_contiguous",
     "ShapeEnv",
     "is_concrete_int",
+    "is_concrete_float",
     "guard_int",
     "guard_float",
     "guard_scalar",
@@ -365,6 +366,25 @@ def is_concrete_int(a: Union[int, SymInt]) -> bool:
         return True
 
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
+
+def is_concrete_float(a: Union[float, SymFloat]) -> bool:
+    r"""Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or float): Object to test if it float
+    """
+    assert isinstance(a, (SymFloat, float))
+
+    if isinstance(a, float):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Float):
         return True
 
     return False
@@ -5229,6 +5249,16 @@ class ShapeEnv:
         To be used by compile_fx to evaluate symexprs
         """
         args = {str(e): val for e, val in self.var_to_val.items()}
+        return eval(code, SYMPY_INTERP, args)
+
+    def deserialize_symexpr(self, code: str) -> Union[SymInt, SymFloat, SymBool]:
+        """
+        To be used by compile_fx to deserialize symexprs
+        """
+        args = {
+            str(e): SymInt(SymNode(e, self, int, int(val), fx_node=None))
+            for e, val in self.var_to_val.items()
+        }
         return eval(code, SYMPY_INTERP, args)
 
     def evaluate_guards_expression(self, code: str, args: Sequence[object]) -> bool:

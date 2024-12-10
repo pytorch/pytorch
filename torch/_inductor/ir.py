@@ -3176,8 +3176,10 @@ class Layout(OutputSpec):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
+
+        device_index_str = "" if self.device.index is None else f":{self.device.index}"
         return (
-            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+            f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
             f"size={self.size}, stride={self.stride}{offset})"
         )
 
@@ -3884,7 +3886,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
