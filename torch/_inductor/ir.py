@@ -5063,8 +5063,10 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout
         if is_storage_and_layout(x):
+
             while isinstance(x.get_layout(), NonOwningLayout):
-                x = x.get_layout().view
+                assert False
+
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
                     # If the the FlexibleLayout already has the size and stride in the required order,
