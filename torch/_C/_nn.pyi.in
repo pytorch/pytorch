@@ -1,4 +1,6 @@
 # ${generated_comment}
+# mypy: disable-error-code="type-arg"
+
 from numbers import Number
 from typing import Generator, List, Optional, overload, Sequence, Tuple, Union
 
