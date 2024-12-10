@@ -856,7 +856,7 @@ class CompilationMetrics:
     aot_autograd_cumulative_compile_time_us: Optional[int] = None
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
-    triton_compile_time_us: Optional[int] = None  # TODO: instrument
+    triton_compile_time_us: Optional[int] = None
     runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
     runtime_triton_autotune_time_us: Optional[int] = None  # TODO: instrument
     dynamo_compile_time_before_restart_us: Optional[int] = None
@@ -1003,6 +1003,24 @@ def record_compilation_metrics(
         return ",".join(safe_str(item) for item in metric)
 
     structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
+
+    if torch._inductor.utils.should_use_remote_fx_graph_cache():
+        try:
+            from torch._inductor.fb.remote_cache import (
+                FbRemoteFxGraphCache,
+                REMOTE_CACHE_VERSION,
+            )
+
+            remote_cache_version = REMOTE_CACHE_VERSION
+            backend = FbRemoteFxGraphCache.get_remote_backend()
+            inductor_fx_remote_cache_backend_type = type(backend).__name__
+        except ModuleNotFoundError:
+            remote_cache_version = None
+            inductor_fx_remote_cache_backend_type = None
+    else:
+        inductor_fx_remote_cache_backend_type = None
+        remote_cache_version = None
+
     common_metrics = {
         "compile_id": str(torch._guards.CompileContext.current_compile_id()),
         "start_time_us": start_time_ns // 1000,
@@ -1020,6 +1038,8 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
             "inductor_fx_remote_cache_miss_keys"
         ),
+        "remote_cache_version": remote_cache_version,
+        "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
 
     # TODO: The following are legacy fields, populated from the fields that replace
@@ -1051,7 +1071,10 @@ def record_compilation_metrics(
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
         name,
-        lambda: {k: list(v) if isinstance(v, set) else v for k, v in metrics.items()},
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
         # NB: Because compilation metrics *includes* the logging overhead time,
         # we can't both *measure* the logging overhead of compilation metrics
         # without making it inconsistent with compilation metrics itself, so
@@ -3556,7 +3579,7 @@ def get_torch_function_mode_stack_at(ind):
 
 
 def set_torch_function_mode_stack(stack):
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
     for mode in stack:
@@ -3564,7 +3587,7 @@ def set_torch_function_mode_stack(stack):
 
 
 def clear_torch_function_mode_stack():
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 

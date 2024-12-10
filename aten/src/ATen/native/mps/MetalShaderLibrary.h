@@ -13,6 +13,7 @@ typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
 #endif
 
+#include <c10/util/OptionalArrayRef.h>
 #include <functional>
 #include <optional>
 #include <type_traits>
@@ -80,8 +81,8 @@ class MetalKernelFunction {
       uint64_t length,
       std::optional<uint64_t> groupSize = std::nullopt);
   void dispatch(
-      std::array<uint64_t, 2> length,
-      std::optional<std::array<uint64_t, 2>> groupSize = std::nullopt);
+      c10::ArrayRef<uint64_t> length,
+      c10::OptionalArrayRef<uint64_t> groupSize = std::nullopt);
 
  private:
   MTLComputePipelineState_t cps;
@@ -102,7 +103,7 @@ class MetalShaderLibrary {
         nparams(nparams_),
         compile_options(compile_options_) {}
   MetalShaderLibrary(const MetalShaderLibrary&) = delete;
-  virtual ~MetalShaderLibrary() = default;
+  virtual ~MetalShaderLibrary();
   std::vector<std::string> getFunctionNames();
   std::shared_ptr<MetalKernelFunction> getKernelFunction(
       const std::string& name);

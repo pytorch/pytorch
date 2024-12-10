@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 
 import torch
 from torch._inductor.virtualized import V
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, type_to_dtype
 
+from . import config
 from .utils import upcast_compute_type
 from .virtualized import OpsValue
 
@@ -48,7 +49,7 @@ def get_promoted_dtype(
 ):
     def construct_input(inp):
         if inp[1]:
-            return torch.empty(1, dtype=inp[0])
+            return torch.empty([], dtype=inp[0])
         else:
             return torch.empty([1], dtype=inp[0])
 
@@ -72,7 +73,12 @@ def promote_types(
 
     for arg in args:
         if isinstance(arg, str):
-            # comes from templates.. TODO
+            # TODO: fix the flex attention instances, enable internally
+            if not config.is_fbcode():
+                assert isinstance(
+                    V.get_ops_handler(),
+                    torch._inductor.select_algorithm.ModificationWrapper,
+                )
             continue
 
         if isinstance(arg, OpsValue):
@@ -80,10 +86,10 @@ def promote_types(
             assert isinstance(arg, torch._prims_common.Number) or hasattr(arg, "dtype")
 
         if isinstance(arg, torch._prims_common.Number):
-            dtype_prop_candidates.append((torch.tensor(arg).dtype, True))
+            dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
-        dtype_prop_candidates.append((arg.dtype, False))
+        dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
         *dtype_prop_candidates,

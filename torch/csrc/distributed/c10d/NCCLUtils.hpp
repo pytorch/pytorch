@@ -39,6 +39,10 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 #define NCCL_REMOTE_ERROR
 #endif
 
+static_assert(
+    (NCCL_MAJOR == 2 && NCCL_MINOR >= 7) || (NCCL_MAJOR > 2),
+    "NCCL version must be 2.7 or later");
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -215,19 +219,18 @@ class NCCLComm {
   NCCLComm() = default;
 
   ~NCCLComm() noexcept {
-    // Add lock in this destructor, as aborted_ needs to be read after memory
-    // barrier here.
+    // (kwen2501) Making CUDA/NCCL calls in this destructor can hit CUDA driver
+    // shutdown error if CUDA context has exited first. Thus, we are not
+    // destroying or aborting NCCL communicators here. We just detect and warn
+    // about the risk of memory leak. Normally, a user would have called
+    // `destroy_process_group` or `abort_process_group`, and such risk would be
+    // avoided.
     LockType lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
-      at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-      // Use ncclCommAbort instead of ncclCommDestroy here since
-      // ncclCommDestroy could block forever waiting for work to complete on
-      // the communicator.
-      C10D_NCCL_ASSERT(::ncclCommAbort(ncclComm_));
-#else
-      C10D_NCCL_ASSERT(::ncclCommDestroy(ncclComm_));
-#endif
+      TORCH_WARN_ONCE(
+          "WARNING: NCCL communicator hasn't been destroyed. This may cause "
+          "memory leaks. To avoid the risk, you can call `destroy_process_group` "
+          "during normal exit or `_abort_process_group` when handling failures.")
     }
   }
 
@@ -323,6 +326,17 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+  // Wait for the communicator to be ready. This is a blocking function.
+  // Useful in nonblocking mode: NCCL requires the communicator to be ready
+  // before issuing a second command.
+  // Arguments:
+  //   longInterval: if true, wait with sleep of an interval; otherwise, wait
+  //   with `sched_yield` which is faster (but acquires CPU more frequently).
+  //   Use `longInterval=true` when waiting for initialization or finalize to
+  //   complete. Use `longInterval=false` when waiting collective call to return
+  //   ncclSuccess.
+  void waitReady(bool longInterval);
+
   std::optional<std::string> getNcclCommFailureReason() const {
     LockType lock(mutex_);
     return commFailureReason_;
@@ -376,6 +390,14 @@ class NCCLComm {
     return;
 #endif
   }
+
+  // Finalize a communicator -- asking it to flush its operations. When the
+  // communicator is marked as nonblocking, this is a nonblocking function;
+  // otherwise, it will block till all operations complete.
+  void finalize();
+
+  // Destroy a communicator. This is a blocking function.
+  void destroy();
 
   bool isInitialized() const {
     LockType lock(mutex_);

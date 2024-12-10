@@ -40,7 +40,6 @@ import torch._export.serde.schema as export_schema
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
@@ -79,7 +78,7 @@ from .dependencies import (
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
     argsort,
     argsort_sym,
@@ -354,6 +353,22 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
+
+
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
+    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+        return False
+
+    aligned_strides = all(
+        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
+        for i in range(len(x.get_stride()) - 1)
+    )
+    # if the last dim size is <= 1, stride doesnt matter
+    aligned_last_dim = (
+        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
+        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+    )
+    return aligned_last_dim and aligned_strides
 
 
 class IRNode:
@@ -1058,96 +1073,25 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        dtype = get_device_type(device)
-        assert dtype is not None
-        device_interface = get_interface_for_device(dtype)
-        device_properties = device_interface.Worker.get_device_properties(device)
-        if get_device_type(device) == "xpu":
-            num_sm = device_properties.gpu_subslice_count
-        else:
-            # default is cuda behavior
-            num_sm = device_properties.multi_processor_count
-
+        props = DeviceProperties.create(device)
+        num_sm = props.multi_processor_count
         min_elements_per_thread = 32
-        max_elements_per_thread = 512
-        threads_per_sm = 2048
-        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
-        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
-
-        def inner_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
-            if not should_split:
-                return 1
-            # do heuristics that's close to eager mode for split inner reduction
-            # we leak reduction autotune configs here, and will need to refactor to avoid this later
-            num_warps = 8
-            num_threads = 32 * num_warps
-            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
-                return 1
-            if reduction_numel_hint <= 8192:
-                return 1
-            if reduction_numel_hint * numel_hint <= min_elements_per_device:
-                split_size = min_elements_per_thread
-            elif reduction_numel_hint * numel_hint < max_elements_per_device:
-                target_blocks = num_sm * threads_per_sm // (2 * num_threads)
-                blocks_per_output = (target_blocks + numel_hint - 1) // numel_hint
-                tmp_split_size = (
-                    reduction_numel_hint + num_threads * blocks_per_output - 1
-                ) // (num_threads * blocks_per_output)
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
-                if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
-                    split_size = max(closest, min_elements_per_thread)
-                else:
-                    split_size = tmp_split_size
-            else:
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
-                if abs(closest - max_elements_per_thread) < 50:
-                    # prefer even splits
-                    split_size = closest
-                else:
-                    split_size = max_elements_per_thread
-            return (reduction_numel_hint + split_size * num_threads - 1) // (
-                split_size * num_threads
+        if should_split:
+            inner_reduction_splits: Callable[[int, int], int] = functools.partial(
+                V.choices.reduction_split_factor, device, inner_reduction=True
             )
-
-        def outer_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
-            if not should_split:
-                return 1
-            # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
-            # extend to even smaller number of outputs
-            num_warps = 8
-            num_threads = num_warps * 32
-            rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
-            xvals_per_block = 128
-            xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
-            if reduction_numel_hint * numel_hint < min_elements_per_device:
-                split_size = min_elements_per_thread
-            elif reduction_numel_hint * numel_hint < max_elements_per_device:
-                target_blocks = num_sm * threads_per_sm // (num_threads)
-                target_blocks = (target_blocks + xblocks - 1) // xblocks
-                tmp_split_size = (
-                    reduction_numel_hint + rvals_per_thread * target_blocks - 1
-                ) // (rvals_per_thread * target_blocks)
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
-                if abs(tmp_split_size - closest) < 20:
-                    split_size = max(closest, min_elements_per_thread)
-                else:
-                    split_size = tmp_split_size
-            else:
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
-                if abs(closest - max_elements_per_thread) < 50:
-                    # prefer even splits
-                    split_size = closest
-                else:
-                    split_size = max_elements_per_thread
-
-            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
-                rvals_per_thread * split_size
+            outer_reduction_splits: Callable[[int, int], int] = functools.partial(
+                V.choices.reduction_split_factor, device, inner_reduction=False
             )
+        else:
+
+            def inner_reduction_splits(
+                reduction_numel_hint: int,
+                numel_hint: int,
+            ) -> int:
+                return 1
+
+            outer_reduction_splits = inner_reduction_splits
 
         # easy cases
         if numel_hint == 1:
@@ -1378,7 +1322,7 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and (sympy_product(ranges) != 1 or device.type == "cuda")
+            and (sympy_product(ranges) != 1 or is_gpu(device.type))
         ):
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
@@ -2342,7 +2286,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2411,7 +2355,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -3038,7 +2982,6 @@ class SliceView(View):
         except TypeError:
             pass
 
-        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -3176,8 +3119,10 @@ class Layout(OutputSpec):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
+
+        device_index_str = "" if self.device.index is None else f":{self.device.index}"
         return (
-            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+            f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
             f"size={self.size}, stride={self.stride}{offset})"
         )
 
@@ -3884,7 +3829,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
@@ -4122,7 +4067,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4251,7 +4196,18 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):  # type: ignore[no-untyped-def]
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
         return deps
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -4284,6 +4240,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -4313,8 +4270,15 @@ class TritonTemplateBuffer(TemplateBuffer):
                 for buf in mutated_inputs
             ]
 
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
+
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
+
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -4392,8 +4356,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
     ) -> None:
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=None,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
@@ -4805,7 +4775,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -5398,7 +5368,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -6323,7 +6293,6 @@ class FallbackKernel(ExternKernelAlloc):
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
 
-        schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg) -> None:  # type: ignore[no-untyped-def]
@@ -6540,23 +6509,17 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
-            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
-            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
-            # fix would require changing all the uses of self.mutation_outputs.
+            # NOTE: [special handling of all_reduce_coalesced_'s return value]
+            # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
+            outputs = self.outputs if self.outputs else self.mutation_outputs
             return_type = returns[0].real_type
-            output_arguments = [
-                handle_single_output(
-                    return_type, [*self.outputs, *self.mutation_outputs]
-                )
-            ]
+            output_arguments = [handle_single_output(return_type, outputs)]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(
-                    returns, [*self.outputs, *self.mutation_outputs]
-                )
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -6611,7 +6574,8 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.op_overload,
                 exported_args,
-                [*self.outputs, *self.mutation_outputs],
+                # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
             self.codegen_comment(wrapper)
@@ -7486,7 +7450,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7613,7 +7577,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def]
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
