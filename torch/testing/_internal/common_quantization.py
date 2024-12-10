@@ -2788,6 +2788,9 @@ class TestHelperModules:
         def forward(self, x):
             return self.linear2(self.linear1(x))
 
+        def example_inputs(self):
+            return (torch.randn(2, 8),)
+
     class ConvMaxPool2d(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
