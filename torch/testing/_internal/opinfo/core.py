@@ -731,6 +731,9 @@ class OpInfo:
 
     # the following dtypesIf... options override the dtypes value on their respective device types
 
+    # dtypes this function is expected to work with on GPUs defined in GPU_TYPES
+    dtypesIfGPU: _dispatch_dtypes = None
+
     # dtypes this function is expected to work with on CUDA
     dtypesIfCUDA: _dispatch_dtypes = None
 
@@ -744,6 +747,9 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on GPUs defined in GPU_TYPES
+    backward_dtypesIfGPU: _dispatch_dtypes = None
 
     # backward dtypes this function is expected to work with on CUDA
     backward_dtypesIfCUDA: _dispatch_dtypes = None
@@ -914,6 +920,7 @@ class OpInfo:
 
         dtypes_args = (
             self.dtypes,
+            self.dtypesIfGPU,
             self.dtypesIfCUDA,
             self.dtypesIfROCM,
             self.dtypesIfXPU,
@@ -943,6 +950,25 @@ class OpInfo:
 
         self.dtypes = set(self.dtypes)
 
+        self.dtypesIfGPU = (
+            set(self.dtypesIfGPU) if self.dtypesIfGPU is not None else self.dtypes
+        )
+        self.dtypesIfCUDA = (
+            set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypesIfGPU
+        )
+        self.dtypesIfROCM = (
+            set(self.dtypesIfROCM)
+            if self.dtypesIfROCM is not None
+            else self.dtypesIfCUDA
+        )
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfGPU
+        )
+
+        self.dtypesIfHpu = (
+            set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
+        )
+
         # NOTE: backward dtypes must be acquired before forward dtypes
         #   since they fallback to explicit (not implicit!) specifications of
         #   forward dtypes
@@ -950,14 +976,25 @@ class OpInfo:
             set(self.backward_dtypesIfROCM)
             if self.backward_dtypesIfROCM is not None
             else (
-                self.backward_dtypesIfCUDA
-                if self.backward_dtypesIfCUDA is not None
+                self.backward_dtypesIfGPU
+                if self.backward_dtypesIfGPU is not None
                 else self.backward_dtypes
                 if self.backward_dtypes is not None
                 else self.dtypesIfROCM
                 if self.dtypesIfROCM is not None
-                else self.dtypesIfCUDA
-                if self.dtypesIfCUDA is not None
+                else self.dtypesIfGPU
+                if self.dtypesIfGPU is not None
+                else self.dtypes
+            )
+        )
+        self.backward_dtypesIfGPU = (
+            set(self.backward_dtypesIfGPU)
+            if self.backward_dtypesIfGPU is not None
+            else (
+                self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfGPU
+                if self.dtypesIfGPU is not None
                 else self.dtypes
             )
         )
@@ -965,7 +1002,9 @@ class OpInfo:
             set(self.backward_dtypesIfCUDA)
             if self.backward_dtypesIfCUDA is not None
             else (
-                self.backward_dtypes
+                self.backward_dtypesIfGPU
+                if self.backward_dtypesIfGPU is not None
+                else self.backward_dtypes
                 if self.backward_dtypes is not None
                 else self.dtypesIfCUDA
                 if self.dtypesIfCUDA is not None
@@ -981,28 +1020,25 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else (
+                self.backward_dtypesIfGPU
+                if self.backward_dtypesIfGPU is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfXPU
+                if self.dtypesIfXPU is not None
+                else self.dtypes
+            )
+        )
 
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
             else self.dtypes
-        )
-
-        self.dtypesIfCUDA = (
-            set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypes
-        )
-        self.dtypesIfROCM = (
-            set(self.dtypesIfROCM)
-            if self.dtypesIfROCM is not None
-            else self.dtypesIfCUDA
-        )
-        self.dtypesIfXPU = (
-            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
-        )
-
-        self.dtypesIfHpu = (
-            set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
-        )
+        )        
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
@@ -1548,6 +1584,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -2957,6 +2995,7 @@ class ShapeFuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         dtypesIfXPU=None,
+        dtypesIfGPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2966,6 +3005,7 @@ class ShapeFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             dtypesIfXPU=dtypesIfXPU,
+            dtypesIfGPU=dtypesIfGPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )

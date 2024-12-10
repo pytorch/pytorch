@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR
+    TEST_WITH_TORCHINDUCTOR, GPU_TYPE,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -6923,7 +6923,7 @@ def make_mvlgamma_opinfo(variant_test_name, domain, skips, sample_kwargs):
                           domain=domain,
                           decorators=(precisionOverride({torch.float16: 5e-2}),),
                           dtypes=all_types_and(torch.half, torch.bfloat16),
-                          dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                          dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
                           sample_inputs_func=sample_inputs_mvlgamma,
                           supports_forward_ad=True,
                           supports_fwgrad_bwgrad=True,
@@ -9954,7 +9954,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 ),
                 'TestForeach',
                 'test_parity',
-                device_type='cuda'
+                device_type=GPU_TYPE
             ),
         ),
     ),
@@ -9991,7 +9991,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 ),
                 'TestForeach',
                 'test_parity',
-                device_type='cuda'
+                device_type=GPU_TYPE
             ),
         ),
     ),
@@ -11670,7 +11670,7 @@ op_db: List[OpInfo] = [
                    aliases=('absolute', ),
                    ref=np.abs,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                   dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    skips=(
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestBwdGradients',
@@ -11712,7 +11712,7 @@ op_db: List[OpInfo] = [
                    ref=np.arccos,
                    domain=(-1, 1),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -11723,16 +11723,16 @@ op_db: List[OpInfo] = [
                                                   torch.complex64: 1e-2}),),
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        # Failing with wrong imaginary sign on at least some Windows jobs
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        # Failing with wrong imaginary sign on at least some Windows jobs
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -11754,7 +11754,7 @@ op_db: List[OpInfo] = [
                    ref=np.arccosh,
                    domain=(1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
@@ -11763,22 +11763,22 @@ op_db: List[OpInfo] = [
                    promotes_int_to_float=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        # Failing with wrong imaginary sign on at least some Windows jobs
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                    ),
                    # acosh is not defined at x < 1 (real)
@@ -12067,7 +12067,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
-                                     device_type='cuda'),
+                                     device_type=GPU_TYPE),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -12086,7 +12086,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
-                                     device_type='cuda'),
+                                     device_type=GPU_TYPE),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -12149,7 +12149,7 @@ op_db: List[OpInfo] = [
            # trigger addmm being decomposed by a jit pass.
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
@@ -12168,7 +12168,7 @@ op_db: List[OpInfo] = [
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
@@ -12189,7 +12189,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+           dtypesIfGPU=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12204,7 +12204,7 @@ op_db: List[OpInfo] = [
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
                                                                              np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -12236,7 +12236,7 @@ op_db: List[OpInfo] = [
            ],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
@@ -12245,9 +12245,9 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addbmm),
     OpInfo('baddbmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+           dtypesIfGPU=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16,
+           backward_dtypesIfGPU=floating_types_and(torch.float16,
                                                     *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
                                                     torch.complex64, torch.complex128),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -12258,10 +12258,10 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+                   'TestCommon', 'test_variant_consistency_eager', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestMathBits', 'test_conj_view', device_type='cuda'),
+                   'TestMathBits', 'test_conj_view', device_type=GPU_TYPE),
            ],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
@@ -12274,7 +12274,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
@@ -12291,7 +12291,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=sample_inputs_dot_vdot,
            error_inputs_func=error_inputs_dot_vdot,
@@ -12307,7 +12307,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -12317,14 +12317,14 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out")
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
@@ -12382,17 +12382,17 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    decorators=[
                        DecorateInfo(
                            toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
-                           'TestUnaryUfuncs', device_type='cuda'
+                           'TestUnaryUfuncs', device_type=GPU_TYPE
                        ),
                        DecorateInfo(
                            toleranceOverride({torch.float32: tol(atol=8e-5, rtol=4e-5)}),
-                           'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'
+                           'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE
                        ),
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
@@ -12402,10 +12402,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
@@ -12415,7 +12415,7 @@ op_db: List[OpInfo] = [
                    aliases=('arcsinh', ),
                    ref=np.arcsinh,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
@@ -12437,10 +12437,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
@@ -12449,7 +12449,7 @@ op_db: List[OpInfo] = [
                    aliases=('arctan', ),
                    ref=np.arctan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -12469,10 +12469,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
@@ -12494,7 +12494,7 @@ op_db: List[OpInfo] = [
                    ref=np.arctanh,
                    domain=(-1, 1),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    decorators=[
                        precisionOverride({torch.bfloat16: 1e-2}),
@@ -12522,10 +12522,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                                    device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.cfloat],
+                                    device_type=GPU_TYPE, dtypes=[torch.cfloat],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
@@ -12618,7 +12618,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
                     dtypes=integral_types(),
-                    dtypesIfCUDA=integral_types(),
+                    dtypesIfGPU=integral_types(),
                     dtypesIfHpu=custom_types(torch.int32, torch.int8, torch.bool),
                     operator_variant=operator.lshift,
                     inplace_operator_variant=operator.ilshift,
@@ -12633,7 +12633,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
                     dtypes=integral_types(),
-                    dtypesIfCUDA=integral_types(),
+                    dtypesIfGPU=integral_types(),
                     dtypesIfHpu=custom_types(torch.int32, torch.int8, torch.bool),
                     operator_variant=operator.rshift,
                     inplace_operator_variant=operator.irshift,
@@ -12923,7 +12923,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    handles_large_floats=False,
@@ -12936,7 +12936,7 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.cfloat, torch.cdouble,), device_type='cpu', active_if=IS_WINDOWS),
                        # This fails on CUDA but passes on ROCm
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.cdouble,), device_type='cuda'),
+                                    dtypes=(torch.cdouble,), device_type=GPU_TYPE),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -12946,13 +12946,13 @@ op_db: List[OpInfo] = [
                        # Greatest absolute difference: nan at index (700,) (up to 1e-05 allowed)
                        # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda',
+                                    device_type=GPU_TYPE,
                                     dtypes=(torch.chalf,), active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -12978,7 +12978,7 @@ op_db: List[OpInfo] = [
                        # Greatest absolute difference: nan at index (6000,) (up to 1e-05 allowed)
                        # Greatest relative difference: nan at index (6000,) (up to 0.001 allowed)
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda',
+                                    device_type=GPU_TYPE,
                                     dtypes=(torch.chalf,), active_if=IS_WINDOWS),
                    )),
     OpInfo('cov',
@@ -13092,7 +13092,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                    dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
@@ -13165,7 +13165,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                    dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -13183,7 +13183,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                   dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/48010
@@ -13232,7 +13232,7 @@ op_db: List[OpInfo] = [
     OpInfo('diag',
            ref=np.diag,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+           dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13311,7 +13311,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('fmod',
                     ref=np.fmod,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
@@ -13345,7 +13345,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('remainder',
                     ref=np.remainder,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
@@ -13396,7 +13396,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
-                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -13887,8 +13887,8 @@ op_db: List[OpInfo] = [
                    ref=np.log,
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
+                   dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+                   backward_dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -13964,14 +13964,14 @@ op_db: List[OpInfo] = [
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
                     skips=(
                         # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type=GPU_TYPE),
                     )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
@@ -14116,7 +14116,7 @@ op_db: List[OpInfo] = [
     OpInfo('matmul',
            aliases=('linalg.matmul',),
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -14130,13 +14130,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=False),
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
                # ROCm intermittently fails the test with standard atol/rtol
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
-                            'TestCommon', 'test_noncontiguous_samples', device_type='cuda',
+                            'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE,
                             active_if=TEST_WITH_ROCM),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
-                            'TestCommon', 'test_out', device_type='cuda',
+                            'TestCommon', 'test_out', device_type=GPU_TYPE,
                             active_if=TEST_WITH_ROCM),
                # mv for the sample with shapes (S, S, M, M), (M,) has some variance in the
                # backward on CPU
@@ -14370,7 +14370,7 @@ op_db: List[OpInfo] = [
             # Incorrectly attempts to use a scalar for the second argument
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type=GPU_TYPE),
         )),
     BinaryUfuncInfo(
         'maximum',
@@ -14382,7 +14382,7 @@ op_db: List[OpInfo] = [
         supports_rhs_python_scalar=False,
         skips=(
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type=GPU_TYPE),
         )),
     BinaryUfuncInfo(
         'min',
@@ -14402,7 +14402,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure,
                          'TestBinaryUfuncs',
                          'test_type_promotion',
-                         device_type='cuda'),
+                         device_type=GPU_TYPE),
         )),
     BinaryUfuncInfo(
         'minimum',
@@ -14417,7 +14417,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure,
                          'TestBinaryUfuncs',
                          'test_type_promotion',
-                         device_type='cuda'),
+                         device_type=GPU_TYPE),
         ),
     ),
     BinaryUfuncInfo('logical_and',
@@ -14454,7 +14454,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
-                                     'test_type_promotion', device_type='cuda'),
+                                     'test_type_promotion', device_type=GPU_TYPE),
                     )),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
@@ -14469,7 +14469,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
-                                     device_type='cuda'),
+                                     device_type=GPU_TYPE),
                     )),
     BinaryUfuncInfo('bitwise_xor',
                     ref=np.bitwise_xor,
@@ -14484,7 +14484,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
-                                     device_type='cuda'),
+                                     device_type=GPU_TYPE),
                     )),
     BinaryUfuncInfo('heaviside',
                     ref=lambda a, b: (
@@ -14909,7 +14909,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.adaptive_avg_pool3d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
            decorators=(
                # RuntimeError:
@@ -14993,7 +14993,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
@@ -15004,7 +15004,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool3d,
@@ -15056,7 +15056,7 @@ op_db: List[OpInfo] = [
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
            supports_forward_ad=True,
@@ -15066,7 +15066,7 @@ op_db: List[OpInfo] = [
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+                   'TestCommon', 'test_variant_consistency_eager', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing'),
@@ -15101,7 +15101,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            # Runs very slowly on slow-gradcheck for complex.
@@ -15113,10 +15113,10 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+                   'TestCommon', 'test_variant_consistency_eager', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-05, rtol=5e-05), }),
-                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+                   'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=8e-2, rtol=8e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing'),
@@ -15149,7 +15149,7 @@ op_db: List[OpInfo] = [
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(
+           dtypesIfGPU=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
@@ -15161,25 +15161,25 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06),
                                      torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+                   'TestCommon', 'test_variant_consistency_eager', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-04, rtol=2e-04), }),
-                   'TestCompositeCompliance', 'test_operator', device_type='cuda'),
+                   'TestCompositeCompliance', 'test_operator', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06),
                                      torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
-                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+                   'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
-                   'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
+                   'TestCompositeCompliance', 'test_forward_ad', device_type=GPU_TYPE,
                    active_if=TEST_CUDNN),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
-                   "TestMathBits", "test_conj_view", device_type='cuda'),
+                   "TestMathBits", "test_conj_view", device_type=GPU_TYPE),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing'),
@@ -15208,7 +15208,7 @@ op_db: List[OpInfo] = [
            aliases=('conv1d',),
            aten_name='conv1d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv1d,
@@ -15224,7 +15224,7 @@ op_db: List[OpInfo] = [
                ),
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
+                   'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE,
                ),
            ),
            skips=(
@@ -15246,7 +15246,7 @@ op_db: List[OpInfo] = [
            aliases=('conv2d',),
            aten_name='conv2d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_conv2d),
@@ -15281,7 +15281,7 @@ op_db: List[OpInfo] = [
            aliases=('conv3d',),
            aten_name='conv3d',
            dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.chalf, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv3d,
            error_inputs_func=error_inputs_conv3d,
@@ -15391,7 +15391,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_rms_norm,),
     OpInfo('nn.functional.local_response_norm',
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15501,7 +15501,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
+           dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -15572,7 +15572,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
            reference_inputs_func=partial(reference_inputs_interpolate, 'bilinear'),
@@ -15590,7 +15590,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
            reference_inputs_func=partial(reference_inputs_interpolate, 'bicubic'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -15624,7 +15624,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'area'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
@@ -15639,7 +15639,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
            reference_inputs_func=partial(reference_inputs_upsample, 'bilinear'),
@@ -15657,7 +15657,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample_aa, 'bilinear'),
            supports_out=False,
@@ -15703,7 +15703,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multi_margin_loss",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
@@ -15720,7 +15720,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multilabel_margin_loss",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
@@ -15782,11 +15782,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_avg_pool2d,
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=GPU_TYPE),
            )),
     OpInfo('nn.functional.fractional_max_pool2d',
            supports_autograd=True,
@@ -15842,7 +15842,7 @@ op_db: List[OpInfo] = [
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
                DecorateInfo(unittest.skip("Works on some configs"), 'TestNNCOpInfo',
@@ -15867,7 +15867,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
@@ -15907,7 +15907,7 @@ op_db: List[OpInfo] = [
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
            dtypes=all_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_max_pool3d,
@@ -16023,8 +16023,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linear,
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            # linear calls mm under the hood which is nondeterministic on CUDA
            # https://pytorch.org/docs/stable/generated/torch.use_deterministic_algorithms.html#torch.use_deterministic_algorithms
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -16042,7 +16042,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_bilinear,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16,
+           dtypesIfGPU=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-03, rtol=1.3e-03)}),
@@ -16050,7 +16050,7 @@ op_db: List[OpInfo] = [
            ),
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
            ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -16089,7 +16089,7 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
     ),
     # Marked as a Unary function because it has some rather odd broadcasting semantics in its
@@ -16139,7 +16139,7 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
     ),
     UnaryUfuncInfo(
@@ -16150,7 +16150,7 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.rrelu, input, *args, inplace=True, **kwargs),
         dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -16165,7 +16165,7 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ),),
         skips=(
             # lambda impl
@@ -16204,14 +16204,14 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-2, rtol=1.8e-2),
                     torch.bfloat16: tol(atol=1e-2, rtol=1.8e-2)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
     ),
     OpInfo(
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=empty_types(),
-        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        dtypesIfGPU=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
@@ -16219,7 +16219,7 @@ op_db: List[OpInfo] = [
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda'),
+                         device_type=GPU_TYPE),
             # "mul_cuda" not implemented for float8_e4m3fn
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
@@ -16255,10 +16255,10 @@ op_db: List[OpInfo] = [
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(
             # When attn mask is a composite tensor this fails backward by returning a none
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward', device_type=GPU_TYPE),
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
-                         device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
+                         device_type=GPU_TYPE, active_if=_get_torch_cuda_version() >= (11, 6)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
                          dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
@@ -16288,19 +16288,19 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+                         device_type=GPU_TYPE, dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
             # FIXME
             DecorateInfo(unittest.skip('test_cow_input does not work with efficient attention on ROCM'),
                          'TestCompositeCompliance', 'test_cow_input',
-                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         device_type=GPU_TYPE, dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             DecorateInfo(unittest.skip('test_fake_crossref_backward_amp does not work with efficient attention on ROCM'),
                          'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         device_type=GPU_TYPE, dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             DecorateInfo(unittest.skip('test_fake_crossref_backward_no_amp does not work with efficient attention on ROCM'),
                          'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                         device_type='cuda', dtypes=(torch.bfloat16, torch.float16, torch.float32),
+                         device_type=GPU_TYPE, dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             # for element 1, was torch.Size([4, 4, 0]) but real shape was torch.Size([16, 3, 0])
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
@@ -16318,7 +16318,7 @@ op_db: List[OpInfo] = [
         'torch.ops.aten._flash_attention_forward',
         sample_inputs_func=sample_inputs_flash_attention_forward,
         dtypes=empty_types(),
-        dtypesIfCUDA=custom_types(torch.float16)
+        dtypesIfGPU=custom_types(torch.float16)
         if not SM80OrLater
         else custom_types(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -16329,18 +16329,18 @@ op_db: List[OpInfo] = [
         decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
             # Checking the scalar value of the philox seed and offset
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=GPU_TYPE),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type=GPU_TYPE),
             # None Mismatch Tensor
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type=GPU_TYPE),
         )
     ),
     OpInfo(
         'torch.ops.aten._efficient_attention_forward',
         sample_inputs_func=sample_inputs_efficient_attention_forward,
         dtypes=empty_types(),
-        dtypesIfCUDA=custom_types(torch.float16, torch.float32)
+        dtypesIfGPU=custom_types(torch.float16, torch.float32)
         if not SM80OrLater
         else custom_types(torch.float16, torch.float32, torch.bfloat16),
         supports_out=False,
@@ -16356,11 +16356,11 @@ op_db: List[OpInfo] = [
             skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
         skips=(
             # Checking the scaler value of the philox seed and offset
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type=GPU_TYPE),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', device_type=GPU_TYPE),
             # None Mismatch Tensor
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward', device_type=GPU_TYPE),
         )
     ),
     UnaryUfuncInfo(
@@ -16380,7 +16380,7 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-3, rtol=1e-3),
                     torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -16403,7 +16403,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
         dtypes=complex_types(),
-        dtypesIfCUDA=complex_types(),
+        dtypesIfGPU=complex_types(),
         supports_forward_ad=False,
         supports_autograd=False,
         assert_autodiffed=False,
@@ -16415,7 +16415,7 @@ op_db: List[OpInfo] = [
                     torch.float16: tol(atol=1e-3, rtol=1e-3),
                     torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
@@ -16445,14 +16445,14 @@ op_db: List[OpInfo] = [
         inplace_variant=partial(torch.nn.functional.hardsigmoid, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type='cuda',), ],
+                toleranceOverride({torch.float16: tol(atol=1e-04, rtol=0.001)}), 'TestUnaryUfuncs', device_type=GPU_TYPE,), ],
         skips=[
             # still want to test that first derivative works though second derivative isn't supported
             DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', "test_inplace_gradgrad"),
             # produces 0 instead of nan on ROCM
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
-                         device_type='cuda',
+                         device_type=GPU_TYPE,
                          active_if=(TEST_WITH_ROCM)), ]
     ),
     UnaryUfuncInfo(
@@ -16503,7 +16503,7 @@ op_db: List[OpInfo] = [
         'nn.functional.softsign',
         ref=lambda x: x / (np.abs(x) + 1),
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypesIfGPU=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -16534,7 +16534,7 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
                                             torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=GPU_TYPE),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -16673,7 +16673,7 @@ op_db: List[OpInfo] = [
            variant_test_name='without_cudnn',
            aten_name='batch_norm',
            dtypes=empty_types(),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16690,7 +16690,7 @@ op_db: List[OpInfo] = [
         aten_backward_name='binary_cross_entropy_backward',
         sample_inputs_func=sample_inputs_binary_cross_entropy,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
         supports_autograd=True,
@@ -16713,7 +16713,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCompositeCompliance",
                 "test_cow_input",
-                device_type='cuda',
+                device_type=GPU_TYPE,
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
@@ -16739,7 +16739,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('igamma',
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
                     aliases=('torch.special.gammainc',),
-                    dtypesIfCUDA=floating_types(),
+                    dtypesIfGPU=floating_types(),
                     # TODO: FIXME
                     supports_rhs_python_scalar=False,
                     supports_autograd=False,
@@ -16761,8 +16761,8 @@ op_db: List[OpInfo] = [
     #                 rhs_make_tensor_kwargs=dict(requires_grad=False),
     #                 dtypes=floating_types_and(torch.bfloat16, torch.float16),
     #                 backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-    #                 dtypesIfCUDA=floating_types(),
-    #                 backward_dtypesIfCUDA=floating_types(),
+    #                 dtypesIfGPU=floating_types(),
+    #                 backward_dtypesIfGPU=floating_types(),
     #                 supports_inplace_autograd=False,
     #                 skips=(
     #                     # Derivative wrt first tensor not implemented
@@ -16780,7 +16780,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('igammac',
                     dtypes=floating_types_and(torch.bfloat16, torch.float16),
                     aliases=('torch.special.gammaincc',),
-                    dtypesIfCUDA=floating_types(),
+                    dtypesIfGPU=floating_types(),
                     supports_autograd=False,
                     supports_rhs_python_scalar=False,
                     skips=(
@@ -16801,8 +16801,8 @@ op_db: List[OpInfo] = [
     #                 rhs_make_tensor_kwargs=dict(requires_grad=False),
     #                 dtypes=floating_types_and(torch.bfloat16, torch.float16),
     #                 backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
-    #                 dtypesIfCUDA=floating_types(),
-    #                 backward_dtypesIfCUDA=floating_types(),
+    #                 dtypesIfGPU=floating_types(),
+    #                 backward_dtypesIfGPU=floating_types(),
     #                 supports_inplace_autograd=False,
     #                 decorators=[
     #                     # Derivative wrt first tensor not implemented
@@ -16842,7 +16842,7 @@ op_db: List[OpInfo] = [
                    aten_backward_name='hardtanh_backward',
                    dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
                    backward_dtypes=all_types_and(torch.half, torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   backward_dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
                    error_inputs_func=error_inputs_hardtanh,
@@ -16880,7 +16880,7 @@ op_db: List[OpInfo] = [
                    autodiff_nonfusible_nodes=["aten::relu6"]),
     OpInfo('mm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16966,11 +16966,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Could not run 'aten::narrow_copy.out' with arguments from the 'CUDA' backend
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
-                            device_type='cuda'),
+                            device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
-                            device_type='cuda'),
+                            device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                            device_type='cuda'),
+                            device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
            )),
     OpInfo('view_copy',
@@ -17065,13 +17065,13 @@ op_db: List[OpInfo] = [
            )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
+                    dtypesIfGPU=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     ref=np.power,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
+                    backward_dtypesIfGPU=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_inplace_autograd=False,
@@ -17256,7 +17256,7 @@ op_db: List[OpInfo] = [
                    variant_test_name='decimals_3',
                    aliases=('special.round',),
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
                    sample_kwargs=lambda device, dtype, input: ({'decimals': 3}, {'decimals': 3}),
                    sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'decimals': 3}),
                    skips=(
@@ -17282,7 +17282,7 @@ op_db: List[OpInfo] = [
                    variant_test_name='decimals_neg_3',
                    aliases=('special.round',),
                    dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
                    sample_kwargs=lambda device, dtype, input: ({'decimals': -3}, {'decimals': -3}),
                    sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'decimals': -3}),
                    skips=(
@@ -17300,7 +17300,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    handles_large_floats=False,
                    supports_sparse=True,
@@ -17314,7 +17314,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Fails on CUDA but passes on ROCm
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    dtypes=(torch.cdouble,), device_type='cuda'),
+                                    dtypes=(torch.cdouble,), device_type=GPU_TYPE),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=(torch.cfloat, torch.cdouble,), device_type='cpu', active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -17334,7 +17334,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -17363,7 +17363,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sign',
                    ref=reference_sign,
                    dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfGPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -17380,7 +17380,7 @@ op_db: List[OpInfo] = [
                    ref=reference_sgn,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
+                   backward_dtypesIfGPU=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -17517,7 +17517,7 @@ op_db: List[OpInfo] = [
     OpInfo('__rmatmul__',
            op=torch.Tensor.__rmatmul__,
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
@@ -17530,7 +17530,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type=GPU_TYPE, active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
@@ -17556,7 +17556,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
                     dtypes=floating_types_and(torch.bfloat16, torch.half,),
-                    dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
+                    dtypesIfGPU=all_types_and(torch.bfloat16, torch.half),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_out=False,
@@ -17657,11 +17657,11 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(DecorateInfo(
                                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
                                'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                               device_type='cuda'),),
+                               device_type=GPU_TYPE),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -17703,9 +17703,9 @@ op_db: List[OpInfo] = [
                                DecorateInfo(
                                    toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
                                    'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                   device_type='cuda'),),
+                                   device_type=GPU_TYPE),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    assert_jit_shape_analysis=True,
                    supports_forward_ad=True,
@@ -17734,7 +17734,7 @@ op_db: List[OpInfo] = [
     OpInfo('tensor_split',
            ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -17850,14 +17850,14 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                    device_type='cuda', dtypes=[torch.complex128]),
+                                    device_type=GPU_TYPE, dtypes=[torch.complex128]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
     UnaryUfuncInfo('nan_to_num',
                    ref=np.nan_to_num,
                    dtypes=all_types_and(torch.half, torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bool, torch.bfloat16),
+                   dtypesIfGPU=all_types_and(torch.half, torch.bool, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -17888,7 +17888,7 @@ op_db: List[OpInfo] = [
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -17908,7 +17908,7 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_sparse_csr=True,
@@ -17949,7 +17949,7 @@ op_db: List[OpInfo] = [
                        # >>> t.cuda().square()
                        # tensor(inf+nanj, device='cuda:0')
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                                    device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_inplace',
                                     dtypes=[torch.bool]),
                        DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace',
@@ -17959,7 +17959,7 @@ op_db: List[OpInfo] = [
                    ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.chalf, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -17967,11 +17967,11 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool),
+                   dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                   backward_dtypesIfCUDA=floating_and_complex_types_and(torch.chalf),
+                   backward_dtypesIfGPU=floating_and_complex_types_and(torch.chalf),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
@@ -18037,8 +18037,8 @@ op_db: List[OpInfo] = [
            # TODO(@heitorschueroff) update SampleInput to handle such cases
            op=lambda tensors, equation: torch.einsum(equation, tensors),
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           backward_dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18147,7 +18147,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.complex128]),
                        DecorateInfo(
                            toleranceOverride({torch.float32: tol(atol=3e-5, rtol=1e-3)}),
-                           'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
+                           'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE),
                        ],
            skips=(
                # test does not work with passing lambda for op
@@ -18184,7 +18184,7 @@ op_db: List[OpInfo] = [
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else None,
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
@@ -18201,7 +18201,7 @@ op_db: List[OpInfo] = [
                      variant_test_name=f'polygamma_n_{n_}',
                      ref=reference_polygamma if TEST_SCIPY else None,
                      dtypes=all_types_and(torch.bool, torch.bfloat16),
-                     dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                     dtypesIfGPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      promotes_int_to_float=True,
@@ -18391,7 +18391,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
@@ -18425,7 +18425,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+           backward_dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True),
            error_inputs_func=error_inputs_index_select,
@@ -18505,7 +18505,7 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 104448
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type='cuda'),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', device_type=GPU_TYPE),),
            sample_inputs_func=sample_inputs_getitem),
     OpInfo('index_put',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -18519,17 +18519,17 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_put,
            skips=(
                DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
-                            device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
+                            device_type=GPU_TYPE, active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfGPU=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda'),
+                            dtypes=[torch.bool], device_type=GPU_TYPE),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -19275,7 +19275,7 @@ op_db: List[OpInfo] = [
            # The inplace variant (Tensor.normal_) is different from torch.normal
            inplace_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.half),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfGPU=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_normal_tensor_first,
            skips=(
@@ -19304,7 +19304,7 @@ op_db: List[OpInfo] = [
            # The inplace variant (Tensor.normal_) is different from torch.normal
            inplace_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.half),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfGPU=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_normal_tensor_second,
            skips=(
@@ -19327,7 +19327,7 @@ op_db: List[OpInfo] = [
                # AssertionError
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                # AssertionError in CUDA variant
-               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type='cuda'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', device_type=GPU_TYPE),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDeviceUtils', 'test_device_mode_ops'))),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
@@ -19389,13 +19389,13 @@ op_db: List[OpInfo] = [
            ),
     BinaryUfuncInfo('hypot',
                     dtypes=floating_types_and(torch.bfloat16, torch.half),
-                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                    dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
     OpInfo('histogram',
            dtypes=floating_types(),
-           dtypesIfCUDA=_dispatch_dtypes(),  # histogram is only implemented on CPU
+           dtypesIfGPU=_dispatch_dtypes(),  # histogram is only implemented on CPU
            sample_inputs_func=sample_inputs_histogram,
            supports_autograd=False,
            skips=(
@@ -19413,20 +19413,20 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
-           dtypesIfCUDA=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
+           dtypesIfGPU=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
            sample_inputs_func=sample_inputs_histogramdd,
            error_inputs_func=error_inputs_histogramdd,
            supports_autograd=False,
            skips=(
                # Not implemented on CUDA
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type=GPU_TYPE),
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64),
+           dtypesIfGPU=floating_types_and(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
@@ -19434,7 +19434,7 @@ op_db: List[OpInfo] = [
                # CUDA histc returns a float tensor but does not correctly warn when passed an integral out tensor
                # "AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
                # from a result of dtype torch.float32 into an out= with dtype torch.long"
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=GPU_TYPE),
            )),
     OpInfo('bincount',
            dtypes=integral_types_and(),
@@ -19448,7 +19448,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('bucketize',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfGPU=all_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
            reference_inputs_func=reference_inputs_bucketize,
            error_inputs_func=error_inputs_bucketize,
@@ -19459,7 +19459,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('searchsorted',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfGPU=all_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_searchsorted,
            supports_autograd=False,
            ref=reference_searchsorted,
@@ -19557,7 +19557,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfGPU=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19565,7 +19565,7 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/139972
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
-                            dtypes=[torch.bool], device_type='cuda', active_if=TEST_WITH_ROCM),
+                            dtypes=[torch.bool], device_type=GPU_TYPE, active_if=TEST_WITH_ROCM),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
@@ -19706,7 +19706,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19737,7 +19737,7 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-4, rtol=4.3e-3)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'
+                   'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE
                ),
            ],
            sample_inputs_func=sample_trapezoid),
@@ -19751,7 +19751,7 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-4, rtol=4.3e-3)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'
+                   'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE
                ),
            ],
            sample_inputs_func=sample_trapezoid),
@@ -19841,7 +19841,7 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+           dtypesIfGPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            error_inputs_func=error_inputs_trace,
            supports_inplace_autograd=False,
            supports_out=False,
@@ -19971,7 +19971,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_inplace_autograd=False,
@@ -19984,7 +19984,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('inner',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19994,7 +19994,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('tensordot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -20012,7 +20012,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_to_sparse,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            backward_dtypes=floating_types(),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_sparse_csr=True,
            supports_sparse_csc=True,
@@ -20040,12 +20040,12 @@ op_db: List[OpInfo] = [
     OpInfo('logcumsumexp',
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           backward_dtypesIfGPU=floating_and_complex_types_and(torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type=GPU_TYPE),
                # RuntimeError: "max_values_cpu" not implemented for 'ComplexDouble'
                # Falling back to non-numerically stablized exp, causing nan in the results.
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD', dtypes=[torch.complex128]),
@@ -20075,7 +20075,7 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.chalf, torch.complex64, torch.cdouble])),
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and_complex_and(torch.complex32, torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
@@ -20090,7 +20090,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True),
@@ -20132,7 +20132,7 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2,
                                                   torch.float32: 1e-4}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
@@ -20155,8 +20155,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_smooth_l1_loss,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            backward_dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -20189,7 +20189,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.gammaln', ),
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfGPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
@@ -20463,7 +20463,7 @@ op_db: List[OpInfo] = [
         "norm",
         sample_inputs_func=sample_inputs_norm,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -20487,7 +20487,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_and_complex_types(),
-           dtypesIfCUDA=floating_and_complex_types(),
+           dtypesIfGPU=floating_and_complex_types(),
            skips=(
                # Dispatches in Python to matrix_norm. Not sure how to make this test happy
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
@@ -20497,7 +20497,7 @@ op_db: List[OpInfo] = [
            variant_test_name='fro',
            sample_inputs_func=sample_inputs_norm_fro,
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
            # got: Could not allocate memory to change Tensor SizesAndStrides!
@@ -20526,7 +20526,7 @@ op_db: List[OpInfo] = [
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
@@ -20535,7 +20535,7 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
-                'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
+                'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE,
             ),
             # Dispatches in Python to vector_norm. Not sure how to make this test happy
             # Happens to pass on complex64. Also a mystery
@@ -20584,7 +20584,7 @@ op_db: List[OpInfo] = [
             # inplace variant dispatches to dropout kernel, while on CUDA
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type=GPU_TYPE),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -20599,7 +20599,7 @@ op_db: List[OpInfo] = [
         op=torch.ops.aten.native_dropout_backward.default,
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
@@ -20671,7 +20671,7 @@ op_db: List[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Fails in cuda11.7
             # Error Log: https://github.com/pytorch/pytorch/actions/runs/3440108478/jobs/5738475757
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
@@ -20744,7 +20744,7 @@ op_db: List[OpInfo] = [
             # Fails on CI https://github.com/pytorch/pytorch/issues/85377
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
             # Reference: https://github.com/pytorch/pytorch/issues/67084
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type=GPU_TYPE),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
             # Fails due to non-determinism (see issue #74679)
@@ -20763,9 +20763,9 @@ op_db: List[OpInfo] = [
         # is tested in gradient tests.
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding_bag(idx, weight, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
         # backward is not supported for mode `max` and dtype `bfloat16`
-        backward_dtypesIfCUDA=floating_types_and(torch.float16),
+        backward_dtypesIfGPU=floating_types_and(torch.float16),
         sample_inputs_func=sample_inputs_embedding_bag,
         skips=(
             # lambda impl
@@ -20999,7 +20999,7 @@ op_db: List[OpInfo] = [
         skips=(
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast from a result
             # of dtype torch.float32 into an out= with dtype torch.long
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type='cuda', dtypes=[torch.float32]),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', device_type=GPU_TYPE, dtypes=[torch.float32]),
             # FIXME: mean does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: mean reduces all dimensions when dim=[]
@@ -21009,7 +21009,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
-                         device_type='cuda', dtypes=[torch.complex64]),
+                         device_type=GPU_TYPE, dtypes=[torch.complex64]),
         ),
     ),
     ReductionOpInfo(
@@ -21021,7 +21021,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
         ref=reference_reduction_numpy(np.nanmean),
         skips=(
@@ -21035,9 +21035,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
-                         device_type='cuda', dtypes=[torch.float16]),
+                         device_type=GPU_TYPE, dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
-                         device_type='cuda', dtypes=[torch.complex64]),
+                         device_type=GPU_TYPE, dtypes=[torch.complex64]),
         ),
     ),
     ReductionOpInfo(
@@ -21051,7 +21051,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         check_batched_forward_grad=False,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_std_var,
         ref=reference_std_var(np.std),
         generate_args_kwargs=generate_std_var_kwargs,
@@ -21080,7 +21080,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         check_batched_forward_grad=False,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
@@ -21099,7 +21099,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_std_var,
         ref=reference_std_var(np.var),
         generate_args_kwargs=generate_std_var_kwargs,
@@ -21128,7 +21128,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         check_batched_forward_grad=False,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_std_var_unbiased,
         skips=(
             # FIXME: dim=[] reduces all dimensions
@@ -21149,7 +21149,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_prod,
         ref=prod_numpy,
         skips=(
@@ -21179,7 +21179,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
         error_inputs_sparse_func=error_inputs_sparse_reduction_sum,
         sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_coo),
@@ -21212,7 +21212,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
         ref=reference_reduction_numpy(np.nansum),
         skips=(
@@ -21296,7 +21296,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCompositeCompliance",
                 "test_cow_input",
-                device_type='cuda',
+                device_type=GPU_TYPE,
             ),
             DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
@@ -21375,7 +21375,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "argsort",
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_sort,
         supports_out=False,
         supports_autograd=False,
@@ -21391,14 +21391,14 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_non_standard_bool_values",
                 dtypes=[torch.bool],
-                device_type='cuda',
+                device_type=GPU_TYPE,
             ),
         ),
     ),
     OpInfo(
         "repeat_interleave",
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        backward_dtypesIfGPU=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
@@ -21495,7 +21495,7 @@ op_db: List[OpInfo] = [
         ref=lambda input, offset=0: np.diagflat(input, k=offset),
         sample_inputs_func=sample_inputs_diagflat,
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -21518,7 +21518,7 @@ op_db: List[OpInfo] = [
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         skips=(
@@ -21535,7 +21535,7 @@ op_db: List[OpInfo] = [
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
@@ -21544,7 +21544,7 @@ op_db: List[OpInfo] = [
         'scatter_reduce',
         variant_test_name='amin',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
@@ -21555,7 +21555,7 @@ op_db: List[OpInfo] = [
         'scatter_reduce',
         variant_test_name='amax',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfGPU=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
@@ -21627,21 +21627,21 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             # Failing with wrong imaginary sign on at least some Windows jobs
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_small',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             # Failing with wrong imaginary sign on at least some Windows jobs
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
@@ -21657,11 +21657,11 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -21671,16 +21671,16 @@ python_ref_db = [
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             # Failing with wrong imaginary sign on at least some Windows jobs
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_small',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
         ),
     ),
@@ -21690,7 +21690,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
-                'TestUnaryUfuncs', device_type='cuda'),
+                'TestUnaryUfuncs', device_type=GPU_TYPE),
             precisionOverride({torch.bfloat16: 1e-2}),
         ],
         skips=(
@@ -21702,11 +21702,11 @@ python_ref_db = [
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
         ),
     ),
@@ -21729,11 +21729,11 @@ python_ref_db = [
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cdouble],
                          active_if=IS_WINDOWS),
         ),
     ),
@@ -21832,7 +21832,7 @@ python_ref_db = [
                          'test_python_ref'),
             DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
                          'TestCommon',
-                         'test_python_ref_executor', device_type='cuda'),
+                         'test_python_ref_executor', device_type=GPU_TYPE),
 
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: geometric is not comparable"),
@@ -21859,7 +21859,7 @@ python_ref_db = [
                          'test_python_ref'),
             DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
                          'TestCommon',
-                         'test_python_ref_executor', device_type='cuda'),
+                         'test_python_ref_executor', device_type=GPU_TYPE),
 
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: log_normal is not comparable"),
@@ -22166,11 +22166,11 @@ python_ref_db = [
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
         ),
     ),
@@ -22190,11 +22190,11 @@ python_ref_db = [
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
+                         device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble],
                          active_if=IS_WINDOWS),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda', dtypes=[torch.cfloat],
+                         device_type=GPU_TYPE, dtypes=[torch.cfloat],
                          active_if=IS_WINDOWS),
         ),
     ),
@@ -22233,7 +22233,7 @@ python_ref_db = [
             # This fails on CUDA but passes on ROCm
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         dtypes=(torch.cdouble,), device_type='cuda'),
+                         dtypes=(torch.cdouble,), device_type=GPU_TYPE),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
@@ -22246,7 +22246,7 @@ python_ref_db = [
             # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda',
+                         device_type=GPU_TYPE,
                          dtypes=(torch.chalf,), active_if=IS_WINDOWS),
         ),
     ),
@@ -22280,7 +22280,7 @@ python_ref_db = [
             # Greatest relative difference: nan at index (6000,) (up to 0.001 allowed)
             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         device_type='cuda',
+                         device_type=GPU_TYPE,
                          dtypes=(torch.chalf,), active_if=IS_WINDOWS),
         ),
     ),
@@ -22626,7 +22626,7 @@ python_ref_db = [
             # Fails on CUDA but passes on ROCm
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
-                         dtypes=(torch.cdouble,), device_type='cuda'),
+                         dtypes=(torch.cdouble,), device_type=GPU_TYPE),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          dtypes=(torch.cfloat, torch.cdouble,), device_type='cpu',
@@ -22710,7 +22710,7 @@ python_ref_db = [
                          dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
-                         device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                         device_type=GPU_TYPE, dtypes=[torch.cfloat, torch.cdouble]),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -22719,7 +22719,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=GPU_TYPE),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -22738,7 +22738,7 @@ python_ref_db = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=GPU_TYPE),
         ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -22792,7 +22792,7 @@ python_ref_db = [
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
-                         'test_python_ref_executor', device_type='cuda'),
+                         'test_python_ref_executor', device_type=GPU_TYPE),
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
@@ -22858,7 +22858,7 @@ python_ref_db = [
                     torch.float16: tol(atol=1e-03, rtol=1.2e-03),
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -22963,7 +22963,7 @@ python_ref_db = [
                     torch.float16: tol(atol=1e-2, rtol=1.8e-2),
                     torch.bfloat16: tol(atol=1e-2, rtol=1.8e-2)
                 }),
-                'TestUnaryUfuncs', device_type='cuda',
+                'TestUnaryUfuncs', device_type=GPU_TYPE,
             ), ],
     ),
     PythonRefInfo(
@@ -23043,7 +23043,7 @@ python_ref_db = [
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
                                    torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=GPU_TYPE),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -23403,13 +23403,13 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type='cuda'
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type='cuda'
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
         )
     ),
@@ -24594,7 +24594,7 @@ python_ref_db = [
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_out=False,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type=GPU_TYPE),
         ),
     ),
     PythonRefInfo(
