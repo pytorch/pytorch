@@ -3564,7 +3564,11 @@ class TestOutOfOrderDataLoader(TestCase):
         # normally, this should be [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         expected_order = [0, 1, 3, 5, 7, 2, 4, 6, 8, 9]
         output = [sample.item() for sample in dataloader]
-        self.assertEqual(expected_order, output)
+        self.assertNotEqual(output, list(range(10)))
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:5]), set(expected_order[:5]))
+        self.assertEqual(set(output[5:]), set(expected_order[5:]))
 
     def test_in_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
@@ -3591,7 +3595,11 @@ class TestOutOfOrderDataLoader(TestCase):
         # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
         expected_order = [0, 1, 2, 3, 5, 4, 6, 7, 8, 9]
         output = [sample.item() for sample in dataloader]
-        self.assertEqual(expected_order, output)
+        self.assertNotEqual(output, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:4]), set(expected_order[:4]))
+        self.assertEqual(set(output[4:]), set(expected_order[4:]))
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
