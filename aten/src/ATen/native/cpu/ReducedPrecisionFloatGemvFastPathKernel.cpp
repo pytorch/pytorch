@@ -473,6 +473,10 @@ void bf16_gemv_trans(
 #endif // !defined(C10_MOBILE)
 } // namespace CPU_CAPABILITY
 
+#ifdef __ARM_FEATURE_BF16
+#error "some CI system built with __ARM_FEATURE_BF16! (good)"
+#endif
+
 #if !defined(C10_MOBILE)
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
 REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans)
