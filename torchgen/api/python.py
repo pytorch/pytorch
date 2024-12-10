@@ -677,7 +677,6 @@ def argument_type_str(
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
-            BaseTy.ConstQuantizerPtr,
             BaseTy.SymInt,
         ]:
             # These python schema type names line up with their function schema names
