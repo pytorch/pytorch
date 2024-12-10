@@ -964,15 +964,14 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    Note!
-    If passing in the ``py_limited_api`` flag signifying that the extension uses
-    only the Python limited API, CppExtension will respect the flag and SKIP
-    linking torch_python with your custom extension!!!! This means that your
-    extension CANNOT rely on any APIs provided in torch_python!!!! Notably, your
-    extension cannot call PYBIND11_MODULE, which is commonly used to create a
-    Python module associated with the extension. The APIs in torch_python are
-    blatantly NOT within the Python limited API, which is why we avoid linking
-    torch_python when the ``py_limited_api`` is specified.
+    ..note:
+        The PyTorch python API (as provided in libtorch_python) cannot be built
+        with the flag ``py_limited_api=True``.  When this flag is passed, it is
+        the user's responsibility in their library to not use APIs from
+        libtorch_python (in particular pytorch/python bindings) and to only use
+        APIs from libtorch (aten objects, operators and the dispatcher). For
+        example, to give access to custom ops from python, the library should
+        register the ops through the dispatcher.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1029,15 +1028,14 @@ def CUDAExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
-    Note!
-    If passing in the ``py_limited_api`` flag signifying that the extension uses
-    only the Python limited API, CUDAExtension will respect the flag and SKIP
-    linking torch_python with your custom extension!!!! This means that your
-    extension CANNOT rely on any APIs provided in torch_python!!!! Notably, your
-    extension cannot call PYBIND11_MODULE, which is commonly used to create a
-    Python module associated with the extension. The APIs in torch_python are
-    blatantly NOT within the Python limited API, which is why we avoid linking
-    torch_python when the ``py_limited_api`` is specified.
+    ..note:
+        The PyTorch python API (as provided in libtorch_python) cannot be built
+        with the flag ``py_limited_api=True``.  When this flag is passed, it is
+        the user's responsibility in their library to not use APIs from
+        libtorch_python (in particular pytorch/python bindings) and to only use
+        APIs from libtorch (aten objects, operators and the dispatcher). For
+        example, to give access to custom ops from python, the library should
+        register the ops through the dispatcher.
 
     Example:
         >>> # xdoctest: +SKIP
