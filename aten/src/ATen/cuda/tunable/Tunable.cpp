@@ -13,6 +13,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
