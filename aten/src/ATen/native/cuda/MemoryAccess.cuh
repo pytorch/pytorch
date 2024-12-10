@@ -351,11 +351,25 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   uint64_t address = reinterpret_cast<uint64_t>(pointer);
   constexpr int vec2_alignment = std::alignment_of_v<aligned_vector<scalar_t, 2>>;
   constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
+#ifdef USE_ROCM
+  constexpr int vec8_alignment = std::alignment_of_v<aligned_vector<scalar_t, 8>>;
+  constexpr int vec16_alignment = std::alignment_of_v<aligned_vector<scalar_t, 16>>;
+  if (address % vec16_alignment == 0) {
+    return 16;
+  } else if (address % vec8_alignment == 0) {
+    return 8;
+  } else if (address % vec4_alignment == 0) {
+    return 4;
+  } else if (address % vec2_alignment == 0) {
+    return 2;
+  }
+#else
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
+#endif
   return 1;
 }
 
