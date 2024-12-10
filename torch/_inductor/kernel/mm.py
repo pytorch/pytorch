@@ -50,9 +50,9 @@ from .mm_common import (
     mm_configs,
     mm_grid,
     mm_options,
+    persistent_mm_configs,
     persistent_mm_grid,
     persistent_mm_options,
-    persistent_mm_configs,
     triton_config,
 )
 

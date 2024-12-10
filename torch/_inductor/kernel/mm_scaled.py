@@ -31,8 +31,8 @@ from .mm_common import (
     mm_args,
     mm_grid,
     persistent_mm_grid,
-    scaled_persistent_mm_configs,
     scaled_mm_configs,
+    scaled_persistent_mm_configs,
 )
 
 
