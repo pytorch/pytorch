@@ -62,8 +62,12 @@ __all__ = [
 ]
 
 
-# TODO: Update docstrings for default_planner.py
 class DefaultSavePlanner(SavePlanner):
+    """
+    Default implementation used to plan the save process, recommended extend
+    this class to add custom behaviors.
+    """
+
     mappings: FLATTEN_MAPPING
 
     def __init__(
