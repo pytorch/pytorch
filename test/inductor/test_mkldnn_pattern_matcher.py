@@ -192,11 +192,12 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
         check_dynamic=None,
         num_include_ops=None,
+        quantizer=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = _generate_qdq_quantized_model(mod, inputs)
+                mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -3200,6 +3201,90 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 atol=0.001,
                 rtol=0.07,
             )
+
+    def _test_linear_dynamic_fp16_helper(self, use_relu: bool):
+        class M(torch.nn.Module):
+            def __init__(self, bias: bool, use_relu: bool):
+                super().__init__()
+                self.linear = torch.nn.Linear(256, 256, bias=bias)
+                self.relu = torch.nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                if self.use_relu:
+                    return self.relu(self.linear(x))
+                return self.linear(x)
+
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
+        quantizer.set_module_type_qconfig(
+            torch.nn.Linear, xiq.get_x86_inductor_linear_dynamic_fp16_config()
+        )
+        bias_list = [True, False]
+        input_ndim_list = [2, 3]
+        x_contig_list = [True, False]
+        cases = itertools.product(bias_list, input_ndim_list, x_contig_list)
+        for bias, input_ndim, x_contig in cases:
+            x_shape = (4, 256) if input_ndim == 2 else (4, 1, 256)
+            x = torch.randn(x_shape)
+            if not x_contig:
+                x = x[0::2, ...]
+            mod = M(bias, use_relu).eval()
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                # Matched nodes:
+                # (1) w to fp16, (2) w to fp32, (3) permute w, (4) mm/addmm/bmm
+                # If x.ndim == 3 and x is contiguous, two view nodes are added.
+                # If x.ndim == 3 and x is not contiguous, two expand nodes and one add node are added.
+                nodes_count = 4
+                if input_ndim > 2:
+                    if x_contig:
+                        nodes_count += 2
+                    else:
+                        nodes_count += 3 if bias else 2
+                if use_relu:
+                    nodes_count += 1
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
+
+            self._test_common(
+                mod,
+                (x,),
+                atol=1e-2,
+                rtol=1e-2,
+                matcher_check_fn=matcher_check_fn,
+                check_quantization=True,
+                quantizer=quantizer,
+            )
+            linear_op_str = (
+                "torch.ops.onednn.linear_relu_dynamic_fp16.default"
+                if use_relu
+                else "torch.ops.onednn.linear_dynamic_fp16.default"
+            )
+            self._test_code_common(
+                mod,
+                (x,),
+                [linear_op_str],
+                ["torch.ops.aten.addmm.default", "torch.ops.aten.mm.default"],
+                check_quantization=True,
+                quantizer=quantizer,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_dynamic_fp16(self):
+        self._test_linear_dynamic_fp16_helper(use_relu=False)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_linear_relu_dynamic_fp16(self):
+        self._test_linear_dynamic_fp16_helper(use_relu=True)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})

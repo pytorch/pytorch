@@ -89,8 +89,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = python_pytree._cxx_pytree_exists
-if HAS_OPTREE:
+if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 else:
     cxx_pytree = None
@@ -293,7 +292,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
-    @unittest.skipIf(not HAS_OPTREE, "missing optree package")
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_optree_graph_break_message(self):
         import optree
 
