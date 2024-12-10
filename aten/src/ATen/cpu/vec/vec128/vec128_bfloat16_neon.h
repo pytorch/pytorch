@@ -543,7 +543,7 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& c) {
   // See NOTE [BF16 FMA] above.
 #ifdef __ARM_FEATURE_BF16
-  return 2Vectorized<c10::BFloat16>(vfmsq_f16(c, a, b));
+  return Vectorized<c10::BFloat16>(vfmsq_f16(c, a, b));
 #else
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
