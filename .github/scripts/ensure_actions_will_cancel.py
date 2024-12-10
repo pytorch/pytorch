@@ -20,9 +20,10 @@ def should_check(filename: Path) -> bool:
     with open(filename) as f:
         content = f.read()
 
-    data = yaml.safe_load(content)
-    on = data.get("on", data.get(True, {}))
-    return "pull_request" in on
+    return True
+    #data = yaml.safe_load(content)
+    #on = data.get("on", data.get(True, {}))
+    #return "pull_request" in on
 
 
 if __name__ == "__main__":
