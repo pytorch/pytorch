@@ -589,6 +589,40 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->refresh_device_policy();
 }
 
+// This function returns true when lhs and rhs tensor generic metadata equal
+// one another. In particular, this is checking equality for the generic
+// properties when calling TensorImpl::copy_generic_tensor_metadata.
+bool TensorImpl::is_generic_tensor_metadata_equal(
+    const TensorImpl* lhs,
+    const TensorImpl* rhs) {
+  const size_t size = lhs->sizes_and_strides_.size();
+  if (size != rhs->sizes_and_strides_.size())
+    return false;
+
+  for (size_t i = 0; i < size; ++i) {
+    if (lhs->sizes_and_strides_.size_at_unchecked(i) !=
+            rhs->sizes_and_strides_.size_at_unchecked(i) ||
+        lhs->sizes_and_strides_.stride_at_unchecked(i) !=
+            rhs->sizes_and_strides_.stride_at_unchecked(i))
+      return false;
+  }
+
+  return lhs->has_symbolic_sizes_strides_ == rhs->has_symbolic_sizes_strides_ &&
+      lhs->storage_offset_ == rhs->storage_offset_ &&
+      lhs->data_type_ == rhs->data_type_ &&
+      lhs->device_opt_ == rhs->device_opt_ &&
+      lhs->is_contiguous_ == rhs->is_contiguous_ &&
+      lhs->is_channels_last_contiguous_ == rhs->is_channels_last_contiguous_ &&
+      lhs->is_channels_last_3d_contiguous_ ==
+      rhs->is_channels_last_3d_contiguous_ &&
+      lhs->is_channels_last_ == rhs->is_channels_last_ &&
+      lhs->is_channels_last_3d_ == rhs->is_channels_last_3d_ &&
+      lhs->is_non_overlapping_and_dense_ ==
+      rhs->is_non_overlapping_and_dense_ &&
+      lhs->is_wrapped_number_ == rhs->is_wrapped_number_ &&
+      lhs->reserved_ == rhs->reserved_ && lhs->numel_ == rhs->numel_;
+}
+
 void TensorImpl::copy_tensor_metadata_except_version_counter(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,

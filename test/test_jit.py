@@ -76,6 +76,7 @@ from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
 from jit.test_dataclasses import TestDataclasses  # noqa: F401
 from jit.test_generator import TestGenerator  # noqa: F401
+from jit.test_trace_autograd import TestTraceAutograd  # noqa: F401
 
 # Torch
 from torch import Tensor

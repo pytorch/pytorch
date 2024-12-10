@@ -1435,6 +1435,29 @@ struct TORCH_API WeakIValue final {
         is_intrusive_ptr == rhs.is_intrusive_ptr;
   }
 
+#if 0
+  void debugPrint() const {
+    if (tag != IValue::Tag::Tensor)
+      return;
+
+    auto impl = static_cast<at::TensorImpl*>(payload.as_intrusive_ptr);
+    const auto& storage = impl->unsafe_storage();
+
+    std::cout << "[Value] Tensor [impl = " << impl << ", storage = " << storage.unsafeGetStorageImpl();
+  }
+#endif
+
+  bool is_alias_of(at::TensorImpl* rhs) const {
+    if (tag != IValue::Tag::Tensor)
+      return false;
+
+    auto impl = static_cast<const at::TensorImpl*>(payload.as_intrusive_ptr);
+    if (impl->has_storage() && rhs->has_storage() && impl->storage().is_alias_of(rhs->storage()))
+      return TensorImpl::is_generic_tensor_metadata_equal(impl, rhs);
+
+    return false;
+  }
+
   IValue lock() const {
     if (!is_intrusive_ptr) {
       IValue::Payload newPayload;

@@ -91,6 +91,11 @@ struct TORCH_API TracingState
   using Frame =
       std::unordered_map<WeakIValue, Value*, WeakIValueHasher, WeakIValueEq>;
   std::vector<Frame> env_stack;
+
+  // Keep reference to tensors requiring gradient during tracing so that
+  // temporary tensors created from make_variable (called in
+  // SavedVariable::unpack) do not get released during tracing.
+  std::vector<at::Tensor> backup_;
 };
 
 // This is meant to be used as a thread local place, where we can store extra
