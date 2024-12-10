@@ -1138,10 +1138,18 @@ def forward(self, pred_1, x_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_cond_autograd_zeros_unused_branch(self):
-        def cond_branch(x, w1, w2):
-            return torch.cond(x > 0, lambda x: w1 * x, lambda x: w2 * x, [x])
+        from torch._higher_order_ops.cond import create_fw_bw_graph_branches
 
-        def imperative_branch(x, w1, w2):
+        def true_fn(x, w1, w2):
+            return (w1 * x,)
+
+        def false_fn(x, w1, w2):
+            return (w2 * x,)
+
+        def cond_branch(x, w1, w2):
+            return torch.cond(x > 0, true_fn, false_fn, [x, w1, w2])
+
+        def imperative_branch(x):
             if x > 0:
                 return w1 * x
             else:
@@ -1153,9 +1161,11 @@ def forward(self, pred_1, x_1):
         parameters = [w1, w2]
 
         y_cond = cond_branch(x, w1, w2)
-        grad_cond = torch.autograd.grad(y_cond, parameters, allow_unused=True)
+        grad_cond = torch.autograd.grad(
+            y_cond, parameters, allow_unused=True, retain_graph=True
+        )
 
-        y_exp = imperative_branch(x, w1, w2)
+        y_exp = imperative_branch(x)
         grad_exp = torch.autograd.grad(y_exp, parameters, allow_unused=True)
 
         # Replace None gradients with a tensor of zeros
@@ -1165,6 +1175,61 @@ def forward(self, pred_1, x_1):
         ]
 
         self.assertEqual(grad_exp, grad_cond)
+
+        def f():
+            return torch.autograd.grad(y_cond, parameters, allow_unused=True)
+
+        gm = make_fx(f)()
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self):
+    _tensor_constant0 = self._tensor_constant0
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
+ memory_format = torch.preserve_format);  _tensor_constant0 = None
+    _tensor_constant1 = self._tensor_constant1
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant2 = self._tensor_constant2
+    _tensor_constant3 = self._tensor_constant3
+    _tensor_constant4 = self._tensor_constant4
+    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
+ (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4));\
+  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 =\
+ _tensor_constant3 = _tensor_constant4 = None
+    getitem = cond[0];  getitem = None
+    getitem_1 = cond[1]
+    getitem_2 = cond[2];  cond = None
+    return (getitem_1, getitem_2)""",
+        )
+
+        (
+            fw_true_graph,
+            fw_false_graph,
+            joint_true_graph,
+            joint_false_graph,
+        ) = create_fw_bw_graph_branches(true_fn, false_fn, *(x, w1, w2))
+
+        # Check that the joint_true_graph and the joint_false_graph do not return Nones
+        self.assertExpectedInline(
+            joint_true_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    mul = torch.ops.aten.mul.Tensor(arg2_1, arg1_1);  arg2_1 = mul = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
+    return [None, mul_1, zeros_like]""",
+        )
+
+        self.assertExpectedInline(
+            joint_false_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    mul = torch.ops.aten.mul.Tensor(arg3_1, arg1_1);  arg3_1 = mul = None
+    mul_1 = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
+    return [None, zeros_like, mul_1]""",
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_cond_autograd_zeros_unused_branch_complex(self):
