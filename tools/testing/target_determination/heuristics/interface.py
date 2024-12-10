@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from copy import copy
-from typing import Any, Iterable, Iterator
+from typing import Any, TYPE_CHECKING
 
 from tools.testing.test_run import TestRun
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
 
 
 class TestPrioritizations:
