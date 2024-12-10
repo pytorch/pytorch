@@ -72,6 +72,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -1018,6 +1019,8 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
+        output_replacements = self.dedup_pass()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1101,7 +1104,9 @@ class OutputGraph:
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
+                self.compile_and_call_fx_graph(
+                    tx, list(reversed(stack_values)), root, output_replacements
+                )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
             # restore all the live local vars
@@ -1134,7 +1139,9 @@ class OutputGraph:
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                    self.compile_and_call_fx_graph(
+                        tx, pass2.graph_output_vars(), root, output_replacements
+                    )
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1295,7 +1302,7 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def compile_and_call_fx_graph(self, tx, rv, root):
+    def compile_and_call_fx_graph(self, tx, rv, root, replaced_outputs):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
@@ -1311,12 +1318,17 @@ class OutputGraph:
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
+
             output_node = self.create_node(
                 "output",
                 "output",
                 (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
                 {},
             )
+
+            for old_node, new_node in replaced_outputs.items():
+                old_node.replace_all_uses_with(new_node)
+
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
                 insert_deferred_runtime_asserts(
@@ -1492,6 +1504,29 @@ class OutputGraph:
         )
 
         return compiled_fn
+
+    def dedup_pass(self):
+        if torch._dynamo.config.use_graph_deduplication:
+            return apply_graph_deduplication(self)
+        else:
+            return dict()
+
+    def install_subgraph(self, name, sub_gm):
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"{name}_{i}"
+            if candidate in self.nn_modules:
+                i += 1
+            else:
+                next_name = candidate
+
+        sub_gm.__name__ = next_name
+        sub_gm.torchdynamo_force_dynamic = False
+        # This graph module is not present in the user space, so it can't be
+        # accessed by a source. Set source=None.
+        self.register_attr_or_module(sub_gm, next_name, source=None)
+        return next_name
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
