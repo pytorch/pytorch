@@ -3465,7 +3465,6 @@ class GraphModule(torch.nn.Module):
     def test_map_max(a, b):
         return max(map(lambda x: x.sum(), [a, b]))
 
-    # max(map(...)) graph breaks
     @make_test
     def test_map_max_const(a):
         return max(map(lambda x: x, [1, 2, 3])), a + 1
