@@ -1188,6 +1188,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Take a column of 2D tensor, such that memory is not dense
         self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
 
+    @requires_gloo()
+    def test_allgather_inference_mode(self):
+        with torch.inference_mode():
+            self._test_allgather_basics(lambda t: t.clone())
+
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
