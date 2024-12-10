@@ -9,7 +9,7 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.9.0
+  git clone https://github.com/mozilla/sccache -b v0.8.2
   cd sccache
   echo "Building sccache"
   cargo build --release
@@ -52,7 +52,7 @@ function write_sccache_stub() {
     cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
-if [ "\$1" = "-E" ] || [ "\$2" = "-E" ]; then
+if [ "\$1" = "-E" ] || [ "\$2" = "-E" ] || [ "\$3" = "-E" ]; then
   exec $(which $1) "\$@"
 elif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
   exec sccache $(which $1) "\$@"
