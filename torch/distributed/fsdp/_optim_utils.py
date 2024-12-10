@@ -105,7 +105,7 @@ class _ConsolidatedOptimState:
 
 class _PosDimTensorInfo(NamedTuple):
     """
-    Meatadata for positive-dimension tensors used internally for
+    Metadata for positive-dimension tensors used internally for
     :meth:`scatter_full_optim_state_dict`.
 
     Attributes:
