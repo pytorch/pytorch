@@ -63,15 +63,15 @@ if __name__ == "__main__":
                 file=sys.stderr,
             )
             errors_found = True
-        #if not actual.get("cancel-in-progress", False):
-        #    print(
-        #        f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
-        #        file=sys.stderr,
-        #    )
-        #    print(
-        #        f"concurrency cancel-in-progress should be True but found {actual.get('cancel-in-progress', None)}",
-        #        file=sys.stderr,
-        #    )
+        if not actual.get("cancel-in-progress", False):
+            print(
+                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"concurrency cancel-in-progress should be True but found {actual.get('cancel-in-progress', None)}",
+                file=sys.stderr,
+            )
 
     if errors_found:
         sys.exit(1)
