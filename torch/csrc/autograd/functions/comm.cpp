@@ -109,13 +109,13 @@ variable_list Gather::apply(variable_list&& inputs) {
   }
 
   std::vector<at::Tensor> tensors;
-  tensors.reserve(inputs.size());
-  for (auto& variable : inputs) {
-    if (unsqueeze_scalars) {
+  if (unsqueeze_scalars) {
+    tensors.reserve(inputs.size());
+    for (auto& variable : inputs) {
       tensors.push_back(variable.view(1));
-    } else {
-      tensors.push_back(std::move(variable));
     }
+  } else {
+    tensors = std::move(inputs);
   }
 
   // Disable the autograd during the actual computation
