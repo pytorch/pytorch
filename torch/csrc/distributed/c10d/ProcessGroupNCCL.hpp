@@ -903,9 +903,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PostProcess post,
       const char* profilingTitle);
 
-  template <bool isBarrier = false>
   c10::intrusive_ptr<Work> allreduce_impl(
       at::Tensor& tensor,
+      const char* profilingTitle = "nccl:all_reduce",
       const AllreduceOptions& opts = AllreduceOptions());
 
   // Checks for NCCL errors on each of the communicators and returns an
