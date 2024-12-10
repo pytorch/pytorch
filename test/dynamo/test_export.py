@@ -31,7 +31,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
 @torch._dynamo.assume_constant_result
@@ -2460,70 +2460,6 @@ def forward(self, x):
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
-    @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
-    def test_export_with_parameters(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.features = torch.nn.Sequential(
-                    torch.nn.Conv2d(
-                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
-                    ),
-                    torch.nn.ReLU(inplace=True),
-                )
-
-            def forward(self, x):
-                return self.features(x)
-
-        model = MyModule().eval().cuda()
-        random_inputs = (torch.rand([32, 3, 32, 32]).to("cuda"),)
-        dim_x = torch.export.Dim("dim_x", min=1, max=32)
-        exp_program = torch.export.export(
-            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
-        )
-        output_buffer = io.BytesIO()
-        # Tests if we can restore saved nn.Parameters when we load them again
-        torch.export.save(exp_program, output_buffer)
-        loaded_model = torch.export.load(output_buffer)
-        self.assertTrue(
-            isinstance(
-                loaded_model.module().get_parameter("features.0.weight"),
-                torch.nn.Parameter,
-            )
-        )
-
-    def test_export_fast_binary_broadcast_check(self):
-        # This test looks at the case where we erroneously create a guard
-        # when checking the equality of the operands' shape and the output
-        # shape during FakeTensor's binary op fast path.
-
-        class MyModel(torch.nn.Module):
-            def forward(self, a, b):
-                # final shape is (dim0, 4, 8)
-                # order matters since a & the output have the same shape
-                return b + a
-
-        a = torch.randn(100, 4, 8)
-        b = torch.randn(4, 8)
-        model = MyModel().eval().cuda()
-        batchsize = torch.export.Dim("dim0", min=3, max=1024)
-        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
-
-        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
-
-    def test_export_fast_binary_broadcast_check_unbacked(self):
-        class MyModel(torch.nn.Module):
-            def forward(self, numel, scalar):
-                u0 = numel.item()
-                torch._check_is_size(u0)
-                x = torch.ones(u0 + 1)
-                return scalar - x
-
-        model = MyModel().eval().cuda()
-        numel = torch.tensor(10)
-        scalar = torch.randn(1)
-        torch.export.export(model, (numel, scalar))
-
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4639,7 +4575,74 @@ def forward(self, x, b, y):
         self.assertEqual(ref_out, out)
 
 
+class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    def test_export_with_parameters(self, device):
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.features = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)
+                    ),
+                    torch.nn.ReLU(inplace=True),
+                )
+
+            def forward(self, x):
+                return self.features(x)
+
+        model = MyModule().eval().to(device)
+        random_inputs = (torch.rand([32, 3, 32, 32]).to(device),)
+        dim_x = torch.export.Dim("dim_x", min=1, max=32)
+        exp_program = torch.export.export(
+            model, random_inputs, dynamic_shapes={"x": {0: dim_x}}
+        )
+        output_buffer = io.BytesIO()
+        # Tests if we can restore saved nn.Parameters when we load them again
+        torch.export.save(exp_program, output_buffer)
+        loaded_model = torch.export.load(output_buffer)
+        self.assertTrue(
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
+        )
+
+    def test_export_fast_binary_broadcast_check(self, device):
+        # This test looks at the case where we erroneously create a guard
+        # when checking the equality of the operands' shape and the output
+        # shape during FakeTensor's binary op fast path.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().to(device)
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
+
+    def test_export_fast_binary_broadcast_check_unbacked(self, device):
+        class MyModel(torch.nn.Module):
+            def forward(self, numel, scalar):
+                u0 = numel.item()
+                torch._check_is_size(u0)
+                x = torch.ones(u0 + 1)
+                return scalar - x
+
+        model = MyModel().eval().to(device)
+        numel = torch.tensor(10)
+        scalar = torch.randn(1)
+        torch.export.export(model, (numel, scalar))
+
+
 common_utils.instantiate_parametrized_tests(ExportTests)
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(ExportTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
