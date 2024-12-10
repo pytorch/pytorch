@@ -53,16 +53,16 @@ if __name__ == "__main__":
                     file=sys.stderr,
                 )
                 errors_found = True
-        #elif not actual.get("group", "").startswith(EXPECTED_GROUP):
-        #    print(
-        #        f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
-        #        file=sys.stderr,
-        #    )
-        #    print(
-        #        f"concurrency group should start with {EXPECTED_GROUP} but found {actual.get('group', None)}",
-        #        file=sys.stderr,
-        #    )
-        #    errors_found = True
+        elif not actual.get("group", "").startswith(EXPECTED_GROUP):
+            print(
+                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"concurrency group should start with {EXPECTED_GROUP} but found {actual.get('group', None)}",
+                file=sys.stderr,
+            )
+            errors_found = True
         #if not actual.get("cancel-in-progress", False):
         #    print(
         #        f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
