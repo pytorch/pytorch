@@ -428,9 +428,7 @@ inline std::pair<T, T> activationLimits(
   }
 }
 
-namespace at {
-namespace native {
-namespace qnnp_avgpool_helper {
+namespace at::native::qnnp_avgpool_helper {
 Tensor qnnpack_avg_pool2d(
     Tensor input,
     IntArrayRef kernel_size,
@@ -439,9 +437,7 @@ Tensor qnnpack_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override);
-} // qnnp_avgpool_helper
-} // namespace native
-} // namespace at
+} // namespace at::native::qnnp_avgpool_helper
 
 namespace {
 [[maybe_unused]] std::vector<float> generate_requantization_scales(

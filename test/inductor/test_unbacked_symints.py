@@ -279,11 +279,26 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_masked_scatter(self, device):
+        def fn(value, mask):
+            u0 = mask.count_nonzero()
+            source = torch.ones(u0, dtype=torch.float32, device=device)
+            return torch.masked_scatter(value, mask, source)
+
+        value = make_tensor(10, 10, dtype=torch.float32, device=device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=device)
+        example_inputs = (value, mask)
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu(0)):
+    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu()):
         run_tests()

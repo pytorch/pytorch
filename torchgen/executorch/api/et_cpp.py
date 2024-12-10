@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen import local
 from torchgen.api.types import (
@@ -38,6 +38,10 @@ from torchgen.model import (
     Type,
 )
 from torchgen.utils import assert_never
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 """
@@ -242,7 +246,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "torch::executorch::nullopt",  # UGH this one is type directed
+    "None": "torch::execustd::nullopt",  # UGH this one is type directed
     "[]": "{}",
     "contiguous_format": "torch::executorch::MemoryFormat::Contiguous",
     "long": "torch::executorch::kLong",

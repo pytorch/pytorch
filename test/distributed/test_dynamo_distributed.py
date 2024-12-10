@@ -301,7 +301,10 @@ class FakeDDP(nn.Module):
             DDP._active_ddp_module = None
 
     def forward(self, *inputs, **kwargs):
-        with self._inside_ddp_forward():
+        if not DDP._active_ddp_module:
+            with self._inside_ddp_forward():
+                return self.module.forward(*inputs, **kwargs)
+        else:
             return self.module.forward(*inputs, **kwargs)
 
 
@@ -312,7 +315,7 @@ def run_hf_bert_ddp(self, model, inputs, backend):
     correct_loss.backward()
 
     reset_rng_state()
-    opt_model = torch._dynamo.optimize(backend)(model)
+    opt_model = torch.compile(model, backend=backend)
     opt_outputs = opt_model(**inputs)
     opt_loss = opt_outputs.loss
     opt_loss.backward()
@@ -349,7 +352,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = Model()
         model = FakeDDP(model)
 
-        opt_model = torch._dynamo.optimize("aot_eager")(model)
+        opt_model = torch.compile(model, backend="aot_eager")
         opt_model()
 
     @patch.object(config, "optimize_ddp", True)
@@ -371,6 +374,43 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch.compile(dynamic=True)(model)
         opt_model(torch.randn(20, 512))
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_ddp_optimizer_inductor_strides_dont_specialize(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc_0 = nn.Linear(768, 768)
+                self.fc_1 = nn.Linear(768, 768)
+
+            def forward(self, x):
+                x = self.fc_0(x)
+                x = self.fc_1(x)
+                return x
+
+        model = Model()
+        model = FakeDDP(model)
+
+        inp = torch.randn((16, 18, 768))
+        inp2 = torch.randn((16, 20, 768))
+
+        torch._dynamo.mark_dynamic(inp, 1)
+        torch._dynamo.mark_dynamic(inp2, 1)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        torch._dynamo.reset()
+        try:
+            DDP._active_ddp_module = model
+            opt_model = torch.compile(model)
+            self.assertEqual(0, len(torch._dynamo.utils.get_compilation_metrics()))
+            opt_model(inp)
+            compile_count_before = len(torch._dynamo.utils.get_compilation_metrics())
+            opt_model(inp2)
+            compile_count_after = len(torch._dynamo.utils.get_compilation_metrics())
+            # no recompiles
+            self.assertEqual(compile_count_before, compile_count_after)
+        finally:
+            DDP._active_ddp_module = None
 
     @config.patch(optimize_ddp=True, capture_scalar_outputs=True)
     def test_unbacked_symbol_splitting_direct(self):
@@ -517,7 +557,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertFalse(config.optimize_ddp)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             m = DDP(m, device_ids=[self.rank])
-            m = torch._dynamo.optimize("aot_eager")(m)
+            m = torch.compile(m, backend="aot_eager")
             outputs = m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
@@ -612,7 +652,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
-            fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            fsdp_m = torch.compile(fsdp_m, backend="aot_eager")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
@@ -625,7 +665,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 ),
                 use_orig_params=True,
             )
-            fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+            fsdp_m = torch.compile(fsdp_m, backend="aot_eager")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
@@ -683,7 +723,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
             fsdp_m = FSDP(m, use_orig_params=True)
-            fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
+            fsdp_m = torch.compile(fsdp_m, backend="inductor")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
@@ -696,7 +736,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 ),
                 use_orig_params=True,
             )
-            fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
+            fsdp_m = torch.compile(fsdp_m, backend="inductor")
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
@@ -713,7 +753,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = apply_fsdp_with_checkpointing(model, wrap_policy, is_inner)
             correct_outputs = model(inputs)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-            opt_model = torch._dynamo.optimize(cnt)(model)
+            opt_model = torch.compile(model, backend=cnt)
             outputs = opt_model(inputs)
             self.assertTrue(same(correct_outputs, outputs))
             # Each FSDP module is a separate graph
@@ -753,7 +793,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
                 reset_rng_state()
                 opt_model = apply_fsdp(model, wrap_policy)
-                opt_model = torch._dynamo.optimize("inductor")(opt_model)
+                opt_model = torch.compile(opt_model, backend="inductor")
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
@@ -802,7 +842,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
                 reset_rng_state()
                 opt_model = apply_fsdp_with_checkpointing(model, wrap_policy, check_fn)
-                opt_model = torch._dynamo.optimize("inductor")(opt_model)
+                opt_model = torch.compile(opt_model, backend="inductor")
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
@@ -1059,6 +1099,26 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertEqual(res[0], r)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_get_pg_attr(self):
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            pg = dist.distributed_c10d._get_default_group()
+
+            device = f"cuda:{self.rank}"
+
+            @torch.compile(fullgraph=True)
+            def f(x):
+                if dist.distributed_c10d._rank_not_in_group(pg):
+                    return x + 1
+                else:
+                    return x - 1
+
+            x = torch.ones(4, device=device)
+            self.assertEqual(f(x), x - 1)
+
+            pg = dist.distributed_c10d.GroupMember.NON_GROUP_MEMBER
+            self.assertEqual(f(x), x + 1)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config, "fx_graph_cache", False)
     @patch.object(torch._inductor.config, "fx_graph_remote_cache", False)
     def test_asymmetric_compilation(self):
@@ -1074,7 +1134,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             cnt = torch._dynamo.testing.CompileCounter()
             sleep_time = 5
 
-            @torch._dynamo.optimize(cnt)
+            @torch.compile(backend=cnt)
             def f(x):
                 if self.rank == 0:
                     comptime.sleep(sleep_time)
@@ -1195,7 +1255,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
-        ddp_m = torch._dynamo.optimize("aot_eager")(ddp_m)
+        ddp_m = torch.compile(ddp_m, backend="aot_eager")
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -1206,7 +1266,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
-        ddp_m = torch._dynamo.optimize("inductor")(ddp_m)
+        ddp_m = torch.compile(ddp_m, backend="inductor")
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -1225,7 +1285,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         check_splits_compiler = CheckSplitsCompiler()
 
-        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
+        @torch.compile(backend=check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -1274,9 +1334,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
                 compiler = get_compiler()
 
-                @torch._dynamo.optimize(
-                    compiler.compile_fn if compiler else "aot_eager"
-                )
+                @torch.compile(backend=compiler.compile_fn if compiler else "aot_eager")
                 def opt_fn(inputs):
                     return ddp_m(inputs)
 
@@ -1417,7 +1475,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -1469,7 +1527,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             m, inputs, correct_outputs = get_model()
             ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-            @torch._dynamo.optimize("inductor")
+            @torch.compile(backend="inductor")
             def opt_fn(inputs):
                 return ddp_m(inputs)
 
@@ -1532,7 +1590,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
         check_splits_compiler = CheckSplitsCompiler()
 
-        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
+        @torch.compile(backend=check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -1549,7 +1607,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch._dynamo.optimize("aot_eager")
+        @torch.compile(backend="aot_eager")
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -1570,7 +1628,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         check_splits_compiler = CheckSplitsCompiler()
 
-        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
+        @torch.compile(backend=check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(*inputs)
 
@@ -1584,7 +1642,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
             return (get_world_size,)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
         res = None
         try:
             res = opt_fn()[0]
@@ -1612,7 +1670,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             backend_compile_fn=check_splits_compiler.compile_fn,
         )
 
-        @torch._dynamo.optimize(ddp_optimizer.compile_fn)
+        @torch.compile(backend=ddp_optimizer.compile_fn)
         def opt_fn(inputs):
             return ddp_m(*inputs)
 
@@ -1667,7 +1725,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
         fsdp_m = FSDP(m, use_orig_params=False)
-        fsdp_m = torch._dynamo.optimize()(fsdp_m)
+        fsdp_m = torch.compile(fsdp_m)
         self.assertRaisesRegex(
             AssertionError,
             "Dynamo only supports FSDP with use_orig_params=True",
@@ -1728,7 +1786,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_m = FSDP(m, use_orig_params=True)
 
             with torch._dynamo.config.patch(skip_fsdp_guards=skip_guards):
-                opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
+                opt_m = torch.compile(fsdp_m, backend="aot_eager")
                 outputs = opt_m(inputs)
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
@@ -1791,7 +1849,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                         )
             return gm
 
-        opt_m = torch._dynamo.optimize(backend=debug_compiler)(fsdp_m)
+        opt_m = torch.compile(fsdp_m, backend=debug_compiler)
         outputs = opt_m(inputs)
 
         self.assertTrue(same(correct_outputs, outputs))
@@ -1820,7 +1878,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         model = DuplicateModule()
         fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
-        fsdp_model = torch._dynamo.optimize("aot_eager")(fsdp_model)
+        fsdp_model = torch.compile(fsdp_model, backend="aot_eager")
         inp = torch.randn((2, 3), device="cuda")
         local_out = model(inp)
         fsdp_out = fsdp_model(inp)
@@ -1864,7 +1922,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
         fsdp_model = FSDP(Model(), use_orig_params=True)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+        fsdp_model = torch.compile(fsdp_model, backend=cnt)
         inp = torch.randn((2, 3), device="cuda")
         for _ in range(15):
             fsdp_model(inp)
@@ -1907,7 +1965,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             model = ModuleWithStaticMethod(use_self)
             fsdp_model = FSDP(model, use_orig_params=True)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-            fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+            fsdp_model = torch.compile(fsdp_model, backend=cnt)
             test_outs.append(fsdp_model(x))
             # Check for no recompiles, which could happen if incorrectly
             # passing args to the staticmethod (e.g. doubly passing `self`)

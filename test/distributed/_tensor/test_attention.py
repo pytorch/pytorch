@@ -15,6 +15,7 @@ from torch.distributed._tensor.experimental._attention import (
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
+    set_rotate_method,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
@@ -48,6 +49,12 @@ if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
 
+rotater_enum_to_str = {
+    _RotateMethod.ALL_GATHER: "allgather",
+    _RotateMethod.ALL_TO_ALL: "alltoall",
+}  # mapping from _RotateMethod enum to string
+
+
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -76,7 +83,8 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
     ) -> None:
-        _cp_options.rotate_method = rotater
+        set_rotate_method(rotater_enum_to_str[rotater])
+        self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
@@ -88,10 +96,6 @@ class RingAttentionTest(DTensorTestBase):
         dtype = (
             torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
         )
-
-        if is_causal and compiled and self.world_size > 2:
-            # TODO: Fix this after we move `wait_tensor` to use `with_effect`.
-            return
 
         _cp_options.enable_load_balance = load_balance
 
@@ -124,9 +128,9 @@ class RingAttentionTest(DTensorTestBase):
             out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
             out.sum().backward()
 
-        cp_q = q.clone().detach()
-        cp_k = k.clone().detach()
-        cp_v = v.clone().detach()
+        cp_q = q.detach().clone()
+        cp_k = k.detach().clone()
+        cp_v = v.detach().clone()
         # Theoretically, context_parallel() should not be used to shard
         # parameters because when require_grad is True, resize_ is not
         # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
@@ -234,7 +238,8 @@ class RingAttentionTest(DTensorTestBase):
         self, is_causal: bool, rotater: _RotateMethod
     ) -> None:
         _cp_options.enable_load_balance = is_causal
-        _cp_options.rotate_method = rotater
+        set_rotate_method(rotater_enum_to_str[rotater])
+        self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
@@ -318,7 +323,8 @@ class RingAttentionTest(DTensorTestBase):
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     @parametrize("rotater", [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL])
     def test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
-        _cp_options.rotate_method = rotater
+        set_rotate_method(rotater_enum_to_str[rotater])
+        self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),

@@ -5,13 +5,12 @@ import unittest
 
 import torch
 from functorch.experimental.control_flow import map
-from torch._higher_order_ops import InvokeQuant
 from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_attention
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
-
+from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -71,7 +70,6 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
-    "invoke_quant_tracer",
     "call_torchbind",
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
@@ -122,21 +120,12 @@ def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs
     yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
 
 
+@mark_compile_region
+def fn_for_invoke_subgraph(x):
+    return torch.sin(x)
+
 def simple_invoke_subgraph(x):
-    def fn(x):
-        return (torch.sin(x),)
-
-    return torch._higher_order_ops.invoke_subgraph(fn, None, (x,))
-
-
-quant_tracer = InvokeQuant()
-
-
-def simple_invoke_quant(x):
-    def fn(x):
-        return (torch.sin(x),)
-
-    return quant_tracer(fn, (x,))
+    return fn_for_invoke_subgraph(x)
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
@@ -224,21 +213,6 @@ hop_db = [
         name="invoke_subgraph",
         variant_test_name="simple",
         op=simple_invoke_subgraph,
-        sample_inputs_func=sample_inputs_invoke_subgraph,
-        dtypes=all_types_and(torch.bool, torch.half),
-        supports_out=False,
-        check_batched_grad=False,
-        check_batched_gradgrad=False,
-        check_batched_forward_grad=False,
-        check_inplace_batched_forward_grad=False,
-        supports_autograd=True,
-        # "torch.compile with aot_autograd does not currently support double backward."
-        supports_gradgrad=False,
-    ),
-    OpInfo(
-        name="invoke_quant",
-        variant_test_name="simple",
-        op=simple_invoke_quant,
         sample_inputs_func=sample_inputs_invoke_subgraph,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,

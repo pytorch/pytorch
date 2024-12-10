@@ -103,7 +103,24 @@ complete snapshot of the memory allocator state via
 underlying allocation patterns produced by your code.
 
 To debug memory errors, set
-``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
+``PYTORCH_NO_HIP_MEMORY_CACHING=1`` in your environment to disable caching.
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` is also accepted for ease of porting.
+
+.. hipblas-workspaces:
+
+hipBLAS workspaces
+------------------
+
+For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
+handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
+avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
+``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
+HIP. The workspace size per allocation can be specified via the environment variable
+``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the environment
+variable ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` specifies a total size of ``2 * 4096 + 8 * 16
+KiB`` or 8 MIB. The default workspace size is 32 MiB; MI300 and newer defaults to 128 MiB. To force
+hipBLAS to avoid using workspaces, set ``HIPBLAS_WORKSPACE_CONFIG=:0:0``. For convenience,
+``CUBLAS_WORKSPACE_CONFIG`` is also accepted.
 
 .. _hipfft-plan-cache:
 

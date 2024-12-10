@@ -416,6 +416,9 @@ class TestUnflatten(TestCase):
         self.compare_outputs(orig_eager, unflattened, inputs)
         self.assertEqual(len(eb.graphs), 1)
 
+        unflattened.compile()
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
     def test_fx_trace(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -942,8 +945,8 @@ class TestUnflatten(TestCase):
         with _disable_interpreter():
             unflattened = unflatten(export_module)
 
-        self.assertEqual(unflattened._run_with_interpeter, False)
-        self.assertEqual(unflattened.foo._run_with_interpeter, False)
+        self.assertEqual(unflattened._run_with_interpreter, False)
+        self.assertEqual(unflattened.foo._run_with_interpreter, False)
 
         inputs = (torch.rand(2, 3),)
 

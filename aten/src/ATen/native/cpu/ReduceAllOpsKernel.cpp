@@ -220,8 +220,8 @@ static void aminmax_allreduce_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
-REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
+REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl)
+REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl)
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel)
 
 } // namespace at::native
