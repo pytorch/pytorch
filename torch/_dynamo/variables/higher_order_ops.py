@@ -62,6 +62,26 @@ def raise_hard_error_if_graph_break(reason):
     return deco
 
 
+# This function is a syntax sugar for creating a dummy new subtracer so that
+# newly added nodes are added to a separate subgraph in this subtracer instead of affecting
+# the main graph. This is useful for creating sample inputs for tracing the subgraph.
+# For example, in FlexAttentionHigherOrderVariable, we want to create several scalars
+# to trace the score_mod function but we don't want the operators that creates the scalar to
+# show up in the graph, we could this function to discard the graph changes.
+# Example usage:
+# with discard_graph_changes():
+#   sample_input= create_sample_inputs()
+# speculate_subgraph(tx, f, sample_inputs, {})
+@contextlib.contextmanager
+def discard_graph_changes(tx):
+    ctx = tx.output.subtracer("subgraph_wrapper", None)
+    try:
+        ctx.__enter__()
+        yield
+    finally:
+        ctx.__exit__(None, None, None)
+
+
 @contextlib.contextmanager
 def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
     from . import GradModeVariable
@@ -1189,13 +1209,13 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         assert isinstance(xs, torch._dynamo.variables.lists.BaseListVariable)
 
         # Trace the subgraph
-        # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
-        sub_args = [
-            _make_inlined(tx, first_slice_copy)(leaf, dim)
-            for leaf in itertools.chain(xs.items, xs.items)
-        ]
+        with discard_graph_changes(tx):
+            sub_args = [
+                _make_inlined(tx, first_slice_copy)(leaf, dim)
+                for leaf in itertools.chain(xs.items, xs.items)
+            ]
         (
             (combine_result, combine_treespec),
             combine_graph,
@@ -1313,20 +1333,19 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented("scan() operator requires init leaves.")
 
         # Trace the subgraph
-        # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
-        # TODO: Unify handling of sub_args across control flow ops, such as cond, while_loop, etc.
-        sub_args_init = [
-            ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
-        ]
-        # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
-        # the sub_args_inp shape will be (4, ).
-        sub_args_inp = [
-            _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
-        ]
-        sub_args_additional_inputs = [
-            t.call_method(tx, "clone", args=(), kwargs={})
-            for t in additional_inputs.items
-        ]
+        with discard_graph_changes(tx):
+            sub_args_init = [
+                ini.call_method(tx, "clone", args=(), kwargs={}) for ini in init.items
+            ]
+            # The sub_args_inp is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
+            # the sub_args_inp shape will be (4, ).
+            sub_args_inp = [
+                _make_inlined(tx, first_slice_copy)(inp, dim) for inp in xs.items
+            ]
+            sub_args_additional_inputs = [
+                t.call_method(tx, "clone", args=(), kwargs={})
+                for t in additional_inputs.items
+            ]
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
             (combine_result, combine_treespec),
@@ -1460,9 +1479,10 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # To get the example output from map() we will need to provide at least one sample to
         # the loop body. In our case we will always use xs[0], and our map() won't support zero
         # sized tensor during tracing.
-        first_dim = wrap_fx_proxy_cls(
-            target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
-        )
+        with discard_graph_changes(tx):
+            first_dim = wrap_fx_proxy_cls(
+                target_cls=TensorVariable, tx=tx, proxy=args[1].as_proxy()[0]
+            )
 
         # TODO: Support kwargs
         (
@@ -2210,19 +2230,20 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 },
             )
 
-        bhmn = [create_scalar() for _ in range(4)]
-        if fn_name == "score_mod":
-            scores_require_grad: bool = query.requires_grad
-            score = query.call_method(
-                tx,
-                "new_empty",
-                (VariableTracker.build(tx, []),),
-                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
-            )
-            new_args = [score, *bhmn]
-        else:
-            assert fn_name == "mask_fn", "Illegal function name: " + fn_name
-            new_args = [*bhmn]
+        with discard_graph_changes(tx):
+            bhmn = [create_scalar() for _ in range(4)]
+            if fn_name == "score_mod":
+                scores_require_grad: bool = query.requires_grad
+                score = query.call_method(
+                    tx,
+                    "new_empty",
+                    (VariableTracker.build(tx, []),),
+                    {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
+                )
+                new_args = [score, *bhmn]
+            else:
+                assert fn_name == "mask_fn", "Illegal function name: " + fn_name
+                new_args = [*bhmn]
 
         with TransformGetItemToIndex():
             (

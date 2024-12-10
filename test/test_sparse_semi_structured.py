@@ -21,7 +21,7 @@ from torch.sparse._semi_structured_conversions import (
 )
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, PLATFORM_SUPPORTS_FP8, xfailIfSM89
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1047,6 +1047,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             self.skipTest('cuSPARSELt not enabled')
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @xfailIfSM89
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602:
@@ -1066,6 +1067,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             dense_result = torch.mm(A_fp8_sparse, B_fp8)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @xfailIfSM89
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
         x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
@@ -1082,6 +1084,7 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch.testing.assert_close(out_fp32, out_fp32_sparse, rtol=1e-1, atol=1e-1)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+ and sm_89 and MI300+ devices")
+    @xfailIfSM89
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
     @parametrize("dense_input_shape", [(256, 128)])
     def test_sparse_semi_structured_scaled_mm(
@@ -1132,20 +1135,26 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
-    def test_cslt_sparse_mm_alpha_compile_autotune(self, device):
-        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).cuda()
-        B = torch.ones((128, 256), device=device).to(torch.int8).t()
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
+    def test_cslt_sparse_mm_alpha_compile_autotune(self, device, out_dtype):
+        A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(torch.int8).to(device)
+        B = torch.ones((128, 256), device=device, dtype=torch.int8).t()
         alpha = torch.Tensor([2**(-i) for i in range(128)]).cuda()
 
         A_compressed = torch._cslt_compress(A)
-        compiled_sparse_mm = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")
-        sparse_result = compiled_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=torch.int32)
 
-        alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
-        dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
-        dense_result = dense_result.to(torch.int32)
+        cslt_sparse_mm_c = torch.compile(torch._cslt_sparse_mm, mode="max-autotune")
+        sparse_result = cslt_sparse_mm_c(A_compressed, B, alpha=alpha, out_dtype=out_dtype)
 
-        torch.testing.assert_close(sparse_result.cpu(), dense_result, rtol=1e-3, atol=1e-3)
+        # disable this otherwise inductor will attempt to reorder strides and pass a contiguous B
+        @torch.compiler.disable
+        def get_dense_result():
+            alpha_scaled = torch.stack([alpha] * 128).t().cpu().float()
+            dense_result = alpha_scaled * torch.mm(A.to(torch.int64).cpu(), B.to(torch.int64).cpu())
+            dense_result = dense_result.to(out_dtype)
+            return dense_result
+
+        torch.testing.assert_close(sparse_result.cpu(), get_dense_result(), rtol=1e-3, atol=1e-3)
 
     @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.int32])
     def test_cslt_sparse_mm_alpha_mixed_dtype(self, out_dtype, device):
