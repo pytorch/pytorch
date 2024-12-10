@@ -9,7 +9,7 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.8.2
+  git clone https://github.com/mozilla/sccache -b v0.9.0
   cd sccache
   echo "Building sccache"
   cargo build --release
@@ -47,9 +47,9 @@ function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
   if [ $1 == "gcc" ]; then
-  # Do not call sccache recursively when dumping preprocessor argument
-  # For some reason it's very important for the first cached nvcc invocation
-    cat > "/opt/cache/bin/$1" <<EOF
+    # Do not call sccache recursively when dumping preprocessor argument
+    # For some reason it's very important for the first cached nvcc invocation
+    cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
 if [ "\$1" = "-E" ] || [ "\$2" = "-E" ]; then
@@ -61,7 +61,7 @@ else
 fi
 EOF
   else
-    cat > "/opt/cache/bin/$1" <<EOF
+    cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
@@ -111,7 +111,7 @@ if [ -n "$ROCM_VERSION" ]; then
     TOPDIR=$(dirname $OLDCOMP)
     WRAPPED="$TOPDIR/original/$COMPNAME"
     mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" > "$OLDCOMP"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
     chmod a+x "$OLDCOMP"
   }
 
