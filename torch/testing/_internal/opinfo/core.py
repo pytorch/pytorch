@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
+    USE_PYTEST,
 )
 from torch.testing._internal.opinfo import utils
 from torchgen.utils import dataclass_repr
@@ -1262,6 +1263,16 @@ def test_foo(self, device, dtype, op):
         if not use_subtests:
             # use the default callback that returns the sample without a subtest context
             return None
+
+        if USE_PYTEST:
+            try:
+                import pytest_subtests  # noqa: F401
+            except ModuleNotFoundError:
+                raise RuntimeError(
+                    "Encountered an OpInfo test with use_subtests=True and pytest-subtests is "
+                    "not installed. The feature will not work correctly within pytest without "
+                    "this package; please install it."
+                ) from None
 
         def _f(
             sample,
