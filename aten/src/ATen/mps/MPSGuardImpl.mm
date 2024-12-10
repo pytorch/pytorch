@@ -50,6 +50,11 @@ bool MPSGuardImpl::queryEvent(void* event) const {
   return at::mps::getMPSEventPool()->queryEvent(mps_event_id);
 }
 
+void MPSGuardImpl::synchronizeEvent(void* event) const {
+  auto mps_event_id = (__bridge id_t)(intptr_t)(event);
+  return at::mps::getMPSEventPool()->synchronizeEvent(mps_event_id);
+}
+
 void MPSGuardImpl::synchronizeDevice(const DeviceIndex device_index) const {
   at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
