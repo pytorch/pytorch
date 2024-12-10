@@ -1,3 +1,5 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import datetime
 import itertools
 import random
@@ -216,7 +218,6 @@ def group_gemm_fn(
         all_configs = gen_configs()
         # Use a random order to increase chance of finding a good config early.
         random.shuffle(all_configs)
-        # with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
         for i, config in enumerate(all_configs):
             current_timestamp = datetime.datetime.now()
             print_prefix = current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -227,19 +228,6 @@ def group_gemm_fn(
                 [a_values, a_offsets, max_M, tensor_b, c_values, config],
                 best_ms,
             )
-            # if best_ms is None:
-            #     ms = do_bench(group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values, config], best_ms)
-            # else:
-            #     assert best_ms is not None
-            #     ms_future = executor.submit(do_bench, group_gemm_fn_kernel, [a_values, a_offsets, max_M, tensor_b, c_values, config], best_ms)
-            #     try:
-            #         timeout = ((100 * best_ms) / 1000)
-            #         print(print_prefix, "timeout: ", timeout)
-            #         ms = ms_future.result(timeout=timeout)
-            #     except concurrent.futures.TimeoutError:
-            #         print(print_prefix, f"Timeout with config number {i} out of {len(all_configs)}: {config}")
-            #         ms_future.cancel()
-            #         continue
             print(
                 f"     ms: {ms} with config number {i} out of {len(all_configs)}: {config}"
             )
