@@ -42,17 +42,17 @@ if __name__ == "__main__":
         print(filename.name)
         actual = data.get("concurrency", {})
         print(actual)
-        #if filename.name == "create_release.yml":
-        #    if not actual.get("group", "").startswith(EXPECTED_GROUP_PREFIX):
-        #        print(
-        #            f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
-        #            file=sys.stderr,
-        #        )
-        #        print(
-        #            f"concurrency group should start with {EXPECTED_GROUP_PREFIX} but found {actual.get('group', None)}",
-        #            file=sys.stderr,
-        #        )
-        #        errors_found = True
+        if filename.name == "create_release.yml":
+            if not actual.get("group", "").startswith(EXPECTED_GROUP_PREFIX):
+                print(
+                    f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                    file=sys.stderr,
+                )
+                print(
+                    f"concurrency group should start with {EXPECTED_GROUP_PREFIX} but found {actual.get('group', None)}",
+                    file=sys.stderr,
+                )
+                errors_found = True
         #elif not actual.get("group", "").startswith(EXPECTED_GROUP):
         #    print(
         #        f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
