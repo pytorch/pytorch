@@ -576,13 +576,13 @@ class BaseSchedulerNode:
         self, include_reads: bool, include_writes: bool
     ) -> int:
         return sum(
-            self.get_read_write_buffers_sizes_mapping(
+            self.get_read_write_buffer_accesses(
                 include_reads=include_reads, include_writes=include_writes
             ).values(),
             start=0,
         )
 
-    def get_read_write_buffers_sizes_mapping(
+    def get_read_write_buffer_accesses(
         self, include_reads: bool, include_writes: bool
     ) -> Dict[str, int]:
         """
@@ -3247,7 +3247,7 @@ class Scheduler:
             unaligned_reads = 0
             unaligned_writes = 0
 
-            buf_accesses = node1.get_read_write_buffers_sizes_mapping(
+            buf_accesses = node1.get_read_write_buffer_accesses(
                 include_reads=True, include_writes=True
             )
             for buf_name, mem in buf_accesses.items():
