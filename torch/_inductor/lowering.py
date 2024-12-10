@@ -75,6 +75,13 @@ from .utils import (
 from .virtualized import ops, V
 
 
+# TODO(jansel): we should implement decomps or lowerings for these
+# https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+    "aten::index_add",
+}
+
 log = logging.getLogger(__name__)
 lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
@@ -929,7 +936,10 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (d in dims and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1))):
+        if not (
+            d in dims
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+        ):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -1548,6 +1558,9 @@ def cat(inputs, dim=0):
 
         return False
 
+    if config.force_pointwise_cat:
+        return pointwise_cat(inputs, dim)
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
     if cpu_device:
@@ -1863,8 +1876,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1874,6 +1889,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -2319,13 +2335,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
-# TODO(jansel): we should implement decomps or lowerings for these
-# https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-}
-
-
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
@@ -2365,23 +2374,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def is_aligned_realized_tensor(x):
-            aligned_strides = all(
-                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
-                for i in range(len(x.get_stride()) - 1)
-            )
-            # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-            )
-            return aligned_last_dim and aligned_strides
-
-        if (
-            isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
-        ):
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return V.graph.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride
             )
@@ -3027,7 +3020,7 @@ def new_constant(fill_value):
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        return _full(fill_value, decode_device(device), dtype, size)
 
     return _new_constant
 
@@ -3039,7 +3032,12 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        None,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
@@ -3053,6 +3051,7 @@ def empty_strided(
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
+    device = decode_device(device)
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
     pointwise.realize()
     buffer = pointwise.data.data
@@ -3083,7 +3082,12 @@ def new_empty_strided(
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        stride,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
