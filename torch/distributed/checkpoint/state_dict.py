@@ -571,9 +571,11 @@ def _load_model_state_dict(
             )
         elif info.full_state_dict:
             _distribute_state_dict(state_dict, local_state_dict, device=device)
+        if info.cpu_offload:
+            for fqn in local_state_dict.keys():
+                local_state_dict[fqn] = local_state_dict[fqn].to(torch.device("cpu"))
         for fqn, local_state in local_state_dict.items():
-            state_dict[fqn] = local_state
-
+            state_dict[fqn] = nn.Parameter(local_state)
     with info.fsdp_context():
         return cast(
             _IncompatibleKeys,
