@@ -124,6 +124,7 @@ MetaType = Union[
     FakeTensor, int, torch.SymInt, float, torch.SymFloat, bool, torch.SymBool, ep.CustomObjArgument
 ]
 
+DEFAULT_PICKLE_PROTOCOL = 2
 
 ST_DELIMITER = ";"
 
@@ -334,7 +335,7 @@ def _reconstruct_fake_tensor(
     return fake_tensor
 
 
-def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
+def serialize_torch_artifact(artifact: Optional[Any], pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL) -> bytes:
     if artifact is None:
         return b""
 
@@ -350,7 +351,7 @@ def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
         # on the designated device.
         # For now, we simply move the tensor to cpu before saving.
         # TODO: this should be fixed by deserialization instead.
-        torch.save(artifact, buffer)
+        torch.save(artifact, buffer, pickle_protocol=pickle_protocol)
         return buffer.getvalue()
     finally:
         del copyreg.dispatch_table[FakeTensor]
@@ -1445,12 +1446,14 @@ class GraphModuleSerializer(metaclass=Final):
 
 @final
 class ExportedProgramSerializer(metaclass=Final):
-    def __init__(self, opset_version: Optional[Dict[str, int]] = None):
+    def __init__(self, opset_version: Optional[Dict[str, int]] = None, pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
             self.opset_version.update(opset_version)
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
+
+        self.pickle_protocol = pickle_protocol
 
     def serialize(self, exported_program: ep.ExportedProgram) -> _SerializedProgram:
         """
@@ -1498,9 +1501,9 @@ class ExportedProgramSerializer(metaclass=Final):
         )
         return _SerializedProgram(
             serialized_ep,
-            serialize_torch_artifact(new_state_dict),
-            serialize_torch_artifact(constants),
-            serialize_torch_artifact(exported_program.example_inputs),
+            serialize_torch_artifact(new_state_dict, self.pickle_protocol),
+            serialize_torch_artifact(constants, self.pickle_protocol),
+            serialize_torch_artifact(exported_program.example_inputs, self.pickle_protocol),
         )
 
 
@@ -2513,8 +2516,9 @@ def _dataclass_to_dict(obj):
 def serialize(
     exported_program: ep.ExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> SerializedArtifact:
-    serialized_program = ExportedProgramSerializer(opset_version).serialize(
+    serialized_program = ExportedProgramSerializer(opset_version, pickle_protocol).serialize(
         exported_program
     )
     assert isinstance(serialized_program.exported_program, ExportedProgram)
