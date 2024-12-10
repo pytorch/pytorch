@@ -79,10 +79,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   TORCH_CHECK(weight_zero_point.isIntegral(false));
 
   // Calculate statistics for quantization of the input Tensor
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  float x_min = std::numeric_limits<float>::quiet_NaN();
+  float x_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
@@ -237,10 +235,8 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   const Tensor weight_contig = weight.contiguous();
 
   // Calculate weight statistics
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float w_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float w_max;
+  float w_min = std::numeric_limits<float>::quiet_NaN();
+  float w_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
       /*m=*/weight_contig.data_ptr<float>(),
       /*min=*/&w_min,
