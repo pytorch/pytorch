@@ -10,14 +10,13 @@ from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
 from .ir import MultiOutputLayout, NoneLayout
-from .scheduler import BaseSchedulerNode
 from .utils import get_dtype_size
 from .virtualized import V
 
 
 if TYPE_CHECKING:
     from .dependencies import Dep
-    from .scheduler import SchedulerBuffer
+    from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
 
 torch_log = logging.getLogger(__name__)
@@ -378,7 +377,7 @@ def topological_sort_lpmf(
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled
-    nodes_to_schedule = OrderedSet[BaseSchedulerNode]()
+    nodes_to_schedule: OrderedSet[BaseSchedulerNode] = OrderedSet()
     for node in nodes:
         node_info[node] = {
             "indegree": len(node.mpi_node.pred_nodes),
@@ -546,7 +545,7 @@ def topological_sort_dfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
     compute the total memory of all buffers it reads from or writes to, and we visit
     the nodes in ascending order of this priority.
     """
-    seen = OrderedSet[BaseSchedulerNode]()
+    seen: OrderedSet[BaseSchedulerNode] = OrderedSet()
     name_to_node: Dict[str, BaseSchedulerNode] = dict()
     result: List[BaseSchedulerNode] = []
     size_with_reads: Dict[BaseSchedulerNode, int] = dict()
