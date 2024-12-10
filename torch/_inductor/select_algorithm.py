@@ -1457,11 +1457,20 @@ class AlgorithmSelectorCache(PersistentCache):
                     choice.precompile()
                     return time.time() - start_time
 
-            executor = ThreadPoolExecutor(max_workers=num_workers)
 
+            async_compile = torch._inductor.async_compile.AsyncCompile()
+            executor = async_compile.pool()
             futures = {}
+
             for c in choices:
                 if hasattr(c, "precompile"):
+                    if isinstance(c, TritonTemplateCaller) and async_compile._use_process_pool():
+                        with open(c.bmreq.module_path, 'r') as file:
+                            source_code = file.read()
+                        out = async_compile.triton(kernel_name=c.bmreq.kernel_name, source_code=source_code)
+                        futures[out.future] = c
+                        continue
+
                     future = executor.submit(precompile_with_captured_stdout, c)
                     futures[future] = c
 
