@@ -106,6 +106,9 @@ void* CUDAPluggableAllocator::malloc(
   void* r = alloc_fn_(size, device, stream);
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
+    TORCH_CHECK(
+        !allocation_metadata_.count(r),
+        "Trying to alloc a pointer already allocated here");
     allocation_metadata_.emplace(r, _AllocationMetadata(size, device, stream));
   }
   return r;
