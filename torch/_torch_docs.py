@@ -13211,7 +13211,8 @@ Stream(device, *, priority) -> Stream
 
 An in-order queue of executing the respective tasks asynchronously in first in first out (FIFO) order.
 It can control or synchronize the execution of other Stream or block the current host thread to ensure
-the correct task sequencing.
+the correct task sequencing. It supports with statement as a context manager to ensure the operators
+within the with block are running on the corresponding stream.
 
 See in-depth description of the CUDA behavior at :ref:`cuda-semantics` for details
 on the exact semantic that applies to all devices.
@@ -13228,7 +13229,10 @@ Returns:
 Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
-    >>> s_cuda = torch.Stream(device='cuda')
+    >>> with torch.Stream(device='cuda') as s_cuda:
+    >>>     a = torch.randn(10, 5, device='cuda')
+    >>>     b = torch.randn(5, 10, device='cuda')
+    >>>     c = torch.mm(a, b)
 """,
 )
 
