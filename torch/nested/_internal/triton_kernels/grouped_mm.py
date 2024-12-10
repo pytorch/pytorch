@@ -283,8 +283,6 @@ def grouped_mm(tensor_a, tensor_b):
 
     max_M = tensor_a._max_seqlen
 
-    c_values = group_gemm_fn(
-        a_values, a_offsets, max_M, tensor_b
-    )
+    c_values = group_gemm_fn(a_values, a_offsets, max_M, tensor_b)
 
     return torch.nested.nested_tensor_from_jagged(c_values, offsets=a_offsets)
