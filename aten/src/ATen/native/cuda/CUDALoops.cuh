@@ -66,10 +66,8 @@ template <int io_sizes>
 constexpr auto elems_per_thread(){
   if constexpr (io_sizes == 1) {
     return 16;
-  } else if constexpr (io_sizes < 4) {
-    return 8;
   } else {
-    return 4;
+    return 8;
   }
 }
 
@@ -151,9 +149,17 @@ static inline void launch_vectorized_kernel(
   constexpr auto io_size = calc_io_size<func_t>();
   int64_t grid = (N + io_block_work_size<io_size>() - 1) / io_block_work_size<io_size>();
   auto stream = at::cuda::getCurrentCUDAStream();
-  int vec_size = memory::can_vectorize_up_to<func_t>(data);
+  using cpp_type = typename function_traits<func_t>::result_type;
+  const uint16_t max_vec_size = memory::can_vectorize_up_to<func_t>(data, /*use_vec8 = */true);
+  uint16_t vec_size = 16 / static_cast<uint16_t>(sizeof(cpp_type));
+  vec_size = std::min(vec_size, max_vec_size);
 
   switch (vec_size) {
+    case 8:
+      vectorized_elementwise_kernel<8, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
     case 4:
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
