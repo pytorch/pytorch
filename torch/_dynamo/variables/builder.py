@@ -985,12 +985,10 @@ class VariableBuilder:
                 example_strong_ref=new_symint,
             )
             # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
             sym_expr = new_symint.node.expr
             assert isinstance(
                 sym_expr, sympy.Symbol
             ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
