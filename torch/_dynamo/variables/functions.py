@@ -366,6 +366,8 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
 
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
+        torch._C._dynamo.eval_frame.skip_code(code)
+
         # calling a generator returns a generator object
         return GeneratorObjectVariable(
             code, f_globals, inline_tracer, source=self.source
@@ -477,10 +479,10 @@ class GeneratorObjectVariable(VariableTracker):
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
-            if "graph_break" not in e.msg:
-                raise e
+            # if "graph_break" not in e.msg:
+            #     raise e
 
-            # torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
 
     def has_unpack_var_sequence(self, tx):

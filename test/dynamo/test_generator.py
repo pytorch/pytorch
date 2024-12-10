@@ -13,9 +13,7 @@ from torch.testing._internal.common_utils import (
 
 
 class GeneratorTests(torch._dynamo.test_case.TestCase):
-    expected_failures = [
-        "test_infinite_generator_3",
-    ]
+    expected_failures = []
 
     def run(self, result=None):
         # Override the run method to inject the "expectingFailure" marker
@@ -281,6 +279,21 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
+            return zip(range(3), whoo(t))
+
+        t = torch.randn(3)
+        y = fn(t)
+        expected = list(zip(range(3), whoo(t)))
+        self.assertEqual(expected, list(y))
+
+    def test_list_zip_generator(self):
+        def whoo(t):
+            yield t + 1
+            yield t + 2
+            yield t + 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
             return list(zip(range(3), whoo(t)))
 
         t = torch.randn(3)
@@ -532,24 +545,28 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
 
-# class GeneratorTestsOldBehavior(GeneratorTests):
-#     expected_failures = [
-#         "test_infinite_generator",
-#         "test_infinite_generator_2",
-#         "test_infinite_generator_3",
-#         "test_iter",
-#         "test_graph_break_in_generator",
-#         "test_zip_infinite_generator",
-#         "test_generator_with_side_effects",
-#     ]
+class GeneratorTestsOldBehavior(GeneratorTests):
+    expected_failures = [
+        "test_generator_as_argument",
+        "test_generator_as_argument_2",
+        "test_infinite_generator",
+        "test_infinite_generator_2",
+        "test_infinite_generator_3",
+        "test_iter",
+        "test_graph_break_in_generator",
+        "test_zip_infinite_generator",
+        "test_generator_with_side_effects",
+        "test_generator_with_side_effects_graph_break",
+        "test_send",
+    ]
 
-#     def setUp(self):
-#         super().setUp()
-#         torch._dynamo.config.enable_yield_on_generator = False
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.config.enable_yield_on_generator = False
 
-#     def tearDown(self):
-#         super().tearDown()
-#         torch._dynamo.config.enable_yield_on_generator = True
+    def tearDown(self):
+        super().tearDown()
+        torch._dynamo.config.enable_yield_on_generator = True
 
 
 instantiate_parametrized_tests(GeneratorTests)
