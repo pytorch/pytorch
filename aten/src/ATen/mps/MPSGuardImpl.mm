@@ -10,8 +10,9 @@ void MPSGuardImpl::createEvent(mpsEvent_t* event, const EventFlag flag) const {}
 void MPSGuardImpl::destroyEvent(void* event, const DeviceIndex device_index) const noexcept {
   if (!event)
     return;
-  auto mps_event = static_cast<mpsEvent_t>(event);
-  mps_event->~MPSEvent();
+
+  auto mps_event_id = (__bridge id_t)(event);
+  at::mps::getMPSEventPool()->releaseEvent(mps_event_id);
 }
 
 void MPSGuardImpl::record(void** event,
@@ -38,15 +39,15 @@ void MPSGuardImpl::record(void** event,
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
-  auto mps_event = static_cast<mpsEvent_t>(event);
+  auto mps_event_id = (__bridge id_t)(event);
   MPSStream mps_stream{stream};
 
-  mps_event->wait(true, false);
+  at::mps::getMPSEventPool()->waitForEvent(mps_event_id, false);
 }
 
 bool MPSGuardImpl::queryEvent(void* event) const {
-  auto mps_event = static_cast<mpsEvent_t>(event);
-  return mps_event->query();
+  auto mps_event_id = (__bridge id_t)(event);
+  return at::mps::getMPSEventPool()->queryEvent(mps_event_id);
 }
 
 void MPSGuardImpl::synchronizeDevice(const DeviceIndex device_index) const {
