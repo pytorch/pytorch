@@ -241,7 +241,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "slice",
     "constant_pad_nd",
     "unbind",
-    "unbind_copy",
     "split",
     "split_with_sizes",
     "unsafe_split",

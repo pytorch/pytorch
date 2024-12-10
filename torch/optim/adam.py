@@ -22,6 +22,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     DeviceDict,
+    DeviceDtypeDict,
     Optimizer,
     ParamsT,
 )
@@ -35,7 +36,7 @@ class Adam(Optimizer):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: Tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         amsgrad: bool = False,
@@ -63,6 +64,25 @@ class Adam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+        if not (
+            (isinstance(betas[0], float) and isinstance(betas[1], float))
+            or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
+        ):
+            raise ValueError("betas must be either both floats or both Tensors")
+        if isinstance(betas[0], Tensor):
+            if not capturable and foreach:
+                raise ValueError(
+                    "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
+                )
+            if betas[0].numel() != 1:
+                raise ValueError("Tensor betas[0] must be 1-element")
+        if isinstance(betas[1], Tensor):
+            if not capturable and foreach:
+                raise ValueError(
+                    "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
+                )
+            if betas[1].numel() != 1:
+                raise ValueError("Tensor betas[1] must be 1-element")
 
         defaults = dict(
             lr=lr,
@@ -273,7 +293,7 @@ Adam.__doc__ = (
             &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
             &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
             &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
-            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
+            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_{t-1}}^{max},
                 \widehat{v_t})                                                                   \\
             &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
@@ -329,8 +349,8 @@ def _single_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
@@ -345,6 +365,17 @@ def _single_tensor_adam(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
+        assert isinstance(beta1, float)
+        assert isinstance(beta2, float)
+
+    # We only shuffle around the beta when it is a Tensor, otherwise, we prefer
+    # treating it as a scalar.
+    # Note: ensure type declaration is under conditional check for isinstance
+    # or else torchscript will get cranky about the DeviceDict type.
+    if isinstance(beta1, Tensor):
+        beta1_dict: Optional[DeviceDtypeDict] = {(beta1.device, beta1.dtype): beta1}
+    else:
+        beta1_dict = None
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -353,7 +384,7 @@ def _single_tensor_adam(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -374,8 +405,23 @@ def _single_tensor_adam(
                 max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
             param = torch.view_as_real(param)
 
+        device = param.device
+
+        if beta1_dict is not None:
+            dtype = param.dtype  # type: ignore[union-attr]
+
+            # cast to workaround https://github.com/pytorch/pytorch/issues/140601
+            key = (device, dtype)
+            if key not in beta1_dict:
+                beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
+
+            device_beta1: Union[float, Tensor] = beta1_dict[key]
+        else:
+            device_beta1 = beta1
+
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - beta1)
+        exp_avg.lerp_(grad, 1 - device_beta1)
+
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -448,8 +494,8 @@ def _multi_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,
@@ -465,8 +511,24 @@ def _multi_tensor_adam(
             "lr as a Tensor is not supported for capturable=False and foreach=True"
         )
 
+    if isinstance(beta1, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta1 as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if beta1.numel() != 1:
+            raise ValueError("Tensor beta1 must be 1-element")
+
+    if isinstance(beta2, Tensor):
+        if not capturable:
+            raise ValueError(
+                "beta2 as a Tensor is not supported for capturable=False and foreach=True"
+            )
+        if beta2.numel() != 1:
+            raise ValueError("Tensor beta2 must be 1-element")
+
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -483,6 +545,15 @@ def _multi_tensor_adam(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
+
+    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
+    # treating it as a scalar.
+    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
+
     for (
         device_params_,
         device_grads_,
@@ -496,6 +567,12 @@ def _multi_tensor_adam(
         device_exp_avgs = cast(List[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(List[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(List[Tensor], device_state_steps_)
+
+        device = device_params[0].device
+        if beta1_dict is not None and device not in beta1_dict:
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
+
+        device_beta1 = beta1_dict[device] if beta1_dict else beta1
 
         # Handle complex parameters
         if has_complex:
@@ -520,7 +597,7 @@ def _multi_tensor_adam(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -537,23 +614,38 @@ def _multi_tensor_adam(
                 )
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
+        # Use device beta1 if beta1 is a tensor to ensure all
+        # tensors are on the same device
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
+
+        # Due to the strictness of the _foreach_addcmul API, we can't have a single
+        # tensor scalar as the scalar arg (only python number is supported there)
+        # as a result, separate out the value mul
+        # Filed https://github.com/pytorch/pytorch/issues/139795
+        if isinstance(beta2, torch.Tensor):
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
+            value = 1.0
+        else:
+            scaled_device_grads = device_grads  # type: ignore[assignment]
+            value = 1 - beta2
+
         torch._foreach_addcmul_(
-            device_exp_avg_sqs, device_grads, device_grads, 1 - beta2
+            device_exp_avg_sqs, scaled_device_grads, device_grads, value
         )
 
-        # Delete the local intermediate since it won't be used anymore to save on peak memory
+        # Delete the local intermediate(s) since they won't be used anymore to save on peak memory
         del device_grads
+        del scaled_device_grads
 
         bias_correction1: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2: Union[Tuple[Tensor, ...], List[Tensor]]
         bias_correction2_sqrt: Union[Tuple[Tensor, ...], List[Tensor]]
 
         if capturable:
-            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
-            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)  # type: ignore[arg-type]
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
@@ -762,7 +854,7 @@ def adam(
 
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

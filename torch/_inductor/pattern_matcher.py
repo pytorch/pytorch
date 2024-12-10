@@ -78,7 +78,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -953,9 +952,10 @@ class PatternPrettyPrinter:
         assert hasattr(obj, "pretty_print")
         out_str = obj.pretty_print(pp=pp)
 
-        output = []
-        for key in pp.memoized_objs_names:
-            output.append(f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}")
+        output = [
+            f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}"
+            for key in pp.memoized_objs_names
+        ]
 
         output.append(f"{output_name} = {out_str}")
 
@@ -1362,9 +1362,7 @@ def register_replacement(
             return False
 
     def normalize_args(**kwargs: Any) -> List[Any]:
-        args = []
-        for name in argnames_static:
-            args.append(kwargs.pop(name))
+        args = [kwargs.pop(name) for name in argnames_static]
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
                 break
@@ -1693,12 +1691,12 @@ def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
 
 
 def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
-    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta  # type: ignore[arg-type]
 
 
 def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
-    for nd in graph.nodes:
+    for nd in graph.nodes:  # type: ignore[union-attr]
         if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
@@ -1718,7 +1716,7 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: torch.fx.GraphModule) -> int:
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -1746,9 +1744,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
@@ -1805,10 +1802,15 @@ def fx_to_pattern(
     inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
     assert len(inv_scalar_workaround) == len(scalar_workaround)
 
-    def process_arg(x: T) -> Union[T, KeywordArg, Ignored]:
+    def process_arg(
+        x: T, ignore_types_override: Optional[Sequence[Type[Any]]] = None
+    ) -> Union[T, KeywordArg, Ignored]:
+        current_ignore_types = (
+            ignore_types_override if ignore_types_override is not None else ignore_types
+        )
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
             return KeywordArg(inv_scalar_workaround[x])
-        if type(x) in ignore_types:
+        if type(x) in current_ignore_types:
             return Ignored()
         if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
@@ -1841,11 +1843,25 @@ def fx_to_pattern(
         def call_function(
             self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> PatternExpr:
-            args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            process_arg_fn = process_arg
+            # Indexing is critical for matching getitem nodes, so we can't ignore int args here
+            if target == operator.getitem:
+
+                def process_arg_fn_impl(
+                    x: T,
+                    ignore_types_override: Optional[Sequence[Type[Any]]] = tuple(
+                        t for t in ignore_types if t is not int
+                    ),
+                ) -> Union[T, KeywordArg, Ignored]:
+                    return process_arg(x, ignore_types_override)
+
+                process_arg_fn = process_arg_fn_impl
+
+            args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
-                args = [process_arg(a) for a in args]
-                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
+                args = [process_arg_fn(a) for a in args]
+                kwargs = {k: process_arg_fn(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n: torch.fx.Node) -> Any:

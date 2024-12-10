@@ -165,7 +165,7 @@ class CodeGen::CallArg {
     memcpy(buffer_, &v, sizeof(Type)); \
     data_ = (void*)buffer_;            \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_TYPE_CTOR)
 #undef ARG_TYPE_CTOR
 
   void* data() const {
@@ -199,7 +199,7 @@ class CodeGen::CallArg {
     TORCH_INTERNAL_ASSERT(data_ == (void*)buffer_); \
     return (Type*)data_;                            \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, ARG_PTR_DEFINE)
 #undef ARG_PTR_DEFINE
 
  private:

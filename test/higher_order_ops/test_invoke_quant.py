@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 
 import contextlib
+import dataclasses
 import logging
 
 import torch
@@ -9,9 +10,40 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
-from torch._higher_order_ops import InvokeQuant
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
+
+class InvokeQuantTest(torch._higher_order_ops.PrimHOPBase):
+    def __init__(self):
+        super().__init__("invoke_quant_test")
+
+    def __call__(self, subgraph, operands, *, scheme=None, quant_options=None):
+        return super().__call__(
+            subgraph, operands, scheme=scheme, quant_options=quant_options
+        )
+
+
+invoke_quant_test = InvokeQuantTest()
+
+
+@dataclasses.dataclass(frozen=True)
+class InvokeQuant:
+    """
+    TODO - fill in next pr
+    """
+
+    codegen_low_precision: bool = True
+
+    def __call__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        if not torch._utils.is_compiling():
+            return args[0](*args[1])
+
+        return invoke_quant_test(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]
 
 
 invoke_quant_tracer = InvokeQuant()
@@ -26,7 +58,25 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return invoke_quant_tracer(gn, (x, y), scheme="nf4")[0]
+            return invoke_quant_tracer(
+                gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
+            )[0]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+        ref = gn(x, y)[0]
+
+        x_clone = x.clone().detach().requires_grad_(False)
+        y_clone = y.clone().detach().requires_grad_(False)
+        res = torch.compile(fn, backend=self.backend)(x_clone, y_clone)
+        self.assertEqual(ref, res)
+
+    def test_construct_inline(self):
+        def gn(x, y):
+            return (torch.mul(x, y) + y,)
+
+        def fn(x, y):
+            return InvokeQuant(codegen_low_precision=False)(gn, (x, y), scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)

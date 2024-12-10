@@ -45,7 +45,7 @@ std::shared_ptr<TaskThreadPoolBase> create_c10_threadpool(
 
 } // namespace
 
-C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, C10, create_c10_threadpool)
 
 void set_num_interop_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");

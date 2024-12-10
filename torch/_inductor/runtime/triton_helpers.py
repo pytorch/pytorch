@@ -59,6 +59,14 @@ def set_driver_to_gpu():
     raise RuntimeError("Could not find an active GPU backend")
 
 
+def get_backend_options():
+    driver = triton.runtime.driver
+    target = driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    return options.__dict__
+
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
@@ -204,7 +212,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = tl.randint4x(seed, offset)
+    r0, r1, _r2, _r3 = tl.randint4x(seed, offset)
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)
@@ -536,7 +544,7 @@ def _compare_and_swap_with_index(
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
     )
-    cond = cond ^ flip
+    cond = (cond ^ flip).to(tl.int1)
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
 
@@ -641,8 +649,8 @@ def x_grid_barrier(sem):
     bar_flipped = False
     while not bar_flipped:
         # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
-        # current_arrive = tl.atomic_add(sem, 0, sem="acquire")
-        current_arrive = tl.load(sem, volatile=True)  # is missing .acquire
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
         bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
 
     # TODO(jansel): is this needed?
