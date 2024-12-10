@@ -76,6 +76,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  # NB: Keep this in sync with trunk.yml
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
