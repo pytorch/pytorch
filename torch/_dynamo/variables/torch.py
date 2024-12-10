@@ -1117,6 +1117,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
+            # In reconstruct() we should use the original parameter. The one
+            # returned by the graph will be an alias.
+            source=placeholder.source,
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
@@ -1126,9 +1129,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False
-
-        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
-        result.source = placeholder.source
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.

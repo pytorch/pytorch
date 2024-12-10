@@ -261,22 +261,18 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> Tuple[torch.Tensor, ...]:
-        ...
+    ) -> Tuple[torch.Tensor, ...]: ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
-        ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
-        ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor:
-        ...
+    def next_buffer(self) -> torch.Tensor: ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -1106,15 +1102,13 @@ class _LoadBalancer(ABC):
     @abstractmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     @classmethod
     @abstractmethod
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 class _SequentialSharder(_LoadBalancer):
@@ -1284,6 +1278,15 @@ def context_parallel_unshard(
 ) -> List[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
+
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (List[torch.Tensor]): the buffers to be unsharded.
+        seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
+            must have the same length as ``buffers``.
+
+    Returns:
+        List[torch.Tensor]: the unsharded buffers.
     """
     sharder = (
         _RoundRobinLoadBalancer
@@ -1297,9 +1300,17 @@ def set_rotate_method(rotate_method: str) -> None:
     """
     Context Parallel SDPA requires the rotation of kv shards. Users can call this
     API to specify which rotation method to use. "alltoall" shuffles the kv shards
-    using all-to-all collective while "allgather" gathers the kv shards using
-    all-gather collective. If this API has not been called, the default rotate
-    method is "allgather".
+    using all-to-all collective. While "allgather" gathers the kv shards using
+    all-gather collective after the first sub-SDPA computation. If this API has not
+    been called, the default rotate method is "allgather".
+
+    Args:
+        rotate_method (str): the rotate method to use. Currently only supports
+        "allgather" and "alltoall". If a different string other than these two
+        is passed in, the function will raise an error.
+
+    Returns:
+        None
     """
     if rotate_method == "allgather":
         _cp_options.rotate_method = _RotateMethod.ALL_GATHER
