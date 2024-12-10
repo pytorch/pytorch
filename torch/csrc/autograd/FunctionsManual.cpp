@@ -606,7 +606,7 @@ Tensor div_tensor_self_backward(
     const Tensor& grad,
     T other,
     ScalarType self_st,
-    const std::optional<c10::string_view>& rounding_mode) {
+    const std::optional<std::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(self_st));
   }
@@ -618,18 +618,18 @@ template Tensor div_tensor_self_backward(
     const Tensor&,
     Tensor,
     ScalarType,
-    const std::optional<c10::string_view>&);
+    const std::optional<std::string_view>&);
 template Tensor div_tensor_self_backward(
     const Tensor&,
     Scalar,
     ScalarType,
-    const std::optional<c10::string_view>&);
+    const std::optional<std::string_view>&);
 
 Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other,
-    const std::optional<c10::string_view>& rounding_mode) {
+    const std::optional<std::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
   }
@@ -1397,7 +1397,7 @@ Tensor convolution_backward_jvp_grad_bias(
 //  input_name         Name of `input` tensor, from derivative formula
 at::SymIntArrayRef strides_or_error(
     const Tensor& input,
-    c10::string_view const& input_name) {
+    std::string_view const& input_name) {
   // TODO: Ideally, this function would never be called if requires_grad is
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
@@ -3282,7 +3282,7 @@ Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
     const Tensor& input,
-    c10::string_view approximate) {
+    std::string_view approximate) {
   // if (at::native::get_gelutype_enum(approximate) ==
   // at::native::GeluType::Tanh) {
   if (approximate == "tanh") {
@@ -3884,7 +3884,7 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
     const Tensor& dA,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode) {
+    const std::string_view mode) {
   // dA = dQR + QdR
   //
   // Case m >= n
@@ -3978,7 +3978,7 @@ Tensor linalg_qr_backward(
     const Tensor& gR,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode) {
+    const std::string_view mode) {
   // Nb. We won't be too formal below, as writing this proof formally is a pain
   // We'll link here a formal writing of all this at some point in the future
   //
@@ -6767,7 +6767,7 @@ Tensor scatter_reduce_jvp(
     const Tensor& index,
     const Tensor& src_p,
     const Tensor& src_t,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result) {
   if (reduce == "sum" || reduce == "mean") {
@@ -6800,7 +6800,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& src,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result) {
   Tensor grad_self, grad_src;
@@ -6900,7 +6900,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& source,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result) {
   Tensor grad_self, grad_src;
