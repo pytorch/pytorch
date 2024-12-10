@@ -18,6 +18,15 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
+if [[ "${TEST_CONFIG}" == "default" ]]; then
+  # See https://github.com/pytorch/pytorch/issues/142206
+  # Temporarily turn on CONTINUE_THROUGH_ERROR for all mac default tests in
+  # order to find all test failures.  Red signal will show up later than usual,
+  # but failing tests can also be found on HUD when clicking additional test
+  # info button
+  export CONTINUE_THROUGH_ERROR=True
+fi
+
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
   # This environment variable makes ProcessGroupGloo default to
@@ -276,25 +285,6 @@ test_timm_perf() {
 
 install_tlparse
 
-if [[ $TEST_CONFIG == *"test_mps"* ]]; then
-  if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_python_shard "${SHARD_NUMBER}"
-    if [[ "${SHARD_NUMBER}" == 1 ]]; then
-      test_libtorch
-      test_custom_script_ops
-    elif [[ "${SHARD_NUMBER}" == 2 ]]; then
-      test_jit_hooks
-      test_custom_backend
-    fi
-  else
-    test_python_all
-    test_libtorch
-    test_custom_script_ops
-    test_jit_hooks
-    test_custom_backend
-  fi
-fi
-
 if [[ $TEST_CONFIG == *"perf_all"* ]]; then
   test_torchbench_perf
   test_hf_perf
@@ -307,4 +297,19 @@ elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
 elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest
+elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_python_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_libtorch
+    test_custom_script_ops
+  elif [[ "${SHARD_NUMBER}" == 2 ]]; then
+    test_jit_hooks
+    test_custom_backend
+  fi
+else
+  test_python_all
+  test_libtorch
+  test_custom_script_ops
+  test_jit_hooks
+  test_custom_backend
 fi
