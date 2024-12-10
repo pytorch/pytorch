@@ -609,7 +609,7 @@ def to_copy_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
-    # Don't change layout
+    # don't change layout
     new_kwargs.pop("layout")
     new_values = func(inp._values, **new_kwargs)
     new_device = new_values.device
@@ -1810,17 +1810,16 @@ def index_put_(func, *args, **kwargs):
     # We can run on the underlying values directly
 
     # Validate indices
-    if inp.lengths() is None:
-        lengths = offsets.diff()
-    else:
-        lengths = inp.lengths()
+    lengths = inp.lengths()
+    if lengths is None:
+        lengths = inp.offsets().diff()
     torch._assert_async(
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
 
     # Recompute indices for _values
-    ragged_indices = offsets[indices[0]] + indices[inp._ragged_idx]
+    ragged_indices = inp.offsets()[indices[0]] + indices[inp._ragged_idx]
     func_indices = (
         # before ragged dim
         indices[1 : inp._ragged_idx]

@@ -212,11 +212,10 @@ class NestedTensor(torch.Tensor):
         max_seqlen_tensor = self._max_seqlen_tensor
         if max_seqlen_tensor is None:
             # compute & cache
-            if (lengths := self._lengths) is None:
-                offsets = self._offsets
-                assert offsets is not None
-                lengths = offsets.diff()
-            max_val = _get_sdpa_extreme_seqlen(torch.max, lengths)
+            max_val = _get_sdpa_extreme_seqlen(
+                torch.max,
+                self.offsets().diff() if self._lengths is None else self._lengths,  #
+            )
             max_seqlen_tensor = _store_val_in_tensor(max_val)
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
         return _load_val_from_tensor(max_seqlen_tensor)
@@ -225,11 +224,10 @@ class NestedTensor(torch.Tensor):
         min_seqlen_tensor = self._min_seqlen_tensor
         if min_seqlen_tensor is None:
             # compute & cache
-            if (lengths := self._lengths) is None:
-                offsets = self._offsets
-                assert offsets is not None
-                lengths = offsets.diff()
-            min_val = _get_sdpa_extreme_seqlen(torch.min, lengths)
+            min_val = _get_sdpa_extreme_seqlen(
+                torch.min,
+                self.offsets().diff() if self._lengths is None else self._lengths,
+            )
             min_seqlen_tensor = _store_val_in_tensor(min_val)
             self._metadata_cache["min_seqlen"] = min_seqlen_tensor
         return _load_val_from_tensor(min_seqlen_tensor)

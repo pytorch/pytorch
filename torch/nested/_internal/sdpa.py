@@ -343,7 +343,6 @@ def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
     offsets = tensor.offsets()
     strides = tensor._strides
 
-    assert offsets is not None
     n_tensors = offsets.size(0) - 1
     if n_tensors <= 1:
         return True
