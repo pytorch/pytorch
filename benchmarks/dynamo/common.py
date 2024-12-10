@@ -3272,13 +3272,9 @@ class BenchmarkRunner:
             )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3318,7 +3314,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3429,13 +3425,9 @@ class BenchmarkRunner:
                     )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3475,7 +3467,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
