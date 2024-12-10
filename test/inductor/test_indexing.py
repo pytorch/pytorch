@@ -14,8 +14,8 @@ from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import (
-    IS_MACOS,
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -324,7 +324,9 @@ class ExprPrinterTests(InductorTestCase):
         x = sympy.Symbol("x", integer=True)
         expr = Mod(x - 1, 2)
         self.assertExpectedInline(pexpr(expr), """((-1) + x) % 2""")
-        self.assertExpectedInline(cexpr(expr), f"""((-1{LONG_SUFFIX}) + x) % 2{LONG_SUFFIX}""")
+        self.assertExpectedInline(
+            cexpr(expr), f"""((-1{LONG_SUFFIX}) + x) % 2{LONG_SUFFIX}"""
+        )
         self.assertExpectedInline(texpr(expr), """((-1) + x) % 2""")
 
         expr = (x - 10) % x
