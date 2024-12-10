@@ -3,7 +3,19 @@
 import itertools
 from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, NewType, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NewType,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+)
 from unittest.mock import patch
 
 import torch
@@ -21,7 +33,8 @@ from torch._dynamo.utils import (
     preserve_rng_state,
 )
 from torch._guards import detect_fake_mode
-from torch._inductor.utils import BoxedBool
+from torch._inductor.output_code import OutputCode
+from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -55,7 +68,6 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     to_fun,
 )
 from ._aot_autograd.input_output_analysis import (  # noqa: F401
-    _tensors_definitely_do_not_overlap,
     compute_overlapping_inputs,
     create_graph_signature,
     create_synthetic_base_metadata,
@@ -101,7 +113,6 @@ from ._aot_autograd.schemas import (  # noqa: F401
     ViewAndMutationMeta,
 )
 from ._aot_autograd.subclass_utils import (  # noqa: F401
-    create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     unwrap_tensor_subclasses_with_indices_to_original,
@@ -437,6 +448,47 @@ aot_autograd_decompositions = {}
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", List[Any])
 
 
+TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+
+
+class AOTDispatchCompiler(Protocol):
+    """
+    Represents a fw or bw_compiler passed to AOTAutograd.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any:
+        ...
+
+
+# TODO: bikeshed on this name
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
+    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
+    the kwargs in _CompileFxKwargs.
+    """
+
+    def __init__(
+        self,
+        output_code_ty: Type[TOutputCode],
+        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
+    ):
+        self.output_code_ty = output_code_ty
+        self.compiler_fn = compiler_fn
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> OutputCode:
+        return self.compiler_fn(gm, example_inputs)
+
+
 def process_inputs(
     flat_args: List[Any],
     aot_config: AOTConfig,
@@ -524,7 +576,7 @@ def create_aot_dispatcher_function(
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
 ) -> Tuple[Callable, ViewAndMutationMeta]:
-    with dynamo_timed("create_aot_dispatcher_function"):
+    with dynamo_timed("create_aot_dispatcher_function", log_pt2_compile_event=True):
         return _create_aot_dispatcher_function(
             flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
         )
@@ -584,14 +636,7 @@ def _create_aot_dispatcher_function(
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
-
-    def try_record_chromium_data(**kwargs):
-        # `backend_compile` only exists as an event if we are compiling with dynamo
-        # In some unit tests we don't use dynamo, so we ignore those cases
-        chromium_log = get_chromium_event_logger()
-        if "backend_compile" in chromium_log.get_stack():
-            chromium_log.add_event_data("backend_compile", **kwargs)
-
+    chromium_log = get_chromium_event_logger()
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -645,8 +690,8 @@ def _create_aot_dispatcher_function(
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
-                try_record_chromium_data(
-                    requires_subclass_dispatch=req_subclass_dispatch
+                chromium_log.try_add_event_data(
+                    "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
                 )
 
                 output_and_mutation_safe = not any(
@@ -694,7 +739,6 @@ def _create_aot_dispatcher_function(
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
-                            traced_tangent_memory_formats=fw_metadata.traced_tangent_memory_formats,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
@@ -766,13 +810,19 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             if aot_config.is_export:
                 # export uses just the "graph bits", whereas the other
                 # two dispatchers include some extra work around handling a runtime epilogue
-                try_record_chromium_data(dispatch_mode="export")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="export"
+                )
                 return partial(aot_dispatch_export, needs_autograd=needs_autograd)
             elif needs_autograd and not aot_config.pre_dispatch:
-                try_record_chromium_data(dispatch_mode="autograd")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="autograd"
+                )
                 return aot_dispatch_autograd
             else:
-                try_record_chromium_data(dispatch_mode="inference")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="inference"
+                )
                 return aot_dispatch_base
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
@@ -957,12 +1007,12 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 def aot_module_simplified(
     mod: nn.Module,
     args,
-    fw_compiler: Callable,
-    bw_compiler: Optional[Callable] = None,
+    fw_compiler: AOTDispatchCompiler,
+    bw_compiler: Optional[AOTDispatchCompiler] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
-    inference_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
 ) -> nn.Module:
     """
@@ -1077,7 +1127,7 @@ def aot_module_simplified(
 
     def dispatch_and_compile():
         functional_call = create_functional_call(mod, params_spec, params_len)
-        with compiled_autograd.disable():
+        with compiled_autograd._disable():
             compiled_fn, _ = create_aot_dispatcher_function(
                 functional_call,
                 fake_flat_args,
@@ -1090,8 +1140,8 @@ def aot_module_simplified(
     # Autograd cache stuff
     remote = should_use_remote_autograd_cache()
     local = should_use_local_autograd_cache()
-
-    if local or remote:
+    # We only care if the forward will return an OutputCode.
+    if (local or remote) and isinstance(fw_compiler, SerializableAOTDispatchCompiler):
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile,
             mod,
@@ -1316,7 +1366,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             fw_outs, gradients = fx_g(args, fake_tangents)
             assert len(gradients) == len(args)
             output_gradients = []
-            for i, (a, grad) in enumerate(zip(args, gradients)):
+            for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
                     assert (
                         grad is not None
@@ -1432,7 +1482,7 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, bw_module = aot_config.default_partition(  # noqa: F821
+        fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
             fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
@@ -11,8 +12,10 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch.fx.experimental.symbolic_shapes import statically_known_true
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.experimental.symbolic_shapes import (
+    _guard_sizes_oblivious,
+    statically_known_true,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from ...utils._ordered_set import OrderedSet
@@ -210,7 +213,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 self.symint_nodes[n.meta["val"]] = n
 
@@ -244,7 +247,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
             else:
@@ -435,38 +438,32 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
 def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     """
-    To reuse code and simplify tracing, we trace invoke_quant as invoke_subgraph through the
-    joint graph. Then, we map invoke_quant which we traced as invoke_subgraph back to
-    torch.higher_order_ops.invoke_quant. We removed the "identifier" arg, add back the
-    scheme for ease of pattern matching, add the quant options as a meta on the invoke_quant node,
-    and unwrap single element tuples.
+
 
     torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'quant_invoke_0_0', (arg0_1, arg1_1));
     ->
     torch.ops.higher_order.invoke_quant(repeated_subgraph0, arg0_1, arg1_1, scheme = 'nf4');
     """
     graph = gm.graph
-    subgraph_invocations = graph.find_nodes(
-        op="call_function", target=torch.ops.higher_order.invoke_subgraph
+    invoke_quant_invocations = graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.invoke_quant_packed
     )
-    tc = torch._guards.TracingContext.try_get()
-    if not tc:
-        return
-    invoke_subgraph_mapping = tc.invoke_subgraph_mapping
-    for invoke_subgraph in subgraph_invocations:
-        if invoke_subgraph.args[1] not in invoke_subgraph_mapping:
-            continue
+    for invoke_quant in invoke_quant_invocations:
+        kwargs = dict(invoke_quant.kwargs)
 
-        scheme, quant_options = invoke_subgraph_mapping[invoke_subgraph.args[1]]
+        quant_options_node = kwargs.pop("quant_options", None)
+        if quant_options_node is not None:
+            assert isinstance(quant_options_node, torch.fx.Node)
+            quant_options = torch._higher_order_ops.InvokeQuant(
+                *invoke_quant.kwargs["quant_options"].args,
+                **invoke_quant.kwargs["quant_options"].kwargs,
+            )
+        else:
+            quant_options = None
 
-        subgraph, identifier, args = invoke_subgraph.args
-        kwargs = invoke_subgraph.kwargs
-
-        if scheme is not None:
-            kwargs = dict(kwargs)
-            kwargs["scheme"] = scheme
-
-        with gm.graph.inserting_before(invoke_subgraph):
+        # breakpoint()
+        subgraph, args = invoke_quant.args
+        with gm.graph.inserting_before(invoke_quant):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
                 (subgraph, *args),
@@ -475,8 +472,12 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant_replacement.meta.update(subgraph.meta)
             invoke_quant_replacement.meta["quant_options"] = quant_options
 
-            invoke_subgraph.replace_all_uses_with(invoke_quant_replacement)
-            graph.erase_node(invoke_subgraph)
+            invoke_quant.replace_all_uses_with(invoke_quant_replacement)
+            graph.erase_node(invoke_quant)
+
+            if len(quant_options_node.users) == 0:
+                graph.erase_node(quant_options_node)
+
             first_user = next(iter(invoke_quant_replacement.users))
 
             if (
@@ -515,6 +516,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="joint_graph_passes",
+    )
+
     lazy_init()
     count = 0
 
@@ -522,35 +528,37 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     canonicalize_aten_ir_passes(graph)
 
     if config.joint_custom_pre_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform
-        ):
-            config.joint_custom_pre_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     from .post_grad import remove_noop_ops
 
-    remove_noop_ops(graph.graph)
+    GraphTransformObserver(graph, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
 
     if config.joint_graph_constant_folding:
-        with GraphTransformObserver(
-            graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
-        ):
-            constant_fold_uniform_value(graph)
+        GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
+            constant_fold_uniform_value
+        )
 
     if config.pattern_matcher:
-        for patterns in pass_patterns:
-            count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+        for i, patterns in enumerate(pass_patterns):
+            maybe_count = GraphTransformObserver(
+                graph, f"pass_pattern_{i}"
+            ).apply_graph_pass(patterns.apply)
+            count += maybe_count if maybe_count is not None else 0
 
     if not config.fallback_random:
+        # not trying into the bisector because decomps may have already affected rng reproducibility
+        # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
     if config.joint_custom_post_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_post_pass", config.trace.log_url_for_graph_xform
-        ):
-            config.joint_custom_post_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
+            config.joint_custom_post_pass
+        )
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)
@@ -646,9 +654,48 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if size == arg_size:
+    if _guard_sizes_oblivious(size, arg_size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.view.default,
+        CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
+        KeywordArg("size2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_view_pair(match: Match, arg, size1, size2):
+    """
+    Remove a pair of views that are pointless.
+    """
+    node = match.output_node()
+    arg_size = list(arg.meta["val"].shape)
+    if _guard_sizes_oblivious(arg_size, size2):
+        node.replace_all_uses_with(arg)
+        match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.permute.default,
+        CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
+        KeywordArg("perm2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_permute_pair(match: Match, arg, perm1, perm2):
+    rank = len(perm1)
+    assert len(perm2) == rank
+
+    for i in range(rank):
+        if perm1[perm2[i]] != i:
+            return  # bail out
+    node = match.output_node()
+    node.replace_all_uses_with(arg)
+    match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern

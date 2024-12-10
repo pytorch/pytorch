@@ -180,8 +180,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_dynamic(
 
 #endif // AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // note: this works for both Conv and ConvT due to transpose()
@@ -237,5 +236,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

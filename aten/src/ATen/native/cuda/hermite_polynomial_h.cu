@@ -27,5 +27,5 @@ namespace at::native {
             } // hermite_polynomial_h_kernel_cuda
         } // namespace (anonymous)
 
-        REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel_cuda);
+        REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel_cuda)
 } // namespace at::native

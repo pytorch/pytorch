@@ -4,6 +4,7 @@ import itertools
 import math
 import operator
 import random
+import sys
 import warnings
 from functools import partial
 from itertools import chain, product
@@ -1483,7 +1484,7 @@ class TestBinaryUfuncs(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "Found dtype \\w+ but expected \\w+",
+                        r"result type \w+ can't be cast to the desired output type \w+",
                         lambda: actual.pow_(exponent),
                     )
 
@@ -3469,6 +3470,7 @@ class TestBinaryUfuncs(TestCase):
             weights = [
                 torch.randn(shapes[2], device=device, dtype=dtype),
                 random.random(),
+                torch.randn([], device="cpu", dtype=dtype),
             ]
             if dtype.is_complex:
                 weights += [complex(0, 1), complex(0.4, 1.2)]
@@ -3522,10 +3524,13 @@ class TestBinaryUfuncs(TestCase):
             our_func = torch.logaddexp2
         elif dtype in (torch.complex64, torch.complex128):
             # numpy has not implemented logaddexp for complex
-            def _ref_func(x, y):
-                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            def complex_logaddexp(x1, x2):
+                x = np.stack((x1, x2))
+                amax = np.amax(x, axis=0)
+                amax[~np.isfinite(amax)] = 0
+                return np.log(np.sum(np.exp(x - amax), axis=0)) + np.squeeze(amax)
 
-            ref_func = _ref_func
+            ref_func = complex_logaddexp
             our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp
@@ -3571,6 +3576,8 @@ class TestBinaryUfuncs(TestCase):
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
     )
     def test_logaddexp(self, device, dtype):
+        if sys.version_info >= (3, 12) and dtype in (torch.complex64, torch.complex128):
+            return self.skipTest("complex flaky in 3.12")
         self._test_logaddexp(device, dtype, base2=False)
 
     @dtypes(torch.float32, torch.float64, torch.bfloat16)

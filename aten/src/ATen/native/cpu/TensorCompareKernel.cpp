@@ -115,7 +115,7 @@ static void min_kernel_impl(
         scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
@@ -400,17 +400,17 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
-REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
+REGISTER_DISPATCH(max_stub, &max_kernel_impl)
+REGISTER_DISPATCH(min_stub, &min_kernel_impl)
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel)
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(mode_stub, &mode_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
+REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu)
 
 } // namespace at::native

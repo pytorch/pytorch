@@ -35,7 +35,25 @@ class TestInvokeQuant(TestCase):
             return (torch.mul(x, y) + y,)
 
         def fn(x, y):
-            return invoke_quant_tracer(gn, (x, y), scheme="nf4")[0]
+            return invoke_quant_tracer(
+                gn, (x, y), scheme="nf4", quant_options=invoke_quant_tracer
+            )[0]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+        ref = gn(x, y)[0]
+
+        x_clone = x.clone().detach().requires_grad_(False)
+        y_clone = y.clone().detach().requires_grad_(False)
+        res = torch.compile(fn, backend=self.backend)(x_clone, y_clone)
+        self.assertEqual(ref, res)
+
+    def test_construct_inline(self):
+        def gn(x, y):
+            return (torch.mul(x, y) + y,)
+
+        def fn(x, y):
+            return InvokeQuant(codegen_low_precision=False)(gn, (x, y), scheme="nf4")[0]
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -93,7 +111,7 @@ class TestInvokeQuant(TestCase):
             logs = "\n".join(r.getMessage() for r in log.records)
             f = FileCheck()
             f.check("AFTER POST GRAD")
-            f.check("repeated_subgraph0").check("repeated_subgraph1")
+            f.check("subgraph0").check("subgraph1")
             for _ in range(2):
                 f.check("torch.ops.higher_order.invoke_quant(").check_same("nf4")
             f.run(logs)
