@@ -97,6 +97,8 @@ if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
   export ACL_ROOT_DIR=/ComputeLibrary
+  export CFLAGS="-march=armv8.2-a+bf16"
+  export CXXFLAGS="-march=armv8.2-a+bf16"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
