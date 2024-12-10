@@ -4,7 +4,7 @@ import json
 import traceback
 from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ._compatibility import compatibility
 from .graph import Graph
@@ -30,7 +30,7 @@ should_preserve_node_meta = False
 
 
 @compatibility(is_backward_compatible=False)
-class NodeSourceAction(str, Enum):
+class NodeSourceAction(Enum):
     CREATE = "create"
     REPLACE = "replace"
 
@@ -49,7 +49,7 @@ class NodeSource:
             self.graph_id = graph_id
 
     pass_name: str
-    action: Optional["NodeSourceAction"]
+    action: List["NodeSourceAction"]
     from_node: List["NodeSource"]
     node_info: Optional["NodeInfo"]
 
@@ -57,9 +57,16 @@ class NodeSource:
         self,
         node: Optional[Node],
         pass_name: str = "",
-        action: Optional["NodeSourceAction"] = None,
+        action: Optional[Union["NodeSourceAction", List["NodeSourceAction"]]] = None,
     ):
         self.pass_name = pass_name
+
+        if action is None:
+            action = []
+        elif not isinstance(action, list):
+            action = [action]
+        for a in action:
+            assert isinstance(a, NodeSourceAction)
         self.action = action
         if node:
             self.node_info = self.NodeInfo(
@@ -89,13 +96,17 @@ class NodeSource:
     def __repr__(self):
         return self.print_readable()
 
+    def _get_action_string(self):
+        return "+".join([a.name.lower() for a in self.action])
+
     def print_readable(self, indent=0):
         if indent > 9:
             return ""
         result = ""
+        action_string = self._get_action_string()
         result += (
             " " * indent * 4
-            + f"(name={self.name}, pass_name={self.pass_name}, action={self.action}, graph_id={self.graph_id})\n"
+            + f"(name={self.name}, pass_name={self.pass_name}, action={action_string}, graph_id={self.graph_id})\n"
         )
         for item in self.from_node:
             result += item.print_readable(indent + 1)
@@ -103,12 +114,13 @@ class NodeSource:
 
     def to_dict(self) -> dict:
         # Convert the object to a dictionary
+        action_string = self._get_action_string()
         return {
             "name": self.name,
             "target": self.target,
             "graph_id": self.graph_id,
             "pass_name": self.pass_name,
-            "action": self.action,
+            "action": action_string,
             "from_node": [node.to_dict() for node in self.from_node],
         }
 

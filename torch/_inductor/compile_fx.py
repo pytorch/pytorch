@@ -145,6 +145,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+pre_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "pre_grad_graphs")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
@@ -917,11 +918,17 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+                provenance_tracking_json = torch.fx.traceback.get_graph_provenance_json(
+                    gm.graph
+                )
+                post_grad_graphs_log.debug("%s", provenance_tracking_json)
                 trace_structured(
                     "inductor_post_grad_graph",
                     payload_fn=lambda: gm.print_readable(
                         print_output=False, include_stride=True, include_device=True
-                    ),
+                    )
+                    + "# "
+                    + provenance_tracking_json,
                 )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1626,13 +1633,32 @@ def compile_fx(
 
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
-    ), enable_python_dispatcher():
+    ), enable_python_dispatcher(), torch.fx.traceback.preserve_node_meta():
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
         # where a user directly passes a plain Module with the intention of
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            trace_structured(
+                "inductor_pre_grad_graph",
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
+            pre_grad_graphs_log.debug(
+                "%s",
+                lazy_format_graph_code(
+                    "BEFORE GRAD",
+                    model_,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
+            pre_grad_graphs_log.debug("pre_grad_graph_id: %s", id(model_.graph))
+
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
         # TODO: Move this before recursive pre-grad passes
