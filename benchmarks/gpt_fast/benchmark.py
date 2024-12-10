@@ -318,6 +318,11 @@ all_experiments = {
     run_gemv,
 }
 
+all_experiments = {
+    # run_llama2_7b_int8,
+    run_llama2_7b_autoquant
+}
+
 
 def main(output_file=DEFAULT_OUTPUT_FILE):
     results = []
