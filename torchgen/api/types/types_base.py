@@ -219,15 +219,6 @@ class Binding:
         else:
             return f"{self.type} {self.name}{mb_default}"
 
-    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
-    # TODO: Kill this when we eventually remove it!
-    def decl_registration_declarations(self) -> str:
-        type_s = self.nctype.cpp_type()
-        mb_default = ""
-        if self.default is not None:
-            mb_default = f"={self.default}"
-        return f"{type_s} {self.name}{mb_default}"
-
     def defn(self) -> str:
         return f"{self.type} {self.name}"
 
