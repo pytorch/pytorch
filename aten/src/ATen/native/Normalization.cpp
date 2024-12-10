@@ -103,11 +103,7 @@ namespace {
 template<typename T>
 struct InvStd {
   T operator()(T var, double epsilon) const {
-    T invstd = 0;
-    if (var != static_cast<T>(0) || epsilon != static_cast<T>(0)) {
-      invstd = static_cast<T>(1) / std::sqrt(var + epsilon);
-    }
-    return invstd;
+    return static_cast<T>(1) / std::sqrt(var + epsilon);
   }
 };
 
