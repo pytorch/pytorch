@@ -583,14 +583,7 @@ def _create_aot_dispatcher_function(
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
-
-    def try_record_chromium_data(**kwargs):
-        # `backend_compile` only exists as an event if we are compiling with dynamo
-        # In some unit tests we don't use dynamo, so we ignore those cases
-        chromium_log = get_chromium_event_logger()
-        if "backend_compile" in chromium_log.get_stack():
-            chromium_log.add_event_data("backend_compile", **kwargs)
-
+    chromium_log = get_chromium_event_logger()
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -644,8 +637,8 @@ def _create_aot_dispatcher_function(
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
-                try_record_chromium_data(
-                    requires_subclass_dispatch=req_subclass_dispatch
+                chromium_log.try_add_event_data(
+                    "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
                 )
 
                 output_and_mutation_safe = not any(
@@ -764,13 +757,19 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             if aot_config.is_export:
                 # export uses just the "graph bits", whereas the other
                 # two dispatchers include some extra work around handling a runtime epilogue
-                try_record_chromium_data(dispatch_mode="export")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="export"
+                )
                 return partial(aot_dispatch_export, needs_autograd=needs_autograd)
             elif needs_autograd and not aot_config.pre_dispatch:
-                try_record_chromium_data(dispatch_mode="autograd")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="autograd"
+                )
                 return aot_dispatch_autograd
             else:
-                try_record_chromium_data(dispatch_mode="inference")
+                chromium_log.try_add_event_data(
+                    "backend_compile", dispatch_mode="inference"
+                )
                 return aot_dispatch_base
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)

@@ -12,14 +12,15 @@ import logging
 import math
 import operator
 import re
-import typing
 import traceback
+import typing
 
 from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    Annotated,
     Any,
     Callable,
     cast,
@@ -51,7 +52,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BufferMutationSpec,
-    InputToConstantInputSpec,
     ConstantValue,
     CustomObjArgument,
     Device,
@@ -64,6 +64,7 @@ from .schema import (  # type: ignore[attr-defined]
     GraphSignature,
     InputSpec,
     InputToBufferSpec,
+    InputToConstantInputSpec,
     InputToCustomObjSpec,
     InputTokenSpec,
     InputToParameterSpec,
@@ -2405,6 +2406,8 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
+    if typing.get_origin(cls) == Annotated:
+        return _dict_to_dataclass(cls.__origin__, data)
     if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
         if data is None:
             return None
@@ -2420,7 +2423,7 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment]
+        obj = cls(**data)  # type: ignore[assignment,operator]
         type_hints = typing.get_type_hints(cls)
         for f in dataclasses.fields(cls):
             name = f.name

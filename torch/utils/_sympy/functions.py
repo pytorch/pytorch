@@ -191,7 +191,7 @@ class FloorDiv(sympy.Function):
     """
 
     nargs: Tuple[int, ...] = (2,)
-    precedence: int = 50  # precedence of mul  # noqa: F811
+    precedence: int = 35  # lower precedence than add
     is_integer: bool = True
 
     @property
@@ -291,6 +291,7 @@ class ModularIndexing(sympy.Function):
 
     nargs: Tuple[int, ...] = (3,)
     is_integer: bool = True
+    precedence: int = 35  # lower precedence than add
 
     @classmethod
     def eval(
@@ -360,6 +361,7 @@ class Where(sympy.Function):
     """
 
     nargs: Tuple[int, ...] = (3,)
+    precedence: int = 35  # lower precedence than add
 
     def _eval_is_integer(self) -> Optional[bool]:
         return True if self.args[1].is_integer and self.args[2].is_integer else None  # type: ignore[attr-defined]
@@ -389,6 +391,7 @@ class Where(sympy.Function):
 class PythonMod(sympy.Function):
     nargs: Tuple[int, ...] = (2,)
 
+    precedence: int = 35  # lower precedence than add
     is_integer: bool = True
 
     @classmethod
@@ -447,6 +450,7 @@ class PythonMod(sympy.Function):
 # Generic modulus: only defined on non-negative arguments
 class Mod(sympy.Function):
     nargs = (2,)
+    precedence: int = 35  # lower precedence than add
 
     is_integer = True
     is_nonnegative = True
@@ -944,6 +948,7 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
     r"""
     Return, if possible, the maximum value of the list.
     """
+
     zero = S.Infinity
     identity = S.NegativeInfinity
 
@@ -1013,6 +1018,8 @@ def _safe_pow(base, exponent):
 class PowByNatural(sympy.Function):
     is_integer = True
 
+    precedence: int = 50  # precedence of mul
+
     @classmethod
     def eval(cls, base, exp):
         if isinstance(base, sympy.Integer) and isinstance(exp, sympy.Integer):
@@ -1038,6 +1045,8 @@ class PowByNatural(sympy.Function):
 class FloatPow(sympy.Function):
     is_real = True
 
+    precedence: int = 60  # precedence of pow
+
     @classmethod
     def eval(cls, base, exp):
         # NB: These test sympy.Number, not sympy.Float, because:
@@ -1057,6 +1066,8 @@ class FloatPow(sympy.Function):
 # where 1 is an integer, but this must be a float if x was float.
 class FloatTrueDiv(sympy.Function):
     is_real = True
+
+    precedence: int = 35  # lower precedence than add
 
     @classmethod
     def eval(cls, base, divisor):
@@ -1080,6 +1091,8 @@ class FloatTrueDiv(sympy.Function):
 # NB: Right now, Inductor codegen doesn't implement this correctly lol
 class IntTrueDiv(sympy.Function):
     is_real = True
+
+    precedence: int = 35  # lower precedence than add
 
     @classmethod
     def eval(cls, base, divisor):
@@ -1253,6 +1266,8 @@ class Identity(sympy.Function):
     Prevents expansion and other optimizations
     """
 
+    precedence = 10
+
     def __repr__(self):  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
@@ -1323,3 +1338,29 @@ OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
 OpaqueUnaryFn_log = make_opaque_unary_fn("log")
 OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
 OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
+
+
+def make_opaque_bitwise_fn(name, real_op_name):
+    class BitwiseFn(sympy.Function):
+        _torch_handler_name = name
+
+        @classmethod
+        def eval(cls, a, b):
+            if a.is_Boolean and b.is_Boolean:
+                return getattr(operator, real_op_name)(a, b)
+            if a.is_Boolean:
+                a = sympy.Integer(1 if a else 0)
+            if b.is_Boolean:
+                b = sympy.Integer(1 if b else 0)
+            if isinstance(a, (sympy.Integer, int)) and isinstance(
+                b, (sympy.Integer, int)
+            ):
+                return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
+            return None
+
+    BitwiseFn.__name__ = "BitwiseFn_" + name
+    return BitwiseFn
+
+
+BitwiseFn_bitwise_and = make_opaque_bitwise_fn("bitwise_and", "and_")
+BitwiseFn_bitwise_or = make_opaque_bitwise_fn("bitwise_or", "or_")

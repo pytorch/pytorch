@@ -3259,9 +3259,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             (torch.tensor(20),),
             fixes=[
                 # Could not guard on data-dependent expression Eq((u0//2), 0)
-                "torch._check(((i//2)) != 0)",
+                "torch._check((i // 2) != 0)",
                 # Could not guard on data-dependent expression Eq((u0//2), 1)
-                "torch._check(((i//2)) != 1)",
+                "torch._check((i // 2) != 1)",
             ],
         )
 
@@ -9602,7 +9602,8 @@ def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
     getitem = _scaled_dot_product_flash_attention[0];  _scaled_dot_product_flash_attention = None
     return (getitem,)"""
-        if SM90OrLater and not torch.version.hip:
+        # TODO(eqy): this needs to stay in sync with default SDPA priority order
+        if (False and SM90OrLater) and not torch.version.hip:
             code_str = """\
 def forward(self, q, k, v):
     _scaled_dot_product_cudnn_attention = torch.ops.aten._scaled_dot_product_cudnn_attention.default(q, k, v, None, False, 0.0, True);  q = k = v = None
