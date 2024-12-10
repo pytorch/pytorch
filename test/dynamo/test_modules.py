@@ -1456,7 +1456,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         data = torch.randn(1)
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch.compile(m, backend=cnt, fullgraph=True)
         out2 = opt_m(data)
         self.assertEqual(cnt.op_count, 2)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
@@ -1467,7 +1467,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         out1 = m(data)
         cnt = torch._dynamo.testing.CompileCounter()
         torch._dynamo.reset()
-        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        opt_m = torch.compile(m, backend=cnt, fullgraph=True)
         out2 = opt_m(data)
 
         self.assertEqual(cnt.op_count, 1)
@@ -1477,7 +1477,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         pre = m(data)
         cnt.clear()
 
-        with torch._dynamo.optimize(cnt, nopython=False):
+        with torch.compile(backend=cnt, fullgraph=False):
             opt_pre = m(data)
             m = M(module_dict)
             data = torch.randn(1)
