@@ -1632,7 +1632,7 @@ def load_inline(name,
     .. note::
         Since load_inline will just-in-time compile the source code, please ensure
         that you have the right toolchains installed in the runtime. For example,
-        if you are loading C++, make sure a C++ compiler is available. If you're loading
+        when loading C++, make sure a C++ compiler is available. If you're loading
         a CUDA extension, you will need to additionally install the corresponding CUDA
         toolkit (nvcc and any other dependencies your code has). Compiling toolchains
         are not included when you install torch and must be additionally installed.
