@@ -107,17 +107,29 @@ if [[ $ROCM_INT -ge 60200 ]]; then
 fi
 
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
     LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
     LIBELF_PATH="/usr/lib64/libelf.so.1"
-    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+    if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+        LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+    else
+        LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+    fi
     LIBDRM_PATH="/opt/amdgpu/lib64/libdrm.so.2"
     LIBDRM_AMDGPU_PATH="/opt/amdgpu/lib64/libdrm_amdgpu.so.1"
     if [[ $ROCM_INT -ge 60100 ]]; then
         # Below libs are direct dependencies of libhipsolver
         LIBSUITESPARSE_CONFIG_PATH="/lib64/libsuitesparseconfig.so.4"
-        LIBCHOLMOD_PATH="/lib64/libcholmod.so.2"
+        if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+            LIBCHOLMOD_PATH="/lib64/libcholmod.so.2"
+            # Below libs are direct dependencies of libsatlas
+            LIBGFORTRAN_PATH="/lib64/libgfortran.so.3"
+        else
+            LIBCHOLMOD_PATH="/lib64/libcholmod.so.3"
+            # Below libs are direct dependencies of libsatlas
+            LIBGFORTRAN_PATH="/lib64/libgfortran.so.5"
+        fi
         # Below libs are direct dependencies of libcholmod
         LIBAMD_PATH="/lib64/libamd.so.2"
         LIBCAMD_PATH="/lib64/libcamd.so.2"
@@ -125,7 +137,6 @@ if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
         LIBCOLAMD_PATH="/lib64/libcolamd.so.2"
         LIBSATLAS_PATH="/lib64/atlas/libsatlas.so.3"
         # Below libs are direct dependencies of libsatlas
-        LIBGFORTRAN_PATH="/lib64/libgfortran.so.3"
         LIBQUADMATH_PATH="/lib64/libquadmath.so.0"
     fi
     MAYBE_LIB64=lib64
@@ -175,9 +186,12 @@ do
     OS_SO_FILES[${#OS_SO_FILES[@]}]=$file_name # Append lib to array
 done
 
-# PyTorch-version specific
-# AOTriton dependency only for PyTorch >= 2.4
-if (( $(echo "${PYTORCH_VERSION} 2.4" | awk '{print ($1 >= $2)}') )); then
+# FIXME: Temporary until https://github.com/pytorch/pytorch/pull/137443 lands
+# Install AOTriton
+if [ -e ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt ]; then
+    cp -a ${PYTORCH_ROOT}/.ci/docker/aotriton_version.txt aotriton_version.txt
+    bash ${PYTORCH_ROOT}/.ci/docker/common/install_aotriton.sh ${ROCM_HOME} && rm aotriton_version.txt
+    export AOTRITON_INSTALLED_PREFIX=${ROCM_HOME}/aotriton
     ROCM_SO_FILES+=("libaotriton_v2.so")
 fi
 
@@ -251,6 +265,20 @@ RCCL_SHARE_DST=share/rccl/msccl-algorithms
 RCCL_SHARE_FILES=($(ls $RCCL_SHARE_SRC))
 DEPS_AUX_SRCLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_SRC/})
 DEPS_AUX_DSTLIST+=(${RCCL_SHARE_FILES[@]/#/$RCCL_SHARE_DST/})
+
+# PyTorch 2.6+ (AOTriton 0.8b+)
+# AKS = "AOTriton Kernel Storage", a file format to store GPU kernels compactly
+if (( $(echo "${PYTORCH_VERSION} 2.6" | awk '{print ($1 >= $2)}') )); then
+    LIBAOTRITON_DIR=$(find "$ROCM_HOME/lib/" -name "libaotriton_v2.so" -printf '%h\n')
+    if [[ -z ${LIBAOTRITON_DIR} ]]; then
+        LIBAOTRITON_DIR=$(find "$ROCM_HOME/" -name "libaotriton_v2.so" -printf '%h\n')
+    fi
+    AKS_FILES=($(find "${LIBAOTRITON_DIR}/aotriton.images" -type f -name '*.aks?' -printf '%P\n'))
+    AKS_SRC="${LIBAOTRITON_DIR}/aotriton.images"
+    AKS_DST="lib/aotriton.images"
+    DEPS_AUX_SRCLIST+=(${AKS_FILES[@]/#/${AKS_SRC}/})
+    DEPS_AUX_DSTLIST+=(${AKS_FILES[@]/#/${AKS_DST}/})
+fi
 
 echo "PYTORCH_ROCM_ARCH: ${PYTORCH_ROCM_ARCH}"
 
