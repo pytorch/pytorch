@@ -1,5 +1,6 @@
 from types import TracebackType
-from typing import Self
+from typing_extensions import Self
+
 
 from filelock import FileLock as base_FileLock
 
