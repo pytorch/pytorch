@@ -84,6 +84,86 @@ __global__ void compute_agg(int * agg, int64_t * agg_cum, uint n_blocks) {
   }
 }
 
+template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
+__global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg, int64_t input_nelem, int64_t output_nelem, int iters_per_cta) {
+  int64_t start_idx = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
+  if (start_idx >= input_nelem) return;
+  d_in += start_idx;
+
+  using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
+
+  // Specialize BlockScan type for our thread block
+  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
+  using TransformInputIteratorT = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<int, NonZeroOp<T>, const T*>;
+  using BlockExchangeT =  ROCM_HIPCUB(at_cuda_detail::cub)::BlockExchange<int, BLOCK_THREADS, ITEMS_PER_THREAD>;
+
+  // Shared memory
+  __shared__ union TempStorage
+  {
+    typename BlockLoadT::TempStorage load;
+    typename BlockScanT::TempStorage scan;
+    typename BlockExchangeT::TempStorage exchange;
+  } temp_storage;
+
+  int64_t aggregate = blockIdx.x == 0 ? 0 : agg[blockIdx.x - 1];
+  d_out += aggregate;
+
+  TransformInputIteratorT t_input_itr(d_in, NonZeroOp<T>());
+
+  // Per-thread tile data
+  int data[ITEMS_PER_THREAD];
+  int out_indices[ITEMS_PER_THREAD];
+
+  int64_t remaining =  input_nelem - start_idx;
+  int64_t out_remaining = output_nelem - aggregate;
+  for (int i=0; i<iters_per_cta; i++){
+
+  // Load items into a blocked arrangement
+    if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
+      BlockLoadT(temp_storage.load).Load(t_input_itr, data);
+    } else {
+      BlockLoadT(temp_storage.load).Load(t_input_itr, data, remaining, int(0));
+    }
+
+    // Barrier for smem reuse
+    __syncthreads();
+
+    // Compute inclusive prefix sum
+    int aggregate;
+    __shared__ int aggregate_sh;
+    BlockScanT(temp_storage.scan).ExclusiveSum(data, out_indices, aggregate);
+
+    if (threadIdx.x == 0){
+      aggregate_sh = aggregate;
+    }
+
+    // Barrier for smem reuse
+    __syncthreads();
+    // striped arrangement will provide a slightly better
+    // coalescing for writes (although it's still bad because it's indirect indexing)
+    BlockExchangeT(temp_storage.exchange).BlockedToStriped(data);
+    __syncthreads();
+    BlockExchangeT(temp_storage.exchange).BlockedToStriped(out_indices);
+    for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
+      if (data[ii] != 0 && out_indices[ii] < out_remaining) {
+        int64_t inp_idx = start_idx + threadIdx.x + blockDim.x * ii;
+        d_out[out_indices[ii]] = inp_idx;
+      }
+    }
+
+    out_remaining -= aggregate_sh;
+    remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
+    if (remaining <= 0 || out_remaining <= 0) return;
+    d_out += aggregate_sh;
+    t_input_itr += BLOCK_THREADS * ITEMS_PER_THREAD;
+    start_idx += BLOCK_THREADS * ITEMS_PER_THREAD;
+    __syncthreads();
+  }
+
+}
+
+
+
 } // anonymous namespace
 
 template <typename scalar_t>
@@ -245,8 +325,8 @@ void nonzero_static_cuda_out_impl(
   constexpr int ITEMS_PER_THREAD = 16;
   auto grid_size = (self.numel() + BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (BLOCK_THREADS * ITEMS_PER_THREAD);
   const int64_t num_sms = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-
-  const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
+  int64_t target_blocks = sizeof(scalar_t) == 1 ? 2 * num_sms : num_sms;
+  const int iters_per_cta = (grid_size + target_blocks - 1)/target_blocks;
   grid_size = (self.numel() + iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD - 1) / (iters_per_cta * BLOCK_THREADS * ITEMS_PER_THREAD);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(int));
@@ -261,7 +341,7 @@ void nonzero_static_cuda_out_impl(
    (int*)agg.get(), (int64_t*)agg_cum.get(), grid_size
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  at::cuda::cub::flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
+  flag_kernel<BLOCK_THREADS, ITEMS_PER_THREAD>
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();

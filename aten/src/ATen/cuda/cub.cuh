@@ -400,7 +400,7 @@ struct TransformFunctor {
 template<int BLOCK_THREADS, int ITEMS_PER_THREAD, bool nonzero, typename T, typename aggT>
 __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int iters_per_cta){
     if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= nelem) return;
-    d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+    d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
 
     using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<aggT, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_STRIPED>;
     using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<aggT, BLOCK_THREADS>;
@@ -412,7 +412,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     } temp_storage;
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
-    int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
+    int64_t remaining =  nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * (int64_t)blockIdx.x;
     TransformFunctor<T, aggT, nonzero> transform_functor;
     auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
@@ -452,95 +452,6 @@ struct NonZeroOp {
     return (a != T(0));
   }
 };
-
-
-template<int BLOCK_THREADS, int ITEMS_PER_THREAD, typename T>
-__global__ void flag_kernel(const T* d_in, int64_t * d_out, int64_t * agg, int64_t input_nelem, int64_t output_nelem, int iters_per_cta) {
-  if (BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x >= input_nelem) return;
-  d_in += BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
-  int64_t start_idx = BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
-
-  using BlockLoadT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockLoad<int, BLOCK_THREADS, ITEMS_PER_THREAD, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_LOAD_WARP_TRANSPOSE>;
-
-  // Specialize BlockScan type for our thread block
-  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
-  //using BlockReduceT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockReduce<int, BLOCK_THREADS>;
-  using TransformInputIteratorT = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<int, NonZeroOp<T>, const T*>;
-  using BlockExchangeT =  ROCM_HIPCUB(at_cuda_detail::cub)::BlockExchange<int, BLOCK_THREADS, ITEMS_PER_THREAD>;
-
-  // Shared memory
-  __shared__ union TempStorage
-  {
-    typename BlockLoadT::TempStorage load;
-    typename BlockScanT::TempStorage scan;
-    typename BlockExchangeT::TempStorage exchange;
-  } temp_storage;
-
-  int64_t aggregate = blockIdx.x == 0 ? 0 : agg[blockIdx.x - 1];
-  d_out += aggregate;
-
-  TransformInputIteratorT t_input_itr(d_in, NonZeroOp<T>());
-
-  // Per-thread tile data
-  int data[ITEMS_PER_THREAD];
-  int out_indices[ITEMS_PER_THREAD];
-
-  int64_t remaining =  input_nelem - BLOCK_THREADS * ITEMS_PER_THREAD * iters_per_cta * blockIdx.x;
-  int64_t out_remaining = output_nelem - aggregate;
-  for (int i=0; i<iters_per_cta; i++){
-
-  // Load items into a blocked arrangement
-    if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
-      BlockLoadT(temp_storage.load).Load(t_input_itr, data);
-    } else {
-       #pragma unroll
-       for (int j=0; j<ITEMS_PER_THREAD; j++) {
-         data[j] = 0;
-       }
-       BlockLoadT(temp_storage.load).Load(t_input_itr, data, remaining);
-    }
-
-    // Barrier for smem reuse
-    __syncthreads();
-
-    // Compute inclusive prefix sum
-    int aggregate;
-    __shared__ int aggregate_sh;
-    BlockScanT(temp_storage.scan).ExclusiveSum(data, out_indices, aggregate);
-
-    if (threadIdx.x == 0){
-      aggregate_sh = aggregate;
-    }
-
-
-
-    // Barrier for smem reuse
-    __syncthreads();
-    // striped arrangement will provide a slightly better
-    // coalescing for writes (although it's still bad because it's indirect indexing)
-    BlockExchangeT(temp_storage.exchange).BlockedToStriped(data);
-    __syncthreads();
-    BlockExchangeT(temp_storage.exchange).BlockedToStriped(out_indices);
-    for (int ii=0; ii<ITEMS_PER_THREAD; ii++){
-      if (data[ii] != 0 && out_indices[ii] < out_remaining) {
-        int64_t inp_idx = start_idx + threadIdx.x + blockDim.x * ii;
-        d_out[out_indices[ii]] = inp_idx;
-      }
-    }
-
-    t_input_itr += BLOCK_THREADS * ITEMS_PER_THREAD;
-    d_out += aggregate_sh;
-    out_remaining -= aggregate_sh;
-    remaining -= BLOCK_THREADS * ITEMS_PER_THREAD;
-    start_idx += BLOCK_THREADS * ITEMS_PER_THREAD;
-    if (remaining <= 0 || out_remaining <= 0) return;
-    __syncthreads();
-  }
-
-}
-
-
-
 
 template<int size>
 constexpr int block_threads(){
