@@ -33,7 +33,9 @@ class FileLock(base_FileLock):
     ) -> None:
         self.region_counter.__exit__()
         with _WaitCounter("pytorch.filelock.exit").guard():
-            # Returns nothing per https://github.com/tox-dev/filelock/blob/57f488ff8fdc2193572efe102408fb63cfefe4e4/src/filelock/_api.py#L379
+            # Returns nothing per
+            # https://github.com/tox-dev/filelock/blob/57f488ff8fdc2193572efe102408fb63cfefe4e4/src/filelock/_api.py#L379
             super().__exit__(exc_type, exc_value, traceback)
-        # Returns nothing per https://github.com/pytorch/pytorch/blob/0f6bfc58a2cfb7a5c052bea618ab62becaf5c912/torch/csrc/monitor/python_init.cpp#L315
+        # Returns nothing per
+        # https://github.com/pytorch/pytorch/blob/0f6bfc58a2cfb7a5c052bea618ab62becaf5c912/torch/csrc/monitor/python_init.cpp#L315
         return None
