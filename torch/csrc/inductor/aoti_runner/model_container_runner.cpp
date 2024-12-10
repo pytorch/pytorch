@@ -74,6 +74,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
         json_filename, device_str == "cpu");
     proxy_executor_handle_ =
         reinterpret_cast<AOTIProxyExecutorHandle>(proxy_executor_.get());
+  } else {
+    proxy_executor_handle_ = nullptr;
   }
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
@@ -155,6 +157,21 @@ void AOTIModelContainerRunner::update_constant_buffer(
     const TensorConstantMap& const_map,
     bool use_inactive,
     bool check_full_update) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
+      container_handle_,
+      (AOTInductorConstantMapHandle)&const_map,
+      use_inactive,
+      check_full_update));
+}
+
+void AOTIModelContainerRunner::update_constant_buffer(
+    std::unordered_map<std::string, at::Tensor>& tensor_map,
+    bool use_inactive,
+    bool check_full_update) {
+  TensorConstantMap const_map;
+  for (auto& [k, v] : tensor_map) {
+    const_map.emplace(k, &v);
+  }
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_constant_buffer_func_(
       container_handle_,
       (AOTInductorConstantMapHandle)&const_map,

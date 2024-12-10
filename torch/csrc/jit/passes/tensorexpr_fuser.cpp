@@ -155,11 +155,11 @@ void setTensorExprFuserEnabled(bool val) {
 }
 
 bool tensorExprFuserEnabled() {
-  static const auto enable_opt = c10::utils::get_env("PYTORCH_TENSOREXPR");
-  if (!enable_opt.has_value()) {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR");
+  if (!enable_c_str) {
     return texpr_fuser_enabled_;
   }
-  if (enable_opt == "0") {
+  if (std::string(enable_c_str) == "0") {
     return false;
   }
   return true;
@@ -1293,10 +1293,10 @@ class TensorExprFuser {
   // 'PYTORCH_TENSOREXPR_DONT_FUSE="clamp:mul:add"' disables fusion on
   // aten::clamp, aten::mul and aten::add.
   void parseTENotFuseOption() {
-    const auto option = c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_FUSE");
+    const char* option = std::getenv("PYTORCH_TENSOREXPR_DONT_FUSE");
     std::stringstream in_ss;
-    if (option.has_value()) {
-      in_ss << option.value();
+    if (option) {
+      in_ss << option;
     }
 
     std::string line;

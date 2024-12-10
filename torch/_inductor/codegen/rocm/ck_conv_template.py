@@ -215,6 +215,14 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         return 0;
     } // kernel definition
     } // extern C
+
+    #ifdef GENERATE_CK_STANDALONE_RUNNER
+    int main(int argc, char** argv) {
+        (void) argc;
+        (void) argv;
+        return 0;
+    }
+    #endif // GENERATE_CK_STANDALONE_RUNNER
 """
 
     def globals(self) -> IndentedBuffer:

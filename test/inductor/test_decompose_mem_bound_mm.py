@@ -12,6 +12,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_gpu
@@ -47,6 +48,10 @@ class MyModule3(torch.nn.Module):
 
 
 @requires_gpu
+@skipIfXpu(
+    msg="Intel GPU has not enabled decompose_mem_bound_mm PASS in "
+    "torch/_inductor/fx_passes/decompose_mem_bound_mm.py"
+)
 @torch._inductor.config.patch(
     post_grad_fusion_options={
         "decompose_mm_pass": {},

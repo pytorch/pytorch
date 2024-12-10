@@ -100,14 +100,9 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
-        return (
-            self
-            in (
-                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
-                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
-            )
-            # TODO (anijain2305) - Investigate why is_fsdp_module required.
-            or self.is_fsdp_module()
+        return self in (
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
         )
 
     def is_unspecialized_nn_module(self) -> bool:
@@ -368,6 +363,26 @@ class DuplicateInputs(GuardEnvExpr):
 
     def __post_init__(self):
         assert self.input_source_a != self.input_source_b
+
+
+"""
+A class representing storage overlap relations among inputs that aliases the same storage.
+
+Given that a set of tensors alias the same storage, this guard checks whether they actually
+have overlapping storages.
+
+While non_overlapping_sources represent input tensors that definitely don't have any storage
+overlapping with any other input, overlapping_sources represent tensors that either:
+
+1. Do overlap some other input tensor
+2. Might not overlap some other input tensor, but we are not sure
+"""
+
+
+@dataclasses.dataclass
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: List[Source]
+    non_overlapping_sources: List[Source]
 
 
 """
@@ -665,6 +680,8 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Verbose ShapeEnv guards produced.
+        self.shape_env_guards: List[str] = []
 
     @staticmethod
     def current_compile_id():

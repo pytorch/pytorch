@@ -1,6 +1,5 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
@@ -322,10 +321,10 @@ static std::string dladdr_lookup(void* addr) {
 
 struct Symbolizer {
   Symbolizer() {
-    auto envar = c10::utils::get_env("TORCH_ADDR2LINE_BINARY");
-    if (envar.has_value()) {
+    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    if (envar != nullptr) {
       // currently we take user's input as is without checking
-      addr2line_binary_ = std::move(envar.value());
+      addr2line_binary_ = envar;
       TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
     } else {
       addr2line_binary_ = "addr2line"; // default
@@ -380,7 +379,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
-  std::string addr2line_binary_;
+  const char* addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -395,13 +394,12 @@ struct Symbolizer {
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          addr2line_binary_.c_str(), "-C", "-f", "-e", name.c_str(), nullptr};
+          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
                    Entry{
-                       std::make_unique<Communicate>(
-                           addr2line_binary_.c_str(), args),
+                       std::make_unique<Communicate>(addr2line_binary_, args),
                        {}})
                .first;
     }
