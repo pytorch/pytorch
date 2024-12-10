@@ -1140,7 +1140,7 @@ graph():
         model = TestModule()
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
-        self.assertEquals(list(ep_model.graph.nodes)[-1].name, "output")
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     def test_real_tensor_size_mismatch(self):
