@@ -13,6 +13,7 @@ from typing import (
     Type,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import torch
 import torch.nn as nn
@@ -201,14 +202,17 @@ def fully_shard(
     return arg_module
 
 
-def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+_P = ParamSpec("_P")
+
+
+def _unimplemented_deepcopy(*args: _P.args, **kwargs: _P.kwargs) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
 
 
 class FSDPModule:
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: _P.args, **kwargs: _P.kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
@@ -217,7 +221,7 @@ class FSDPModule:
         # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
+        self.__init__(*args, **kwargs)  # type: ignore[misc]
         return self
 
     def reshard(self) -> None:
@@ -440,7 +444,7 @@ class FSDPModule:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
 
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+    def _apply(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
         ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
@@ -503,7 +507,7 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
     orig_method = getattr(module, method_name)
 
     @functools.wraps(orig_method)
-    def wrapped_method(self, *args, **kwargs):
+    def wrapped_method(self, *args: _P.args, **kwargs: _P.kwargs):
         fsdp_state = self._get_fsdp_state()
         args, kwargs = fsdp_state._pre_forward(self, args, kwargs)
         out = orig_method(*args, **kwargs)
