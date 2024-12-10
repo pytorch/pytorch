@@ -513,11 +513,19 @@ class AOTInductorModelContainer {
   }
 
   void reclaim_finished_models(std::unique_lock<std::mutex>& lk) {
+#ifdef __aarch64__
+    // push finished model instances to the end of pending_models_
+    auto it = std::partition(
+        pending_models_.begin(),
+        pending_models_.end(),
+        [](AOTInductorModel* m) { return !m->is_finished(); });
+#else
     // push finished model instances to the end of pending_models_
     auto it = std::stable_partition(
         pending_models_.begin(),
         pending_models_.end(),
         [](AOTInductorModel* m) { return !m->is_finished(); });
+#endif
 
     if (it != pending_models_.end()) {
       // We have finished model instances that can be pushed into
