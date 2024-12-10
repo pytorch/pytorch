@@ -4392,7 +4392,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = func(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            if not torch.compiler.is_compiling:  # if not using torch dynamo
+            if not torch.compiler.is_compiling():  # if not using torch dynamo
                 self.assertEqual(len(out.shape), len(ref_shape))
                 for o, r in zip(out.shape, ref_shape):
                     if r is not None:
@@ -5202,8 +5202,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 if nt_with_holes._ragged_idx == reduce_dim:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "not supported for non-contiguous nested tensor inputs, e.g. with holes, "
-                        + "when reducing across the ragged dimension for NestedTensor",
+                        "not supported where lengths is not None "
+                        + "if reducing across the ragged dimension for NestedTensor",
                     ):
                         out = torch.nn.functional.softmax(nt_with_holes, dim=reduce_dim)
                 else:
@@ -7805,7 +7805,7 @@ torch.cuda.synchronize()
         # expect min / max seqlen to be stored here
         cache = dict(nt._metadata_cache)
 
-        @torch.compile(dynamic=True)
+        @torch.compile
         def g(nt):
             padded = nt.to_padded_tensor(0.3)
             intermediate = padded.sin() + 1
@@ -8187,13 +8187,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_noncontig_holes_ragged_dim_reduction",
     ),
-    # uses fill_ which isn't implemented
-    XFailRule(
-        error_type=NotImplementedError,
-        op_match_fn=lambda device, op: (op.full_name == "atanh"),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="atanh_unimplemented_fill",
-    ),
     # expected: autodiff on complex dtype is not supported
     XFailRule(
         error_type=RuntimeError,
@@ -8289,20 +8282,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for these activation ops
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="non-strided meta tensors not supported yet",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "nn.functional.hardshrink",
-                "nn.functional.softshrink",
-            }
-        ),
-        name="empty_with_jagged_layout_activation",
     ),
 ]
 
@@ -8503,20 +8482,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         in_f, fullgraph=True, backend="aot_eager_decomp_partition"
                     )
 
-                    if sample.input.is_contiguous():
-                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
-                        if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                            self.assertEqualIgnoringNestedInts(sample.input, out_ref)
-                        else:
-                            self.assertEqual(sample.input, out_ref)
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
                     else:
-                        # see https://github.com/pytorch/pytorch/issues/106456
-                        with self.assertRaisesRegex(
-                            RuntimeError,
-                            "Mutations on non-contiguous inputs are currently not "
-                            "allowed on tensor subclasses",
-                        ):
-                            compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                        self.assertEqual(sample.input, out_ref)
 
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -8572,6 +8542,55 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @skipIfTorchDynamo(
+        "Dynamo fails on pending unbacked symints at assertEqual(ref_y[0][0][0].item(), 2)"
+    )
+    def test_nested_tensor_non_contiguous_mutation(self):
+        def fn(x, x0):
+            x[0, 0, 0] = 2
+            return x
+
+        def _inp():
+            base = torch.zeros(32, 3)
+            v = base.t()
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ), torch.ones(2, 32)
+
+        ref_x, ref_x0 = _inp()
+        ref_y = fn(ref_x, ref_x0)
+
+        self.assertEqual(ref_y[0][0][0].item(), 2)
+
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(*_inp())
+        self.assertEqual(y[0][0][0], 2)
+
+    def test_nested_tensor_input_mutation_backward(self):
+        # See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+        # NJT tangent is always subclass, See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+        # This test checks that AOTD correctly guess NJT tangent as NJT.
+        def fn(x):
+            x.mul_(2)
+            return x + 1
+
+        def _inp():
+            v = torch.zeros(32, 3, requires_grad=True)
+            return torch.nested.nested_tensor_from_jagged(
+                v,
+                offsets=torch.tensor([0, 2, 3]),
+            ).clone()
+
+        ref_x = _inp()
+        ref_y = fn(ref_x)
+        ref_y.sum().backward()
+
+        x = _inp()
+        y = torch.compile(fn, fullgraph=True, backend="aot_eager")(x)
+        y.sum().backward()
 
 
 from torch.nested._internal.nested_int import NestedIntNode

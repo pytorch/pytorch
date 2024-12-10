@@ -3,6 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -17,20 +18,22 @@ __all__: List[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
-# Simplifying assumption: we assume that the batch dim is always the left-most
-# dim, and the ragged dim is always the second dim.
-def _outer_to_inner_dim(ndim, dim, canonicalize=False):
+def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
 
     if isinstance(dim, (tuple, list)):
-        output = type(dim)(_outer_to_inner_dim(ndim, d) for d in dim)
+        output = type(dim)(_outer_to_inner_dim(ndim, d, ragged_dim) for d in dim)
         # ensure no duplicates, which can result from both batch and ragged mapping to 0
         return type(output)(dict.fromkeys(output))
 
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
+
     assert dim >= 0 and dim < ndim
-    return 0 if dim < 2 else dim - 1
+
+    # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
+    # For other dims, subtract 1 to convert to inner space.
+    return ragged_dim - 1 if dim == 0 else dim - 1
 
 
 def _wrap_jagged_dim(
@@ -49,7 +52,11 @@ def _wrap_jagged_dim(
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on ragged dim")
     elif wrapped == 0 and not allow_batch_dim:
         raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
-    ret = _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
+    ret = (
+        _outer_to_inner_dim(ndim, wrapped, ragged_dim)
+        if convert_to_inner_dim
+        else wrapped
+    )
     if allow_batch_dim:
         # Need to disambiguate whether we're operating on the batch dim or not.
         # Operating on dim=1 -> dim=0 after the inner dim conversion.
@@ -80,7 +87,7 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
 
     # ensure no duplicates, which can result from both batch and ragged mapping to 0
     outer_to_inner_dim = tuple(
-        dict.fromkeys(_outer_to_inner_dim(ndim, d) for d in wrapped_dims)
+        dict.fromkeys(_outer_to_inner_dim(ndim, d, ragged_idx) for d in wrapped_dims)
     )
 
     return outer_to_inner_dim, operate_on_batch, operate_on_ragged, operate_on_non_batch
@@ -492,7 +499,7 @@ def is_contiguous_general(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     # If created from narrow() check for lengths
-    if inp._non_contig_offsets is not None:
+    if inp.lengths() is not None:
         return False
 
     new_kwargs["memory_format"] = new_kwargs.get(
@@ -520,7 +527,7 @@ def clone_default(func, *args, **kwargs):
 
     new_meta = extract_kwargs(inp)
 
-    if inp._non_contig_offsets is not None:
+    if inp._lengths is not None:
         if new_kwargs["memory_format"] == torch.contiguous_format:
             # need to copy to remove "holes" non-contiguity / lengths metadata
             # TODO: write a kernel for this
@@ -595,8 +602,8 @@ def to_dtype(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
+    from torch.nested._internal.nested_tensor import make_cached_tensor_for_nested
     from torch.nested._internal.tensor_registry import register_tensor, try_get_int
-    from torch.nested._internal.wrappers import make_cached_tensor_for_nested
 
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -656,7 +663,11 @@ def copy_default(func, *args, **kwargs):
         raise RuntimeError(
             "copy_ only supports Nested Tensors that have same size and the exact same offset tensor."
         )
-    inp.values().copy_(src.values())
+    # AOTD allows mutations of inputs only, (not views of the inputs).
+    # NJT.values() returns _values.detach() to workaround some issues.
+    # To keep mutation in the graph, AOTD manually calls copy_ on the input (NJT).
+    # Here we directly mutate self._values to not emit .detach() in the graph, which would make it non-compilable.
+    inp._values.copy_(src._values)
     return inp
 
 
@@ -737,10 +748,10 @@ def _softmax_default(func, *args, **kwargs):
             "softmax(): not supported when reducing along the ragged dimension for ragged_idx > 1 for NestedTensor"
         )
 
-    if reduce_on_ragged and inp._non_contig_offsets is not None:
+    if reduce_on_ragged and inp._lengths is not None:
         raise RuntimeError(
-            "softmax(): not supported for non-contiguous nested tensor inputs, e.g. with holes, "
-            + "when reducing across the ragged dimension for NestedTensor"
+            "softmax(): not supported where lengths is not None "
+            + "if reducing across the ragged dimension for NestedTensor"
         )
 
     new_kwargs["dim"] = new_kwargs["dim"][
@@ -959,28 +970,61 @@ def unbind_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp.values()
-    non_contig_offsets = inp._non_contig_offsets
     offsets = inp.offsets()
+    lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
-    lengths: Optional[torch.Tensor] = inp.lengths()
 
-    if non_contig_offsets is None:
-        lengths = lengths if lengths is not None else offsets.diff()
-        return torch.split(values, lengths.tolist(), dim=(ragged_idx - 1))
+    def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
+        # This torch._check and torch._check_is_size are needed for torch.compile
+        # symbolic shapes processing.
+        # offsets and lengths are symbolic variables during compilation,
+        # we guarantee the correct offsets/lengths correspondence:
+        # sum of lengths <= total ragged_dim_size
+        # every length and offset are size-like variable (allows sym shapes to reason it as [2, inf))
+        # offset[i] + length[i] <= ragged_dim_size, for unbind and split dim correctness
+        # offsets[i] <= ragged_dim_size
+
+        lengths_sum = 0
+        ragged_dim_size = values.shape[ragged_idx - 1]
+        for i in range(len(_lengths)):
+            torch._check_is_size(_lengths[i])
+            torch._check(_lengths[i] <= ragged_dim_size)
+
+            lengths_sum += _lengths[i]
+            if _offsets is not None:
+                torch._check(
+                    _offsets[i] + _lengths[i] <= ragged_dim_size,
+                    lambda: "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension",
+                )
+        torch._check(lengths_sum <= ragged_dim_size)
+
+        if _offsets is not None:
+            for i in range(len(_offsets)):
+                torch._check_is_size(_offsets[i])
+                torch._check(_offsets[i] <= ragged_dim_size)
+
+    if lengths is None:
+        lengths_scalars = offsets.diff().tolist()
+        _torch_check(lengths_scalars)
+
+        return torch.split(values, lengths_scalars, dim=(ragged_idx - 1))
 
     if ragged_idx <= 0:
         raise RuntimeError(
             "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
         )
-    assert lengths is not None
-    for i in range(lengths.shape[0]):
-        if non_contig_offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
-            raise RuntimeError(
-                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
-            )
+
+    lengths_scalars = lengths.tolist()
+    offsets_scalars = offsets.tolist()
+
+    _torch_check(lengths_scalars, offsets_scalars)
+
     return [
         torch.narrow(
-            values, dim=(ragged_idx - 1), start=non_contig_offsets[i], length=lengths[i]  # type: ignore[call-overload]
+            values,
+            dim=(ragged_idx - 1),
+            start=offsets_scalars[i],
+            length=lengths_scalars[i],
         )
         for i in range(lengths.shape[0])
     ]
@@ -1328,12 +1372,18 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
             "for non-contiguous nested tensors with holes"
         )
 
+    from torch.utils._pytree import tree_map
+
     # raggedness reduced away --> return dense tensor
     if reduce_on_ragged:
         # reduction cases: (batch, ragged), (batch, ragged, non-batch), etc.
         if reduce_on_batch:
             # no need to read offsets --> apply sum directly on values
             out = func(inp._values, **new_kwargs)
+            if new_kwargs.get("keepdim", False):
+                # some ops return multiple things; unsqueeze all of them
+                out = tree_map(lambda o: o.unsqueeze(0), out)
+            return out
         else:
             # invalid reduction cases: (ragged, non-batch), etc.
             if reduce_on_non_batch:
@@ -1344,17 +1394,11 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
 
             # reduction cases: (ragged)
             # convert to padded dense and reduce
+            new_kwargs.pop("dim")
             dim_to_pass = [inp._ragged_idx] if is_dimlist else inp._ragged_idx
-            out = func(inp.to_padded_tensor(identity_element), dim=dim_to_pass)
-
-        if new_kwargs.get("keepdim", False):
-            if isinstance(out, (tuple, list)):
-                # some ops return multiple things; unsqueeze all of them
-                out = type(out)(o.unsqueeze(inp._ragged_idx) for o in out)
-            else:
-                out = out.unsqueeze(inp._ragged_idx)
-
-        return out
+            return func(
+                inp.to_padded_tensor(identity_element), dim=dim_to_pass, **new_kwargs
+            )
     # raggedness preserved --> return nested tensor
     else:
         # invalid reduction cases: (batch), (batch, non-batch), etc.
@@ -1380,10 +1424,8 @@ def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
                 if d < inp._ragged_idx - 1:
                     out_kwargs["_ragged_idx"] -= 1
 
-        if isinstance(out, (tuple, list)):
-            # some ops return multiple things; wrap each of them as an NJT
-            return type(out)(NestedTensor(o, **out_kwargs) for o in out)
-        return NestedTensor(out, **out_kwargs)
+        # some ops return multiple things; wrap each of them as an NJT
+        return tree_map(lambda o: NestedTensor(o, **out_kwargs), out)
 
 
 @register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
@@ -1434,8 +1476,8 @@ def transpose_int(func, *args, **kwargs):
         inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
-                _outer_to_inner_dim(len(inp._size), dim0),
-                _outer_to_inner_dim(len(inp._size), dim1),
+                _outer_to_inner_dim(len(inp._size), dim0, inp._ragged_idx),
+                _outer_to_inner_dim(len(inp._size), dim1, inp._ragged_idx),
             ),
             **inp_kwargs,
         )
@@ -1483,7 +1525,10 @@ def permute_default(func, *args, **kwargs):
             "Permute is not supported on the batch dimension for jagged NT"
         )
     inp_kwargs["_ragged_idx"] = canonicalized_dims.index(inp._ragged_idx)
-    inner_dims = [_outer_to_inner_dim(inp_dim, dim) for dim in canonicalized_dims[1:]]
+    inner_dims = [
+        _outer_to_inner_dim(inp_dim, dim, inp._ragged_idx)
+        for dim in canonicalized_dims[1:]
+    ]
     new_kwargs["dims"] = inner_dims
     return NestedTensor(func(inp._values, **new_kwargs), **inp_kwargs)
 
@@ -1765,16 +1810,17 @@ def index_put_(func, *args, **kwargs):
     # We can run on the underlying values directly
 
     # Validate indices
-    lengths = inp.lengths()
-    if lengths is None:
-        lengths = inp.offsets().diff()
+    if inp.lengths() is None:
+        lengths = offsets.diff()
+    else:
+        lengths = inp.lengths()
     torch._assert_async(
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
 
     # Recompute indices for _values
-    ragged_indices = inp.offsets()[indices[0]] + indices[inp._ragged_idx]
+    ragged_indices = offsets[indices[0]] + indices[inp._ragged_idx]
     func_indices = (
         # before ragged dim
         indices[1 : inp._ragged_idx]

@@ -148,24 +148,12 @@ class NestedTensor(torch.Tensor):
     # .lengths() and .offsets() do not automatically do conversion between lengths
     # and offsets. If the requested variant does not exist, then None is returned.
     def offsets(self) -> torch.Tensor:
-        ret = None
-        if self._non_contig_offsets is not None:
-            # non-contig case
-            ret = self._non_contig_offsets
-        else:
-            # contig case
-            if self.is_cpu:
-                ret = self._host_offsets
-            else:
-                ret = self._device_offsets
+        ret = self._offsets
         assert ret is not None
         return ret
 
     def lengths(self) -> Optional[torch.Tensor]:
-        if self.is_cpu:
-            return self._host_lengths
-        else:
-            return self._device_lengths
+        return self._lengths
 
     def __getattr__(self, name) -> Optional[torch.Tensor]:
         if name not in SOURCE_FIELDS + EXTRA_FIELDS + ("_lengths", "_offsets"):
@@ -178,10 +166,20 @@ class NestedTensor(torch.Tensor):
         metadata = get_metadata(ragged_int)
 
         if name == "_offsets":
-            return self.offsets()
+            if self._non_contig_offsets is not None:
+                # non-contig case
+                return self._non_contig_offsets
+            # contig case
+            if self.is_cpu:
+                return self._host_offsets
+            else:
+                return self._device_offsets
 
         elif name == "_lengths":
-            return self.lengths()
+            if self.is_cpu:
+                return self._host_lengths
+            else:
+                return self._device_lengths
 
         return metadata.metadata.get(name)
 
@@ -214,10 +212,11 @@ class NestedTensor(torch.Tensor):
         max_seqlen_tensor = self._max_seqlen_tensor
         if max_seqlen_tensor is None:
             # compute & cache
-            max_val = _get_sdpa_extreme_seqlen(
-                torch.max,
-                self.offsets().diff() if self._lengths is None else self._lengths,
-            )
+            if (lengths := self._lengths) is None:
+                offsets = self._offsets
+                assert offsets is not None
+                lengths = offsets.diff()
+            max_val = _get_sdpa_extreme_seqlen(torch.max, lengths)
             max_seqlen_tensor = _store_val_in_tensor(max_val)
             self._metadata_cache["max_seqlen"] = max_seqlen_tensor
         return _load_val_from_tensor(max_seqlen_tensor)
@@ -226,10 +225,11 @@ class NestedTensor(torch.Tensor):
         min_seqlen_tensor = self._min_seqlen_tensor
         if min_seqlen_tensor is None:
             # compute & cache
-            min_val = _get_sdpa_extreme_seqlen(
-                torch.min,
-                self.offsets().diff() if self._lengths is None else self._lengths,
-            )
+            if (lengths := self._lengths) is None:
+                offsets = self._offsets
+                assert offsets is not None
+                lengths = offsets.diff()
+            min_val = _get_sdpa_extreme_seqlen(torch.min, lengths)
             min_seqlen_tensor = _store_val_in_tensor(min_val)
             self._metadata_cache["min_seqlen"] = min_seqlen_tensor
         return _load_val_from_tensor(min_seqlen_tensor)
