@@ -662,9 +662,6 @@ JIT_EXECUTOR_TESTS = [
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
-AOT_DISPATCH_TESTS = [
-    test for test in TESTS if test.startswith("functorch/test_aotdispatch")
-]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -1636,11 +1633,6 @@ def parse_args():
         help="exclude torch export tests",
     )
     parser.add_argument(
-        "--exclude-aot-dispatch-tests",
-        action="store_true",
-        help="exclude aot dispatch tests",
-    )
-    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1805,9 +1797,6 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_torch_export_tests:
         options.exclude.extend(TORCH_EXPORT_TESTS)
-
-    if options.exclude_aot_dispatch_tests:
-        options.exclude.extend(AOT_DISPATCH_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
