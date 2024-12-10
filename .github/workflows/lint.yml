@@ -61,6 +61,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -117,6 +118,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
@@ -154,6 +156,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -193,6 +196,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
