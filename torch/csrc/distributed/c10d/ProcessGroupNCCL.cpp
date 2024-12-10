@@ -1297,8 +1297,8 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
     try {
       bool result = fut.get();
       if (result) {
-        LOG(INFO) << logPrefix()
-                  << "future is successfully executed for: " << futDescription;
+        VLOG(2) << logPrefix()
+                << "future successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
@@ -1780,6 +1780,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           true);
 
       if (complete) {
+        LOG(INFO)
+            << logPrefix()
+            << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
@@ -2046,9 +2049,9 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
         reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
     globalStore_->set(std::string(EXCEPTION_DUMP), vec);
     if (!shouldDump_.load()) {
-      LOG(ERROR)
+      LOG(INFO)
           << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+          << "Broadcasting flight recorder dump signal to other processes via TCPStore.";
     }
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
