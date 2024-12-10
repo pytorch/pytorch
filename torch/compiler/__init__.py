@@ -17,6 +17,7 @@ __all__ = [
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "is_exporting",
 ]
 
 
