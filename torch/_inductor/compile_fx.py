@@ -57,6 +57,10 @@ from torch._functorch.aot_autograd import (
     make_boxed_func,
     SerializableAOTDispatchCompiler,
 )
+from torch._functorch._aot_autograd.subclass_parametrization import (
+    unwrap_tensor_subclass_parameters,
+)
+
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -633,7 +637,7 @@ def _compile_fx_inner(
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
+                and is_gpu(input.device.type)
                 and i in static_input_idxs
             ):
                 input._is_inductor_static = True  # type: ignore[attr-defined]
@@ -1543,6 +1547,9 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    
+    # [See NOTE] Unwrapping subclasses AOT
+    unwrap_tensor_subclass_parameters(model_)
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else

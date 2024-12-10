@@ -384,6 +384,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             unwrap_tensor_subclass_parameters,
         )
 
+        # [NOTE] Unwrapping subclasses AOT
         # In torch.compile, the subclass unwrapping/wrapping happen at runtime
         # but at export, this is impossible as it is intented to be run on
         # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
