@@ -101,7 +101,7 @@ class CoordescTuner:
         return out
 
     def value_too_large(self, name: str, val: int) -> bool:
-        if name in {"XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"}:
+        if name in ("XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"):
             return val > self.get_config_max(name[0].lower())
         if name == "num_warps":
             return val > self.get_warpsmax()
