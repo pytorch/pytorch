@@ -43,13 +43,13 @@ std::optional<AttrTag> ParseAttrTag(
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
-  char nested_open = -1;
-  char nested_close = -1;
+  std::optional<char> nested_open;
+  std::optional<char> nested_close;
   size_t nest_count = 1;
   AttrTag tag;
   tag.name = match[1].str();
   for (pos = vpos; pos < node_string.size(); ++pos) {
-    if (nested_open < 0) {
+    if (!nested_open.has_value()) {
       if (SkipTagSeparator(node_string, pos) != pos) {
         break;
       }
@@ -72,7 +72,8 @@ std::optional<AttrTag> ParseAttrTag(
       --nest_count;
       if (nest_count == 0) {
         nest_count = 1;
-        nested_open = nested_close = -1;
+        nested_open.reset();
+        nested_close.reset();
       }
     } else if (node_string[pos] == nested_open) {
       ++nest_count;
