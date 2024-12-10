@@ -4,25 +4,26 @@ FLAKE8_COMMENT: Checks files to make sure # flake8: noqa is only at the top of f
 
 from __future__ import annotations
 
-import logging
-
-import sys
 import argparse
 import json
-import tokenize
+import logging
 import re
-from io import StringIO
-
+import sys
+import tokenize
 from enum import Enum
+from io import StringIO
 from typing import NamedTuple
 
+
 LINTER_CODE = "FLAKE8_COMMENT"
+
 
 class LintSeverity(str, Enum):
     ERROR = "error"
     WARNING = "warning"
     ADVICE = "advice"
     DISABLED = "disabled"
+
 
 class LintMessage(NamedTuple):
     path: str | None
@@ -35,24 +36,30 @@ class LintMessage(NamedTuple):
     replacement: str | None
     description: str | None
 
+
 def check_file(filename: str) -> LintMessage | None:
     logging.debug("Checking file %s", filename)
 
-    pattern = r'^# flake8:\s*noqa'
+    pattern = r"^# flake8:\s*noqa"
     is_start_of_file = True
 
-    with open(filename, "r", encoding='utf-8') as f:
+    with open(filename, encoding="utf-8") as f:
         original = f.read()
 
         for token in tokenize.generate_tokens(StringIO(original).readline):
-            if (token.type != tokenize.COMMENT and token.type != tokenize.NL) and is_start_of_file:
+            if (
+                token.type != tokenize.COMMENT and token.type != tokenize.NL
+            ) and is_start_of_file:
                 is_start_of_file = False
 
-            if token.type == tokenize.COMMENT \
-                    and not is_start_of_file \
-                    and re.search(pattern, token.string):
+            if (
+                token.type == tokenize.COMMENT
+                and not is_start_of_file
+                and re.search(pattern, token.string)
+            ):
                 replacement_lines = original.splitlines()
                 replacement_lines[token.start[0] - 1] = ""
+                replacement_lines.insert(0, "# flake8: noqa")
                 return LintMessage(
                     path=filename,
                     line=None,
@@ -61,10 +68,11 @@ def check_file(filename: str) -> LintMessage | None:
                     severity=LintSeverity.ERROR,
                     name="mid-file '# flake8: noqa'",
                     original=original,
-                    replacement=original,
+                    replacement="\n".join(replacement_lines),
                     description="'# flake8: noqa' in the middle of the file ",
                 )
     return None
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import abc
 import collections
 import collections.abc
@@ -2714,7 +2715,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             "int",
             np.intp,
             np.int32,
-            np.uint8
+            np.uint8,
             # np.dtype('int')       # XXX: as above
         ]
 
@@ -7591,7 +7592,6 @@ utils_device.CURRENT_DEVICE == None""".split(
     @unittest.skipIf(sys.version_info >= (3, 13), "feature landed in 3.13")
     def test_get_instruction_source_311(self):
         def f():
-            # flake8: noqa
             # fmt: off
             # test binary ops
             a = ( b   )   +   c
@@ -7606,7 +7606,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             << (
 
                 c  # test
-                \
+
             )  # test
             )
 
@@ -8104,8 +8104,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
-            def forward(self):
-                ...
+            def forward(self): ...
 
             def training_step(self):
                 self()

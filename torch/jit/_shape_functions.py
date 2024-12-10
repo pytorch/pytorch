@@ -1,10 +1,10 @@
+# flake8: noqa
 # mypy: allow-untyped-defs
 import math
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 
 number = Union[int, float]
-# flake8: noqa
 
 ###
 # There are generated files that depend on this file

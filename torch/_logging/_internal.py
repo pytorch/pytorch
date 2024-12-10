@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# flake8: noqa: B950
 import functools
 import hashlib
 import importlib.util
@@ -644,7 +645,7 @@ Examples:
 
   TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
   well. This is useful when the output is long.
-"""  # flake8: noqa: B950
+"""
     msg = f"""
 TORCH_LOGS Info
 {examples}
