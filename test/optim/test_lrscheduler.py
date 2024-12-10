@@ -759,6 +759,32 @@ class TestLRScheduler(TestCase):
         # Ensure that multiple schedulers does not affect the initial learning rate
         self.assertEqual(prev_lr, new_lr)
 
+    def test_sequentiallr5(self):
+        """
+        Test SequentialLR with a ChainedScheduler.
+        """
+        epochs = 10
+        schedulers = []
+        milestones = []
+
+        targets = [
+            [0.0005, 0.0014, 0.0023, 0.0032, 0.0041]
+            + [0.025, 0.025, 0.025, 0.025, 0.025]
+        ]
+
+        const_sched = ConstantLR(optimizer=self.opt, factor=0.1, total_iters=5)
+        lin_sched = LinearLR(optimizer=self.opt, start_factor=0.1, total_iters=5)
+        milestones.append(5)
+
+        chained = ChainedScheduler([lin_sched, const_sched])
+        schedulers.append(chained)
+
+        const_sched2 = ConstantLR(optimizer=self.opt, factor=0.5, total_iters=5)
+        schedulers.append(const_sched2)
+
+        scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
+        self._test(scheduler, targets, epochs)
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
@@ -2404,6 +2430,60 @@ class TestLRScheduler(TestCase):
             scheduler2 = LRClass(self.opt)
             scheduler2.load_state_dict(state_dict_loaded)
             self.assertEqual(scheduler2.state_dict(), state_dict)
+
+    @parametrize("min_lr", ["scalar", "list"])
+    def test_add_param_group_does_not_break_reduce_lr_on_plateau(self, min_lr):
+        epochs = 20
+        for param_group in self.opt.param_groups:
+            param_group["lr"] = 0.5
+        targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
+        metrics = [1] * 7 + [0.6] + [0.5] * 12
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=0.1,
+            patience=5,
+            cooldown=5,
+            min_lr=0 if min_lr == "scalar" else [1e-5, 1e-4],
+        )
+        for epoch in range(epochs):
+            # Point is to test the use case in #104361
+            if epoch == 8:
+                param = torch.nn.Parameter(torch.rand(2, 3))
+                self.opt.add_param_group({"params": [param], "lr": 0.05})
+                if min_lr == "list":
+                    scheduler.min_lrs.append(1e-6)
+            self.opt.step()
+            scheduler.step(metrics[epoch])
+            for param_group, target in zip(self.opt.param_groups, targets):
+                self.assertEqual(
+                    target[epoch],
+                    param_group["lr"],
+                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
+                        epoch, target[epoch], param_group["lr"]
+                    ),
+                    atol=1e-5,
+                    rtol=0,
+                )
+
+    def test_add_param_group_errors_reduce_lr_on_plateau(self):
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            threshold_mode="rel",
+            threshold=1e-5,
+            patience=0,
+            cooldown=0,
+            min_lr=[1e-5, 1e-4],
+        )
+        param = torch.nn.Parameter(torch.rand(2, 3))
+        self.opt.add_param_group({"params": [param], "lr": 0.05})
+        self.opt.step()
+        scheduler.step(1)
+        with self.assertRaisesRegex(RuntimeError, "The number of param groups in the"):
+            self.opt.step()
+            scheduler.step(1.3)
 
     @parametrize(
         "LRClass",

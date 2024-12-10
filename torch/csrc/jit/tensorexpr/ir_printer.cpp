@@ -226,12 +226,11 @@ static void formatImm(std::ostream& os, T v) {
   formatIntSuffix(os, v);
 }
 
-// NOLINTNEXTLINE
 #define IMM_PRINT_VISIT(Type, Name)              \
   void IRPrinter::visit(const Name##ImmPtr& v) { \
     formatImm(os(), v->value());                 \
   }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
 void IRPrinter::visit(const CastPtr& v) {

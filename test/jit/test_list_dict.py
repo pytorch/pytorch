@@ -2850,7 +2850,6 @@ class TestScriptList(JitTestCase):
         with self.assertRaises(TypeError):
             script_data.append("str")
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_clear(self):
         """
         Test clear.

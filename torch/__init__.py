@@ -25,6 +25,7 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     Dict as _Dict,
+    get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
     Set as _Set,
@@ -34,7 +35,7 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+from typing_extensions import ParamSpec as _ParamSpec
 
 
 if TYPE_CHECKING:
@@ -64,7 +65,15 @@ from torch._utils_internal import (
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
+    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
+    if not TYPE_CHECKING:
+        import typing_extensions
+
+        _TypeIs = typing_extensions.TypeGuard
+        typing_extensions.TypeIs = _TypeIs
 else:
+    from typing_extensions import TypeIs as _TypeIs
+
     from torch.torch_version import __version__ as __version__
 
 __all__ = [
@@ -128,6 +137,7 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",
@@ -220,7 +230,8 @@ if sys.platform == "win32":
         try:
             ctypes.CDLL("vcruntime140.dll")
             ctypes.CDLL("msvcp140.dll")
-            ctypes.CDLL("vcruntime140_1.dll")
+            if platform.machine() != "ARM64":
+                ctypes.CDLL("vcruntime140_1.dll")
         except OSError:
             print(
                 textwrap.dedent(
@@ -309,7 +320,6 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -524,6 +534,15 @@ class SymInt:
     def __sub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __rsub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __and__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __or__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __repr__(self):
         return self.node._graph_repr()
 
@@ -666,6 +685,14 @@ class SymFloat:
 
     def __hash__(self):
         return hash(builtins.float(self))
+
+    def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
+        return self
+
+    def hex(self) -> str:
+        """Returns the hexadecimal representation of the float."""
+        return self.node.guard_float("", 0).hex()
 
 
 class SymBool:
@@ -874,6 +901,8 @@ def _get_sym_math_fn(name):
     def fn(a):
         if overrides.has_torch_function_unary(a):
             return overrides.handle_torch_function(fn, (a,), a)
+        if isinstance(a, SymInt):
+            a = torch.sym_float(a)
         if hasattr(a, f"__sym_{name}__"):
             return getattr(a, f"__sym_{name}__")()
         return getattr(math, name)(a)
@@ -893,11 +922,13 @@ for __name in (
     "asin",
     "acos",
     "atan",
+    "log2",
 ):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
+
 
 del __fn, __name, __sym_name, _get_sym_math_fn
 
@@ -913,6 +944,11 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
+
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
 
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -1031,7 +1067,7 @@ def typename(obj: _Any, /) -> str:
     return f"{module}.{qualname}"
 
 
-def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
+def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
 
     Note that this function is simply doing ``isinstance(obj, Tensor)``.
@@ -1051,7 +1087,7 @@ def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeGuard[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
@@ -2090,6 +2126,7 @@ from torch import (
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
+    accelerator as accelerator,
     autograd as autograd,
     backends as backends,
     cpu as cpu,
@@ -2237,12 +2274,20 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
+        from torch._inductor.compiler_bisector import CompilerBisector
+
+        if bisect_changes := CompilerBisector.get_config_change("inductor"):
+            options = {} if options is None else options
+            options = (
+                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
+            )
+
         if not options:
             return
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: _Dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -2250,13 +2295,18 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
-            if type(val) is not type(current_config[attr_name]):
-                val_type_str = type(val).__name__
-                expected_type_str = type(current_config[attr_name]).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
-                )
-            self.config[attr_name] = val
+            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            # Subscriptable generic types don't support isinstance so skip the type
+            # check. There doesn't seem to be a good way of checking membership without
+            # 3rd party libraries.
+            if _get_origin(attr_type) is None:
+                if not isinstance(val, attr_type):
+                    val_type_str = type(val).__name__
+                    expected_type_str = type(current_config[attr_name]).__name__
+                    raise RuntimeError(
+                        f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                    )
+                self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
@@ -2442,8 +2492,8 @@ def compile(
 
     """
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Dynamo is not supported on Python 3.13+")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("Dynamo is not supported on Python 3.14+")
 
     # Decorator mode
     if model is None:
@@ -2469,6 +2519,12 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if bisect_backend := CompilerBisector.get_backend():
+        backend = bisect_backend
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2523,6 +2579,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+from torch import fx as fx
 
 
 # Register MPS specific decomps

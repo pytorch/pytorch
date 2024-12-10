@@ -784,7 +784,8 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
                  ival_pos)
                  .Union();
   } else {
-    AT_ERROR("Invalid IValue type for serialization: ", ivalue.tagKind());
+    TORCH_CHECK(
+        false, "Invalid IValue type for serialization: ", ivalue.tagKind());
   }
   return CreateIValue(fbb, ivalue_type, offset);
 }

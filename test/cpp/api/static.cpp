@@ -68,8 +68,7 @@ template <typename Module, typename ExpectedType, typename... Args>
 void assert_has_expected_type() {
   using ReturnType =
       typename torch::detail::return_type_of_forward<Module, Args...>::type;
-  constexpr bool is_expected_type =
-      std::is_same<ReturnType, ExpectedType>::value;
+  constexpr bool is_expected_type = std::is_same_v<ReturnType, ExpectedType>;
   ASSERT_TRUE(is_expected_type) << Module().name();
 }
 

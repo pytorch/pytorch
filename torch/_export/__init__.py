@@ -24,6 +24,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import compile_context
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
@@ -35,15 +36,17 @@ from torch.export.graph_signature import (
     OutputKind,
     OutputSpec,
     SymIntArgument,
+    SymBoolArgument,
+    SymFloatArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
+from .utils import _materialize_cpp_cia_ops
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +76,7 @@ def capture_pre_autograd_graph_warning():
 def print_export_warning():
     log.warning("Using torch.export.export_for_training(...,strict=True)")
 
-def gm_using_training_ir(graph_module):
+def gm_using_training_ir(graph_module: torch.fx.GraphModule) -> bool:
     """
     Returns true if the graph module is detected to use training IR.
 
@@ -168,9 +171,23 @@ def capture_pre_autograd_graph(
         # Do not decompose dropout for exported models, because in eval mode the dropout
         # op disappears from the graph, which makes it difficult to switch to train mode.
         # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
+
+        # We force create native_batch_norm because the below materialization logic
+        # only applies to CIA ops.
+        maybe_aliasing_or_mutating_ops = [torch.ops.aten.native_batch_norm.default]
+
+        _materialize_cpp_cia_ops()
+
+        for op in torch.ops.aten:
+            op_obj = getattr(torch.ops.aten, op)
+            for overload in op_obj.overloads():
+                op_overload = getattr(op_obj, overload)
+                if torch.Tag.maybe_aliasing_or_mutating in op_overload.tags:
+                    maybe_aliasing_or_mutating_ops.append(op_overload)
+
         decomp_table = {
             op: op.decompose
-            for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
+            for op in maybe_aliasing_or_mutating_ops
             if op != torch.ops.aten.dropout.default
         }
         with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
@@ -261,8 +278,9 @@ def aot_compile_warning():
     log.warning("|     !!!   WARNING   !!!    |")
     log.warning("+============================+")
     log.warning(
-        "torch._export.aot_compile() is being deprecated, please switch to "
-        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export()) instead.")
+        "torch._export.aot_compile()/torch._export.aot_load() is being deprecated, please switch to "
+        "directly calling torch._inductor.aoti_compile_and_package(torch.export.export())/"
+        "torch._inductor.aoti_load_package() instead.")
 
 
 def aot_compile(
@@ -275,7 +293,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> str:
+) -> Union[List[str], str]:
     """
     Note: this function is not stable yet
 
@@ -349,10 +367,15 @@ def aot_load(so_path: str, device: str) -> Callable:
     Returns:
         A callable
     """
+    aot_compile_warning()
+
     if device == "cpu":
         runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
+    elif device == "xpu" or device.startswith("xpu:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
+
     else:
         raise RuntimeError("Unsupported device " + device)
 

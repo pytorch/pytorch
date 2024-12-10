@@ -8,6 +8,8 @@ import sympy
 import torch
 from torch.utils._sympy.functions import (
     _keep_float,
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -17,6 +19,7 @@ from torch.utils._sympy.functions import (
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -163,6 +166,10 @@ class ReferenceAnalysis:
         return OpaqueUnaryFn_log(x)
 
     @staticmethod
+    def log2(x):
+        return OpaqueUnaryFn_log2(x)
+
+    @staticmethod
     def sqrt(x):
         return OpaqueUnaryFn_sqrt(x)
 
@@ -189,6 +196,14 @@ class ReferenceAnalysis:
     @staticmethod
     def round_decimal(a, b):
         return RoundDecimal(a, b)
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return BitwiseFn_bitwise_and(a, b)
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return BitwiseFn_bitwise_or(a, b)
 
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
@@ -248,6 +263,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         raise AssertionError("log is not valid shape sympy expr")
 
     @staticmethod
+    def log2(x):
+        return torch._sym_log2(x)  # type: ignore[attr-defined]
+
+    @staticmethod
     def sqrt(x):
         return torch._sym_sqrt(x)  # type: ignore[attr-defined]
 
@@ -298,6 +317,14 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def round_decimal(a, b):
         return round(a, ndigits=b)
 
+    @staticmethod
+    def bitwise_and(a, b):
+        return a & b
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return a | b
+
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
@@ -308,7 +335,7 @@ class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    return torch.ops.aten._to_copy(x, dtype=dtype)
+    return torch.ops.prims.convert_element_type.default(x, dtype)
 
 
 # Suppose we have some int/float arguments.  This diagram commutes:
@@ -348,6 +375,14 @@ class TensorReferenceAnalysis:
     @staticmethod
     def and_(a, b):
         return torch.ops.aten.logical_and.default(a, b)
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return torch.ops.aten.bitwise_and(a, b)
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return torch.ops.aten.bitwise_or(a, b)
 
     @staticmethod
     def eq(a, b):
@@ -444,7 +479,7 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return torch.ops.aten.floor_divide(a, b)
+        return torch.ops.aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
     @staticmethod
     def truncdiv(a, b):
@@ -473,8 +508,48 @@ class TensorReferenceAnalysis:
         return torch.ops.aten.log.default(x)
 
     @staticmethod
+    def log2(x):
+        return torch.ops.aten.log2.default(x)
+
+    @staticmethod
     def sqrt(x):
         return torch.ops.aten.sqrt.default(x)
+
+    @staticmethod
+    def sin(x):
+        return torch.ops.aten.sin.default(x)
+
+    @staticmethod
+    def cos(x):
+        return torch.ops.aten.cos.default(x)
+
+    @staticmethod
+    def tanh(x):
+        return torch.ops.aten.tanh.default(x)
+
+    @staticmethod
+    def sinh(x):
+        return torch.ops.aten.sinh.default(x)
+
+    @staticmethod
+    def cosh(x):
+        return torch.ops.aten.cosh.default(x)
+
+    @staticmethod
+    def tan(x):
+        return torch.ops.aten.tan.default(x)
+
+    @staticmethod
+    def acos(x):
+        return torch.ops.aten.acos.default(x)
+
+    @staticmethod
+    def atan(x):
+        return torch.ops.aten.atan.default(x)
+
+    @staticmethod
+    def asin(x):
+        return torch.ops.aten.asin.default(x)
 
     @staticmethod
     def pow(a, b):

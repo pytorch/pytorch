@@ -215,7 +215,7 @@ torch.backends.opt_einsum
 
 .. attribute::  enabled
 
-    A :class:``bool`` that controls whether opt_einsum is enabled (``True`` by default). If so,
+    A :class:`bool` that controls whether opt_einsum is enabled (``True`` by default). If so,
     torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
     if available to calculate an optimal path of contraction for faster performance.
 
@@ -224,7 +224,7 @@ torch.backends.opt_einsum
 
 .. attribute::  strategy
 
-    A :class:``str`` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
+    A :class:`str` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
     is ``True``. By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal"
     strategies are also supported. Note that the "optimal" strategy is factorial on the number of
     inputs as it tries all possible paths. See more details in opt_einsum's docs
