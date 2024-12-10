@@ -31,7 +31,7 @@ void MPSGuardImpl::record(void** event,
   // the MPS event pool.
   auto mps_event_id = (__bridge id_t)(intptr_t)(*event);
   if (!mps_event_id) {
-    mps_event_id = at::mps::getMPSEventPool()->acquireEvent(EventFlag);
+    mps_event_id = at::mps::getMPSEventPool()->acquireEvent(EventFlag == EventFlag::BACKEND_DEFAULT);
     *event = (__bridge void*)(intptr_t)(mps_event_id);
   }
   MPSStream mps_stream{stream};
