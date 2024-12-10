@@ -8857,6 +8857,25 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
+    def test_module_list_slice(self):
+        class ModuleListTruncated(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fcs = torch.nn.ModuleList(
+                    [torch.nn.Linear(1, 1) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                for fc in self.fcs[:1]:
+                    x = fc(x)
+                return x
+
+        x = torch.rand(2, 1)
+        mod = ModuleListTruncated()
+
+        epm = export(mod, (x,)).module()
+        self.assertTrue(torch.allclose(mod(x), epm(x)))
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
