@@ -39,7 +39,9 @@ if __name__ == "__main__":
             errors_found = True
         names.add(name)
         print(f"==== {name}")
-        #actual = data.get("concurrency", {})
+        print(filename.name)
+        actual = data.get("concurrency", {})
+        print(actual)
         #if filename.name == "create_release.yml":
         #    if not actual.get("group", "").startswith(EXPECTED_GROUP_PREFIX):
         #        print(
