@@ -55,22 +55,29 @@ class TestNumericDebugger(TestCase):
         return debug_handle_map
 
     def _extract_debug_handles_with_prev_decomp_op(self, model) -> Dict[str, int]:
-        debug_handle_to_prev_decomp_op_map: Dict[str, int] = {}
+        prev_decomp_op_to_debug_handle_map: Dict[str, int] = {}
 
         def _extract_debug_handles_with_prev_decomp_op_from_node(node):
-            nonlocal debug_handle_to_prev_decomp_op_map
+            nonlocal prev_decomp_op_to_debug_handle_map
             if (
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
             ):
-                debug_handle_to_prev_decomp_op_map[
-                    str(node.meta.get("nn_module_stack"))
-                ] = node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
+                prev_decomp_op = str(node.meta.get("nn_module_stack"))
+                debug_handle = node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY]
+                if prev_decomp_op not in prev_decomp_op_to_debug_handle_map:
+                    prev_decomp_op_to_debug_handle_map[prev_decomp_op] = debug_handle
+                else:
+                    assert (
+                        prev_decomp_op_to_debug_handle_map[prev_decomp_op]
+                        == debug_handle
+                    ), f"Node {node} has different debug handle {debug_handle}"
+                    "than previous node sharing the same decomp op {prev_decomp_op}"
 
         bfs_trace_with_node_process(
             model, _extract_debug_handles_with_prev_decomp_op_from_node
         )
-        return debug_handle_to_prev_decomp_op_map
+        return prev_decomp_op_to_debug_handle_map
 
     def test_simple(self):
         m = TestHelperModules.Conv2dThenConv1d()
