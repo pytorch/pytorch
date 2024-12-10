@@ -18,6 +18,7 @@ from typing import (
     TypeVar,
 )
 
+import torch._logging
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._pytree import tree_flatten
@@ -36,6 +37,13 @@ IdenticalNodes = List[Node]
 GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
+graph_expansion_log = torch._logging.getArtifactLogger(
+    __name__, "graph_region_expansion"
+)
+
+
+def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
+    graph_expansion_log.debug(msg, *args)
 
 
 def _extract_tensor_metadata_for_node_hash(
@@ -278,6 +286,9 @@ def fully_expand_region_group(
     seen_nodes: Set[Node],
     is_identical_fn: Callable[[Node, Node], bool],
 ) -> None:
+    debug_log("--------------------------------------------------")
+    debug_log("expanding new region group: %s", regions)
+
     # All regions should start with 1 node
     assert all(len(region) == 1 for region in regions)
     region_iters = []
@@ -306,7 +317,12 @@ def fully_expand_region_group(
         for region_it in region_iters[1:]:
             node = region_it.next()
 
+            debug_log("--------------------")
+            debug_log("considering adding: %s, cur_node: %s", node, current_node)
+            debug_log("previously claimed nodes: %s", node in seen_nodes)
+            debug_log("%s", seen_nodes)
             if node:
+                debug_log("is_identical: %s", is_identical_fn(node, current_node))
                 add_node &= (
                     node not in seen_nodes
                     and node not in nodes_to_add_set
@@ -317,9 +333,13 @@ def fully_expand_region_group(
             else:
                 add_node = False
 
+            debug_log("--------------------")
+
         if add_node:
             for region, region_it, node in zip(regions, region_iters, nodes_to_add):
                 region.append(node)
+                debug_log("adding %s's children", node)
+                debug_log("%s %s", node.args, list(node.kwargs.items()))
                 region_it.add_children(node)
                 seen_nodes.add(node)
 
@@ -328,3 +348,6 @@ def fully_expand_region_group(
     # Ensure regions are sorted in topological order
     for region in regions:
         region.reverse()
+
+    debug_log("end expand new region group: %s", regions)
+    debug_log("--------------------------------------------------")
