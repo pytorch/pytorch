@@ -369,10 +369,11 @@ class TestAOTInductorPackage(TestCase):
         buffer = torch._inductor.aoti_compile_and_package(
             ep, package_path=buffer
         )  # type: ignore[arg-type]
-        loaded = load_package(buffer)
-        self.assertTrue(
-            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
-        )
+        for _ in range(2):
+            loaded = load_package(buffer)
+            self.assertTrue(
+                torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+            )
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
