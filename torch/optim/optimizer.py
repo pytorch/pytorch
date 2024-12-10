@@ -26,7 +26,6 @@ from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
-from torch._utils import is_compiling
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -41,6 +40,7 @@ Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict = Dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
 
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
@@ -100,14 +100,14 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
     else:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return torch.stack(x)
     else:
         return x
@@ -139,7 +139,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
         def maybe_fallback(*args, **kwargs):
-            if is_compiling() and (
+            if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
                 and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
@@ -232,6 +232,10 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
 
 
 # Common doc strings among optimizers
+_params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize
+            or iterable of dicts defining parameter groups. When using named_parameters,
+            all parameters in all groups should be named"""
+
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
@@ -308,7 +312,9 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     return handle
 
 
-ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
+ParamsT: TypeAlias = Union[
+    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+]
 
 _P = ParamSpec("_P")
 R = TypeVar("R")
@@ -423,7 +429,7 @@ class Optimizer:
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if (
-            not is_compiling()
+            not torch.compiler.is_compiling()
             and torch.backends.cuda.is_built()
             and torch.cuda.is_available()
         ):
@@ -510,7 +516,7 @@ class Optimizer:
 
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]
@@ -649,6 +655,8 @@ class Optimizer:
             parameter group is a Dict. Each parameter group contains metadata
             specific to the optimizer, such as learning rate and weight decay,
             as well as a List of parameter IDs of the parameters in the group.
+            If a param group was initialized with ``named_parameters()`` the names
+            content will also be saved in the state dict.
 
         NOTE: The parameter IDs may look like indices but they are just IDs
         associating state with param_group. When loading from a state_dict,
@@ -673,12 +681,14 @@ class Optimizer:
                         'weight_decay': 0,
                         ...
                         'params': [0]
+                        'param_names' ['param0']  (optional)
                     },
                     {
                         'lr': 0.001,
                         'weight_decay': 0.5,
                         ...
                         'params': [1, 2, 3]
+                        'param_names': ['param1', 'layer.weight', 'layer.bias'] (optional)
                     }
                 ]
             }
@@ -834,6 +844,17 @@ class Optimizer:
         Args:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
+
+        .. note::
+            The names of the parameters (if they exist under the "param_names" key of each param group
+            in :meth:`state_dict`) will not affect the loading process.
+            To use the parameters' names for custom cases (such as when the parameters in the loaded state dict
+            differ from those initialized in the optimizer),
+            a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
+            accordingly.
+            If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
+            the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
+            the optimizer ``param_names`` will remain unchanged.
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
@@ -905,6 +926,8 @@ class Optimizer:
             group: Dict[str, Any], new_group: Dict[str, Any]
         ) -> Dict[str, Any]:
             new_group["params"] = group["params"]
+            if "param_names" in group and "param_names" not in new_group:
+                new_group["param_names"] = group["param_names"]
             return new_group
 
         param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
@@ -982,10 +1005,6 @@ class Optimizer:
         Args:
             closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
-
-        .. note::
-            Unless otherwise specified, this function should not modify the
-            ``.grad`` field of the parameters.
         """
         raise NotImplementedError
 
@@ -1013,6 +1032,25 @@ class Optimizer:
             )
         else:
             param_group["params"] = list(params)
+
+        extracted_param_tensors = []
+        extracted_param_names = []
+        for param in param_group["params"]:
+            if isinstance(param, tuple):
+                param_name = param[0]
+                extracted_param_names.append(param_name)
+                extracted_param_tensors.append(param[1])
+            else:
+                extracted_param_tensors.append(param)
+
+        param_group["params"] = extracted_param_tensors
+        if len(extracted_param_names) != 0:
+            if len(extracted_param_names) == len(extracted_param_tensors):
+                param_group["param_names"] = extracted_param_names
+            else:
+                raise ValueError(
+                    "all optimizer params should be with/without names. Some param names are missing"
+                )
 
         for param in param_group["params"]:
             if not isinstance(param, torch.Tensor):
@@ -1045,6 +1083,14 @@ class Optimizer:
         param_set: Set[torch.Tensor] = set()
         for group in self.param_groups:
             param_set.update(set(group["params"]))
+            if ("param_names" in param_group) != ("param_names" in group):
+                current_group_txt = (
+                    "with names" if "param_names" in param_group else "without names"
+                )
+                raise ValueError(
+                    "all optimizer param groups should be with/without names. "
+                    f"cannot add param group {current_group_txt} to the optimizer"
+                )
 
         if not param_set.isdisjoint(set(param_group["params"])):
             raise ValueError("some parameters appear in more than one parameter group")

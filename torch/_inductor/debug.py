@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import io
 import itertools
 import logging
 import os
@@ -473,7 +474,26 @@ class DebugFormatter:
         inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_dir = None
+            if torch._inductor.config.trace.save_real_tensors:
+                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
+                save_dir = os.path.dirname(fd.name)
+
+            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # and avoid recursively trying to save real tensors inside of the inductor compilation
+            # regardless
+            stable_hash = torch._inductor.config.trace.save_real_tensors
+            with torch._inductor.config.patch(
+                {"trace.enabled": False, "trace.save_real_tensors": False}
+            ):
+                save_graph_repro(
+                    fd,
+                    gm,
+                    inputs,
+                    "inductor",
+                    save_dir=save_dir,
+                    stable_hash=stable_hash,
+                )
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -546,7 +566,7 @@ class DebugFormatter:
                 "type": type(node).__name__,
             }
             try:
-                layout = node.get_layout()
+                layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
                     offset = 0
                     try:
@@ -561,13 +581,13 @@ class DebugFormatter:
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=list(V.graph.sizevars.size_hints(layout.size)),
-                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        size=[*V.graph.sizevars.size_hints(layout.size)],
+                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
                         offset=offset,
                     )
                     node_info["layout"] = str(static_layout)
                 else:
-                    node_info["layout"] = str(node.get_layout())
+                    node_info["layout"] = str(layout)
             except Exception as e:
                 pass
             try:
@@ -585,7 +605,7 @@ class DebugFormatter:
             except Exception as e:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
             except Exception as e:
                 pass
             try:
@@ -691,3 +711,41 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
+
+
+def aot_inductor_minifier_wrapper(
+    func: Callable[..., str],
+    exported_program: torch.export.ExportedProgram,
+    *,
+    inductor_configs: Dict[str, Any],
+    package_path: Optional[Union[str, io.BytesIO]] = None,
+) -> str:
+    from torch._inductor import config
+
+    use_minifier = config.aot_inductor.dump_aoti_minifier
+
+    gm = exported_program.module()
+    assert isinstance(gm, torch.fx.GraphModule)
+
+    args, kwargs = exported_program.example_inputs
+
+    try:
+        return func(
+            gm,
+            args,
+            kwargs,
+            inductor_configs=inductor_configs,
+            package_path=package_path,
+            load_and_run=use_minifier,
+        )
+    except Exception as e:
+        if use_minifier:
+            # TODO: check accuracy and re-direct to minifier
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            dump_to_minify(
+                exported_program,
+                "compile_fx_aot",
+                options=inductor_configs,
+            )
+        raise e

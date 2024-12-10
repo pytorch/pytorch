@@ -312,10 +312,11 @@ def _make_prim(
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
     else:
-        mutates_args = []
-        for arg in cpp_schema.arguments:
-            if arg.alias_info is not None and arg.alias_info.is_write:
-                mutates_args.append(arg.name)
+        mutates_args = [
+            arg.name
+            for arg in cpp_schema.arguments
+            if arg.alias_info is not None and arg.alias_info.is_write
+        ]
         prim_def = torch.library.custom_op(
             "prims::" + name,
             _prim_impl,
@@ -1773,22 +1774,22 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     assert dim >= 0
     shape = tensors[0].shape
-    concat_length = 0
+    sym_sum_args = []
     for tensor_idx, tensor in enumerate(tensors):
         assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
-                concat_length = concat_length + length
+                sym_sum_args.append(length)
             else:
                 torch._check(
                     length == common_length,
                     lambda: f"Sizes of tensors must match except in dimension {dim}. "
-                    f"Expected {common_length} but got {length} for tensor number "
+                    f"Expected {common_length} in dimension {idx} but got {length} for tensor number "
                     f"{tensor_idx} in the list",
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = concat_length
+    new_shape[dim] = torch.sym_sum(sym_sum_args)
     return TensorMeta(
         tensors[0],
         shape=new_shape,

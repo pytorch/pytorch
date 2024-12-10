@@ -649,6 +649,7 @@ def determine_qparams(
     device = min_val_neg.device
     scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+    eps = eps.to(device)
 
     if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
         max_val_pos = torch.max(-min_val_neg, max_val_pos)

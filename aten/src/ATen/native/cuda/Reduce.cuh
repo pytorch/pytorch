@@ -11,6 +11,7 @@
 #include <ATen/OpMathType.h>
 #include <c10/macros/Macros.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <array>
 #include <functional>
 #include <iosfwd>
 #include <type_traits>
@@ -20,8 +21,6 @@
 #include <ATen/native/cuda/jit_utils.h>
 
 namespace at::native {
-
-using at::detail::Array;
 
 static inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
@@ -407,7 +406,7 @@ struct ReduceOp {
     index_t input_idx = config.input_idx();
     auto base_offsets1 = output_calc.get(output_idx)[1];
 
-    using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
+    using arg_vec_t = std::array<arg_t, output_vec_size>;
     arg_vec_t value;
 
     if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
@@ -422,8 +421,8 @@ struct ReduceOp {
       value = block_x_reduce<output_vec_size>(value, shared_memory);
     }
 
-    using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+    using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
+    using offset_vec_t = std::array<index_t, output_vec_size>;
     offset_vec_t base_offsets;
     out_ptr_vec_t out;
 
@@ -480,7 +479,7 @@ struct ReduceOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
+  C10_DEVICE std::array<arg_t, output_vec_size> thread_reduce(const scalar_t* data) const {
     if (config.vectorize_input) {
       CUDA_KERNEL_ASSERT(output_vec_size == 1);
       // reduce at the header of input_slice where memory is not aligned,
@@ -561,12 +560,12 @@ struct ReduceOp {
   }
 
   template <int output_vec_size, typename offset_calc_t>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> thread_reduce_impl(const scalar_t* data_, offset_calc_t calc) const {
+  C10_DEVICE std::array<arg_t, output_vec_size> thread_reduce_impl(const scalar_t* data_, offset_calc_t calc) const {
     index_t idx = config.input_idx();
     const index_t end = config.num_inputs;
     const index_t stride = config.step_input;
 
-    using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
+    using arg_vec_t = std::array<arg_t, output_vec_size>;
     using load_t = at::native::memory::aligned_vector<scalar_t, output_vec_size>;
 
     // Multiple accumulators to remove dependency between unrolled loops.
@@ -634,8 +633,8 @@ struct ReduceOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> block_x_reduce(at::detail::Array<arg_t, output_vec_size> value, char* shared_memory) const {
-    using args_vec_t = at::detail::Array<arg_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> block_x_reduce(std::array<arg_t, output_vec_size> value, char* shared_memory) const {
+    using args_vec_t = std::array<arg_t, output_vec_size>;
     int dim_x = blockDim.x;
     args_vec_t* shared = (args_vec_t*)shared_memory;
     if (dim_x > warpSize) {
@@ -668,8 +667,8 @@ struct ReduceOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> block_y_reduce(at::detail::Array<arg_t, output_vec_size> value, char* shared_memory) const {
-    using args_vec_t = at::detail::Array<arg_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> block_y_reduce(std::array<arg_t, output_vec_size> value, char* shared_memory) const {
+    using args_vec_t = std::array<arg_t, output_vec_size>;
     args_vec_t* shared = (args_vec_t*)shared_memory;
     shared[config.shared_memory_offset(0)] = value;
     for (int offset = blockDim.y / 2; offset > 0; offset >>= 1) {
@@ -701,12 +700,12 @@ struct ReduceOp {
   }
 
   template <int output_vec_size, bool can_acc>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
-    at::detail::Array<out_scalar_t*, output_vec_size> out,
-    at::detail::Array<arg_t, output_vec_size> value,
+  C10_DEVICE std::array<arg_t, output_vec_size> accumulate_in_output(
+    std::array<out_scalar_t*, output_vec_size> out,
+    std::array<arg_t, output_vec_size> value,
     typename std::enable_if_t<can_acc>* = nullptr
   ) const {
-    at::detail::Array<arg_t, output_vec_size> ret;
+    std::array<arg_t, output_vec_size> ret;
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
       ret[i] = ops.combine(*(out[i]), value[i]);
@@ -727,13 +726,13 @@ struct ReduceOp {
   // it's the version of `accumulate_in_output`
   // when accumulation in the output is not possible.
   template <int output_vec_size, bool can_acc>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> accumulate_in_output(
-    at::detail::Array<out_scalar_t*, output_vec_size>,
-    at::detail::Array<arg_t, output_vec_size>,
+  C10_DEVICE std::array<arg_t, output_vec_size> accumulate_in_output(
+    std::array<out_scalar_t*, output_vec_size>,
+    std::array<arg_t, output_vec_size>,
     typename std::enable_if_t<!can_acc>* = nullptr
   ) const {
     CUDA_KERNEL_ASSERT(false);
-    return arg_t {};
+    return {arg_t{}};
   }
 
   // This function should never be called --
@@ -771,7 +770,7 @@ struct ReduceOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<index_t, output_vec_size> base_offset) const {
+  C10_DEVICE void set_results_to_output(std::array<arg_t, output_vec_size> value, std::array<index_t, output_vec_size> base_offset) const {
     CUDA_KERNEL_ASSERT(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
@@ -780,10 +779,10 @@ struct ReduceOp {
   }
 
   template <int output_vec_size>
-  C10_DEVICE at::detail::Array<arg_t, output_vec_size> global_reduce(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<arg_t, output_vec_size> *acc, char* shared_memory) const {
-    using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
-    using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+  C10_DEVICE std::array<arg_t, output_vec_size> global_reduce(std::array<arg_t, output_vec_size> value, std::array<arg_t, output_vec_size> *acc, char* shared_memory) const {
+    using arg_vec_t = std::array<arg_t, output_vec_size>;
+    using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
+    using offset_vec_t = std::array<index_t, output_vec_size>;
 
     arg_vec_t* reduce_buffer = (arg_vec_t*)cta_buf;
     index_t output_idx = config.output_idx<output_vec_size>();
@@ -808,7 +807,9 @@ struct ReduceOp {
 
     if (is_last_block_done) {
       __threadfence(); // complete the acquire pattern after atomic
-      value = ident;
+      for (auto &v : value) {
+        v = ident;
+      }
       if (config.should_block_x_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;
         index_t step = blockDim.x * blockDim.y;
@@ -832,7 +833,7 @@ struct ReduceOp {
           }
         }
       }
-      value = block_y_reduce(value, shared_memory);
+      value = block_y_reduce<output_vec_size>(value, shared_memory);
       if (config.should_block_x_reduce()) {
         value = block_x_reduce<output_vec_size>(value, shared_memory);
       }
@@ -1092,11 +1093,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   }
 
   constexpr int min_values_per_thread = 16;
-#ifndef USE_ROCM
   constexpr int max_values_per_thread = 256;
-#else
-  constexpr int max_values_per_thread = 1024;
-#endif
 
   if (config.values_per_thread() >= block_height * 16 || config.values_per_thread() >= max_values_per_thread) {
     // Divide the input across warps in a thread-block, if that leaves at least
@@ -1108,7 +1105,18 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     config.output_mult[1] = config.split_output(block_height);
   }
 
-  const int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor / config.num_threads;
+  int max_threads_per_mp =
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+#ifdef USE_ROCM
+  // Control the number of threadblocks by adjusting the maximum number of
+  // threads per multi-processor. These numbers better reflect the maximum
+  // theoretical achievable threads per MP for the reduction operation.
+  if (iter.ndim() == 1)
+    max_threads_per_mp = 512;
+  if (iter.ndim() == 2)
+    max_threads_per_mp = 256;
+#endif
+  const int blocks_per_sm = max_threads_per_mp / config.num_threads;
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1126,6 +1134,23 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+#ifdef USE_ROCM
+    // In cases where a number of threadblocks along the y direction of the grid
+    // is needed then make sure they are reduced to the number of MPs. For
+    // smaller sizes, use half the number of MPs. For smaller sizes than half
+    // the number of MPs use the original value unless the value is less than 16
+    // blocks in which case it is more profitable to use just 1 block.
+    if (config.ctas_per_output > num_mp)
+      if (num_mp < 128)
+        config.ctas_per_output =
+            num_mp * (config.ctas_per_output > 512 ? 4 : 2);
+      else
+        config.ctas_per_output = num_mp;
+    else if (config.ctas_per_output > div_up(num_mp, 2))
+      config.ctas_per_output = div_up(num_mp, 2);
+    else if (config.ctas_per_output < 16)
+      config.ctas_per_output = 1;
+#endif
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
