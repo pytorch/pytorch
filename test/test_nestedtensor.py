@@ -8673,6 +8673,100 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a * 2 == 2 * a)
 
 
+from torch.nested._internal.cached_tensor import CachedTensor
+
+
+class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
+    def test_basic_eager(self):
+        # Create some tensors
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+        metadata = {"a": a, "b": b, "c": c}
+        # Create CachedTensor with source_fields="a"
+        cached_tensor = CachedTensor(metadata, source_field="a")
+        # Test that cached_tensor is created correctly
+        self.assertIsInstance(cached_tensor, CachedTensor)
+        # Test that cached_tensor's shape matches 'a'
+        self.assertEqual(cached_tensor.shape, a.shape)
+        # Test that cached_tensor behaves like 'a'
+        self.assertEqual(cached_tensor + 1, a + 1)
+        # Test that accessing other fields works
+        self.assertIs(cached_tensor.c, c)
+        # Create CachedTensor with source_field='b'
+        cached_tensor_b = CachedTensor(metadata, source_field="b")
+        self.assertEqual(cached_tensor_b.shape, b.shape)
+        self.assertEqual(cached_tensor_b + 1, b + 1)
+
+        # Test that accessing a non-existent field raises AttributeError
+        with self.assertRaises(AttributeError):
+            _ = cached_tensor.d
+
+    def test_open_registration(self):
+        from torch.nested._internal.cached_tensor import (
+            register_cached_tensor_func,
+            set_func_registry,
+        )
+
+        tmp_registry = {}
+
+        with set_func_registry(tmp_registry):
+            # Create some tensors
+            a = torch.tensor([1, 2, 3], dtype=torch.float32)
+            b = torch.tensor([4, 5, 6], dtype=torch.float32)
+            c = torch.tensor([7, 8, 9], dtype=torch.float32)
+            metadata = {"a": a, "b": b, "c": c}
+            cached_tensor = CachedTensor(metadata, source_field="a")
+
+            # Before registration, clone unwraps
+            cloned_cached_tensor = cached_tensor.clone()
+            self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+
+            # Define a custom clone function that rewraps the output into
+            # a new CachedTensor.
+            @register_cached_tensor_func(torch.ops.aten.clone.default)
+            def cached_tensor_clone(op, inp, *args, **kwargs):
+                cloned_metadata = {}
+                for k, v in inp.metadata.items():
+                    cloned_metadata[k] = v.clone()
+                return CachedTensor(
+                    cloned_metadata,
+                    inp.source_field,
+                )
+
+            cloned_cached_tensor = cached_tensor.clone()
+            self.assertIsInstance(cloned_cached_tensor, CachedTensor)
+
+            for key in cached_tensor.metadata.keys():
+                assert isinstance(cloned_cached_tensor, CachedTensor)
+                self.assertEqual(
+                    cloned_cached_tensor.metadata[key], cached_tensor.metadata[key]
+                )
+                self.assertFalse(
+                    cloned_cached_tensor.metadata[key] is cached_tensor.metadata[key]
+                )
+
+        # After leaving the context, clone behaves as it did before.
+        cloned_cached_tensor = cached_tensor.clone()
+        self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+
+    def test_basic_compile(self):
+        # Create outside the graph
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+        metadata = {"a": a, "b": b, "c": c}
+
+        cached_tensor = CachedTensor(metadata, source_field="a")
+
+        @torch.compile
+        def fn(x):
+            return x.clone()
+
+        out = fn(cached_tensor)
+        self.assertFalse(isinstance(out, CachedTensor))
+
+
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
