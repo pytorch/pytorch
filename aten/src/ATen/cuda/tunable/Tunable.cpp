@@ -13,6 +13,7 @@
 #include <ATen/cuda/tunable/Tunable.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/version.h>
 
 #ifndef _WIN32
@@ -433,8 +434,8 @@ void TuningContext::EnableTunableOp(bool value) {
 }
 
 bool TuningContext::IsTunableOpEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ENABLED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_ENABLED") == "1";
+  if (eval) {
     return true;
   }
   return enable_;
@@ -460,16 +461,16 @@ void TuningContext::EnableRecordUntuned(bool value) {
 }
 
 bool TuningContext::IsTuningEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
-  if (env != nullptr && strcmp(env, "0") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_TUNING") == "0";
+  if (eval) {
     return false;
   }
   return tuning_enable_;
 }
 
 bool TuningContext::IsRecordUntunedEnabled() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  static const bool eval = c10::utils::get_env("PYTORCH_TUNABLEOP_RECORD_UNTUNED") == "1";
+  if (eval) {
     return true;
   }
   return record_untuned_enable_;
