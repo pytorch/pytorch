@@ -1918,6 +1918,8 @@ class SubgraphTracer(fx.Tracer):
             self.source_fn_stack = self.parent.source_fn_stack + [
                 (self.graph._target_to_str(source_target), source_target)
             ]
+        self.root = torch.nn.Module()
+        self.tensor_attrs = {}
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(self, tx, node):

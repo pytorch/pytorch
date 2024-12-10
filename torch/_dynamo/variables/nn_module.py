@@ -848,6 +848,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         return super().unpack_var_sequence(tx)
 
+    def as_proxy(self):
+        return self.value
+
     def call_function(
         self,
         tx: "InstructionTranslator",

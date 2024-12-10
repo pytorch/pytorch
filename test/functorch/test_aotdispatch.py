@@ -15,12 +15,12 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
-
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -6294,7 +6294,10 @@ metadata incorrectly.
             def __init__(self):
                 super().__init__()
                 self.p = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        TwoTensor(torch.zeros(3, 4), torch.randn(3, 4)),
+                        torch.ones(3, 4),
+                    )
                 )
 
             def forward(self, x):
@@ -6305,7 +6308,10 @@ metadata incorrectly.
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        torch.ones(3, 4),
+                        TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                    )
                 )
                 self._m = _M()
 
