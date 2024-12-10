@@ -290,6 +290,7 @@ def lru_cache(
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
     import torch._inductor.sizevars
+    import torch._library.custom_ops
     import torch._library.fake_impl
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
@@ -301,6 +302,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
+        torch._library.custom_ops,
         torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
