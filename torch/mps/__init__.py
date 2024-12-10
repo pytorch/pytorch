@@ -146,7 +146,8 @@ def _compile_shader(source: str):
     Example::
 
         >>> lib = torch.mps._compile_shader(
-        >>>     "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }")
+        ... "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }"
+        ...  )
         >>> x = torch.zeros(16, device="mps")
         >>> lib.full(x, 3.14)
     """
