@@ -1206,7 +1206,7 @@ class BuiltinVariable(VariableTracker):
                 a.as_python_constant(),
                 b.as_python_constant(),
             )
-            return variables.ConstantVariable(value)
+            return ConstantVariable(value)
 
     call_min = _call_min_max
     call_max = _call_min_max
