@@ -587,7 +587,7 @@ def get_kernel_metadata(node_schedule, wrapper):
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
-            key = node.meta["from_node"][0][0]
+            key = node.meta["from_node"][0].name
             from_node_dict[key].append(node.name)
     sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
@@ -1754,31 +1754,7 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return (
-        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
-    ) or (
-        # TODO: this is a temporary solution to ensure that we can identify torchrec's
-        # communication ops. But in order to allow better communication and computation
-        # overlap, torchrec's communication ops should be not used.
-        type(node) == ir.FallbackKernel
-        and (
-            # NOTE: the `hasattr()` check is to bypass errors such as the following:
-            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
-            (
-                hasattr(torch.ops.torchrec, "all_to_all_single")
-                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
-            )
-            or (
-                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
-                and node.op_overload
-                == torch.ops.torchrec.all_gather_into_tensor.default
-            )
-            or (
-                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
-                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
-            )
-        )
-    )
+    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
 
 
 def is_wait(node):
@@ -1953,8 +1929,13 @@ def device_need_guard(device: str):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+    # tl.atomic add has bfloat16 support in fbcode
+    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
+    # we will fallback until the code is upstreamed to OSS
+    if config.is_fbcode() and dtype == torch.bfloat16:
+        return False
+    else:
+        return dtype in {torch.int64, torch.bool, torch.bfloat16}
 
 
 def use_scatter_fallback(
