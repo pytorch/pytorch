@@ -67,6 +67,16 @@ def set_tunableop_defaults():
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
 
+def tunableop_matmul(filename, device, dtype):
+    # Helper function to test TunableOp in a subprocess
+    # requires helper function since lambda function
+    # not supported by multiprocessing module
+    torch.cuda.tunable.enable(True)
+    torch.cuda.tunable.set_max_tuning_duration(1)
+    torch.cuda.tunable.set_filename(filename)
+    A = torch.randn((17, 17), device=device, dtype=dtype)
+    B = torch.randn((17, 17), device=device, dtype=dtype)
+    C = torch.matmul(A, B)
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -5099,6 +5109,31 @@ class TestLinalg(TestCase):
                 os.remove(filename)
             except FileNotFoundError:
                 pass
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_dump_results_on_exit_tunableop(self, device, dtype):
+        # Test that the TunableOp results file is created
+        # and is NOT empty.
+        # To test this we create a subprocess and then
+        # execut a matmul from within the subprocess
+        import os
+        import multiprocessing as mp
+
+        ordinal = torch.cuda.current_device()
+        filename = f"tunableop_results{ordinal}.csv"
+
+        mp.set_start_method("spawn")
+        p = mp.Process(target=tunableop_matmul, args=(filename, device, dtype))
+        p.start()
+        p.join()
+
+        # Make sure the results file exists and that it is not zero.
+        self.assertTrue(os.path.exists(filename))
+        self.assertTrue(os.path.getsize(filename) > 0)
+
+        # Clean up, remove file that was generated
+        os.remove(filename)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
