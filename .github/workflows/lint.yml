@@ -132,20 +132,20 @@ jobs:
         # Regenerate workflows
         .github/scripts/generate_ci_workflows.py
 
-        #RC=0
-        ## Assert that regenerating the workflows didn't change them
-        #if ! .github/scripts/report_git_status.sh .github/workflows; then
-        #  echo
-        #  echo 'As shown by the above diff, the committed .github/workflows'
-        #  echo 'are not up to date according to .github/templates.'
-        #  echo 'Please run this command, commit, and push again to your PR:'
-        #  echo
-        #  echo '    .github/scripts/generate_ci_workflows.py'
-        #  echo
-        #  echo 'If running that command does nothing, you may need to rebase'
-        #  echo 'onto a more recent commit from the PyTorch main branch.'
-        #  RC=1
-        #fi
+        RC=0
+        # Assert that regenerating the workflows didn't change them
+        if ! .github/scripts/report_git_status.sh .github/workflows; then
+          echo
+          echo 'As shown by the above diff, the committed .github/workflows'
+          echo 'are not up to date according to .github/templates.'
+          echo 'Please run this command, commit, and push again to your PR:'
+          echo
+          echo '    .github/scripts/generate_ci_workflows.py'
+          echo
+          echo 'If running that command does nothing, you may need to rebase'
+          echo 'onto a more recent commit from the PyTorch main branch.'
+          RC=1
+        fi
 
         ## Check that jobs will be cancelled
         #.github/scripts/ensure_actions_will_cancel.py
