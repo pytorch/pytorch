@@ -375,7 +375,6 @@ function(torch_compile_options libname)
       -Wdeprecated
       -Wno-unused-parameter
       -Wno-missing-field-initializers
-      -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
       -Wno-strict-overflow

@@ -361,16 +361,18 @@ class BackendConfig:
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
-            # default config when backend is not specified
-            # supported since PyTorch 2.0
-            for device, default_backend in Backend.default_device_backend_map.items():
-                if is_backend_available(default_backend):
-                    if (
-                        default_backend == Backend.NCCL
-                        and not torch.cuda.is_available()
-                    ):
-                        continue
-                    self.device_backend_map[device] = Backend(default_backend)
+            # Detect the accelerator on the machine. If no accelerator is
+            # available, it returns CPU.
+            device_type = torch._C._get_accelerator().type
+            try:
+                backend_str = Backend.default_device_backend_map[device_type]
+                self.device_backend_map[device_type] = Backend(backend_str)
+            except KeyError:
+                raise ValueError(
+                    f"We detected accelerator {device_type} on your machine. "
+                    f"But we don't know which communication backend to use for this accelerator. "
+                    f"Please specify the `backend` argument in the `init_process_group` call."
+                ) from None
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -1540,15 +1542,22 @@ def init_process_group(
     Args:
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            ``nccl``, and ``ucc``. If the backend is not provided, then both a ``gloo``
-            and ``nccl`` backend will be created, see notes below for how multiple
-            backends are managed. This field can be given as a lowercase string
-            (e.g., ``"gloo"``), which can also be accessed via
-            :class:`Backend` attributes (e.g., ``Backend.GLOO``). If using
-            multiple processes per machine with ``nccl`` backend, each process
-            must have exclusive access to every GPU it uses, as sharing GPUs
-            between processes can result in deadlocks. ``ucc`` backend is
-            experimental.
+            ``nccl``, ``ucc``, or one that is registered by a third-party
+            plugin.
+            Since 2.6, if ``backend`` is not provided, c10d will use a backend
+            registered for the device type indicated by the `device_id` kwarg
+            (if provided). The known default registrations today are: ``nccl``
+            for ``cuda``, ``gloo`` for ``cpu``.
+            If neither ``backend`` nor ``device_id`` is provided, c10d will
+            detect the accelerator on the run-time machine and use a backend
+            registered for that detected accelerator (or ``cpu``).
+            This field can be given as a lowercase string (e.g., ``"gloo"``),
+            which can also be accessed via :class:`Backend` attributes (e.g.,
+            ``Backend.GLOO``).
+            If using multiple processes per machine with ``nccl`` backend, each
+            process must have exclusive access to every GPU it uses, as sharing
+            GPUs between processes can result in deadlock or NCCL invalid usage.
+            ``ucc`` backend is experimental.
         init_method (str, optional): URL specifying how to initialize the
                                      process group. Default is "env://" if no
                                      ``init_method`` or ``store`` is specified.
