@@ -57,6 +57,7 @@ jobs:
           { config: "default", shard: 9,  num_shards: 10, runner: "linux.s390x" },
           { config: "default", shard: 10, num_shards: 10, runner: "linux.s390x" },
         ]}
+    secrets: inherit
 
   linux-manylinux-2_28-py3-cpu-s390x-test:
     permissions:
@@ -73,3 +74,4 @@ jobs:
       test-matrix: ${{ needs.linux-manylinux-2_28-py3-cpu-s390x-build.outputs.test-matrix }}
       timeout-minutes: 480
       use-gha: "yes"
+    secrets: inherit
