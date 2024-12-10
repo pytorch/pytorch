@@ -75,6 +75,7 @@ namespace {
     template <typename T>
     class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
+    using RealFloatReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vBFloat16, vHalf>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
@@ -921,6 +922,24 @@ namespace {
             NAME_INFO(fmadd), RESOLVE_OVERLOAD(local_fmadd),
             [](const vec& v0, const vec& v1, const vec& v2) {
                 return at::vec::fmadd(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fmsub(v0, v1, v2);
             },
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
@@ -1779,7 +1798,8 @@ namespace {
         CACHE_ALIGN dst_t y[mask_n * size];                                 \
         CACHE_ALIGN dst_t ref[mask_n * size];                               \
         auto seed = TestSeed();                                             \
-        ValueGen<dst_t> generator(dst_t(-100), dst_t(100), seed);           \
+        dst_t generator_min = std::numeric_limits<dst_t>::is_signed ? dst_t(-100) : dst_t(0); \
+        ValueGen<dst_t> generator(generator_min, dst_t(100), seed);     \
         for (const auto i : c10::irange(mask_n * size)) {                   \
           x[i] = generator.get();                                           \
         }                                                                   \
