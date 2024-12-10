@@ -198,12 +198,13 @@ class TestNumericDebugger(TestCase):
         )
 
     def test_run_decompositions_map_handle_to_new_nodes(self):
-        m = TestHelperModules.TwoLinearModule()
-
         test_models = [
             TestHelperModules.TwoLinearModule(),
             TestHelperModules.Conv2dThenConv1d(),
-            TestHelperModules.ControlFlow(),
+            TestHelperModules.LinearBnLeakyReluModel(),
+            TestHelperModules.LinearTanhModel(),
+            TestHelperModules.LinearReluAddModel(),
+            TestHelperModules.ConvReluAddModel(),
         ]
 
         for m in test_models:
