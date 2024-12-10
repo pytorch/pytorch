@@ -166,6 +166,8 @@ def _assert_module_states(
 
 def get_devtype():
     return torch.device(DEVICE_TYPE)
+
+
 def _zero_model(
     model: nn.Module,
     zero_buffers: bool = False,
