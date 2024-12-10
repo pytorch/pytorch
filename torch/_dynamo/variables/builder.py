@@ -1251,10 +1251,6 @@ class VariableBuilder:
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-        for item in value:
-            if item is value:
-                unimplemented("list elements are pointing to the list itself")
-
         # Tuples are immutable objects, so we should mark its items static. This
         # avoids wrapping of tuple items as symints. This helps for nn module
         # attributes like conv2d strides, dilations.
