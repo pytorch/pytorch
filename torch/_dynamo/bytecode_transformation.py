@@ -1454,11 +1454,41 @@ def populate_kw_names_argval(instructions, consts):
 # If safe=True, we do not make any bytecode modifications.
 # Mainly used for debugging bytecode_transformation (see debug_checks)
 def cleaned_instructions(code, safe=False) -> List[Instruction]:
-    return list(_uncached_cleaned_instructions(code, safe))
+    instructions = _cached_cleaned_instructions(code, safe)
+    # We have a lot of code that implicitly mutates the instruction array. We
+    # could do better here by making the copies explicit when necessary.
+    return _clone_instructions(instructions)
+
+
+# Copy an instructions array, making sure to remap the individual instruction targets.
+def _clone_instructions(instructions):
+    remap = {instr: idx for idx, instr in enumerate(instructions)}
+    # This is super hot and this is the fastest way to do this (tried copy.copy
+    # and dataclasses.replace).
+    copied = [
+        Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            i.positions,
+            i.target,
+            i.exn_tab_entry,
+            i.argrepr,
+        )
+        for i in instructions
+    ]
+    for i in copied:
+        if i.target:
+            i.target = copied[remap[i.target]]
+    return copied
 
 
 @functools.cache
-def _uncached_cleaned_instructions(code, safe=False) -> Tuple[Instruction, ...]:
+def _cached_cleaned_instructions(code, safe=False) -> Tuple[Instruction, ...]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     if sys.version_info >= (3, 11):
