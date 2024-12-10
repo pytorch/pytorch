@@ -72,6 +72,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -296,6 +297,8 @@ class OutputGraph:
             "co_filename": f_code.co_filename,
             "co_firstlineno": f_code.co_firstlineno,
         }
+
+        self.region_tracker = GraphRegionTracker()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -2104,6 +2107,13 @@ class SubgraphTracer(fx.Tracer):
             msgs = traceback.StackSummary.from_list(frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
+        if (
+            torch._dynamo.config.use_graph_deduplication
+            or torch._dynamo.config.track_nodes_for_deduplication
+        ):
+            self.output_graph.region_tracker.track_node(
+                self.output_graph.current_tx, rv.node
+            )
         return rv
 
     def create_node(
