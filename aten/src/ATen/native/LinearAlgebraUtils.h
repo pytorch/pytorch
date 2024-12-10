@@ -138,7 +138,6 @@ inline void checkInputsSolver(const Tensor& A,
                                      const Tensor& B,
                                      const bool left,
                                      const char* const f_name) {
-  TORCH_CHECK(A.device() == B.device(), "Input tensors must all be on the same device");
   squareCheckInputs(A, f_name, "A");
   checkIsMatrix(B, f_name, "B");
   TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
