@@ -1462,7 +1462,6 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
 
 # Copy an instructions array, making sure to remap the individual instruction targets.
 def _clone_instructions(instructions):
-    remap = {instr: idx for idx, instr in enumerate(instructions)}
     # This is super hot and this is the fastest way to do this (tried copy.copy
     # and dataclasses.replace).
     copied = [
@@ -1481,9 +1480,15 @@ def _clone_instructions(instructions):
         )
         for i in instructions
     ]
+
+    remap = {instr: copy for instr, copy in zip(instructions, copied)}
+    # Handle `None` in the remapper so we don't need an extra `if`.
+    remap[None] = None
+
     for i in copied:
-        if i.target:
-            i.target = copied[remap[i.target]]
+        i.target = remap[i.target]
+        if entry := i.exn_tab_entry:
+            i.exn_tab_entry = InstructionExnTabEntry(remap[entry.start], remap[entry.end], remap[entry.target], entry.depth, entry.lasti)
     return copied
 
 
@@ -1510,7 +1515,7 @@ def _cached_cleaned_instructions(code, safe=False) -> Tuple[Instruction, ...]:
     if sys.version_info >= (3, 11):
         update_offsets(instructions)
         devirtualize_jumps(instructions)
-    return tuple(instructions)
+    return instructions
 
 
 _unique_id_counter = itertools.count()
