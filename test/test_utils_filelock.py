@@ -3,7 +3,7 @@ import concurrent.futures
 import tempfile
 import time
 
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfWindows, TestCase
 from torch.utils._filelock import FileLock
 
 
@@ -13,6 +13,9 @@ class TestFileLock(TestCase):
         with FileLock(p):
             pass
 
+    @skipIfWindows(
+        msg="Windows doesn't support multiple files being opened at once easily"
+    )
     def test_sequencing(self):
         with tempfile.NamedTemporaryFile() as ofd:
             p = ofd.name
