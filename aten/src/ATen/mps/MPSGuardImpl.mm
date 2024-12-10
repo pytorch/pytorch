@@ -55,6 +55,13 @@ void MPSGuardImpl::synchronizeEvent(void* event) const {
   return at::mps::getMPSEventPool()->synchronizeEvent(mps_event_id);
 }
 
+double MPSGuardImpl::elapsedTime(void* event1, void* event2, const DeviceIndex device_index) const {
+  TORCH_CHECK(event1 && event2, "Both events must be recorded before calculating elapsed time.");
+  auto start_event_id = (__bridge id_t)(intptr_t)(event1);
+  auto end_event_id = (__bridge id_t)(intptr_t)(event2);
+  return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
 void MPSGuardImpl::synchronizeDevice(const DeviceIndex device_index) const {
   at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
