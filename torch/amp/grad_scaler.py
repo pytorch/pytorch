@@ -373,7 +373,7 @@ class GradScaler:
 
         ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.
 
-        Returns the return value of ``optimizer.step(*args, **kwargs)`` and optionally an indication of inf.
+        Returns the return value of ``optimizer.step(*args, **kwargs)`` and optionally an indication of infs/NaNs.
 
         Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
