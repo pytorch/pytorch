@@ -230,6 +230,7 @@ def run_experiment(
         model = torchao.autoquant(model, manual=True, error_on_unseen=False)
         generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
         model.finalize_autoquant()
+        model = torch.compile(model, mode="max-autotune")
 
     if x.mode == "autoquant_v2":
         print("Using autoquant_v2")
