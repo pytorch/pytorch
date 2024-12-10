@@ -770,9 +770,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg2_1);  arg1_1 = arg2_1 = add = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg5_1, pin_memory = False);  arg5_1 = None
     clone = torch.ops.aten.clone.default(arg0_1)
     clone_1 = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    return [clone, clone_1, None, None, None, None]""",
+    return [clone, clone_1, None, None, zeros_like, None]""",
         )
 
     def test_cond_autograd_pytree_input(self):
@@ -1160,7 +1161,7 @@ def forward(self, pred_1, x_1):
         w2 = torch.zeros((), requires_grad=True)
         parameters = [w1, w2]
 
-        y_cond = cond_branch(x, w1, w2)
+        y_cond = cond_branch(x, *parameters)
         grad_cond = torch.autograd.grad(
             y_cond, parameters, allow_unused=True, retain_graph=True
         )
@@ -1233,33 +1234,35 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_cond_autograd_zeros_unused_branch_complex(self):
+        from torch._higher_order_ops.cond import create_fw_bw_graph_branches
+
         x = torch.randn(4, 5, requires_grad=False)
         w1 = torch.randn(2, 4, requires_grad=True)
         b1 = torch.randn(2, 1, requires_grad=True)
         w2 = torch.randn(2, 4, requires_grad=True)
         b2 = torch.randn(1, 5, requires_grad=True)
 
-        def true_fn(x):
-            return (w1 @ x + b1).sum()
+        def true_fn(x, w1, b1, w2, b2):
+            return ((w1 @ x + b1).sum(),)
 
-        def false_fn(x):
-            return (w2 @ x + b2).sum()
+        def false_fn(x, w1, b1, w2, b2):
+            return ((w2 @ x + b2).sum(),)
 
-        def cond_branch(x):
-            return torch.cond(
-                x.mean() > 0, lambda x: true_fn(x), lambda x: false_fn(x), [x]
-            )
+        def cond_branch(x, w1, b1, w2, b2):
+            return torch.cond(x.mean() > 0, true_fn, false_fn, [x, w1, b1, w2, b2])
 
         def imperative_branch(x):
             if x.mean() > 0:
-                return true_fn(x)
+                return true_fn(x, w1, b1, w2, b2)
             else:
-                return false_fn(x)
+                return false_fn(x, w1, b1, w2, b2)
 
         parameters = [w1, b1, w2, b2]
 
-        y_cond = cond_branch(x)
-        grad_cond = torch.autograd.grad(y_cond, parameters, allow_unused=True)
+        y_cond = cond_branch(x, *parameters)
+        grad_cond = torch.autograd.grad(
+            y_cond, parameters, allow_unused=True, retain_graph=True
+        )
 
         y_exp = imperative_branch(x)
         grad_exp = torch.autograd.grad(y_exp, parameters, allow_unused=True)
@@ -1271,6 +1274,77 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         ]
 
         self.assertEqual(grad_exp, grad_cond)
+
+        def f():
+            return torch.autograd.grad(y_cond, parameters, allow_unused=True)
+
+        gm = make_fx(f)()
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self):
+    _tensor_constant0 = self._tensor_constant0
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
+ memory_format = torch.preserve_format);  _tensor_constant0 = None
+    _tensor_constant1 = self._tensor_constant1
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    _tensor_constant2 = self._tensor_constant2
+    _tensor_constant3 = self._tensor_constant3
+    _tensor_constant4 = self._tensor_constant4
+    _tensor_constant5 = self._tensor_constant5
+    _tensor_constant6 = self._tensor_constant6
+    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
+ (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5, _tensor_constant6));\
+  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 = _tensor_constant3 =\
+ _tensor_constant4 = _tensor_constant5 = _tensor_constant6 = None
+    getitem = cond[0];  getitem = None
+    getitem_1 = cond[1]
+    getitem_2 = cond[2]
+    getitem_3 = cond[3]
+    getitem_4 = cond[4];  cond = None
+    return (getitem_1, getitem_2, getitem_3, getitem_4)""",
+        )
+
+        (
+            fw_true_graph,
+            fw_false_graph,
+            joint_true_graph,
+            joint_false_graph,
+        ) = create_fw_bw_graph_branches(true_fn, false_fn, *(x, w1, b1, w2, b2))
+
+        # Check that the joint_true_graph and the joint_false_graph do not return Nones
+        self.assertExpectedInline(
+            joint_true_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    mm = torch.ops.aten.mm.default(arg2_1, arg1_1);  arg2_1 = None
+    add = torch.ops.aten.add.Tensor(mm, arg3_1);  mm = arg3_1 = None
+    sum_1 = torch.ops.aten.sum.default(add);  add = sum_1 = None
+    expand = torch.ops.aten.expand.default(arg0_1, [2, 5]);  arg0_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(expand, [1], True)
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_1 = torch.ops.aten.mm.default(expand, t);  expand = t = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg4_1, pin_memory = False);  arg4_1 = None
+    zeros_like_1 = torch.ops.aten.zeros_like.default(arg5_1, pin_memory = False);  arg5_1 = None
+    return [None, mm_1, sum_2, zeros_like, zeros_like_1]""",
+        )
+
+        self.assertExpectedInline(
+            joint_false_graph.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    mm = torch.ops.aten.mm.default(arg4_1, arg1_1);  arg4_1 = None
+    add = torch.ops.aten.add.Tensor(mm, arg5_1);  mm = arg5_1 = None
+    sum_1 = torch.ops.aten.sum.default(add);  add = sum_1 = None
+    expand = torch.ops.aten.expand.default(arg0_1, [2, 5]);  arg0_1 = None
+    sum_2 = torch.ops.aten.sum.dim_IntList(expand, [0], True)
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_1 = torch.ops.aten.mm.default(expand, t);  expand = t = None
+    zeros_like = torch.ops.aten.zeros_like.default(arg2_1, pin_memory = False);  arg2_1 = None
+    zeros_like_1 = torch.ops.aten.zeros_like.default(arg3_1, pin_memory = False);  arg3_1 = None
+    return [None, zeros_like, zeros_like_1, mm_1, sum_2]""",
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
