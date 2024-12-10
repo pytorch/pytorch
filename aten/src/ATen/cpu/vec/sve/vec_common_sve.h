@@ -8,15 +8,19 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
 
-#if defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/sve/vec_double.h>
 #include <ATen/cpu/vec/sve/vec_int.h>
 #include <ATen/cpu/vec/sve/vec_qint.h>
-#endif
+#include <ATen/cpu/vec/sve/vec_bfloat16.h>
 
-namespace at {
-namespace vec {
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <ostream>
+
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -26,6 +30,33 @@ namespace vec {
 // namespace` which changes the name mangling, but can still be
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
+
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+  stream << val.val_;
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+  stream << static_cast<int>(val.val_);
+  return stream;
+}
+inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+  stream << static_cast<unsigned int>(val.val_);
+  return stream;
+}
+template <typename T>
+std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
+  T buf[Vectorized<T>::size()];
+  vec.store(buf);
+  stream << "vec[";
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    if (i != 0) {
+      stream << ", ";
+    }
+    stream << buf[i];
+  }
+  stream << ']';
+  return stream;
+}
 
 #if defined(CPU_CAPABILITY_SVE)
 
@@ -63,15 +94,15 @@ DEFINE_FLOAT_INT_CAST(int16_t, 16, float, 32)
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline gather(const double* base_addr, const Vectorized<int64_t>& vindex_) {
-  svint64_t vindex = svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
-  return svld1_gather_s64index_f64(ptrue, base_addr, vindex);
+    svint64_t offsets = svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale));
+    return svld1_gather_s64offset_f64(ptrue, base_addr, offsets);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline gather(const float* base_addr, const Vectorized<int32_t>& vindex_) {
-  svint32_t vindex = svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
-  return svld1_gather_s32index_f32(ptrue, base_addr, vindex);
+    svint32_t offsets = svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale));
+    return svld1_gather_s32offset_f32(ptrue, base_addr, offsets);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -80,20 +111,20 @@ template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>>
 inline mask_gather(const Vectorized<double>& src, const double* base_addr,
                    const Vectorized<int64_t>& vindex_, const Vectorized<double>& mask_) {
-  svbool_t mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_),
-                              ALL_S64_TRUE_MASK);
-  svint64_t vindex = svasrd_n_s64_x(ptrue, svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale)), 3);
-  return svsel_f64(mask, svld1_gather_s64index_f64(mask, base_addr, vindex), src);
+    svbool_t valid_mask = svcmpeq_s64(ptrue, svreinterpret_s64_f64(mask_), ALL_S64_TRUE_MASK);
+    svint64_t offsets = svmul_s64_x(ptrue, vindex_, svdup_n_s64(scale));
+    svfloat64_t gathered = svld1_gather_s64offset_f64(valid_mask, base_addr, offsets);
+    return svsel_f64(valid_mask, gathered, src);
 }
 
 template<int64_t scale = 1>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>>
 inline mask_gather(const Vectorized<float>& src, const float* base_addr,
                    const Vectorized<int32_t>& vindex_, const Vectorized<float>& mask_) {
-  svbool_t mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_),
-                              ALL_S32_TRUE_MASK);
-  svint32_t vindex = svasrd_n_s32_x(ptrue, svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale)), 2);
-  return svsel_f32(mask, svld1_gather_s32index_f32(mask, base_addr, vindex), src);
+    svbool_t valid_mask = svcmpeq_s32(ptrue, svreinterpret_s32_f32(mask_), ALL_S32_TRUE_MASK);
+    svint32_t offsets = svmul_s32_x(ptrue, vindex_, svdup_n_s32(scale));
+    svfloat32_t gathered = svld1_gather_s32offset_f32(valid_mask, base_addr, offsets);
+    return svsel_f32(valid_mask, gathered, src);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -171,6 +202,19 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
                         Vectorized<float>(svuzp2_f32(a, b)));
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FLIP ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#define DEFINE_FLIP_FUNC(type, sve_func)        \
+inline Vectorized<type> flip(const Vectorized<type> & v) {  \
+    return Vectorized<type>(sve_func(v));      \
+}
+// Use the macro to define the flip functions
+DEFINE_FLIP_FUNC(float, svrev_f32)
+DEFINE_FLIP_FUNC(double, svrev_f64)
+DEFINE_FLIP_FUNC(int64_t, svrev_s64)
+DEFINE_FLIP_FUNC(int32_t, svrev_s32)
+DEFINE_FLIP_FUNC(int16_t, svrev_s16)
+DEFINE_FLIP_FUNC(int8_t, svrev_s8)
+
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

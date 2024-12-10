@@ -166,19 +166,55 @@ class VecNEON(VecISA):
 
 
 @dataclasses.dataclass
-class VecSVE(VecISA):
-    # this function can be repurposed for SVE with variable vec length
+class VecSVE128(VecISA):
+    # SVE with 128-bit width
+    _bit_width = 128
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE128",
+        "AT_BUILD_ARM_VECSVE_WITH_SLEEF",
+    ]
+    _arch_flags = "-march=armv8.2-a+sve -msve-vector-bits=128"
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
+
+    def __str__(self) -> str:
+        return "sve128"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE256(VecISA):
+    # SVE with 256-bit width
     _bit_width = 256
     _macro = [
         "CPU_CAPABILITY_SVE",
         "CPU_CAPABILITY_SVE256",
-        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+        "AT_BUILD_ARM_VECSVE_WITH_SLEEF",
     ]
-    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _arch_flags = "-march=armv8.2-a+sve -msve-vector-bits=256"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "asimd"
+        return "sve256"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE512(VecISA):
+    # SVE with 512-bit width
+    _bit_width = 512
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE512",
+        "AT_BUILD_ARM_VECSVE_WITH_SLEEF",
+    ]
+    _arch_flags = "-march=armv8.2-a+sve -msve-vector-bits=512"
+    _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
+
+    def __str__(self) -> str:
+        return "sve512"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -328,7 +364,15 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
+supported_vec_isa_list = [
+    VecAMX(),
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+    VecSVE128(),
+    VecSVE256(),
+    VecSVE512(),
+]
 
 
 def get_isa_from_cpu_capability(
@@ -389,9 +433,26 @@ def valid_vec_isa_list() -> List[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        if torch.cpu._is_arm_sve_supported():
-            isa_list.append(VecSVE())
-        else:
+        try:
+            if torch.cpu._is_arm_sve_supported():
+                sve_vl = torch.cpu._get_max_arm_sve_length()
+                if sve_vl == 128:
+                    isa_list.append(VecSVE128())
+                elif sve_vl == 256:
+                    isa_list.append(VecSVE256())
+                elif sve_vl == 512:
+                    isa_list.append(VecSVE512())
+                else:
+                    # Handle unexpected SVE vector lengths explicitly
+                    print(
+                        f"Warning: Unsupported SVE vector length {sve_vl}. Falling back to NEON."
+                    )
+                    isa_list.append(VecNEON())
+            else:
+                isa_list.append(VecNEON())
+        except Exception as e:
+            # Handle errors during the SVE checks
+            print(f"Error checking SVE support: {e}. Falling back to NEON.")
             isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
         """
