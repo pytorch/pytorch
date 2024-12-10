@@ -854,7 +854,9 @@ def lower_cpu(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
         )
     if not check_cpu_supported():
-        raise NotImplementedError("torch.compile on current platform is not supported for CPU.")
+        raise NotImplementedError(
+            "torch.compile on current platform is not supported for CPU."
+        )
 
     fake_buffers: List[Buffer] = []  # noqa: F821
     placeholder_inps = [
