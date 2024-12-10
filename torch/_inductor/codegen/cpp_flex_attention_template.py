@@ -10,6 +10,7 @@ import sympy
 import torch
 import torch.utils
 
+from ...utils._ordered_set import OrderedSet
 from .. import ir
 from ..ir import TensorBox
 from ..select_algorithm import DataProcessorTemplateWrapper
@@ -823,11 +824,11 @@ class CppFlexAttentionTemplate(CppTemplate):
         self.len_mask_other = len_mask_other
         self.kernel_input_name_to_buffer = kernel_input_name_to_buffer
         self.extra_sizevars = list(
-            {
+            OrderedSet(
                 val
                 for val in self.kernel_input_name_to_buffer.values()
                 if isinstance(val, sympy.Symbol)
-            }
+            )
         )
         self.other_buf_start_idx = 5
         self.score_mod_other_buffers = (

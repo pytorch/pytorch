@@ -621,12 +621,12 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         return users[0] if len(users) == 1 else None
 
     def is_view(node):
-        view = {"view"}
-        return node.op == "call_method" and node.target in view
+        return node.op == "call_method" and node.target == "view"
 
     def is_pointwise_unary(node):
-        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
-        return node.op in {"call_function", "call_method"} and node.target in pointwise
+        ops = "call_function", "call_method"
+        pointwise = torch.relu, torch.tanh, "relu", "tanh"
+        return node.op in ops and node.target in pointwise
 
     g = module.graph
     for node in g.nodes:

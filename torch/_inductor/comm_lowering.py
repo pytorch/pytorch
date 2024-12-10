@@ -125,7 +125,7 @@ def _get_data(x: ir.TensorBox) -> ir.IRNode:
         )
 
 
-_bufs_to_skip_wait: OrderedSet[Tuple[int, str]] = OrderedSet()
+_bufs_to_skip_wait = OrderedSet[Tuple[int, str]]()
 
 
 def mark_as_skip_wait(x: ir.IRNode) -> None:
