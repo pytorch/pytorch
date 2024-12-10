@@ -43,6 +43,11 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
+# Distributed
+# c10d backend APIs
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
+
 # ONNX Export
 /torch/_dynamo/backends/onnxrt.py @wschin @xadupre
 /torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1 @xadupre
