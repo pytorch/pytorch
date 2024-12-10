@@ -182,20 +182,6 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Checkout pytorch/builder to builder dir
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-
       - name: Check if the job is disabled
         id: filter
         uses: ./pytorch/.github/actions/filter-test-configs
