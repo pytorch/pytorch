@@ -439,25 +439,8 @@ def _get_closure_vars():
     return _CLOSURE_VARS
 
 
-if sys.version_info[:2] <= (3, 8):
-    # [Note: Python Version <= 3.8]
-    # This branch should be dropped when we drop support for Python 3.8.
-    # Reason: 'ast.unparse' function was introduced in Python 3.9.
-
-    try:
-        import astunparse  # type: ignore[import]
-
-        def _ast_unparse(node: ast.AST) -> str:
-            return astunparse.unparse(node).replace("\n", "")
-
-        HAS_UNPARSE_FUNCTIONS = True
-    except ImportError:
-        HAS_UNPARSE_FUNCTIONS = False
-else:
-    HAS_UNPARSE_FUNCTIONS = True
-
-    def _ast_unparse(node: ast.AST) -> str:
-        return ast.unparse(node).replace("\n", "")
+def _ast_unparse(node: ast.AST) -> str:
+    return ast.unparse(node).replace("\n", "")
 
 
 def strip_function_call(name):
@@ -2593,17 +2576,11 @@ class CheckFunctionManager:
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
-    if HAS_UNPARSE_FUNCTIONS:
-        csepass = PyExprCSEPass()
-        csepass.count(code_parts)
+    csepass = PyExprCSEPass()
+    csepass.count(code_parts)
 
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return csepass.replace(expr)
-
-    else:
-
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return [], expr
+    def replace(expr: str) -> Tuple[List[str], str]:
+        return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
