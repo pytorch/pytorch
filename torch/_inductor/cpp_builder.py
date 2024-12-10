@@ -79,7 +79,7 @@ def cpp_compiler_search(search: str) -> str:
                 # Do not install GXX by default
                 if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
-                from torch.utils.filelock import FileLock
+                from torch.utils._filelock import FileLock
 
                 lock_dir = get_lock_dir()
                 lock = FileLock(
@@ -1326,6 +1326,17 @@ class CppTorchDeviceOptions(CppTorchOptions):
         _append_list(self._libraries, device_libraries)
         _append_list(self._passthough_args, device_passthough_args)
         self._finalize_options()
+
+    def _finalize_options(self) -> None:
+        super()._finalize_options()
+        if config.is_fbcode():
+            # Re-order library search paths in case there are lib conflicts
+            # that also live in the FBCode python lib dir.
+            _, python_lib_dirs = _get_python_related_args()
+            assert len(python_lib_dirs) == 1, f"Python lib dirs: {python_lib_dirs}"
+            if python_lib_dirs[0] in self._libraries_dirs:
+                self._libraries_dirs.remove(python_lib_dirs[0])
+                self._libraries_dirs.append(python_lib_dirs[0])
 
 
 def get_name_and_dir_from_output_file_path(

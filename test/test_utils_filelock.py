@@ -4,7 +4,7 @@ import tempfile
 import time
 
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils.filelock import FileLock
+from torch.utils._filelock import FileLock
 
 
 class TestFileLock(TestCase):
