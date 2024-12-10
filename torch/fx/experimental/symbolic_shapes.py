@@ -3746,7 +3746,7 @@ class ShapeEnv:
             ex_storage_offset,
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
-            is_contiguous= ex.is_contiguous(),
+            is_contiguous=ex.is_contiguous(),
             symbolic_context=symbolic_context,
         )
 
