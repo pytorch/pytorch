@@ -637,7 +637,7 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.visit(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
-            if config.capture_autograd_function:
+            if config.capture_autograd_function is False:
                 warnings.warn(
                     "The config.capture_autograd_function flag is deprecated, it's now always true."
                 )
@@ -721,11 +721,11 @@ class AutogradFunctionVariable(VariableTracker):
 
     def call_backward(self, tx: "InstructionTranslator", args, kwargs):
         fn = self.fn_cls.backward
-        self.source = AttrSource(self.source, "backward")
         assert type(args[0].value) is torch._dynamo.external_utils.FakeBackwardCFunction
         assert isinstance(fn, types.FunctionType)
 
-        return variables.UserFunctionVariable(fn, source=self.source).call_function(
+        fn_source = AttrSource(self.source, "backward")
+        return variables.UserFunctionVariable(fn, source=fn_source).call_function(
             tx, args, kwargs
         )
 
@@ -1454,6 +1454,7 @@ class LoggingLoggerVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.value = value
 
     def call_method(
         self,
@@ -1465,7 +1466,15 @@ class LoggingLoggerVariable(VariableTracker):
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
             return
-        unimplemented("Logger not supported for non-export cases")
+        method = getattr(self.value, name, None)
+        function = getattr(method, "__func__", None)
+        if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
+            return variables.ConstantVariable.create(None)
+        unimplemented(
+            "Logger not supported for non-export cases. "
+            "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
+            " disable logging by adding logging methods to config.ignore_logger_methods"
+        )
 
 
 class ConstantLikeVariable(VariableTracker):

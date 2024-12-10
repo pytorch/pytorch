@@ -850,8 +850,12 @@ class GraphLowering(torch.fx.Interpreter):
         device = buffer.get_device()
         if (
             # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
-            and device is not None
+            device is not None
+            and not (
+                isinstance(buffer, ir.ComputedBuffer)
+                and buffer.is_zero_elements()
+                and device == torch.device("cpu")
+            )
         ):
             self.add_device_info(device)
 
@@ -1883,9 +1887,9 @@ class GraphLowering(torch.fx.Interpreter):
                     # Generating random inputs based on self.example_inputs sometimes can be problematic,
                     # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
                     real_inputs = [
-                        materialize(x)
+                        materialize(x)  # type:ignore[arg-type]
                         for x in (
-                            self.example_inputs
+                            self.example_inputs  # type:ignore[union-attr]
                             if isinstance(V.real_inputs, NullHandler)
                             else V.real_inputs
                         )
