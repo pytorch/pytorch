@@ -772,6 +772,8 @@ class PythonWrapperCodegen(CodeGen):
             )
         except (AttributeError, ImportError):
             pass
+        if config.annotate_training:
+            self.header.writeline("from torch.cuda import nvtx")
 
     def include_extra_header(self, header: str):
         pass
@@ -889,6 +891,11 @@ class PythonWrapperCodegen(CodeGen):
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
+            phase = V.graph.get_training_phase()
+            if config.annotate_training:
+                self.prefix.writeline(
+                    f"training_annotation = nvtx._device_range_start('{phase}')"
+                )
             if V.graph.graph_inputs:
                 lhs = ", ".join(V.graph.graph_input_names)
                 if len(V.graph.graph_input_names) == 1:
@@ -1175,6 +1182,10 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.generate_and_run_autotune_block()
 
+            if config.annotate_training:
+                self.wrapper_call.writeline(
+                    "nvtx._device_range_end(training_annotation)"
+                )
             self.generate_return(output_refs)
 
         self.finalize_prefix()
