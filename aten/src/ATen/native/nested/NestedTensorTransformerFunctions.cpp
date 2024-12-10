@@ -15,7 +15,7 @@ namespace {
 inline void check_nested_tensor_matrix_constraints(
     const Tensor& nested_tensor,
     const Tensor& dense_matrix,
-    c10::string_view caller) {
+    std::string_view caller) {
   auto* nt_input = get_nested_tensor_impl(nested_tensor);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
   TORCH_CHECK(
@@ -59,7 +59,7 @@ Tensor nested_linear(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias_opt) {
-  check_nested_tensor_matrix_constraints(input, weight, c10::string_view{"Linear"});
+  check_nested_tensor_matrix_constraints(input, weight, std::string_view{"Linear"});
   auto* nt_input = get_nested_tensor_impl(input);
   const Tensor& input_buffer = nt_input->get_buffer();
   Tensor result_buffer =
@@ -73,7 +73,7 @@ Tensor nested_linear(
 }
 
 Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
-  check_nested_tensor_matrix_constraints(self, other, c10::string_view{"Matmul"});
+  check_nested_tensor_matrix_constraints(self, other, std::string_view{"Matmul"});
   auto* nt_self = get_nested_tensor_impl_or_null(self);
   const Tensor& self_buffer = nt_self->get_buffer();
   Tensor result_buffer =

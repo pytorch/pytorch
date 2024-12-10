@@ -2,6 +2,7 @@
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
 
+#include <array>
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
@@ -68,9 +69,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
     return;
   }
 
-  auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
-  auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
+  auto sizes = std::array<int64_t, MAX_DIMS>{};
+  auto strides = std::array<int64_t, MAX_DIMS>{};
+  auto index_ptrs = std::array<char*, MAX_DIMS>{};
   for (unsigned i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
@@ -475,14 +476,14 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 }
 
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
-REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda)
 
 } // namespace at::native

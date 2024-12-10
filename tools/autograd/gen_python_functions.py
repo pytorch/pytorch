@@ -1100,7 +1100,7 @@ def method_def(
     if module == "torch":
         flags += " | METH_STATIC"
 
-    return f'{{"{name}", {pycname}, {flags}, NULL}},'
+    return f'{{"{name}", {pycname}, {flags}, nullptr}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

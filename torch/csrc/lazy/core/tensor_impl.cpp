@@ -66,7 +66,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   }
 };
 
-C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl);
+C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl)
 
 } // namespace
 

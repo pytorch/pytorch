@@ -11,9 +11,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/bit_cast.h>
-#include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
@@ -31,7 +29,9 @@
 #include <cstring>
 #include <iosfwd>
 #include <limits>
+#ifndef C10_EMBEDDED
 #include <ostream>
+#endif // C10_EMBEDDED
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -50,6 +50,19 @@
 #if defined(__aarch64__) && !defined(__CUDACC__)
 #include <arm_neon.h>
 #endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || \
+    defined(_M_IX86)
+#if defined(__F16C__) &&                               \
+    !(defined(__CUDA_ARCH__) || defined(__CUDACC__) || \
+      defined(__HIP_DEVICE_COMPILE__))
+#define C10_X86_F16 1
+#include <immintrin.h> // import conversion ops from f16cintrin.h
+#endif // defined(__F16C__) && !(defined(__CUDA_ARCH__) || defined(__CUDACC__)
+       // || defined(__HIP_DEVICE_COMPILE__))
+#endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
+#endif // __GNUC__ || __clang__
 
 namespace c10 {
 
@@ -161,6 +174,9 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
  * between integer and floating-point variables.
  */
 C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
+#ifdef C10_X86_F16
+  return _cvtsh_ss(h);
+#else
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
@@ -283,6 +299,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
       (two_w < denormalized_cutoff ? fp32_to_bits(denormalized_value)
                                    : fp32_to_bits(normalized_value));
   return fp32_from_bits(result);
+#endif // C10_X86_F16
 }
 
 /*
@@ -295,6 +312,9 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
  * between integer and floating-point variables.
  */
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
+#ifdef C10_X86_F16
+  return _cvtss_sh(f, _MM_FROUND_TO_NEAREST_INT);
+#else
   // const float scale_to_inf = 0x1.0p+112f;
   // const float scale_to_zero = 0x1.0p-110f;
   constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
@@ -328,7 +348,12 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
   return static_cast<uint16_t>(
       (sign >> 16) |
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
+#endif // C10_X86_F16
 }
+
+#ifdef C10_X86_F16
+#undef C10_X86_F16
+#endif // C10_X86_F16
 
 #if defined(__aarch64__) && !defined(__CUDACC__)
 inline float16_t fp16_from_bits(uint16_t h) {
@@ -386,149 +411,12 @@ struct alignas(2) Half {
 #endif
 };
 
-// TODO : move to complex.h
-template <>
-struct alignas(4) complex<Half> {
-  Half real_;
-  Half imag_;
-
-  // Constructors
-  complex() = default;
-  // Half constructor is not constexpr so the following constructor can't
-  // be constexpr
-  C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
-      : real_(real), imag_(imag) {}
-  C10_HOST_DEVICE inline complex(const c10::complex<float>& value)
-      : real_(value.real()), imag_(value.imag()) {}
-
-  // Conversion operator
-  inline C10_HOST_DEVICE operator c10::complex<float>() const {
-    return {real_, imag_};
-  }
-
-  constexpr C10_HOST_DEVICE Half real() const {
-    return real_;
-  }
-  constexpr C10_HOST_DEVICE Half imag() const {
-    return imag_;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator+=(const complex<Half>& other) {
-    real_ = static_cast<float>(real_) + static_cast<float>(other.real_);
-    imag_ = static_cast<float>(imag_) + static_cast<float>(other.imag_);
-    return *this;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator-=(const complex<Half>& other) {
-    real_ = static_cast<float>(real_) - static_cast<float>(other.real_);
-    imag_ = static_cast<float>(imag_) - static_cast<float>(other.imag_);
-    return *this;
-  }
-
-  C10_HOST_DEVICE complex<Half>& operator*=(const complex<Half>& other) {
-    auto a = static_cast<float>(real_);
-    auto b = static_cast<float>(imag_);
-    auto c = static_cast<float>(other.real());
-    auto d = static_cast<float>(other.imag());
-    real_ = a * c - b * d;
-    imag_ = a * d + b * c;
-    return *this;
-  }
-};
-
-// In some versions of MSVC, there will be a compiler error when building.
-// C4146: unary minus operator applied to unsigned type, result still unsigned
-// C4804: unsafe use of type 'bool' in operation
-// It can be addressed by disabling the following warning.
-#ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4146)
-#pragma warning(disable : 4804)
-#pragma warning(disable : 4018)
-#endif
-
-// The overflow checks may involve float to int conversion which may
-// trigger precision loss warning. Re-enable the warning once the code
-// is fixed. See T58053069.
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
-#endif
-
-// bool can be converted to any type.
-// Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
-// `error: comparison of constant '255' with boolean expression is always false`
-// for `f > limit::max()` below
-template <typename To, typename From>
-std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
-    From /*f*/,
-    bool strict_unsigned [[maybe_unused]] = false) {
-  return false;
-}
-
-// skip isnan and isinf check for integral types
-template <typename To, typename From>
-std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
-overflows(From f, bool strict_unsigned = false) {
-  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
-  if constexpr (!limit::is_signed && std::numeric_limits<From>::is_signed) {
-    // allow for negative numbers to wrap using two's complement arithmetic.
-    // For example, with uint8, this allows for `a - b` to be treated as
-    // `a + 255 * b`.
-    if (!strict_unsigned) {
-      return greater_than_max<To>(f) ||
-          (c10::is_negative(f) &&
-           -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
-    }
-  }
-  return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
-}
-
-template <typename To, typename From>
-std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
-    From f,
-    bool strict_unsigned [[maybe_unused]] = false) {
-  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
-  if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
-    return false;
-  }
-  if (!limit::has_quiet_NaN && (f != f)) {
-    return true;
-  }
-  return f < limit::lowest() || f > limit::max();
-}
-
-C10_CLANG_DIAGNOSTIC_POP()
-
-#ifdef _MSC_VER
-#pragma warning(pop)
-#endif
-
-template <typename To, typename From>
-std::enable_if_t<is_complex<From>::value, bool> overflows(
-    From f,
-    bool strict_unsigned = false) {
-  // casts from complex to real are considered to overflow if the
-  // imaginary component is non-zero
-  if (!is_complex<To>::value && f.imag() != 0) {
-    return true;
-  }
-  // Check for overflow componentwise
-  // (Technically, the imag overflow check is guaranteed to be false
-  // when !is_complex<To>, but any optimizer worth its salt will be
-  // able to figure it out.)
-  return overflows<
-             typename scalar_value_type<To>::type,
-             typename From::value_type>(f.real(), strict_unsigned) ||
-      overflows<
-             typename scalar_value_type<To>::type,
-             typename From::value_type>(f.imag(), strict_unsigned);
-}
-
+#ifndef C10_EMBEDDED
 C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
   out << (float)value;
   return out;
 }
+#endif // C10_EMBEDDED
 
 } // namespace c10
 

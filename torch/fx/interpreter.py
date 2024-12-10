@@ -50,13 +50,13 @@ class Interpreter:
                 def call_function(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
                 def call_method(self, target: Target, args: Tuple, kwargs: Dict) -> Any:
                     if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
 
 
             def fn(x):
@@ -91,7 +91,7 @@ class Interpreter:
         if graph is not None:
             self.graph = graph
         else:
-            self.graph = self.module.graph
+            self.graph = self.module.graph  # type: ignore[assignment]
         self.env: Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
@@ -204,7 +204,9 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.set_current_meta(node):
+        with fx_traceback.set_current_meta(
+            node, f"Interpreter_{self.__class__.__name__}"
+        ):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -460,7 +462,7 @@ class Transformer(Interpreter):
                 ) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
-                    return super().call_function(n)
+                    return super().call_function(target, args, kwargs)
 
                 def call_method(
                     self, target: "Target", args: Tuple[Argument, ...], kwargs: Dict[str, Any]
@@ -468,7 +470,7 @@ class Transformer(Interpreter):
                     if target == "neg":
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
-                    return super().call_method(n)
+                    return super().call_method(target, args, kwargs)
 
 
             def fn(x):

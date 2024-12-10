@@ -12,12 +12,17 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
 
       - name: Run close_nonexistent_disable_issues.py
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLICKHOUSE_ENDPOINT: ${{ secrets.CLICKHOUSE_ENDPOINT }}
+          CLICKHOUSE_USERNAME: ${{ secrets.CLICKHOUSE_READONLY_USERNAME }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
         run: |
           pip3 install requests==2.32.2
-          pip3 install rockset==1.0.3
+          pip3 install clickhouse-connect==0.7.16
           python3 .github/scripts/close_nonexistent_disable_issues.py

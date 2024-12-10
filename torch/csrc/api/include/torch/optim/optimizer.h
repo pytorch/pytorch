@@ -128,7 +128,7 @@ class TORCH_API Optimizer {
       std::unique_ptr<OptimizerOptions> defaults)
       : Optimizer(
             {OptimizerParamGroup(std::move(parameters))},
-            std::move(defaults)){};
+            std::move(defaults)) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);

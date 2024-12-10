@@ -23,6 +23,7 @@ from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
@@ -63,7 +64,13 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+from .utils import (
+    _get_symint_hints,
+    contain_metadata_mutation_ops,
+    make_boxed_func,
+    strict_zip,
+    unlift_tokens,
+)
 
 
 zip = strict_zip
@@ -190,7 +197,7 @@ def aot_dispatch_base(
 
         with TracingContext.report_output_strides() as fwd_output_strides:
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 assert isinstance(fw_module, GraphModule)
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
@@ -290,14 +297,19 @@ def collect_fw_donated_buffer_idxs(
 
     storage_refs = set()
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
-        if isinstance(t, FakeTensor):
+        # Only access storage if a tensor has storage (not sparse)
+        if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
     num_saved_tensor = len(saved_tensors)
     donated_buffer_idxs = []
     for i in range(num_saved_tensor):
         t = saved_tensors[i]
-        if StorageWeakRef(t.untyped_storage()) not in storage_refs:
+        if (
+            t is not None
+            and not is_sparse_any(t)
+            and StorageWeakRef(t.untyped_storage()) not in storage_refs
+        ):
             donated_buffer_idxs.append(i)
 
     return donated_buffer_idxs
@@ -312,13 +324,39 @@ def collect_bw_donated_buffer_idxs(
     Collects backward donated buffer indexes from fw_module and bw_module.
     """
 
+    # [Note: Metadata mutation in proxy tracing]
+    # node.meta["val"] is a snapshot of the tensor value when tracing a graph,
+    # instead of the final state after the graph has run. node.meta["val"] is
+    # not updated even if later there is a metadata mutation op.
+    # See: https://github.com/pytorch/pytorch/pull/141308#issuecomment-2495798947
+    #
+    # Currently, metadata mutation op happens only for sacrificial parameter
+    # specifically the `set_` op. This motivates banning metadata mutation from
+    # proxy tracing.
+    #
+    # Since node.meta["val"] is used to detect donated buffer, we return an empty
+    # list if there exists metadata mutation op.
+    if contain_metadata_mutation_ops(fw_module) or contain_metadata_mutation_ops(
+        bw_module
+    ):
+        return []
+
     fw_ins = fw_module.graph.find_nodes(op="placeholder")
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
 
-    fw_ins = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_ins]
-    fw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_outs]
-    bw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in bw_outs]
+    fw_ins = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in fw_ins
+    ]
+    fw_outs = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in fw_outs
+    ]
+    bw_outs = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in bw_outs
+    ]
 
     user_fw_outs = fw_outs[: fw_metadata.num_forward]
     saved_tensors = fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
@@ -406,7 +444,7 @@ def aot_dispatch_autograd(
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fake_mode = detect_fake_mode()
-            if fake_mode is not None:
+            if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -738,7 +776,11 @@ def aot_dispatch_autograd(
                             "name": "eager_compile_backwards_failure",
                             "encoding": "string",
                         },
-                        payload_fn=lambda: "\n".join(traceback.format_exception(exc)),
+                        payload_fn=lambda: "\n".join(
+                            traceback.format_exception(
+                                type(exc), exc, exc.__traceback__
+                            )
+                        ),
                     )
                     log.warning(
                         "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
@@ -758,7 +800,7 @@ def aot_dispatch_autograd(
             # becomes the lazy version again. One example is when dynamic shape is enabled
             # upfront, the bw_compiler will be called above which can cause extra
             # graph module recompilation on bw_module.
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 from torch.fx._lazy_graph_module import _LazyGraphModule
 
                 _LazyGraphModule.force_recompile(bw_module)

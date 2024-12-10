@@ -5,6 +5,7 @@
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
+#include <utility>
 
 namespace torch::jit::fuser::onednn {
 
@@ -42,8 +43,8 @@ struct LlgaTensorDesc {
       desc::data_type dtype,
       desc::property_type property_type)
       : tid_(tid),
-        sizes_(sizes),
-        strides_(strides),
+        sizes_(std::move(sizes)),
+        strides_(std::move(strides)),
         dtype_(dtype),
         property_type_(property_type),
         layout_type_(desc::layout_type::strided),
@@ -221,7 +222,7 @@ struct LlgaTensorDesc {
 
  private:
   bool is_dimensionality_unknown() const {
-    return sizes_.size() == 0;
+    return sizes_.empty();
   }
 
   size_t tid_;
@@ -236,7 +237,7 @@ struct LlgaTensorDesc {
   // compute_inplace would be true, and input_tensor_index would be the index of
   // the corresponding input tensor in inputSpecs_ of the LlgaKernel object.
   bool compute_inplace_ = false;
-  size_t input_tensor_index_;
+  size_t input_tensor_index_{};
 };
 
 // Initially, oneDNN Graph also used to have blocked layout for tensors between
