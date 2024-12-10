@@ -147,10 +147,10 @@ jobs:
           RC=1
         fi
 
-        ## Check that jobs will be cancelled
-        #.github/scripts/ensure_actions_will_cancel.py
+        # Check that jobs will be cancelled
+        .github/scripts/ensure_actions_will_cancel.py
 
-        #exit $RC
+        exit $RC
 
   toc:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
