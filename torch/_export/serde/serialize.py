@@ -86,10 +86,10 @@ from .schema import (  # type: ignore[attr-defined]
     SymBoolArgument,
     SymExpr,
     SymExprHint,
-    SymInt,
-    SymIntArgument,
     SymFloat,
     SymFloatArgument,
+    SymInt,
+    SymIntArgument,
     TensorArgument,
     TensorMeta,
     TokenArgument,
@@ -838,7 +838,7 @@ class GraphModuleSerializer(metaclass=Final):
         elif type(arg) is float:
             return Argument.create(as_float=arg)
         elif arg is None:
-            return Argument.create(as_none=())
+            return Argument.create(as_none=True)
         elif isinstance(arg, (list, tuple)):
             if len(arg) == 0:
                 if arg_type is not None:
@@ -934,7 +934,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # list of optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
-                        return OptionalTensorArgument.create(as_none=())
+                        return OptionalTensorArgument.create(as_none=True)
                     elif isinstance(a, torch.fx.Node):
                         return OptionalTensorArgument.create(
                             as_tensor=TensorArgument(name=a.name)
@@ -956,7 +956,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # list of inductor buffers as optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
-                        return OptionalTensorArgument.create(as_none=())
+                        return OptionalTensorArgument.create(as_none=True)
                     elif isinstance(a, inductor_tensor_buffers):
                         return OptionalTensorArgument.create(
                             as_tensor=TensorArgument(name=a.get_name())
@@ -1037,7 +1037,7 @@ class GraphModuleSerializer(metaclass=Final):
                 elif type(spec.arg.value) is float:
                     constant_spec = ConstantValue.create(as_float=spec.arg.value)
                 elif spec.arg.value is None:
-                    constant_spec = ConstantValue.create(as_none=())
+                    constant_spec = ConstantValue.create(as_none=True)
                 else:
                     raise SerializeError(f"Unhandled constant input {spec.arg.value} to serialize")
                 return InputSpec.create(
@@ -1265,7 +1265,7 @@ class GraphModuleSerializer(metaclass=Final):
                 )
                 # When the return type is annoated as Tensor type, the op can also return an
                 # undefined Tensor which will be implicitly converted to None in Python.
-                output_arguments.append(Argument.create(as_none=()))
+                output_arguments.append(Argument.create(as_none=True))
             elif isinstance(meta, FakeTensor):
                 assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
                 name = self._output_node_name_at_index(node, idx)
@@ -1348,7 +1348,7 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_output(self, name: str, meta_val: Any) -> Argument:
         # Check single value return
         if meta_val is None:
-            return Argument.create(as_none=())
+            return Argument.create(as_none=True)
         if isinstance(meta_val, torch.Tensor):
             # e.g "-> Tensor"
             return Argument.create(
@@ -2243,20 +2243,42 @@ class GraphModuleDeserializer(metaclass=Final):
 
         def generate_getitems(meta_val, fx_node: torch.fx.Node, args):
             for idx, arg in enumerate(args):
-                if isinstance(arg, Argument):
-                    arg = arg.value
                 if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
                     generate_getitem(meta_val, fx_node, arg, idx)
-                elif isinstance(arg, (list, tuple)):
+                    continue
+
+                assert isinstance(arg, Argument)
+                if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
+                    generate_getitem(meta_val, fx_node, arg.value, idx)
+                elif arg.type in (
+                    "as_tensors",
+                    "as_sym_ints",
+                    "as_sym_floats",
+                    "as_ints",
+                    "as_floats",
+                    "as_strings",
+                    "as_bools",
+                    "as_sym_bools",
+                ):
                     list_output = self.graph.create_node(
                         "call_function",
                         operator.getitem,
                         (fx_node, idx),
                     )
                     meta_val.append([])
-                    generate_getitems(meta_val[-1], list_output, arg)
+                    generate_getitems(meta_val[-1], list_output, arg.value)
                     list_output.meta.update(deserialized_metadata)
                     list_output.meta["val"] = meta_val[-1]
+                elif arg.type == "as_none":
+                    individual_output = self.graph.create_node(
+                        "call_function",
+                        operator.getitem,
+                        (fx_node, idx),
+                        name="as_none",
+                    )
+                    meta_val.append(None)
+                    individual_output.meta['val'] = None
+                    individual_output.meta.update(deserialized_metadata)
                 else:
                     raise NotImplementedError(f"Unimplemented node output type: {arg}")
 
