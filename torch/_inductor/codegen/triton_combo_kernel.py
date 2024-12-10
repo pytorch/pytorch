@@ -34,7 +34,7 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import SIMDScheduling
+from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
@@ -562,36 +562,36 @@ class ComboKernel(Kernel):
         self.min_x_blocks_list.append(min_x_blocks)
         self.x_numels_list.append(x_numels)
 
-    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
-        size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels.values()
-        ]
+    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, Dict[str, int]]:
+        size_hints = {
+            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
+            for prefix, numel in sub_kernel.numels.items()
+            if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
+        }
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
             heuristics = "persistent_reduction"
         elif sub_kernel.inside_reduction:
             heuristics = "reduction"
         else:
-            size_hints.pop()
             heuristics = "pointwise"
         return heuristics, size_hints
 
     def select_combo_heuristics(
-        self, heuristics_list: List[str], size_hints_list: List[List[int]]
-    ) -> Tuple[str, List[int], TritonKernel]:
+        self, heuristics_list: List[str], size_hints_list: List[Dict[str, int]]
+    ) -> Tuple[str, Dict[str, int], TritonKernel]:
         if not self.enable_autotune:
             return "foreach", size_hints_list[0], self.sub_kernels[0]
         if "reduction" in heuristics_list:
             i, _ = max(
                 enumerate(size_hints_list),
-                key=lambda x: x[1][0] if heuristics_list[x[0]] == "reduction" else 0,
+                key=lambda x: x[1]["x"] if heuristics_list[x[0]] == "reduction" else 0,
             )
             return heuristics_list[i], size_hints_list[i], self.sub_kernels[i]
         elif "pointwise" in heuristics_list:
             i, _ = max(
                 enumerate(size_hints_list),
-                key=lambda x: x[1][0] if heuristics_list[x[0]] == "pointwise" else 0,
+                key=lambda x: x[1]["x"] if heuristics_list[x[0]] == "pointwise" else 0,
             )
             # modify size_hint to avoid oom check fail (may be a false alarm)
             num_pointwise = len([e for e in heuristics_list if e == "pointwise"])
@@ -609,7 +609,7 @@ class ComboKernel(Kernel):
             )
             if len(heuristics_list) - num_pointwise >= 4:
                 size_hints = size_hints_list[i]
-                size_hints[0] = min(128, size_hints[0])
+                size_hints["x"] = min(128, size_hints["x"])
             return heuristics, size_hints_list[i], self.sub_kernels[i]
         else:
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
@@ -655,7 +655,7 @@ class ComboKernel(Kernel):
     def jit_line(
         self,
         heuristics: str,
-        size_hints: List[int],
+        size_hints: Dict[str, int],
         selected_kernel: TritonKernel,
         signature: List[Any],
         argdefs: List[str],
