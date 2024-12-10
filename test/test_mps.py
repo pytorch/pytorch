@@ -12508,9 +12508,14 @@ class TestMetalLibrary(TestCaseMPS):
               x[idx.x + idx.y + idx.z] = idx.z;
             }
         """)
+
+        # Check that one can enumerate all shaders
+        self.assertEqual(set(dir(lib)), {f"arange_{i}" for i in ["x", "y", "z"]})
+
         lib.arange_x(x)
         lib.arange_y(y, threads=(1, y.numel()))
         lib.arange_z(z, threads=(1, 1, z.numel()))
+
         self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
         self.assertEqual(x, y)
         self.assertEqual(x, z)
@@ -12536,6 +12541,19 @@ class TestMetalLibrary(TestCaseMPS):
         """)
         lib.arange(x, [3.14, .5], arg_casts={1: "fp16"})
         self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=torch.half))
+
+    def test_metal_error_checking(self):
+        # Syntax error asserts
+        self.assertRaises(RuntimeError, lambda: torch.mps._compile_shader("Syntax error"))
+        cpu_tensor = torch.rand(3)
+        mps_tensor = torch.rand(3, device="mps")
+        lib = torch.mps._compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
+        # Passing CPU tensor asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(cpu_tensor))
+        # Passing invalid shader name asserts
+        self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
+        # Passing no tensors asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(12))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
