@@ -7,6 +7,7 @@ import sys
 import tempfile
 import types
 import unittest
+from pathlib import Path
 from typing import Union
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ import torch.utils.cpp_extension
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    shell,
     skipIfTorchDynamo,
     TemporaryFileName,
     TEST_CUDA,
@@ -63,6 +65,18 @@ def generate_faked_module():
     return foo
 
 
+def build_and_import_openreg():
+    openreg_dir = os.path.join(
+        Path(__file__).resolve().parent, "cpp_extensions", "open_registration_extension"
+    )
+    cmd = [sys.executable, "setup.py", "develop"]
+
+    if shell(cmd, cwd=openreg_dir, env=os.environ) != 0:
+        raise RuntimeError("Building openreg failed")
+
+    import pytorch_openreg  # noqa: F401
+
+
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 @unittest.skipIf(TEST_XPU, "XPU does not support cppextension currently")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -89,6 +103,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        build_and_import_openreg()
+
         torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
 
         cls.module = torch.utils.cpp_extension.load(
@@ -170,14 +186,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # None of our CPU operations should call the custom add function.
         self.assertFalse(self.module.custom_add_called())
 
-        # check generator registered before using
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Please register a generator to the PrivateUse1 dispatch key",
-        ):
-            torch.Generator(device=device)
-
-        self.module.register_generator_first()
         gen = torch.Generator(device=device)
         self.assertTrue(gen.device == device)
 
@@ -188,8 +196,6 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         ):
             self.module.register_generator_second()
 
-        if self.module.is_register_hook() is False:
-            self.module.register_hook()
         default_gen = self.module.default_generator(0)
         self.assertTrue(
             default_gen.device.type == torch._C._get_privateuse1_backend_name()
@@ -346,11 +352,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # Test storage pin_memory and is_pin
         cpu_storage = cpu_tensor.storage()
-        # We implement a dummy pin_memory of no practical significance
-        # for custom device. Once tensor.pin_memory() has been called,
-        # then tensor.is_pinned() will always return true no matter
-        # what tensor it's called on.
-        self.assertTrue(cpu_storage.is_pinned("foo"))
+        self.assertFalse(cpu_storage.is_pinned("foo"))
 
         cpu_storage_pinned = cpu_storage.pin_memory("foo")
         self.assertTrue(cpu_storage_pinned.is_pinned("foo"))
@@ -358,7 +360,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # Test untyped storage pin_memory and is_pin
         cpu_tensor = torch.randn([3, 2, 1, 4])
         cpu_untyped_storage = cpu_tensor.untyped_storage()
-        self.assertTrue(cpu_untyped_storage.is_pinned("foo"))
+        self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
 
         cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
         self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
