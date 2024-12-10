@@ -331,6 +331,9 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF "USE_MKLDNN"
                        OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
+# Option USE_OPENRNG: Enable OpenRNG only for ARM architecture.
+# OpenRNG accelerates distribution kernel operations (e.g., exponential and bernoulli) on ARM.
+cmake_dependent_option(USE_OPENRNG "Use OpenRNG library for Arm architecture." ON "CPU_AARCH64" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -419,6 +422,9 @@ if(WIN32)
   set(USE_TENSORPIPE OFF)
   message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
 
+  set(USE_OPENRNG OFF)
+  message(WARNING "OpenRNG cannot be used on Windows. Set it to OFF")
+
   if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
     find_library(
       libuv_tmp_LIBRARY
@@ -464,6 +470,7 @@ option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
 OPTION(USE_SYSTEM_NVTX "Use system-provided nvtx." OFF)
+option(USE_SYSTEM_OPENRNG "Use system-provided openrng." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -483,6 +490,7 @@ if(USE_SYSTEM_LIBS)
     set(USE_SYSTEM_NCCL ON)
   endif()
   set(USE_SYSTEM_NVTX ON)
+  set(USE_SYSTEM_OPENRNG ON)
 endif()
 
 # /Z7 override option When generating debug symbols, CMake default to use the

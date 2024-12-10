@@ -152,6 +152,7 @@ endif()
 set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
+set(AT_OPENRNG_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1692,3 +1693,38 @@ target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_
 # Include nlohmann-json
 add_library(nlohmann INTERFACE IMPORTED)
 include_directories(nlohmann SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/nlohmann/include)
+
+# ---[ OpenRNG for Arm architecture
+if(USE_OPENRNG)
+  message(STATUS "Enabling OpenRNG on ${CMAKE_SYSTEM_PROCESSOR}. USE_OPENRNG set to ${USE_OPENRNG}.")
+  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  # Use system-provided OpenRNG if available and USE_SYSTEM_OPENRNG is defined
+  if(NOT TARGET openrng AND USE_SYSTEM_OPENRNG)
+    find_package(OpenRNG) 
+    if(OpenRNG_FOUND)
+      message(INFO " Using OpenRNG... ")
+    elseif()
+      message(FATAL_ERROR "Cannot find OpenRNG library")
+    endif()
+    set_target_properties(openrng PROPERTIES IMPORTED_LOCATION "${OPENRNG_LIBRARY}")
+    set_target_properties(openrng PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${OPENRNG_INCLUDE_DIR}")
+  elseif(NOT TARGET openrng)
+    # We will build openrng as static libs and embed it directly into the binary.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+    # Define the source directory if OpenRNG needs to be built from source
+    if(NOT DEFINED OPENRNG_SOURCE_DIR)
+      set(OPENRNG_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/openrng" CACHE STRING "OpenRNG source directory")
+    endif()
+    # Add OpenRNG as a subdirectory for local compilation
+    add_subdirectory(
+      "${OPENRNG_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/openrng"
+    )
+    # Enable PIC since OpenRNG will be linked into a shared library
+    set_property(TARGET openrng PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+  
+  # Add OpenRNG to Caffe2's dependency list to ensure linkage
+  list(APPEND Caffe2_DEPENDENCY_LIBS openrng)
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+endif()

@@ -273,6 +273,7 @@ header_template_rule(
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
+        "@AT_OPENRNG_ENABLED@": "0",
     },
 )
 
