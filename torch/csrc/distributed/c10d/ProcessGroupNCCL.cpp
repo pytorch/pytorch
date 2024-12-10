@@ -3776,7 +3776,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 #endif
 }
 
-template <bool IsBarrier>
+template <bool isBarrier>
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
     const AllreduceOptions& opts) {
@@ -3800,7 +3800,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      IsBarrier ? "nccl:all_reduce_barrier" : "nccl:all_reduce");
+      isBarrier ? "nccl:all_reduce_barrier" : "nccl:all_reduce");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(

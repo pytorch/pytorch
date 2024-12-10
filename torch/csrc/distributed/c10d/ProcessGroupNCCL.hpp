@@ -903,7 +903,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PostProcess post,
       const char* profilingTitle);
 
-  template <bool IsBarrier = false>
+  template <bool isBarrier = false>
   c10::intrusive_ptr<Work> allreduce_impl(
       at::Tensor& tensor,
       const AllreduceOptions& opts = AllreduceOptions());
