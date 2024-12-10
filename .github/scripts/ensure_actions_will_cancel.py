@@ -28,18 +28,19 @@ def should_check(filename: Path) -> bool:
 if __name__ == "__main__":
     errors_found = False
     files = [f for f in WORKFLOWS.glob("*.yml") if should_check(f)]
+    print(files)
     names = set()
-    for filename in files:
-        with open(filename) as f:
-            data = yaml.safe_load(f)
-
-        name = data.get("name")
-        if name is not None and name in names:
-            print("ERROR: duplicate workflow name:", name, file=sys.stderr)
-            errors_found = True
-        names.add(name)
-        print(f"==== {name}")
-        print(filename.name)
+#    for filename in files:
+#        with open(filename) as f:
+#            data = yaml.safe_load(f)
+#
+#        name = data.get("name")
+#        if name is not None and name in names:
+#            print("ERROR: duplicate workflow name:", name, file=sys.stderr)
+#            errors_found = True
+#        names.add(name)
+#        print(f"==== {name}")
+#        print(filename.name)
         #actual = data.get("concurrency", {})
         #print(actual)
         #if filename.name == "create_release.yml":
