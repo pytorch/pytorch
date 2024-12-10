@@ -134,7 +134,7 @@ Tensor& searchsorted_out_cuda(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -180,7 +180,7 @@ Tensor& searchsorted_out_cuda(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
@@ -192,7 +192,7 @@ Tensor searchsorted_cuda(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
@@ -206,7 +206,7 @@ Tensor searchsorted_cuda(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const std::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);

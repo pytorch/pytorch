@@ -1135,7 +1135,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1159,7 +1159,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  std::optional<c10::impl::TorchDispatchModeKey> mode_key = std::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1225,10 +1225,9 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
-  if (maybe_mode == std::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1241,10 +1240,9 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
 
   const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
-  if (maybe_mode == std::nullopt) {
+  if (!maybe_mode.has_value()) {
     Py_RETURN_NONE;
   }
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
