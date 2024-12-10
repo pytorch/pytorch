@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from torch import nn
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.node import Node
@@ -108,6 +109,13 @@ def get_source_partitions(
 
             if node.op == "get_attr":
                 params.add(node)
+
+            if (
+                module_type in [nn.Linear, nn.functional.linear, "linear"]
+                and node.op == "get_attr"
+            ):
+                # linear.weight and linear.bias maybe used by nodes other than torch.ops.aten.linear.default
+                continue
 
             for user in node.users.keys():
                 if user not in nodes:
