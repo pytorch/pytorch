@@ -1617,7 +1617,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             odtype=dtypes[1],
             test_backward=True,
         )
-        
+
     @parametrize_test(
         "bag_use_grad,per_sample_weights_use_grad",
         [(True, True), (True, False), (False, True), (False, False)],
