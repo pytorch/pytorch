@@ -138,13 +138,23 @@ class Multiple:
 MULTIPLE = Multiple()
 
 
-def _transfer_meta(new_meta: Dict[str, Any], old_meta: Dict[str, Any]) -> None:
+def _transfer_meta(
+    new_meta: Dict[str, Any], old_node: torch.fx.Node, pass_name: str = ""
+) -> None:
+    from torch.fx.traceback import NodeSource, NodeSourceAction
+
     # transfer metadata after pattern matching occurs.
     # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
     # to remain accurate after pattern matching has occurred.
+    # We handle "from_node" field of the node meta specially to record that the new node comes from the old_node.
+    new_from_node = new_meta.get("from_node", []).copy()
+    new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
     new_meta.update(
-        (k, v) for k, v in old_meta.items() if k in torch.fx.proxy._COPY_META_FIELDS
+        (k, v)
+        for k, v in old_node.meta.items()
+        if k in torch.fx.proxy._COPY_META_FIELDS
     )
+    new_meta["from_node"] = new_from_node
 
 
 class Match:
@@ -263,7 +273,11 @@ class Match:
             )
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
-                    _transfer_meta(new_meta=n.meta, old_meta=self.nodes[0].meta)
+                    _transfer_meta(
+                        new_meta=n.meta,
+                        old_node=self.nodes[0],
+                        pass_name="replace_by_example",
+                    )
 
             ReplacementPatternEntry.replace_with_graph(
                 self,
@@ -1069,7 +1083,11 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)  # type: ignore[arg-type]
-                    _transfer_meta(new_meta=result.meta, old_meta=node.meta)
+                    _transfer_meta(
+                        new_meta=result.meta,
+                        old_node=node,
+                        pass_name="Interpreter_Replacer",
+                    )
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
                         if isinstance(node.meta["val"], torch.Tensor):
@@ -1356,7 +1374,8 @@ def register_replacement(
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
                             new_meta=n.meta,
-                            old_meta=match.nodes[0].meta,
+                            old_node=match.nodes[0],
+                            pass_name="replacement",
                         )
                 return True
             return False

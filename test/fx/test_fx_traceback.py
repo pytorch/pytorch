@@ -7,6 +7,9 @@ from torch.fx.traceback import get_graph_provenance_json, NodeSource, NodeSource
 from torch.testing._internal.common_utils import TestCase
 
 
+CREATE_STR = str(NodeSourceAction.CREATE)
+
+
 class TestFXNodeSource(TestCase):
     def test_node_source(self):
         node_source = NodeSource(
@@ -20,7 +23,7 @@ class TestFXNodeSource(TestCase):
             "name": "",
             "target": "",
             "pass_name": "test_pass",
-            "action": NodeSourceAction.CREATE,
+            "action": CREATE_STR,
             "graph_id": -1,
             "from_node": [],
         }
@@ -56,7 +59,7 @@ class TestFXNodeSource(TestCase):
                 "name": "add",
                 "target": "aten.add.Tensor",
                 "pass_name": "test_pass",
-                "action": NodeSourceAction.CREATE,
+                "action": CREATE_STR,
                 "graph_id": graph_id,
                 "from_node": [dummy_source_dict],
             },
@@ -111,7 +114,7 @@ class TestFXNodeSource(TestCase):
             key_provenance,
             "x",
             "Interpreter_PropagateUnbackedSymInts",
-            NodeSourceAction.CREATE,
+            CREATE_STR,
         )
 
         # Check node "x" is then created from another node "x" in FlattenInputOutputSignature
@@ -120,7 +123,7 @@ class TestFXNodeSource(TestCase):
             key_provenance,
             "x",
             "Interpreter_FlattenInputOutputSignature",
-            NodeSourceAction.CREATE,
+            CREATE_STR,
         )
 
         gm, graph_signature = aot_export_module(
@@ -150,7 +153,7 @@ class TestFXNodeSource(TestCase):
                 key_provenance,
                 "linear",
                 "Interpreter_PropagateUnbackedSymInts",
-                NodeSourceAction.CREATE,
+                CREATE_STR,
             )
 
             # Check node "linear" is then created from node "x" in PropagateUnbackedSymInts
@@ -159,7 +162,7 @@ class TestFXNodeSource(TestCase):
                 key_provenance,
                 "x",
                 "Interpreter_PropagateUnbackedSymInts",
-                NodeSourceAction.CREATE,
+                CREATE_STR,
             )
 
             # Check node "x" is then created from another node "x" in FlattenInputOutputSignature
@@ -168,5 +171,5 @@ class TestFXNodeSource(TestCase):
                 key_provenance,
                 "x",
                 "Interpreter_FlattenInputOutputSignature",
-                NodeSourceAction.CREATE,
+                CREATE_STR,
             )
