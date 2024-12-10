@@ -31,17 +31,17 @@ class QConvoneDNNXPU final {
       at::Tensor weight,
       at::Tensor weight_scales,
       at::Tensor weight_zero_points,
-      c10::optional<at::Tensor> bias,
+      std::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
       double inv_output_scale,
       int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
+      std::optional<c10::ScalarType> output_dtype,
       std::string_view attr,
-      torch::List<c10::optional<at::Scalar>> scalars,
-      c10::optional<std::string_view> algorithm) {
+      torch::List<std::optional<at::Scalar>> scalars,
+      std::optional<std::string_view> algorithm) {
     if (act.dim() == 3 || act.dim() == 5) {
       TORCH_CHECK(
           attr == "none",

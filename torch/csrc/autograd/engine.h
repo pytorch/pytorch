@@ -44,7 +44,7 @@ TORCH_API void validate_outputs(
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
 TORCH_API void validate_outputs(
-    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
 

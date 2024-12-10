@@ -1677,7 +1677,7 @@ TEST(TestAutogradUtils, ValidateOutputsReduce) {
   auto input = torch::ones({}, {torch::kFloat32});
   auto grad = torch::ones({2, 3}, {torch::kFloat32});
 
-  std::vector<c10::optional<InputMetadata>> input_metadata;
+  std::vector<std::optional<InputMetadata>> input_metadata;
   input_metadata.emplace_back(InputMetadata(input));
   std::vector<torch::Tensor> grads;
   grads.emplace_back(grad);
@@ -1690,7 +1690,7 @@ TEST(TestAutogradUtils, ValidateOutputsBasic) {
   auto input = torch::zeros({2, 3}, {torch::kFloat32});
   auto grad = torch::ones({2, 3}, {torch::kFloat32});
 
-  std::vector<c10::optional<InputMetadata>> input_metadata;
+  std::vector<std::optional<InputMetadata>> input_metadata;
   input_metadata.emplace_back(InputMetadata(input));
   std::vector<torch::Tensor> grads;
   grads.emplace_back(grad);
