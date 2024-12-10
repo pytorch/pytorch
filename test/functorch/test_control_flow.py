@@ -1137,6 +1137,77 @@ def forward(self, pred_1, x_1):
             self.assertEqual(expected_grads, grads)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_cond_autograd_zeros_unused_branch(self):
+        def cond_branch(x, w1, w2):
+            return torch.cond(x > 0, lambda x: w1 * x, lambda x: w2 * x, [x])
+
+        def imperative_branch(x, w1, w2):
+            if x > 0:
+                return w1 * x
+            else:
+                return w2 * x
+
+        x = torch.ones((), requires_grad=False)
+        w1 = torch.zeros((), requires_grad=True)
+        w2 = torch.zeros((), requires_grad=True)
+        parameters = [w1, w2]
+
+        y_cond = cond_branch(x, w1, w2)
+        grad_cond = torch.autograd.grad(y_cond, parameters, allow_unused=True)
+
+        y_exp = imperative_branch(x, w1, w2)
+        grad_exp = torch.autograd.grad(y_exp, parameters, allow_unused=True)
+
+        # Replace None gradients with a tensor of zeros
+        grad_exp = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(grad_exp, parameters)
+        ]
+
+        self.assertEqual(grad_exp, grad_cond)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_cond_autograd_zeros_unused_branch_complex(self):
+        x = torch.randn(4, 5, requires_grad=False)
+        w1 = torch.randn(2, 4, requires_grad=True)
+        b1 = torch.randn(2, 1, requires_grad=True)
+        w2 = torch.randn(2, 4, requires_grad=True)
+        b2 = torch.randn(1, 5, requires_grad=True)
+
+        def true_fn(x):
+            return (w1 @ x + b1).sum()
+
+        def false_fn(x):
+            return (w2 @ x + b2).sum()
+
+        def cond_branch(x):
+            return torch.cond(
+                x.mean() > 0, lambda x: true_fn(x), lambda x: false_fn(x), [x]
+            )
+
+        def imperative_branch(x):
+            if x.mean() > 0:
+                return true_fn(x)
+            else:
+                return false_fn(x)
+
+        parameters = [w1, b1, w2, b2]
+
+        y_cond = cond_branch(x)
+        grad_cond = torch.autograd.grad(y_cond, parameters, allow_unused=True)
+
+        y_exp = imperative_branch(x)
+        grad_exp = torch.autograd.grad(y_exp, parameters, allow_unused=True)
+
+        # Replace None gradients with a tensor of zeros
+        grad_exp = [
+            g if g is not None else torch.zeros_like(p)
+            for g, p in zip(grad_exp, parameters)
+        ]
+
+        self.assertEqual(grad_exp, grad_cond)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
         def f(x, y):
             return x + y

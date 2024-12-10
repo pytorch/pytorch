@@ -54,6 +54,19 @@ In order to do this, we need implementations for each of the dispatch keys.
 """
 
 
+def unmask_none_gradients(grads, operands):
+    return [
+        g
+        if (
+            (type(o) == torch.Tensor and not o.requires_grad)
+            or type(o) != torch.Tensor
+            or g is not None
+        )
+        else torch.zeros_like(o)
+        for g, o in zip(grads, operands)
+    ]
+
+
 class CondOp(HigherOrderOperator):
     def __init__(self):
         super().__init__("cond")
@@ -405,6 +418,9 @@ class CondAutogradOp(torch.autograd.Function):
             ctx._joint_false_graph,
             flat_grads + operands,
         )
+
+        grads = unmask_none_gradients(grads, operands)
+
         return None, None, None, None, None, *grads
 
 
