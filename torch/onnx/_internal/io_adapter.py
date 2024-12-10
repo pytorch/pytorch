@@ -594,11 +594,11 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             model.state_dict[name]  # type: ignore[union-attr,index]
             for name in model.graph_signature.parameters  # type: ignore[union-attr]
         )
-        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
+        non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[arg-type, union-attr]
         ordered_buffers = []
         for name in model.graph_signature.buffers:  # type: ignore[union-attr]
             if name in non_persistent_buffers:
-                ordered_buffers.append(model.constants[name])  # type: ignore[union-attr]
+                ordered_buffers.append(model.constants[name])  # type: ignore[index, union-attr]
             else:
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(

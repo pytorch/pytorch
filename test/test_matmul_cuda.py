@@ -700,6 +700,33 @@ class TestFP8MatmulCuda(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("which_dim_zero", [0, 1, 2])
+    @parametrize("use_torch_compile", [False, True])
+    def test_zero_dim_tensorwise(self, which_dim_zero, use_torch_compile) -> None:
+        device = "cuda"
+        x_dtype, y_dtype = torch.float8_e4m3fn, torch.float8_e4m3fn
+        out_dtype = torch.bfloat16
+        M, K, N = 32, 32, 32
+        if which_dim_zero == 0:
+            M = 0
+        elif which_dim_zero == 1:
+            K = 0
+        elif which_dim_zero == 2:
+            N = 0
+
+        x_fp8 = torch.zeros(M, K, device=device).to(x_dtype)
+        y_fp8 = torch.zeros(N, K, device=device, dtype=y_dtype).t()
+        out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
+        scale_a = torch.tensor(float('-inf'), device=device)
+        scale_b = torch.tensor(float('-inf'), device=device)
+        f = torch._scaled_mm
+        if use_torch_compile:
+            f = torch.compile(torch._scaled_mm)
+        out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
+        self.assertEqual(out_dtype, out_fp8.dtype)
+        self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")

@@ -964,6 +964,16 @@ def CppExtension(name, sources, *args, **kwargs):
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
+    Note!
+    If passing in the ``py_limited_api`` flag signifying that the extension uses
+    only the Python limited API, CppExtension will respect the flag and SKIP
+    linking torch_python with your custom extension!!!! This means that your
+    extension CANNOT rely on any APIs provided in torch_python!!!! Notably, your
+    extension cannot call PYBIND11_MODULE, which is commonly used to create a
+    Python module associated with the extension. The APIs in torch_python are
+    blatantly NOT within the Python limited API, which is why we avoid linking
+    torch_python when the ``py_limited_api`` is specified.
+
     Example:
         >>> # xdoctest: +SKIP
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CPP_EXT)
@@ -1018,6 +1028,16 @@ def CUDAExtension(name, sources, *args, **kwargs):
     All arguments are forwarded to the :class:`setuptools.Extension`
     constructor. Full list arguments can be found at
     https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
+
+    Note!
+    If passing in the ``py_limited_api`` flag signifying that the extension uses
+    only the Python limited API, CUDAExtension will respect the flag and SKIP
+    linking torch_python with your custom extension!!!! This means that your
+    extension CANNOT rely on any APIs provided in torch_python!!!! Notably, your
+    extension cannot call PYBIND11_MODULE, which is commonly used to create a
+    Python module associated with the extension. The APIs in torch_python are
+    blatantly NOT within the Python limited API, which is why we avoid linking
+    torch_python when the ``py_limited_api`` is specified.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -1999,10 +2019,12 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
+        ('Blackwell', '10.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
+                        '10.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2048,7 +2070,10 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         if arch not in valid_arch_strings:
             raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
-            num = arch[0] + arch[2:].split("+")[0]
+            # Handle both single and double-digit architecture versions
+            version = arch.split('+')[0]  # Remove "+PTX" if present
+            major, minor = version.split('.')
+            num = f"{major}{minor}"
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
@@ -2083,7 +2108,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+                  f'cu{torch.version.cuda.replace(".", "")}')
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
@@ -2117,6 +2142,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     return None
 
 
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils
+        return distutils._msvccompiler._get_vc_env(vc_arch)
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler
+        return _msvccompiler._get_vc_env(vc_arch)
+
+
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
@@ -2129,9 +2163,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
-
-        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        vc_env = {k.upper(): v for k, v in _get_vc_env(plat_spec).items()}
         for k, v in env.items():
             uk = k.upper()
             if uk not in vc_env:

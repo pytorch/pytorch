@@ -37,14 +37,7 @@ class clean(distutils.command.clean.clean):
 
 def get_extension():
     extra_compile_args = {
-        "cxx": [
-            "-O3",
-            "-fdiagnostics-color=always",
-        ],
-        "nvcc": [
-            "-O3",
-            "-t=0",
-        ],
+        "cxx": ["-fdiagnostics-color=always"],
     }
 
     sources = list(CSRC_DIR.glob("**/*.cu"))
@@ -64,7 +57,7 @@ setup(
     name="python_agnostic",
     version="0.0",
     author="PyTorch Core Team",
-    description="Example of python agnostic extension, heavily inspired by ao",
+    description="Example of python agnostic extension",
     ext_modules=get_extension(),
     cmdclass={
         "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
