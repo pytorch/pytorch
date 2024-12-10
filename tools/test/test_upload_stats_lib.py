@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest import mock
 
 
@@ -35,7 +35,7 @@ JOB_NAME = "some-job-name"
 
 @mock.patch("boto3.resource")
 class TestUploadStats(unittest.TestCase):
-    emitted_metric: Dict[str, Any] = {"did_not_emit": True}
+    emitted_metric: dict[str, Any] = {"did_not_emit": True}
 
     def mock_put_item(self, **kwargs: Any) -> None:
         # Utility for mocking putting items into s3.  THis will save the emitted

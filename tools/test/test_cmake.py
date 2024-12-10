@@ -5,10 +5,13 @@ import os
 import typing
 import unittest
 import unittest.mock
-from typing import Iterator, Sequence
 
 import tools.setup_helpers.cmake
 import tools.setup_helpers.env  # noqa: F401 unused but resolves circular import
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 T = typing.TypeVar("T")

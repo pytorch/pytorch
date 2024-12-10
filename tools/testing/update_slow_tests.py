@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, cast, Optional
 
 import requests
 from clickhouse import query_clickhouse  # type: ignore[import]
@@ -96,7 +96,7 @@ PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 
 
 def git_api(
-    url: str, params: Dict[str, Any], type: str = "get", token: str = UPDATEBOT_TOKEN
+    url: str, params: dict[str, Any], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -122,7 +122,7 @@ def git_api(
         ).json()
 
 
-def make_pr(source_repo: str, params: Dict[str, Any]) -> int:
+def make_pr(source_repo: str, params: dict[str, Any]) -> int:
     response = git_api(f"/repos/{source_repo}/pulls", params, type="post")
     print(f"made pr {response['html_url']}")
     return cast(int, response["number"])
@@ -150,7 +150,7 @@ def make_comment(source_repo: str, pr_number: int, msg: str) -> None:
     )
 
 
-def add_labels(source_repo: str, pr_number: int, labels: List[str]) -> None:
+def add_labels(source_repo: str, pr_number: int, labels: list[str]) -> None:
     params = {"labels": labels}
     git_api(
         f"/repos/{source_repo}/issues/{pr_number}/labels",
@@ -161,7 +161,7 @@ def add_labels(source_repo: str, pr_number: int, labels: List[str]) -> None:
 
 def search_for_open_pr(
     source_repo: str, search_string: str
-) -> Optional[Tuple[int, str]]:
+) -> Optional[tuple[int, str]]:
     params = {
         "q": f"is:pr is:open in:title author:pytorchupdatebot repo:{source_repo} {search_string}",
         "sort": "created",
