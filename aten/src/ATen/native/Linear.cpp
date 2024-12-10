@@ -42,8 +42,8 @@ static inline bool parseLinearFlatten3d() {
   // Uninitialized value
   static int value = -1;
   if (value == -1) {
-    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
-    if (env_str != nullptr && strcmp(env_str, "1") == 0) {
+    const auto env_str = c10::utils::get_env("TORCH_LINEAR_FLATTEN_3D");
+    if (env_str == "1") {
       value = 1;
     } else {
       value = 0;
