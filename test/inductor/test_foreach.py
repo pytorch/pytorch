@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch._inductor
+from torch._higher_order_ops import foreach_map
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -31,6 +32,16 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+
+def foreach_map_wrapper(op):
+    def wrapper(*args, **kwargs):
+        return foreach_map(op, (args), **kwargs)
+
+    wrapper.__name__ = "foreach_map_" + op.__name__
+
+    return wrapper
+
+
 inplace_bin_ops_under_test = [
     torch._foreach_add_,
     torch._foreach_mul_,
@@ -48,6 +59,15 @@ bin_ops_under_test = [
     torch._foreach_clamp_max,
     torch._foreach_clamp_min,
     aten._foreach_copy,
+    foreach_map_wrapper(torch.add),
+    foreach_map_wrapper(torch.mul),
+    foreach_map_wrapper(torch.sub),
+    foreach_map_wrapper(torch.div),
+    foreach_map_wrapper(torch.maximum),
+    foreach_map_wrapper(torch.minimum),
+    foreach_map_wrapper(torch.clamp_max),
+    foreach_map_wrapper(torch.clamp_min),
+    foreach_map_wrapper(aten.copy),
 ]
 
 un_ops_under_test = [
@@ -57,6 +77,10 @@ un_ops_under_test = [
     torch._foreach_abs,
     torch._foreach_sqrt,
     torch._foreach_rsqrt,
+    foreach_map_wrapper(torch.reciprocal),
+    foreach_map_wrapper(torch.neg),
+    foreach_map_wrapper(torch.sign),
+    foreach_map_wrapper(torch.abs),
 ]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
