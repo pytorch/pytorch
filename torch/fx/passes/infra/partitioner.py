@@ -2,7 +2,6 @@
 import collections
 import itertools
 import logging
-from copy import copy
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 from torch.fx.graph_module import GraphModule
@@ -101,6 +100,9 @@ class CapabilityBasedPartitioner:
         partitions_order: Dict[
             int, int
         ] = {}  # mapping from partition_id to minimum topo order of nodes in partition
+        partition_users: Dict[
+            int, Set
+        ] = {}  # mapping from partition_id to partition users
         new_partition_id = itertools.count()
 
         # try to merge partition other_id into partition self_id
@@ -108,8 +110,8 @@ class CapabilityBasedPartitioner:
         # returns `True` when merge happens, `False` otherwise.
         def maybe_merge_partition(self_id: int, other_id: int):
             # merged_nodes is the union of nodes in two partition to-be-merged
-            merged_nodes = copy(partitions_by_id[self_id].nodes)
-            merged_nodes.update(partitions_by_id[other_id].nodes)
+            self_nodes = partitions_by_id[self_id].nodes
+            other_nodes = partitions_by_id[other_id].nodes
 
             def dfs_iter_find_cycle(all_user_nodes: Set[Node]):
                 for user_node in all_user_nodes:
@@ -118,7 +120,7 @@ class CapabilityBasedPartitioner:
                     for path_node in self.dependency_viewer.downstreams_of(user_node):
                         # If any of the nodes in the dfs path of this node are in the merged_nodes
                         # list then there is a cycle in the graph.
-                        if path_node in merged_nodes:
+                        if path_node in self_nodes or path_node in other_nodes:
                             return True
 
                         # If any of the nodes in the dfs path of this node are in the assignment
@@ -140,38 +142,50 @@ class CapabilityBasedPartitioner:
 
                 return False
 
-            # check if merge would create cyclic dependency.
+            # find new partition users if merge.
             all_user_nodes = set()
-            for node in merged_nodes:
-                for user_node in node.users:
-                    if user_node not in merged_nodes:
-                        all_user_nodes.add(user_node)
+            removed_candidates_list = [other_nodes, self_nodes]
+            partition_users_list = [partition_users[self_id], partition_users[other_id]]
+            for users, removed_candidates in zip(
+                partition_users_list, removed_candidates_list
+            ):
+                for user in users:
+                    if user not in removed_candidates:
+                        all_user_nodes.add(user)
 
+            # check if merge would create cyclic dependency.
             if dfs_iter_find_cycle(all_user_nodes):
                 # return false indicating cyclic dependency found and
                 # merge is aborted
-                return False
+                return self_id, False
 
+            # merge the smaller partition into the larger.
+            merge_id, removed_id = self_id, other_id
+            if len(self_nodes) < len(other_nodes):
+                merge_id, removed_id = removed_id, merge_id
             # no cyclic dependency found, move forward with the merge
             # updating partition nodes
-            partitions_by_id[self_id].nodes = merged_nodes
+            partitions_by_id[merge_id].nodes.update(partitions_by_id[removed_id].nodes)
             # updating assignment map
-            for node in partitions_by_id[other_id].nodes:
-                assignment[node] = self_id
+            for node in partitions_by_id[removed_id].nodes:
+                assignment[node] = merge_id
             # delete other partition
-            del partitions_by_id[other_id]
+            del partitions_by_id[removed_id]
 
-            partitions_order[self_id] = min(
-                partitions_order[self_id], partitions_order[other_id]
+            partitions_order[merge_id] = min(
+                partitions_order[merge_id], partitions_order[removed_id]
             )
-            del partitions_order[other_id]
+            del partitions_order[removed_id]
 
-            partition_map[self_id] = partition_map[self_id].union(
-                partition_map[other_id]
+            partition_map[merge_id] = partition_map[merge_id].union(
+                partition_map[removed_id]
             )
-            del partition_map[other_id]
+            del partition_map[removed_id]
 
-            return True
+            partition_users[merge_id] = all_user_nodes
+            del partition_users[removed_id]
+
+            return merge_id, True
 
         def merge_single_node(node: Node, id: Optional[int]):
             def _update_partition_map(node: Node, id: int):
@@ -205,11 +219,11 @@ class CapabilityBasedPartitioner:
             elif id not in partitions_by_id:
                 assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
+                partition_users[id] = set(node.users)
                 _update_partition_map(node, id)
             else:
                 assignment[node] = id
                 partitions_by_id[id].add_node(node)
-                _update_partition_map(node, id)
 
         logger.debug("Proposing partitions...")
 
@@ -239,10 +253,9 @@ class CapabilityBasedPartitioner:
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
-                    # note: merge partition `other_id` into partition `self_id` if
-                    # it doesn't create cyclic dependency in the graph, otherwise,
-                    # this is a no-op
-                    maybe_merge_partition(self_id, other_id)
+                    # note: merge partitions if it doesn't create cyclic dependency
+                    # in the graph, otherwise, this is a no-op
+                    self_id, _ = maybe_merge_partition(self_id, other_id)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
