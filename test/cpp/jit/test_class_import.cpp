@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static constexpr c10::string_view classSrcs1 = R"JIT(
+static constexpr std::string_view classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -26,7 +26,7 @@ class FooTest:
         self.x = self.class_attr.y + self.class_attr2.y
 )JIT";
 
-static constexpr c10::string_view classSrcs2 = R"JIT(
+static constexpr std::string_view classSrcs2 = R"JIT(
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -134,7 +134,7 @@ TEST(ClassImportTest, ClassDerive) {
   ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
-static constexpr c10::string_view torchbindSrc = R"JIT(
+static constexpr std::string_view torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
   f : __torch__.torch.classes._TorchScriptTesting._StackString
