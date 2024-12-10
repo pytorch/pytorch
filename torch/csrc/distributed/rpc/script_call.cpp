@@ -2,6 +2,7 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace torch::distributed::rpc {
 
 const std::string ScriptCall::BUILTIN_OP_NAMESPACE_("torch.ops.aten.");
@@ -156,3 +157,4 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
 }
 
 } // namespace torch::distributed::rpc
+// NOLINTEND(bugprone-unchecked-optional-access)
