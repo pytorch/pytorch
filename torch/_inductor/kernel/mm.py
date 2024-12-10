@@ -50,8 +50,8 @@ from .mm_common import (
     mm_configs,
     mm_grid,
     mm_options,
-    mm_options_persistent,
-    persistent_grid,
+    persistent_mm_grid,
+    persistent_mm_options,
     persistent_mm_configs,
     triton_config,
 )
@@ -128,9 +128,9 @@ mm_template = TritonTemplate(
 """,
 )
 
-mm_template_persistent = TritonTemplate(
+persistent_mm_template = TritonTemplate(
     name="mm_persistent",
-    grid=persistent_grid,
+    grid=persistent_mm_grid,
     source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
@@ -216,9 +216,9 @@ mm_template_persistent = TritonTemplate(
 """,
 )
 
-mm_template_persistent_tma = TritonTemplate(
+persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
-    grid=persistent_grid,
+    grid=persistent_mm_grid,
     source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
@@ -404,7 +404,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
             for config in persistent_mm_configs(
                 m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
             ):
-                mm_template_persistent_tma.maybe_append_choice(
+                persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(mat1, mat2),
                     layout=layout,
@@ -413,7 +413,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                         device=mat1.get_device(),
                     ),
                     **mm_options(config, m, n, k, layout),
-                    **mm_options_persistent(mat1, mat2),
+                    **persistent_mm_options(mat1, mat2),
                 )
 
     if is_nonzero and use_cutlass_template(layout, m, n, k):
@@ -612,7 +612,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             for config in persistent_mm_configs(
                 m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
             ):
-                mm_template_persistent_tma.maybe_append_choice(
+                persistent_tma_mm_template.maybe_append_choice(
                     choices,
                     input_nodes=(inp_expanded, mat1, mat2),
                     layout=layout,
@@ -621,7 +621,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                         device=mat1.get_device(),
                     ),
                     **mm_options(config, m, n, k, layout),
-                    **mm_options_persistent(mat1, mat2),
+                    **persistent_mm_options(mat1, mat2),
                     prefix_args=1,
                     epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
                 )

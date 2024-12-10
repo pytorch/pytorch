@@ -1147,18 +1147,19 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 
 @functools.lru_cache
-def get_sm_count() -> int:
+def get_num_sms() -> int:
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
 def get_tma_workspace_arg(
-    num_tma_descriptors: int, device: torch.device
+    num_tma_descriptors: int,
+    device: torch.device,
 ) -> WorkspaceArg:
     """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
     zero_mode = WorkspaceZeroMode.from_bool(False)
-    size = get_sm_count() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
         count=size,
         zero_mode=zero_mode,
