@@ -309,6 +309,22 @@ def prepare_fw_with_masks(fn):
     return fw_with_masks
 
 
+# This function replaces None gradients with all-zero gradients.
+# In PyTorch there is the convention that None gradients are
+# replaced with all-zeros gradients
+def unmask_none_gradients(grads, operands):
+    return [
+        g
+        if (
+            (isinstance(o, torch.Tensor) and not o.requires_grad)
+            or not isinstance(o, torch.Tensor)
+            or g is not None
+        )
+        else torch.zeros_like(o)
+        for g, o in zip(grads, operands)
+    ]
+
+
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
 def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
@@ -357,11 +373,14 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
             [grad for grad in grads if grad is not None and grad.requires_grad],
         )
 
+        # Unmask None gradients to all-zero gradients
+        unmasked_grads = unmask_none_gradients(grads, inputs)
+
         # In order to keep map functional for backward graph,
         # we clone outputs that are aliasing inputs
         maybe_clone = clone_outputs_aliasing_inputs(joint_operands_grads)
 
-        return pytree.tree_map(maybe_clone, grads)
+        return pytree.tree_map(maybe_clone, unmasked_grads)
 
     if use_output_and_grad_bw:
         example_xs_out = list(fw_inputs) + list(fw_outputs)
