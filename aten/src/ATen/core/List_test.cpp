@@ -1136,10 +1136,10 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   std::optional<std::string> str2 = list[2];
   decltype(auto) strRef1 = listRef[1];
   decltype(auto) strRef2 = listRef[2];
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  EXPECT_EQ("two", str1.value());
+  EXPECT_EQ("two", str1);
   EXPECT_FALSE(str2.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  EXPECT_TRUE(strRef1.has_value());
   EXPECT_EQ("two", strRef1.value().get());
   EXPECT_FALSE(strRef2.has_value());
 }
