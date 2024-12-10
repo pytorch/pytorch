@@ -39,6 +39,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
+from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -1438,6 +1439,15 @@ class SIMDScheduling(BaseScheduling):
                     with config.patch("triton.codegen_upcast_to_fp32", False):
                         with kernel.set_subgraph_body(subgraph_name):
                             for prologue_node in prologue_group:
+                                if (
+                                    len(prologue_node.get_buffer_names()) == 1
+                                    and len(prologue_group) == 1
+                                ):
+                                    if prologue_preserves_zero_mask(prologue_node):
+                                        kernel.prologue_fused_inputs_preserve_zero |= (
+                                            prologue_node.get_buffer_names()
+                                        )
+
                                 prologue_node.codegen(
                                     kernel.split_and_set_ranges(
                                         prologue_node.get_ranges()
