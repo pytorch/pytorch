@@ -1084,11 +1084,6 @@ class TritonHOPifier:
                         != torch._dynamo.utils.get_first_attr(kernel, "num_reps", "rep")
                     )
                     or (
-                        "prune_configs_by" in defaults
-                        and defaults["prune_configs_by"].default
-                        != kernel.early_config_prune
-                    )
-                    or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
@@ -1178,6 +1173,81 @@ class TritonHOPifier:
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
+
+        # We support running a single Autotuner for each Triton kernel
+        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored
+        # We raise an error here to avoid silent incorrectness
+        iter_kernel = variable.kernel
+        autotuner_count = 0
+        while not isinstance(iter_kernel, JITFunction):
+            if isinstance(iter_kernel, Autotuner):
+                autotuner_count += 1
+            if autotuner_count > 1:
+                self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
+                    "Please use a single @triton.autotune decorator instead."
+                )
+            iter_kernel = iter_kernel.fn
+
+        # These are the default values in upstream Triton
+        # see: triton/runtime/autotuner.py
+        default_perf_model = None
+        default_configs_top_k = 1.0
+        default_early_config_prune = None
+
+        # Run prune_configs_by to filter the configs
+        # Check to see if we need to prune:
+        # - We are looking at an Autotuner
+        # - user provided perf_model or early_config_prune is provided)
+        if isinstance(variable.kernel, Autotuner) and (
+            variable.kernel.perf_model != default_perf_model
+            or variable.kernel.early_config_prune != default_early_config_prune
+        ):
+            # args and kwargs aren't real values yet
+            # e.g., LazyVariableTracker
+            # If a user wants to access them, we should realize them
+            def realize_var(
+                var: Any,
+            ) -> Any:
+                while hasattr(var, "realize") and not (
+                    hasattr(var, "value") or hasattr(var, "get_real_value")
+                ):
+                    var = var.realize()
+
+                # if we can return the value, do it
+                if hasattr(var, "value"):
+                    return var.value
+                elif hasattr(var, "get_real_value"):
+                    return var.get_real_value()
+                else:
+                    self.raise_unsupported(
+                        "Unable to realize value for args or kwargs while pruning configs"
+                    )
+
+            # Eagerly realize the args/kwargs for kernel.prune_configs
+            # We can't pass objects such as VariableTracker to user-provided functions
+            realized_kwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
+            realized_args = zip(
+                variable.kernel.arg_names, [realize_var(arg) for arg in args]
+            )
+
+            # save kernel.nargs if it is present
+            if hasattr(variable.kernel, "nargs"):
+                prev_nargs = variable.kernel.nargs
+            else:
+                prev_nargs = None
+
+            # Prune the configs
+            variable.kernel.nargs = dict(realized_args)
+            variable.kernel.prune_configs(realized_kwargs)
+
+            # Reset Autotuner vars to the default values so we don't run prune_configs again
+            variable.kernel.perf_model = default_perf_model
+            variable.kernel.configs_top_k = default_configs_top_k
+            variable.kernel.early_config_prune = default_early_config_prune
+
+            # restore nargs
+            variable.kernel.nargs = prev_nargs
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
@@ -1276,6 +1346,8 @@ class TritonHOPifier:
         if isinstance(variable.kernel, JITFunction):
             constexprs = variable.kernel.constexprs
         else:
+            # If we are looking at an @triton.autotune decorator, the nested function should be a JITFunction
+            # This is because we don't support @triton.heuristics or nested @triton.autotune decorators yet
             assert isinstance(variable.kernel, Autotuner)
             constexprs = variable.kernel.fn.constexprs
 
