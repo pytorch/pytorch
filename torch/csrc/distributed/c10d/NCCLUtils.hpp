@@ -219,19 +219,18 @@ class NCCLComm {
   NCCLComm() = default;
 
   ~NCCLComm() noexcept {
-    // Add lock in this destructor, as aborted_ needs to be read after memory
-    // barrier here.
+    // (kwen2501) Making CUDA/NCCL calls in this destructor can hit CUDA driver
+    // shutdown error if CUDA context has exited first. Thus, we are not
+    // destroying or aborting NCCL communicators here. We just detect and warn
+    // about the risk of memory leak. Normally, a user would have called
+    // `destroy_process_group` or `abort_process_group`, and such risk would be
+    // avoided.
     LockType lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
-      at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-      // Use ncclCommAbort instead of ncclCommDestroy here since
-      // ncclCommDestroy could block forever waiting for work to complete on
-      // the communicator.
-      C10D_NCCL_ASSERT(::ncclCommAbort(ncclComm_));
-#else
-      C10D_NCCL_ASSERT(::ncclCommDestroy(ncclComm_));
-#endif
+      TORCH_WARN_ONCE(
+          "WARNING: NCCL communicator hasn't been destroyed. This may cause "
+          "memory leaks. To avoid the risk, you can call `destroy_process_group` "
+          "during normal exit or `_abort_process_group` when handling failures.")
     }
   }
 

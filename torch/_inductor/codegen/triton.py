@@ -2330,8 +2330,11 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
+                assert isinstance(masked_value, CSEVariable)
                 result_var = self.cse.generate(
-                    self.compute, final_reduction(masked_value), dtype=dtype
+                    self.compute,
+                    final_reduction(masked_value),
+                    dtype=masked_value.dtype,
                 )
         else:
             accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)

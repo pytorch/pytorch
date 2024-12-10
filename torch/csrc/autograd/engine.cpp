@@ -1602,6 +1602,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 // Remembers current streams on all devices where a context has been created for
 // This function assumes the accelerator device is available.
 void GraphTask::stash_current_streams() {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto accelerator = at::getAccelerator(true).value();
   const auto guard = c10::impl::VirtualGuardImpl{accelerator};
   auto num_devices = guard.deviceCount();
