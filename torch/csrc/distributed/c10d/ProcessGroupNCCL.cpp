@@ -1209,6 +1209,12 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
 
 void ProcessGroupNCCL::registerOnCompletionHook(
     std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+  TORCH_WARN_ONCE(
+      "ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder. "
+      "Please check out FlightRecorder.hpp for information that is recorded at work completion. "
+      "You can file an issue if you want additional information to be recorded. "
+      "You can also file an RFC if you want Flight Recorder to accept plugins that customize the recording.")
+
   TORCH_CHECK_WITH(
       DistBackendError,
       onCompletionHook_ == nullptr,
@@ -2519,7 +2525,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 #endif
 
 #ifdef NCCL_HAS_COMM_SPLIT
-  if (options_->split_from) {
+  // Use split to create a new communicator only if:
+  // 1. The parent comm is known; AND
+  // 2. The new comm is not for a point-to-point operation.
+  // ncclCommSplit() is a collective call, so it does not work for P2P
+  // operations.
+  if (options_->split_from && !singleP2POp) {
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
