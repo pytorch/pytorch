@@ -11,10 +11,12 @@ from ._utils import _device_t, _get_device_index
 
 __all__ = [
     "current_accelerator",
+    "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
     "device_count",
     "is_available",
+    "set_device_idx",  # deprecated
     "set_device_index",
     "set_stream",
     "synchronize",
