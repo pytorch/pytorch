@@ -397,7 +397,7 @@ def _init_device_handle(
                         f"FSDP does not support modules with different device types "
                         f"but got params on {determined_device.type} and {param.device.type}"
                     )
-        determined_device = determined_device or torch._C._get_accelerator()
+        determined_device = determined_device or torch.acc.current_accelerator()
         if determined_device.type == "cpu":
             raise RuntimeError(
                 "FSDP needs a non-CPU accelerator device, but no accelerator device is detected."
