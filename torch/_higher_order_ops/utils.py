@@ -310,7 +310,9 @@ def prepare_fw_with_masks(fn):
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
-def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
+def create_fw_bw_graph(
+    fn, use_output_and_grad_bw, fw_inputs, fw_outputs, materialize_grads=False
+):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
 
     # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
@@ -350,7 +352,11 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
             grads = joint_operands_grads[:num_grads]
             inputs = joint_operands_grads[num_grads:]
 
-        joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
+        joint = create_joint(
+            prepare_fw_with_masks(fn),
+            aot_config=dummy_aot_config,
+            materialize_grads=materialize_grads,
+        )
         _, grads = joint(
             list(inputs),
             [grad for grad in grads if grad is not None and grad.requires_grad],

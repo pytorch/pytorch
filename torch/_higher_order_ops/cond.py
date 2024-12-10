@@ -18,6 +18,11 @@ from torch._C._functorch import (
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
 from torch._guards import detect_fake_mode
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+    if_else_node,
+)
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -235,10 +240,10 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
             # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
             # If we can get rid of the second invokation, it would simplify this function
             fw_true_graph, joint_true_graph = create_fw_bw_graph(
-                true_fn, False, fw_inputs, fw_outputs_true
+                true_fn, False, fw_inputs, fw_outputs_true, materialize_grads=True
             )
             fw_false_graph, joint_false_graph = create_fw_bw_graph(
-                false_fn, False, fw_inputs, fw_outputs_false
+                false_fn, False, fw_inputs, fw_outputs_false, materialize_grads=True
             )
 
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
@@ -374,6 +379,33 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
         return true_fn(*operands)
     else:
         return false_fn(*operands)
+
+
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@cond_op.py_impl(CUDAGraphCaptureControlFlowOpDispatchMode)
+def cond_op_cudagraph(mode, pred, true_fn, false_fn, operands):
+    assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
+    if not mode.inside_already_warmed_up_op:
+        for fn in (true_fn, false_fn):
+            if fn not in mode.warmed_up_control_flow_ops:
+                warmup_mode = ControlFlowOpWarmupDispatchMode()
+                with warmup_mode:
+                    fn(*operands)
+                mode.warmed_up_control_flow_ops.add(fn)
+    mode.inside_already_warmed_up_op = True
+    # Re-enter this mode in order to handle nested control flow
+    # operations
+    with mode:
+        output = if_else_node(pred, true_fn, false_fn, operands)
+    mode.inside_already_warmed_up_op = False
+    return output
+
+
+# WAR for https://github.com/pytorch/pytorch/issues/140322
+@cond_op.py_impl(ControlFlowOpWarmupDispatchMode)
+def cond_op_warmup(mode, pred, true_fn, false_fn, operands):
+    assert torch.cuda.is_available() and torch.cuda.is_current_stream_capturing()
+    return if_else_node(pred, true_fn, false_fn, operands)
 
 
 class CondAutogradOp(torch.autograd.Function):
