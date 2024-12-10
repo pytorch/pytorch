@@ -408,6 +408,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.logsumexp.default,
             aten.masked_fill,
             aten.masked_fill_,
+            aten.masked_select,
             aten.max_unpool2d,
             aten.max_unpool3d,
             aten.mish,
