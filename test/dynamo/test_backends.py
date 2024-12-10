@@ -346,6 +346,43 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             )
             opt_fn(input)
 
+    def test_backend_graph_freeze(self):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        backend_run = False
+
+        def my_compiler(gm, example_inputs):
+            nonlocal backend_run
+            if tracing_context := torch._guards.TracingContext.try_get():
+                fw_metadata = tracing_context.fw_metadata
+                params_flat = tracing_context.params_flat
+                self.assertTrue(fw_metadata is not None)
+                self.assertTrue(params_flat is not None)
+                self.assertTrue(len(params_flat) == 2)
+            backend_run = True
+            return make_boxed_func(gm.forward)
+
+        my_backend = aot_autograd(fw_compiler=my_compiler)
+
+        class MyClass(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.p1 = torch.nn.Parameter(torch.randn(2, 3))
+                self.p2 = torch.nn.Parameter(torch.randn(2, 3))
+
+            @torch._dynamo.config.patch("prepare_freezing", True)
+            def forward(self, x):
+                t = self.p1 + x
+                out = t / self.p2
+                return out
+
+        mod = MyClass()
+
+        opt_mod = torch.compile(mod, backend=my_backend)
+        opt_mod(torch.randn(2, 3))
+        self.assertTrue(backend_run)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
