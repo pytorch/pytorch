@@ -10,7 +10,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-from torch._dynamo.testing import empty_line_normalizer, skipIfNotPy311
+from torch._dynamo.testing import (
+    empty_line_normalizer,
+    extract_graph_and_tracker,
+    skipIfNotPy311,
+)
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
@@ -733,7 +737,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(graph_region_expansion=True)
     def test_graph_region_expansion(self, records):
-        with torch._dynamo.config.patch("use_graph_deduplication", True):
+        with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
 
             def inner_fn(x, y):
                 x0 = x + 1
@@ -748,8 +752,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
                 o3 = inner_fn(x, y)
                 return o2 * o3 * o3
 
-            fn_opt = torch.compile(backend="eager")(fn)
-            fn_opt(torch.randn(10, 10), torch.randn(10, 10))
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.randn(10, 10), torch.randn(10, 10)
+            )
+            tracker.get_identical_regions(graph)
             self.assertGreater(len(records), 0)
 
     @skipIfTorchDynamo("too slow")
