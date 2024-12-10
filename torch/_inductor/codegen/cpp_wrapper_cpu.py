@@ -20,7 +20,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer, Kernel
+from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
@@ -66,6 +66,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: Dict[str, Kernel] = {}
+        self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
     def create(
@@ -539,10 +540,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
+        code.writeline(f"auto {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
+        code.writeline(f"auto {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -571,7 +572,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         for kernel in sorted(declare_kernel):
             self.prefix.writeline(
-                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
+                maybe_hipify_code_wrapper(
+                    f"    {self.device_codegen.cpp_kernel_type()} {kernel}{{nullptr}};"
+                )
             )
         for name, kernel in self.initialized_kernels.items():
             assert hasattr(
@@ -1831,7 +1834,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if outputs is None:
+        if op_overload and not op_overload._schema.returns:
+            # kernel does not return a value
+            output_args = []
+        elif outputs is None:
             # outputs is not specified, the default is to write to buf_name
             output_args = [buf_name]
         else:

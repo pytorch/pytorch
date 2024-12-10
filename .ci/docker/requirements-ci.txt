@@ -193,6 +193,11 @@ pytest-rerunfailures>=10.3
 #Pinned versions:
 #test that import:
 
+pytest-subtests==0.13.1
+#Description: plugin for subtest support
+#Pinned versions:
+#test that import:
+
 #pytest-benchmark
 #Description: fixture for benchmarking code
 #Pinned versions: 3.2.3
