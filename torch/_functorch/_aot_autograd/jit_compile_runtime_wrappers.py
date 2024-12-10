@@ -64,7 +64,13 @@ from .runtime_wrappers import (
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
-from .utils import _get_symint_hints, make_boxed_func, strict_zip, unlift_tokens
+from .utils import (
+    _get_symint_hints,
+    contain_metadata_mutation_ops,
+    make_boxed_func,
+    strict_zip,
+    unlift_tokens,
+)
 
 
 zip = strict_zip
@@ -317,6 +323,23 @@ def collect_bw_donated_buffer_idxs(
     """
     Collects backward donated buffer indexes from fw_module and bw_module.
     """
+
+    # [Note: Metadata mutation in proxy tracing]
+    # node.meta["val"] is a snapshot of the tensor value when tracing a graph,
+    # instead of the final state after the graph has run. node.meta["val"] is
+    # not updated even if later there is a metadata mutation op.
+    # See: https://github.com/pytorch/pytorch/pull/141308#issuecomment-2495798947
+    #
+    # Currently, metadata mutation op happens only for sacrificial parameter
+    # specifically the `set_` op. This motivates banning metadata mutation from
+    # proxy tracing.
+    #
+    # Since node.meta["val"] is used to detect donated buffer, we return an empty
+    # list if there exists metadata mutation op.
+    if contain_metadata_mutation_ops(fw_module) or contain_metadata_mutation_ops(
+        bw_module
+    ):
+        return []
 
     fw_ins = fw_module.graph.find_nodes(op="placeholder")
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
