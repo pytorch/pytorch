@@ -37,14 +37,7 @@ class Partition:
 
 class _DependencyViewer:
     def __init__(self, graph_module: GraphModule):
-        self.upstreams = collections.defaultdict(set)
         self.downstreams = collections.defaultdict(set)
-
-        for node in graph_module.graph.nodes:
-            for input_node in node.all_input_nodes:
-                # add input_node and input_node's upstream dependency
-                self.upstreams[node].add(input_node)
-                self.upstreams[node].update(self.upstreams[input_node])
 
         for node in reversed(graph_module.graph.nodes):
             for output_node in node.users:
@@ -54,9 +47,6 @@ class _DependencyViewer:
 
     def downstreams_of(self, node: Node) -> Set[Node]:
         return self.downstreams[node]
-
-    def upstreams_of(self, node: Node) -> Set[Node]:
-        return self.upstreams[node]
 
 
 class CapabilityBasedPartitioner:
@@ -187,15 +177,6 @@ class CapabilityBasedPartitioner:
                             user_node
                         ), "Encountered user node which has not been traversed yet. \
                             This should only happen if this is an unsupported node."
-
-                # Iterate through all the upstream nodes of this node and update the partition map
-                # to indicate that there is a path from the partition id of the upstream node to the
-                # current node's partition id.
-                upstream_nodes = self.dependency_viewer.upstreams_of(node)
-                for curr_node in upstream_nodes:
-                    source_id = assignment.get(curr_node, None)
-                    if source_id is not None:
-                        partition_map[source_id].add(id)
 
             if node in assignment:
                 partitions_by_id[assignment[node]].remove_node(node)
