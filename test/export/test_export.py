@@ -765,10 +765,10 @@ graph():
         out_copy2 = out.clone()
         out_copy3 = out.clone()
         self.assertEqual(exp_out, ep.module()(x, y, out_copy))
-        # For non-functional graph moduule, out_copy is mutated
+        # For non-functional graph module, out_copy is mutated
         self.assertEqual(out, out_copy)
         self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
-        # For non-functional graph moduule, out_copy is not mutated
+        # For non-functional graph module, out_copy is not mutated
         self.assertEqual(out_copy2, out_copy3)
 
     def test_masked_select_dynamic(self):

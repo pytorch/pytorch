@@ -140,16 +140,16 @@ def triton_op(
             # the custom op to a functional hop and make it a node in exported program,
             # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
             # functions and triton dtypes. This is undesireble because:
-            # - it's tedious to maintain layer that serialize the jited function
-            #   (e.g. with a string) and dtypes.
-            # - exported program will expose the implementation detail (i.e. triton source code) for
-            #   a specific backend (GPU) to users, making it less portable.
+            # - it can be tedious to maintain layer that serialize the jited function (e.g. with a string) and dtypes.
+            # - exported program will expose the implementation detail (i.e. triton source code) for a specific
+            #   backend (GPU) to users, which mixes levels of abstraction.
             # - changes to triton or the serialization logic for triton arguments can be BC breaking
             #
-            # In the short term, we expect users to have a seperate aot_compile stage that
-            # compiles the exported program into a Cubin file, which does autotuning and
-            # removes triton dependency.
+            # In the short term, we expect users to have a seperate aot_compile stage that compiles the exported program
+            # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
+            # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
             # In the long term, we may export multiple cubins for the triton op directly.
+
             from torch.compiler import is_exporting
 
             if is_exporting():
