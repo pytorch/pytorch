@@ -13,7 +13,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     mixed_mm_operations,
     mm_operations,
 )
-from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
+from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.virtualized import V
 
 from .. import config as inductor_config, ir
@@ -31,9 +31,10 @@ from ..select_algorithm import (
 )
 from ..utils import (
     get_gpu_shared_memory,
+    get_tma_workspace_arg,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
-    use_cpp_packed_gemm_template,
+    use_cpp_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -43,15 +44,14 @@ from .mm_common import (
     _is_static_problem,
     addmm_epilogue,
     extra_mm_configs,
-    get_tma_workspace_arg,
     int8_mm_configs,
     mixed_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
-    mm_grid_persistent,
     mm_options,
     mm_options_persistent,
+    persistent_grid,
     persistent_mm_configs,
     triton_config,
 )
@@ -130,7 +130,7 @@ mm_template = TritonTemplate(
 
 mm_template_persistent = TritonTemplate(
     name="mm_persistent",
-    grid=mm_grid_persistent,
+    grid=persistent_grid,
     source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
@@ -218,7 +218,7 @@ mm_template_persistent = TritonTemplate(
 
 mm_template_persistent_tma = TritonTemplate(
     name="mm_persistent_tma",
-    grid=mm_grid_persistent,
+    grid=persistent_grid,
     source=r"""
 {{def_kernel("A", "B")}}
     M = {{size("A", 0)}}
@@ -422,8 +422,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
-    if use_cpp_packed_gemm_template(layout, mat1, mat2):
-        CppPackedGemmTemplate.add_choices(
+    if use_cpp_gemm_template(layout, mat1, mat2):
+        CppGemmTemplate.add_choices(
             choices,
             layout,
             [mat1, mat2],
@@ -653,8 +653,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
         )
 
-    if use_cpp_packed_gemm_template(layout, mat1, mat2):
-        CppPackedGemmTemplate.add_choices(
+    if use_cpp_gemm_template(layout, mat1, mat2):
+        CppGemmTemplate.add_choices(
             choices,
             layout,
             [inp_expanded, mat1, mat2],
