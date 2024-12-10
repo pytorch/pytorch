@@ -72,6 +72,7 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
+    @skip_if_lt_x_gpu(4)
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
