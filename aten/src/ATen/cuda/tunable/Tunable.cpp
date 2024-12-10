@@ -391,11 +391,13 @@ TuningContext::TuningContext() :
     rotating_buffer_size_{-1},
     filename_{},
     untuned_file_{},
-    results_count_from_input_file_{0}
+    results_count_from_input_file_{0},
+    is_shutting_down_{false}
 {
 }
 
 TuningContext::~TuningContext() {
+  is_shutting_down_ = true;
   if (!manager_initialized_) {
     // TuningResultsManager was never initialized, no tuning requested or performed.
     // This can happen in a DDP job where a python process spawns other workers
@@ -738,6 +740,50 @@ bool TuningContext::WriteFile(const std::string& filename_) {
   }
   file.close();
   return true;
+}
+
+namespace {
+
+struct MaybeDelete {
+  bool owns_pointer;
+  void operator()(std::ostream* os) const { if (owns_pointer) delete os; }
+};
+
+using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
+
+inline OstreamPtr get_stream(const std::string& filename) {
+  if (filename == "out") {
+    return OstreamPtr { &std::cout, MaybeDelete {false} };
+  }
+  else if (filename == "err") {
+    return OstreamPtr { &std::cerr, MaybeDelete {false} };
+  }
+  else {
+    return OstreamPtr { new std::ofstream {filename.c_str()}, MaybeDelete {true} };
+  }
+}
+
+} // anonymous namespace
+
+std::string TuningContext::GetLogFilename() const {
+  static const auto env_file = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
+  static std::string val_file = env_file.has_value() ? env_file.value() : "err";
+  return val_file;
+}
+
+int TuningContext::GetLogLevel() const {
+  static const auto env_verbose = c10::utils::get_env("PYTORCH_TUNABLEOP_VERBOSE");
+  static int val_verbose = env_verbose.has_value() ? stoi(env_verbose.value()) : 0;
+  return val_verbose;
+}
+
+bool TuningContext::GetLogOkay() const {
+  return !is_shutting_down_;
+}
+
+std::ostream& TuningContext::GetLog() const {
+  static auto streamptr = get_stream(GetLogFilename());
+  return *streamptr;
 }
 
 } // namespace at::cuda::tunable
