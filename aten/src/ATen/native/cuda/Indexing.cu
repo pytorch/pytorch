@@ -196,8 +196,20 @@ __global__ void indexing_backward_kernel_stride_1(
     if ((idx < numel) &&
         (idx == 0 || crnt_sorted_idx != sorted_indices[idx - 1]))
     {
-      // Determine the number of duplicates in advance
       int64_t num_duplicates = 1;
+#if defined(USE_ROCM)
+      union x4lng { int64_t l[4]; long4 l4; } tmpl4;
+      // pretch 4x...
+      while ((idx + num_duplicates + 3 ) < numel) {
+	tmpl4.l4 = *((long4*)(&sorted_indices[idx + num_duplicates]));
+	if (tmpl4.l[3] == crnt_sorted_idx) { num_duplicates += 4; continue; }
+	if (tmpl4.l[2] == crnt_sorted_idx) num_duplicates += 3;
+	else if (tmpl4.l[1] == crnt_sorted_idx) num_duplicates += 2;
+	else if (tmpl4.l[0] == crnt_sorted_idx) num_duplicates += 1;
+	break;
+      }
+#endif
+      // Determine the number of duplicates in advance
       while (((idx + num_duplicates) < numel) && (sorted_indices[idx + num_duplicates] == crnt_sorted_idx)) {
         num_duplicates++;
       }
