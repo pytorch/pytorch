@@ -261,18 +261,22 @@ class _AttentionOp(Protocol):
         key: torch.Tensor,
         value: torch.Tensor,
         **kwargs: object,
-    ) -> Tuple[torch.Tensor, ...]: ...
+    ) -> Tuple[torch.Tensor, ...]:
+        ...
 
 
 class _RingRotater(ABC):
     @abstractmethod
-    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None: ...
+    def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
+        ...
 
     @abstractmethod
-    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None: ...
+    def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
+        ...
 
     @abstractmethod
-    def next_buffer(self) -> torch.Tensor: ...
+    def next_buffer(self) -> torch.Tensor:
+        ...
 
 
 class _AllToAllRotater(_RingRotater):
@@ -1102,13 +1106,15 @@ class _LoadBalancer(ABC):
     @abstractmethod
     def shard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
     @classmethod
     @abstractmethod
     def unshard(
         cls, buffer: torch.Tensor, mesh: DeviceMesh, seq_dim: int
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        ...
 
 
 class _SequentialSharder(_LoadBalancer):
