@@ -24,7 +24,6 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
-from torch._dynamo.variables.lazy import LazyVariableTracker, VariableTracker
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1175,16 +1174,30 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
+        # These are the default values in OSS Triton
+        # see: triton/runtime/autotuner.py
+        default_perf_model = None
+        default_configs_top_k = 1.0
+        default_early_config_prune = None
+
         # Run prune_configs_by to filter the configs
-        if isinstance(variable.kernel, Autotuner):
+        # Check to see if we need to prune:
+        # (user provided perf_model or early_config_prune)
+        if isinstance(variable.kernel, Autotuner) and (
+            variable.kernel.perf_model != default_perf_model
+            or variable.kernel.early_config_prune != default_early_config_prune
+        ):
             # args and kwargs aren't real values yet
             # e.g., LazyVariableTracker
             # If a user wants to access them, we should realize them
             def realize_var(
-                var: VariableTracker,
-            ) -> Union[Any, VariableTracker, LazyVariableTracker]:
-                while isinstance(var, LazyVariableTracker) and hasattr(var, "realize"):
+                var: Any,
+            ) -> Any:
+                while hasattr(var, "realize") and not (
+                    hasattr(var, "value") or hasattr(var, "get_real_value")
+                ):
                     var = var.realize()
+
                 # if we can return the value, do it
                 if hasattr(var, "value"):
                     return var.value
@@ -1193,17 +1206,23 @@ class TritonHOPifier:
                 else:
                     return var
 
-            realizedKwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
-            realizedArgs = zip(
+            realized_kwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
+            realized_args = zip(
                 variable.kernel.arg_names, [realize_var(arg) for arg in args]
             )
-            variable.kernel.nargs = dict(realizedArgs)
 
-            variable.kernel.prune_configs(realizedKwargs)
+            if hasattr(variable.kernel, "nargs"):
+                prev_nargs = variable.kernel.nargs
+            else:
+                prev_nargs = None
+            variable.kernel.nargs = dict(realized_args)
+            variable.kernel.prune_configs(realized_kwargs)
             # Reset Autotuner vars to the default so we don't run prune_configs again
-            variable.kernel.perf_model = None
-            variable.kernel.configs_top_k = 1.0
-            variable.kernel.early_config_prune = None
+            variable.kernel.perf_model = default_perf_model
+            variable.kernel.configs_top_k = default_configs_top_k
+            variable.kernel.early_config_prune = default_early_config_prune
+            # restore nargs
+            variable.kernel.nargs = prev_nargs
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:

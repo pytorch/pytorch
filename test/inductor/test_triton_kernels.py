@@ -3552,14 +3552,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    @common_utils.parametrize("autotune_at_compile_time", [True, False])
     @common_utils.parametrize("with_perf_model", [False, True])
-    def test_triton_kernel_prune_configs_by(
-        self, backend, autotune_at_compile_time, with_perf_model
-    ):
-        N = 1024
-        src = torch.randn(N, device=GPU_TYPE)
-        dst = torch.empty(N, device=GPU_TYPE)
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
+        # Tracks the state in early_config_prune
         records = {}
 
         def early_config_prune(configs, named_args, **kwargs):
@@ -3568,7 +3563,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 records["capture_kwargs"] = True
             elif "N" in kwargs:
                 breakpoint()
-            if "dst" in named_args and "src" in named_args and len(named_args) == 2:
+            if "dst" in named_args and "src" in named_args and len(named_args) == 5:
                 records["capture_named_args"] = True
             return [configs[0]]
 
@@ -3576,35 +3571,46 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             records["run_perf_model"] = True
             return kwargs["BLOCK_SIZE"]
 
-        configs = [
-            triton.Config(kwargs={"BLOCK_SIZE": 32}),
-            triton.Config(kwargs={"BLOCK_SIZE": 128}),
-        ]
-
         if with_perf_model:
             prune_configs_by = {"perf_model": perf_model, "top_k": 1}
         else:
             prune_configs_by = {"early_config_prune": early_config_prune}
 
-        @triton.autotune(configs=configs, key=["N"], prune_configs_by=prune_configs_by)
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+            ],
+            key=["N"],
+            prune_configs_by=prune_configs_by,
+        )
         @triton.jit
-        def prune_by_kernel(dst, src, N, BLOCK_SIZE: tl.constexpr):
+        def prune_by_kernel(
+            dst,
+            src,
+            add_float,
+            string_arg: tl.constexpr,
+            bool_var: tl.constexpr,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
+            if string_arg == "TEST" and bool_var:
+                x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
 
-        grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
-
         @torch.compile(fullgraph=True, backend=backend)
-        def f(dst, src, N):
-            prune_by_kernel[grid](dst, src, N=N)
+        def f(dst, src, add_float, string_arg, bool_var, N):
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            prune_by_kernel[grid](dst, src, add_float, string_arg, bool_var, N=N)
 
-        with torch._inductor.config.patch(
-            {"triton.autotune_at_compile_time": autotune_at_compile_time}
-        ):
-            f(dst, src, N)
+        N = 1024
+        src = torch.randn(N, device=GPU_TYPE)
+        dst = torch.empty(N, device=GPU_TYPE)
+        f(dst, src, 1.5, "TEST", True, N)
 
-        self.assertEqual(src, dst)
+        self.assertEqual(src + 1.5, dst)
 
         if with_perf_model:
             self.assertEqual(len(records), 1)
