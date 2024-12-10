@@ -1502,8 +1502,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
-        body_name = tx.output.install_subgraph
-        (
+        body_name = tx.output.install_subgraph(
             "map_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1599,8 +1598,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
-        return tx.output.install_subgraph
-        (
+        return tx.output.install_subgraph(
             f"{attr_name}",
             body_gmod,
         )
