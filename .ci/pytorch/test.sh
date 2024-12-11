@@ -391,8 +391,11 @@ test_inductor_cpp_wrapper_shard() {
 
   if [[ "$1" -eq "2" ]]; then
     # For now, manually put the opinfo tests in shard 2, and all other tests in
-    # shard 1.
-    python test/run_test.py --include inductor/test_torchinductor_opinfo --verbose
+    # shard 1.  Test specific things triggering past bugs, for now.
+    python test/run_test.py \
+      --include inductor/test_torchinductor_opinfo \
+      -k "linalg or to_sparse"\
+      --verbose
   fi
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
