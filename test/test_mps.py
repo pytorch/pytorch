@@ -760,12 +760,8 @@ def mps_ops_modifier(ops):
         'pca_lowrank': None,
         'qr': None,
         'rsub': None,
-        'scatter_reduceamax': None,
-        'scatter_reduceamin': None,
-        'scatter_reducemin': None,
-        'scatter_reducemean': None,
-        'scatter_reduceprod': None,
-        'scatter_reducesum': None,
+        'scatter_reduceamax': [torch.int32, torch.int64] if MACOS_VERSION < 15.0 else [torch.int64],
+        'scatter_reduceamin': [torch.int32, torch.int64] if MACOS_VERSION < 15.0 else [torch.int64],
         'segment_reduce': None,
         '_segment.reduce': None,
         'segment.reduce': None,
@@ -8125,6 +8121,18 @@ class TestMPS(TestCaseMPS):
         x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
         x = net1(x)
         endEvent = torch.mps.Event(enable_timing=True)
+        endEvent.record()
+        elapsedTime = startEvent.elapsed_time(endEvent)
+        self.assertGreater(elapsedTime, 0.0)
+
+    def test_generic_event(self):
+        startEvent = torch.Event('mps', enable_timing=True)
+        startEvent.record()
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        endEvent = torch.Event('mps', enable_timing=True)
         endEvent.record()
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)

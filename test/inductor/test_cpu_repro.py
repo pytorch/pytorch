@@ -1727,7 +1727,8 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(
         not cpu_vec_isa.valid_vec_isa_list()
-        or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
+        or "avx2" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()]
+        or "asimd" in [str(vec_isa) for vec_isa in cpu_vec_isa.valid_vec_isa_list()],
         "Does not support vectorization or not s390x/ppc64le machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
@@ -3393,6 +3394,59 @@ class CPUReproTests(TestCase):
         x = torch.rand(4, 5)
         self.common(f, (x,))
 
+    def test_broadcast_scalar_cpp_tile_2d_kernel(self):
+        # Based on detectron2_maskrcnn backbone (conv2d -> max_pool2d)
+        s0 = 12
+        s1 = 21
+
+        data = torch.randn(
+            [1, 256, 8 * s0, 8 * s1],
+        )
+        weight_one = torch.randn([256, 256, 1, 1], requires_grad=True)
+        weight_two = torch.randn((256, 256, 3, 3), requires_grad=True)
+        bias_one = torch.randn([256], requires_grad=True)
+        bias_two = torch.randn([256], requires_grad=True)
+
+        @torch.compile
+        def fn(data, weight_one, weight_two, bias_one, bias_two):
+            conv_result_one = torch.ops.aten.convolution.default(
+                data,
+                weight_one,
+                bias_one,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+            )
+
+            conv_result_two = torch.ops.aten.convolution.default(
+                data,
+                weight_two,
+                bias_two,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+            )
+
+            max_pool_result = torch.nn.functional.max_pool2d(
+                conv_result_one,
+                [1, 1],
+                [2, 2],
+                [0, 0],
+                [1, 1],
+                False,
+            )
+            return conv_result_one, conv_result_two, max_pool_result
+
+        torch._dynamo.mark_dynamic(data, 2)
+        torch._dynamo.mark_dynamic(data, 3)
+        self.common(fn, (data, weight_one, weight_two, bias_one, bias_two))
+
     def test_to_channels_last_lowp_fp(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
@@ -4727,6 +4781,33 @@ class CPUReproTests(TestCase):
         FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
             code
         )
+
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = torch.nn.Linear(768, 768)
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        model = Model()
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        from torch.testing._internal.common_quantization import (
+            _generate_qdq_quantized_model,
+        )
+
+        with torch.no_grad():
+            converted_model = _generate_qdq_quantized_model(model, example_batch)
+            torch.ao.quantization.move_exported_model_to_eval(converted_model)
+            metrics.reset()
+            torch.compile(converted_model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
 
 
 if __name__ == "__main__":

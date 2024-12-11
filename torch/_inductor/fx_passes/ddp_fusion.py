@@ -94,7 +94,6 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    wait_prefixes = "wait_tensor"
     # If the users of the wait node are following items, we consinder them
     # to be a part of the output.
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
