@@ -7,6 +7,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch._utils import _get_device_module
 from torch.distributed.fsdp import BackwardPrefetch, CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
@@ -14,10 +15,17 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_CUDA,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
+
+device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -39,12 +47,12 @@ class LinearUnusedInput(nn.Linear):
 class ModelUnusedInput(nn.Module):
     def __init__(self, freeze: bool):
         super().__init__()
-        self.layer0 = LinearUnusedInput(4, 4, device="cuda")
-        self.layer1_frozen = LinearUnusedInput(4, 4, device="cuda")
+        self.layer0 = LinearUnusedInput(4, 4)
+        self.layer1_frozen = LinearUnusedInput(4, 4)
         if freeze:
             for param in self.layer1_frozen.parameters():
                 param.requires_grad = False
-        self.layer2 = LinearUnusedInput(4, 4, device="cuda")
+        self.layer2 = LinearUnusedInput(4, 4)
 
     def forward(self, frozen_input, learnable_input):
         x = self.layer0(frozen_input, learnable_input)
@@ -60,13 +68,13 @@ class TestFSDPFineTune(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(torch.cuda.device_count(), 2)
+        return min(_get_device_module(self.device_type).device_count(), 2)
 
-    def _init_seq_module(self) -> nn.Module:
+    def _init_seq_module(self, device) -> nn.Module:
         torch.manual_seed(42)
         modules = []
         for _ in range(self.NUM_LINEARS):
-            modules += [nn.Linear(5, 5, device="cuda"), nn.ReLU()]
+            modules += [nn.Linear(5, 5, device=device), nn.ReLU()]
         seq = nn.Sequential(*modules)
         self._set_seq_module_requires_grad(seq, False)
         return seq
@@ -81,13 +89,14 @@ class TestFSDPFineTune(FSDPTest):
                     param.requires_grad = requires_grad
 
     @skip_if_lt_x_gpu(2)
-    def test_backward_reshard_hooks(self):
+    def test_backward_reshard_hooks(self, device):
         """
         Tests that the post-backward reshard happens even for flat parameters
         that do not require gradients.
         """
         self.run_subtests(
             {
+                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -102,18 +111,21 @@ class TestFSDPFineTune(FSDPTest):
 
     def _test_backward_reshard_hooks(
         self,
+        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         inp_requires_grad: bool,
         unfreeze_params: bool,
     ):
-        seq = self._init_seq_module()
+        seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
+        fsdp_kwargs = {"device_id": device_type}
         seq = FSDP(
             seq,
             auto_wrap_policy=policy,
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
+            **fsdp_kwargs,
         )
         orig_post_backward_reshard = (
             torch.distributed.fsdp._runtime_utils._post_backward_reshard
@@ -162,7 +174,7 @@ class TestFSDPFineTune(FSDPTest):
                     self._set_seq_module_requires_grad(seq, True)
 
                 inp = torch.randn(
-                    (8, 5), device="cuda", requires_grad=inp_requires_grad
+                    (8, 5), device=device_type, requires_grad=inp_requires_grad
                 )
                 if step_idx == nograd_step_idx:
                     with torch.no_grad():
@@ -175,15 +187,15 @@ class TestFSDPFineTune(FSDPTest):
                     _assert_post_backward_reshard_count(step_idx, num_steps)
                     post_backward_reshard_count = 0
 
-    def _init_multi_traversal_module(self) -> nn.Module:
+    def _init_multi_traversal_module(self, device) -> nn.Module:
         torch.manual_seed(42)
 
         class TestModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.layer_0 = nn.Linear(5, 5, device="cuda")
-                self.layer_no_grad = nn.Linear(5, 5, device="cuda")
-                self.layer_with_grad = nn.Linear(5, 5, device="cuda")
+                self.layer_0 = nn.Linear(5, 5, device=device)
+                self.layer_no_grad = nn.Linear(5, 5, device=device)
+                self.layer_with_grad = nn.Linear(5, 5, device=device)
                 self.layer_no_grad.requires_grad_(False)
 
             def forward(self, x):
@@ -228,22 +240,26 @@ class TestFSDPFineTune(FSDPTest):
         inp_requires_grad: bool,
         forward_prefetch: bool,
     ):
-        seq = self._init_multi_traversal_module()
+        seq = self._init_multi_traversal_module(device_type.type)
         policy = ModuleWrapPolicy({nn.Linear})
+        fsdp_kwargs = {"device_id": device_type}
         fsdp_seq = FSDP(
             copy.deepcopy(seq),
             auto_wrap_policy=policy,
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
             forward_prefetch=forward_prefetch,
+            **fsdp_kwargs,
         )
-        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[self.rank])
+        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[device_type])
         fsdp_optim = torch.optim.Adam(fsdp_seq.parameters(), lr=1e-2)
         ddp_optim = torch.optim.Adam(ddp_seq.parameters(), lr=1e-2)
         torch.manual_seed(self.rank + 1)
         losses = []
         for _ in range(6):
-            inp = torch.randn((8, 5), device="cuda", requires_grad=inp_requires_grad)
+            inp = torch.randn(
+                (8, 5), device=device_type, requires_grad=inp_requires_grad
+            )
             for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
                 loss = seq(inp).sum()
                 losses.append(loss)
@@ -276,32 +292,37 @@ class TestFSDPFineTune(FSDPTest):
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
-        seq = self._init_seq_module()
+        seq = self._init_seq_module(device_type)
         policy = ModuleWrapPolicy({nn.Linear})
+        fsdp_kwargs = {"device_id": device_type}
         fsdp_seq = FSDP(
             copy.deepcopy(seq),
             auto_wrap_policy=policy,
             sharding_strategy=sharding_strategy,
             use_orig_params=use_orig_params,
+            **fsdp_kwargs,
         )
-        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[self.rank])
+        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[device_type])
         fsdp_optim = torch.optim.Adam(fsdp_seq.parameters(), lr=1e-2)
         ddp_optim = torch.optim.Adam(ddp_seq.parameters(), lr=1e-2)
         torch.manual_seed(self.rank + 1)
         losses = []
         for _ in range(6):
-            inp = torch.randn((8, 5), device="cuda")
+            inp = torch.randn((8, 5), device=device_type.type)
             for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
                 loss = seq(inp).sum()
                 losses.append(loss)
                 loss.backward()
                 optim.step()
                 optim.zero_grad()
-            torch.testing.assert_close(losses[0], losses[1])
+            if TEST_CUDA:
+                torch.testing.assert_close(losses[0], losses[1])
+            else:
+                torch.testing.assert_close(losses[0], losses[1], atol=1e-03, rtol=1e-03)
             losses.clear()
 
     @skip_if_lt_x_gpu(2)
-    def test_parity_with_non_frozen_fsdp(self):
+    def test_parity_with_non_frozen_fsdp(self, device):
         """
         For frozen modules with unused input, reshard could happen without unshard
         Verify numerical parity between `_post_backward_reshard_only_hook` and
@@ -309,6 +330,7 @@ class TestFSDPFineTune(FSDPTest):
         """
         self.run_subtests(
             {
+                "device_id": [device],
                 "sharding_strategy": [
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
@@ -333,6 +355,7 @@ class TestFSDPFineTune(FSDPTest):
 
     def _test_parity_with_non_frozen_fsdp(
         self,
+        device_id,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
         offload_params: bool,
@@ -340,10 +363,11 @@ class TestFSDPFineTune(FSDPTest):
         backward_prefetch: BackwardPrefetch,
     ):
         torch.manual_seed(42)
-        model = ModelUnusedInput(freeze=True)
+        model = ModelUnusedInput(freeze=True).to(device_type)
         torch.manual_seed(42)
-        ref_model = ModelUnusedInput(freeze=False)
+        ref_model = ModelUnusedInput(freeze=False).to(device_type)
         fsdp_kwargs = {
+            "device_id": device_type,
             "auto_wrap_policy": ModuleWrapPolicy({LinearUnusedInput}),
             "sharding_strategy": sharding_strategy,
             "use_orig_params": use_orig_params,
@@ -365,8 +389,10 @@ class TestFSDPFineTune(FSDPTest):
         torch.manual_seed(self.rank + 1)
         losses = []
         for idx in range(6):
-            frozen_input = torch.randn((4, 4), device="cuda", requires_grad=False)
-            learnable_input = torch.randn((4, 4), device="cuda", requires_grad=True)
+            frozen_input = torch.randn((4, 4), device=device_type, requires_grad=False)
+            learnable_input = torch.randn(
+                (4, 4), device=device_type, requires_grad=True
+            )
             for _model, _optim in ((model, model_optim), (ref_model, ref_model_optim)):
                 loss = _model(frozen_input, frozen_input).sum()
                 losses.append(loss)
@@ -381,5 +407,7 @@ class TestFSDPFineTune(FSDPTest):
                     self.assertEqual(param, ref_param)
 
 
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestFSDPFineTune, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
