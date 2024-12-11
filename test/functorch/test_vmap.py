@@ -4151,8 +4151,8 @@ class TestVmapOperatorsOpInfo(TestCase):
                 )
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ("empty_like", "new_empty")
-            for sample_input, subtest_ctx in sample_inputs_itr:
-                with subtest_ctx(self):
+            for sample_input, subtest_ctx, skip_xfail_ctx in sample_inputs_itr:
+                with subtest_ctx(self), skip_xfail_ctx(self):
                     args = (sample_input.input,) + sample_input.args
                     if not any(isinstance(arg, torch.Tensor) for arg in args):
                         # Atleast one tensor required for vmap.
