@@ -196,6 +196,12 @@ def register_run_and_save_rng_state_op():
         impl = impl_map[device]
         return impl(op, *args, **kwargs)
 
+    @run_and_save_rng_state.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)
+    def impl_functional_tensor_mode(mode, op, *args, **kwargs):
+        # Check device to call the right impl
+        with mode:
+            return impl_backend_select(op, *args, **kwargs)
+
     @run_and_save_rng_state.py_impl(FakeTensorMode)
     def impl_fake_tensor_mode(mode, op, *args, **kwargs):
         # Check device to call the right impl

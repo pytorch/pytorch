@@ -1780,12 +1780,15 @@ def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
 
 
 def find_recursive_deps_of_node(
-    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None, allow_weak_dep=True
 ):
+    from .dependencies import WeakDep
     if criteria_cb and criteria_cb(snode):
         return
     collected_node_set.add(snode)
     for dep in snode.unmet_dependencies:
+        if isinstance(dep, WeakDep) and not allow_weak_dep:
+            continue
         defining_op_for_dep = buf_name_to_fused_snode(
             dep.name, name_to_buf, name_to_fused_node
         )
