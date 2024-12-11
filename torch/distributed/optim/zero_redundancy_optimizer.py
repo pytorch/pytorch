@@ -37,9 +37,10 @@ def _recursive_copy_to_device(
 
     Non-tensor values are passed as-is in the result.
 
-    .. note:  These are all copies, so if there are two objects that reference
-    the same object, then after this call, there will be two different objects
-    referenced on the device.
+    .. note::
+        These are all copies, so if there are two objects that reference
+        the same object, then after this call, there will be two different objects
+        referenced on the device.
     """
     if isinstance(value, torch.Tensor):
         return value.to(device, non_blocking=non_blocking)
@@ -1100,7 +1101,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         Returns:
             Optional loss depending on the underlying local optimizer.
 
-        .. note: Any extra parameters are passed to the base optimizer as-is.
+        .. note:: Any extra parameters are passed to the base optimizer as-is.
         """
         if self._overlap_with_ddp:
             logger.warning(
