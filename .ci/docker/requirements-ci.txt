@@ -280,9 +280,9 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.5
+lintrunner==0.12.7
 #Description: all about linters!
-#Pinned versions: 0.12.5
+#Pinned versions: 0.12.7
 #test that import:
 
 redis>=4.0.0
