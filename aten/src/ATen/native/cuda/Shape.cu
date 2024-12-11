@@ -378,22 +378,15 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     if (max_elements_per_tensor == 0)
       continue;
 
-    dim3 applyBlock, catGrid;
-
 #ifdef USE_ROCM
     // always base grid size on max_elements_per_tensor
-    {
-      std::tuple<dim3, dim3> launchParams = getCatGridRocm<scalar_t>(
+    auto [catGrid, applyBlock] = getCatGridRocm<scalar_t>(
           max_elements_per_tensor, batchCounter);
-      catGrid = std::get<0>(launchParams);
-      applyBlock = std::get<1>(launchParams);
-    }
 #else
+    dim3 applyBlock, catGrid;
     if (isContig && sizeof(scalar_t) > 2) {
-      std::tuple<dim3, dim3> launchParams = getCatGridContig<scalar_t>(
+      std::tie(catGrid, applyBlock) = getCatGridContig<scalar_t>(
           max_elements_per_tensor, batchCounter);
-      catGrid = std::get<0>(launchParams);
-      applyBlock = std::get<1>(launchParams);
     } else {
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);
@@ -500,10 +493,21 @@ TORCH_IMPL_FUNC(cat_out_cuda)
           parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
         });
       } else {
-        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
-          using dtype = OpaqueType<sizeof(scalar_t)>;
-          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
-        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+        AT_DISPATCH_V2(
+            result.scalar_type(),
+            "cat_cuda",
+            AT_WRAP([&]() {
+              using dtype = OpaqueType<sizeof(scalar_t)>;
+              parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(
+                  result, materialized, dim, nDims, memory_format);
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16,
+            AT_EXPAND(AT_FLOAT8_TYPES),
+            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
       }
   } else if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
@@ -518,10 +522,27 @@ TORCH_IMPL_FUNC(cat_out_cuda)
           parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
         });
       } else {
-        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
-            using dtype = OpaqueType<sizeof(scalar_t)>;
-            parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
-        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+        AT_DISPATCH_V2(
+            result.scalar_type(),
+            "cat_cuda",
+            AT_WRAP([&]() {
+              using dtype = OpaqueType<sizeof(scalar_t)>;
+              parallel_cat<
+                  dtype,
+                  CAT_ARRAY_BATCH_SIZE / 2,
+                  CAT_ARRAY_BATCH_SIZE / 2>(
+                  result, materialized, dim, nDims, memory_format);
+            }),
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+            kComplexHalf,
+            kHalf,
+            kBool,
+            kBFloat16,
+            kFloat8_e4m3fn,
+            kFloat8_e4m3fnuz,
+            kFloat8_e5m2,
+            kFloat8_e5m2fnuz,
+            AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
       }
   } else {
     int64_t offset = 0;

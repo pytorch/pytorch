@@ -1,5 +1,5 @@
-#include <ATen/native/onednn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/onednn/xpu/detail/Utils.h>
+#include <ATen/native/onednn/xpu/detail/oneDNNContext.h>
 
 /* *
  * Do NOT put any kernels or call any device binaries here!
