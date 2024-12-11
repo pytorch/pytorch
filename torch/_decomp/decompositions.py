@@ -740,8 +740,10 @@ def slice_forward(
 
     if guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
+    elif (
+        statically_known_true(end_val == sys.maxsize)
+        or statically_known_true(end_val >= sizes[dim])
+        or guard_size_oblivious(end_val > sizes[dim])
     ):
         end_val = sizes[dim]
 
@@ -3788,7 +3790,7 @@ def _upsample_linear(
     scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    n_channels = input.shape[1]
+    n_batch, n_channels = input.shape[:2]
     inp_sizes = input.shape[2:]
     n_dims = len(inp_sizes)
 
@@ -4952,6 +4954,7 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
+    dtype = query.dtype
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
