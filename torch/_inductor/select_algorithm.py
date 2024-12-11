@@ -688,6 +688,8 @@ class TritonTemplateKernel(TritonKernel):
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
             assert len(indices) == len(lengths)
 
+            stride = self.named_input_nodes[input_name].get_stride()
+
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             assert len(indices) == len(lengths)
 
@@ -1846,6 +1848,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
+        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice

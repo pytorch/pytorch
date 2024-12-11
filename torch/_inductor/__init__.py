@@ -171,7 +171,7 @@ def _aoti_compile_and_package_inner(
 
     if load_and_run:
         compiled_model = aoti_load_package(package_path)
-        compiled_model(*args, **kwargs)
+        aoti_result = compiled_model(*args, **kwargs)
     return package_path
 
 

@@ -438,7 +438,8 @@ def write(
     # hashes just because the content begins/ends with different number of
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
-    basename, _subdir, path = get_path(key, extension, specified_dir)
+    basename, subdir, path = get_path(key, extension, specified_dir)
+    encode_utf_8: bool = hash_type == "code"
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -471,7 +472,7 @@ def write_atomic(
         f.write(content)
     try:
         tmp_path.rename(target=path)
-    except FileExistsError:
+    except FileExistsError as e_file_exist:
         if not _IS_WINDOWS:
             raise
         # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
