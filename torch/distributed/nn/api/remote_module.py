@@ -110,9 +110,9 @@ def _create_module_with_interface(
 
 
 def _param_rrefs(module_rref, recurse) -> List[rpc.RRef[Parameter]]:
-    ret: List[rpc.RRef[Parameter]] = []
-    for param in module_rref.local_value().parameters(recurse):
-        ret.append(rpc.RRef(param))
+    ret: List[rpc.RRef[Parameter]] = [
+        rpc.RRef(param) for param in module_rref.local_value().parameters(recurse)
+    ]
     return ret
 
 

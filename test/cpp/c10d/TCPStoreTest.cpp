@@ -102,7 +102,7 @@ void testHelper(bool useLibUV, const std::string& prefix = "") {
 
   for (const auto i : c10::irange(numThreads)) {
     threads.emplace_back([=, &sem1, &sem2, &clientStores, &expectedCounterRes] {
-      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
+      for ([[maybe_unused]] const auto j : c10::irange(numIterations)) {
         clientStores[i]->add("counter", 1);
       }
       // Let each thread set and get key on its client store

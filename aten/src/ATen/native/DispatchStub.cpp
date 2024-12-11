@@ -262,7 +262,7 @@ void* DispatchStubImpl::get_call_ptr(
             false, "DispatchStub: missing kernel for ", device_type);
         return nullptr;
       case ErrorType::DeviceNotSupported:
-        AT_ERROR("DispatchStub: unsupported device type", device_type);
+        TORCH_CHECK(false, "DispatchStub: unsupported device type", device_type);
     }
   }
 
