@@ -356,6 +356,14 @@ def create_default_local_load_plan(
                 continue
 
         md = metadata.state_dict_metadata[fqn]
+        if (
+            isinstance(md, TensorStorageMetadata)
+            and getattr(obj, "size", None) is not None
+            and md.size != obj.size()
+        ):
+            raise ValueError(
+                f"Size mismatch between saved {md.size} and current: {obj.size()} for {fqn}",
+            )
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if isinstance(obj, DTensor):
