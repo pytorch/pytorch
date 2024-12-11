@@ -575,16 +575,6 @@ class BaseSchedulerNode:
     def get_read_write_buffers_sizes_impl(
         self, include_reads: bool, include_writes: bool
     ) -> int:
-        return sum(
-            self.get_read_write_buffer_accesses(
-                include_reads=include_reads, include_writes=include_writes
-            ).values(),
-            start=0,
-        )
-
-    def get_read_write_buffer_accesses(
-        self, include_reads: bool, include_writes: bool
-    ) -> Dict[str, int]:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -606,16 +596,14 @@ class BaseSchedulerNode:
 
         1. Numel in ranges multiplied by number of deps the buffer has
         2. The buffer size
-
-        Returns memory accesses per buffer.
         """
         if isinstance(self, NopKernelSchedulerNode):
-            return {}
+            return 0
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
-            return {}
+            return 0
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -659,8 +647,7 @@ class BaseSchedulerNode:
             )
             writes = writes - removed_buffers
             reads = reads - removed_buffers
-
-        buf_byte_accesses: Dict[str, int] = {}
+        node_bytes = 0
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
@@ -702,13 +689,9 @@ class BaseSchedulerNode:
                         buf_accessed_elems, buf_elems
                     )
 
-            buf_bytes = get_buf_bytes(buf)
-            if buf_name not in buf_byte_accesses:
-                buf_byte_accesses[buf_name] = buf_bytes
-            else:
-                buf_byte_accesses[buf_name] += buf_bytes
+            node_bytes += get_buf_bytes(buf)
 
-        return buf_byte_accesses
+        return node_bytes
 
     @cache_on_self
     def get_estimated_runtime(self) -> float:
@@ -3238,34 +3221,8 @@ class Scheduler:
             # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
             # allowing gathers by allowing increasing write_bytes by small factor
             # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-
-            BYTES_THRESHOLD_MULTIPLIER = 1.1
-            if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
+            if read_bytes > (write_bytes * 1.1):
                 why("prologue fusion will not increase amount of bytes read in kernel")
-                return False
-
-            unaligned_reads = 0
-            unaligned_writes = 0
-
-            buf_accesses = node1.get_read_write_buffer_accesses(
-                include_reads=True, include_writes=True
-            )
-            for buf_name, mem in buf_accesses.items():
-                aligned = ir.is_aligned_realized_tensor(
-                    V.graph.get_buffer(buf_name), alignment=8
-                )
-                if aligned:
-                    continue
-
-                if buf_name in node1.get_buffer_names():
-                    unaligned_writes += mem
-                else:
-                    unaligned_reads += mem
-
-            if unaligned_reads >= (unaligned_writes * BYTES_THRESHOLD_MULTIPLIER):
-                why(
-                    "prologue fusion will not increase amount of unaligned bytes read in kernel"
-                )
                 return False
 
         if node1.is_template() and (
