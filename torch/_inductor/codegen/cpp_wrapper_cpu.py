@@ -540,10 +540,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
+        code.writeline(f"auto {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
+        code.writeline(f"auto {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -1563,7 +1563,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_conditional(self, conditional):
-        name = conditional.get_name()
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
         outer_outputs = []
         for out in conditional.outputs:
@@ -1834,7 +1833,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if outputs is None:
+        if op_overload and not op_overload._schema.returns:
+            # kernel does not return a value
+            output_args = []
+        elif outputs is None:
             # outputs is not specified, the default is to write to buf_name
             output_args = [buf_name]
         else:
