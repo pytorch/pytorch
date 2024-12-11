@@ -1842,7 +1842,9 @@ class VariableBuilder:
             if (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
-            ) or not config.assume_static_by_default:
+            ):
+                dynamic_dim = get_automatic_dynamic_shapes_mark_as()
+            elif not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1901,6 +1903,9 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
+        # To prevent circular import
+        from ..symbolic_convert import TensorifyState
+
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1932,6 +1937,7 @@ class VariableBuilder:
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or frame_state_entry.scalar is not auto_dynamic
+            or TensorifyState.should_specialize(self.source)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2513,6 +2519,19 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         )
 
 
+def get_automatic_dynamic_shapes_mark_as():
+    if config.automatic_dynamic_shapes_mark_as == "dynamic":
+        return DimDynamic.DYNAMIC
+    elif config.automatic_dynamic_shapes_mark_as == "unbacked":
+        return DimDynamic.SIZE_LIKE_UNBACKED
+    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
+        return DimDynamic.OBLIVIOUS_SIZE
+    else:
+        raise ValueError(
+            f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
+        )
+
+
 # Tracks the sources of all fake tensors we wrap in Dynamo.
 # Used by shape guard computation.
 @dataclasses.dataclass
@@ -2770,10 +2789,14 @@ def _automatic_dynamic(
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
             # case
-            dynamic_size = DimDynamic.DYNAMIC
+            if automatic_dynamic:
+                dynamic_size = get_automatic_dynamic_shapes_mark_as()
+            else:
+                dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
         else:
+            # TODO: When does this show up?
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:

@@ -575,7 +575,7 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr):
-        return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
+        return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr):
         return (
