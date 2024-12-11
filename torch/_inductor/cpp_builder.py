@@ -79,7 +79,7 @@ def cpp_compiler_search(search: str) -> str:
                 # Do not install GXX by default
                 if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
-                from torch.utils._filelock import FileLock
+                from filelock import FileLock
 
                 lock_dir = get_lock_dir()
                 lock = FileLock(
