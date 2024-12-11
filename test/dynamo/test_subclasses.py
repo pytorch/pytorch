@@ -3130,7 +3130,8 @@ class GraphModule(torch.nn.Module):
             "s7": 23,
             "s8": SingletonInt(0),
         }
-        # We have different symbols for the same s0 because CachedTensor is 1:1 with symbolic int
+        # We create extraneous symbols, but for we make sure to reuse symbols for
+        # the common case, e.g. raggedness/metadata preserving operations like pointwise.
         expected_var_to_sources = {
             "s0": "L['a']._base.size()[1]",
             "s1": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",

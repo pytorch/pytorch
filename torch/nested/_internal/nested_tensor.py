@@ -161,10 +161,6 @@ class NestedTensor(torch.Tensor):
                 f"{type(self).__name__} object has no attribute '{name}'"
             )
 
-        ragged_int = self.shape[self._ragged_idx]
-        assert isinstance(ragged_int, torch.SymInt)
-        metadata = get_metadata(ragged_int)
-
         if name == "_offsets":
             if self._non_contig_offsets is not None:
                 # non-contig case
@@ -181,7 +177,7 @@ class NestedTensor(torch.Tensor):
             else:
                 return self._device_lengths
 
-        return metadata.metadata.get(name)
+        return getattr(self._metadata, name)
 
     @property
     def _metadata(self):
@@ -246,12 +242,12 @@ class NestedTensor(torch.Tensor):
     # compute / cache them if they're not.
     @property
     def _maybe_max_seqlen(self) -> Optional[int]:
-        mt = self._metadata.metadata.get("_max_seqlen_tensor")
+        mt = self._max_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
     @property
     def _maybe_min_seqlen(self) -> Optional[int]:
-        mt = self._metadata.metadata.get("_min_seqlen_tensor")
+        mt = self._min_seqlen_tensor
         return None if mt is None else _load_val_from_tensor(mt)
 
     def __repr__(self):  # type: ignore[override]
@@ -560,20 +556,27 @@ def jagged_from_tensor_and_lengths(
 
 
 def make_cached_tensor_for_nested(metadata):
+    # Metadata passed to CachedTensor for used with NestedTensor must satisfy:
+    # 1) contains every field in SOURCE_FIELD + EXTRA_FIELD (value can be None)
+    # 2) at least one of SOURCE_FIELD is non-None
+    for x in SOURCE_FIELDS + EXTRA_FIELDS:
+        assert x in metadata, f"Missing field {x}"
+
     assert any(
         metadata.get(k) is not None for k in SOURCE_FIELDS
-    ), f"At least one of {SOURCE_FIELDS} must be passed"
+    ), f"At least one of {SOURCE_FIELDS} must be non-None"
 
     return CachedTensor(
-        metadata,
-        next(k for k in SOURCE_FIELDS if metadata.get(k) is not None),
-        SOURCE_FIELDS + EXTRA_FIELDS,
+        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None)
     )
 
 
 def make_nested_meta_with_offsets(offsets) -> CachedTensor:
     prefix = "_host" if offsets.is_cpu else "_device"
-    metadata = {f"{prefix}_offsets": offsets}
+    metadata: Dict[str, Optional[torch.Tensor]] = dict.fromkeys(
+        SOURCE_FIELDS + EXTRA_FIELDS
+    )
+    metadata[f"{prefix}_offsets"] = offsets
     return make_cached_tensor_for_nested(metadata)
 
 
@@ -597,12 +600,15 @@ def _make_nested_meta(
     #    NestedTensor with lengths metadata today.
     assert offsets is not None
 
-    metadata: Dict[str, torch.Tensor] = {}
+    metadata: Dict[str, Optional[torch.Tensor]] = dict.fromkeys(
+        SOURCE_FIELDS + EXTRA_FIELDS
+    )
 
     def process_cached_tensor(metadata: Dict, t: torch.Tensor):
         assert isinstance(t, CachedTensor)
         for k, v in t.metadata.items():
-            metadata[k] = v
+            if v is not None:
+                metadata[k] = v
 
     def process_raw_source_tensor(metadata: Dict, key: str, t: torch.Tensor):
         if t.is_cpu:

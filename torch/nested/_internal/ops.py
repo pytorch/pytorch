@@ -628,7 +628,7 @@ def to_copy_default(func, *args, **kwargs):
                 register_tensor(host_tensor, try_get_int(device_tensor))
                 new_raw_metadata[f"_host_{k}"] = host_tensor
             if device_tensor is not None:
-                del new_raw_metadata[f"_device_{k}"]
+                new_raw_metadata[f"_device_{k}"] = None
         else:
             if host_tensor is not None and device_tensor is None:
                 device_tensor = host_tensor.to(new_device)
@@ -642,7 +642,7 @@ def to_copy_default(func, *args, **kwargs):
                 # (in addition to device tensor), but t_cuda will only have device
                 # tensor. This breaks fakification logic which expects t and t.grad
                 # to have the same symbolic context (we should fix that).
-                del new_raw_metadata[f"_host_{k}"]
+                new_raw_metadata[f"_host_{k}"] = None
 
     new_metadata = make_cached_tensor_for_nested(new_raw_metadata)
 
