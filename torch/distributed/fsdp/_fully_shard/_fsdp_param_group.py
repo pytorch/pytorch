@@ -29,7 +29,7 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
-logger = logging.getLogger("torch.distributed.fsdp._fully_shard")
+logger = logging.getLogger(__name__)
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
