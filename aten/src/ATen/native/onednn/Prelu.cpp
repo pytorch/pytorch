@@ -22,7 +22,7 @@ std::tuple<Tensor, Tensor> onednn_prelu_backward(const Tensor& grad_output, cons
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor onednn_prelu(const Tensor& input, const Tensor& weight) {
   if (input.scalar_type() == ScalarType::BFloat16) {
@@ -67,6 +67,6 @@ std::tuple<Tensor, Tensor> onednn_prelu_backward(const Tensor& grad_output, cons
                                                 weight.options().device_opt())));
   }
 }
-}}
+}
 
 #endif // AT_ONEDNN_ENABLED

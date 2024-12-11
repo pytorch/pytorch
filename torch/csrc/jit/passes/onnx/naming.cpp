@@ -7,7 +7,7 @@ namespace torch::jit::onnx {
 
 namespace ONNXScopeName {
 
-using NameFunc = std::string (*)(torch::jit::ScopePtr scope);
+using NameFunc = std::string (*)(const torch::jit::ScopePtr& scope);
 
 const std::string name_separator = "::";
 
@@ -48,7 +48,7 @@ std::string createFullScopeName(
   return std::string(class_name).append(name_separator).append(variable_name);
 }
 
-std::string variableName(torch::jit::ScopePtr scope) {
+std::string variableName(const torch::jit::ScopePtr& scope) {
   return parseNameFromScope(scope).second;
 }
 
@@ -58,7 +58,7 @@ std::string variableNameFromRoot(
   return nameFromRoot(scope, layer_separator, &variableName);
 }
 
-std::string className(torch::jit::ScopePtr scope) {
+std::string className(const torch::jit::ScopePtr& scope) {
   return parseNameFromScope(scope).first;
 }
 
@@ -79,7 +79,7 @@ namespace {
 
 class NodeNameGenerator {
  public:
-  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(std::move(g)){};
+  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(std::move(g)) {}
   virtual ~NodeNameGenerator() = 0;
   void PopulateNodeNames();
 
@@ -105,7 +105,7 @@ NodeNameGenerator::~NodeNameGenerator() = default;
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:
   ScopedNodeNameGenerator(std::shared_ptr<Graph> g)
-      : NodeNameGenerator(std::move(g)){};
+      : NodeNameGenerator(std::move(g)) {}
 
  protected:
   void CreateNodeName(Node* n) override;

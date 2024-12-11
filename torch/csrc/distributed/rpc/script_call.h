@@ -61,6 +61,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   // an annotated torchscript function defined by users.
   std::optional<const c10::QualifiedName> qualifiedName_;
   std::vector<at::IValue> stack_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool isAsyncExecution_;
 };
 

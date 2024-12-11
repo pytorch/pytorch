@@ -1,8 +1,7 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 from functools import partial
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Union
 
 from sympy import Expr
 
@@ -28,7 +27,7 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
-        def upper_bound(v):
+        def upper_bound(v: Union[Expr, int]) -> int:
             return bound_sympy(v).upper if isinstance(v, Expr) else v
 
         self.loop_body = loop_body
@@ -90,7 +89,9 @@ class BoundVars:
                 # moving the lambda out of make_fn would close over the reference to subblock,
                 # so all lambdas would have the same subblock reference that is the final
                 # subblock in the loop
-                def make_fn(subblock):
+                def make_fn(
+                    subblock: LoopBodyBlock,
+                ) -> Callable[[Any, Any], ValueRanges[Expr]]:
                     return lambda mask, value: self.masked_subblock(
                         subblock, self._bounds, mask, value, result
                     )
