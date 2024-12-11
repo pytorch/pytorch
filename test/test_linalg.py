@@ -4549,6 +4549,7 @@ class TestLinalg(TestCase):
                 self.check_single_matmul(x, y)
 
     @onlyCUDA
+    @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
