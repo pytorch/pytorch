@@ -9,8 +9,7 @@
 
 #include <cstddef>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Embedding
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -163,5 +162,4 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
     return embeddingbag;
   }
 };
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

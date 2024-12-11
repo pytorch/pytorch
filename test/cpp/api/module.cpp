@@ -381,8 +381,8 @@ TEST_F(ModuleTest, CallingCloneOnModuleThatDoesNotOverrideCloneThrows) {
 TEST_F(ModuleTest, CallingCloneOnModuleThatDoesOverrideCloneDoesNotThrow) {
   struct Cloneable : Module {
     std::shared_ptr<Module> clone(
-        const torch::optional<torch::Device>& device =
-            torch::nullopt) const override {
+        const std::optional<torch::Device>& device =
+            std::nullopt) const override {
       return nullptr;
     }
   };

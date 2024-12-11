@@ -55,10 +55,11 @@ def _allocate_jacobians_with_inputs(
     # of `t.numel` and width of `numel_output`. Otherwise, for each tensor, returns
     # a 1-d tensor with size `(t.numel,)`. Each new tensor will be strided and have
     # the same dtype and device as those of the corresponding input.
-    out: List[torch.Tensor] = []
-    for t in input_tensors:
-        if _is_float_or_complex_tensor(t) and t.requires_grad:
-            out.append(t.new_zeros((t.numel(), numel_output), layout=torch.strided))
+    out: List[torch.Tensor] = [
+        t.new_zeros((t.numel(), numel_output), layout=torch.strided)
+        for t in input_tensors
+        if _is_float_or_complex_tensor(t) and t.requires_grad
+    ]
     return tuple(out)
 
 
@@ -69,11 +70,12 @@ def _allocate_jacobians_with_outputs(
     # in `output_tensors`, returns a new zero-filled tensor with height of `dim` and
     # width of `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size
     # (t.numel,).
-    out: List[torch.Tensor] = []
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
-    for t in output_tensors:
-        if _is_float_or_complex_tensor(t):
-            out.append(t.new_zeros((numel_input, t.numel()), **options))
+    out: List[torch.Tensor] = [
+        t.new_zeros((numel_input, t.numel()), **options)
+        for t in output_tensors
+        if _is_float_or_complex_tensor(t)
+    ]
     return tuple(out)
 
 
@@ -675,7 +677,7 @@ def _get_numerical_vJu(
 ):
     # Note that all_v can also be None, in that case, this function only computes Ju.
     reduced_jacobians: List[List[torch.Tensor]] = []
-    for i, (inp_idx, u) in enumerate(zip(inp_indices, all_u)):
+    for inp_idx, u in zip(inp_indices, all_u):
         all_Ju = _get_numerical_jvp_wrt_specific_input(
             fn, inp_idx, inputs, u, eps, is_forward_ad
         )
@@ -904,10 +906,10 @@ def _compute_analytical_jacobian_rows(
 def _get_analytical_vjps_wrt_specific_output(
     vjp_fn, sample_output, v
 ) -> List[List[Optional[torch.Tensor]]]:
-    vjps: List[List[Optional[torch.Tensor]]] = []
     grad_inputs = vjp_fn(v.reshape(sample_output.shape))
-    for vjp in grad_inputs:
-        vjps.append([vjp.clone() if isinstance(vjp, torch.Tensor) else None])
+    vjps: List[List[Optional[torch.Tensor]]] = [
+        [vjp.clone() if isinstance(vjp, torch.Tensor) else None] for vjp in grad_inputs
+    ]
     return vjps
 
 
@@ -1227,10 +1229,10 @@ def _test_backward_mul_by_grad_output(outputs, inputs, masked) -> bool:
 def _test_undefined_forward_mode(func, outputs, inputs):
     fwAD = torch.autograd.forward_ad
 
-    inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
-    all_v, all_u, all_u_dense = _make_vectors(inp_tensors, outputs, use_forward_ad=True)
-
-    tensor_inputs = tuple(i for i in inputs if is_tensor_like(i) and i.requires_grad)
+    _inp_tensors_idx, inp_tensors = _get_inp_tensors(inputs)
+    _all_v, all_u, _all_u_dense = _make_vectors(
+        inp_tensors, outputs, use_forward_ad=True
+    )
 
     with fwAD.dual_level():
         fw_grads = []
@@ -1272,8 +1274,8 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             dual_inputs[idx] = dual_inp_obj
 
             for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
-                val1, res1 = fwAD.unpack_dual(d_o1)
-                val2, res2 = fwAD.unpack_dual(d_o2)
+                _val1, res1 = fwAD.unpack_dual(d_o1)
+                _val2, res2 = fwAD.unpack_dual(d_o2)
 
                 if not (res1 is None or res2 is None):
                     if not torch.allclose(res1, res2):
@@ -1321,7 +1323,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
                 '"tools/autograd/derivatives.yaml"'
             ) from e
 
-        for gi, i in zip(grads_input, diff_input_list):
+        for gi in grads_input:
             if (gi is not None) and (not gi.eq(0).all()):
                 warn_bc_breaking()
                 raise GradcheckError(
@@ -1996,7 +1998,7 @@ def gradcheck(
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
        different indices pointing to the same memory address (e.g., from
-       :func:`torch.expand`), this check will likely fail because the numerical
+       :func:`torch.Tensor.expand`), this check will likely fail because the numerical
        gradients computed by point perturbation at such indices will change
        values at all other indices that share the same memory address.
 
@@ -2047,7 +2049,7 @@ def gradcheck(
     if not raise_exception:
         try:
             return _gradcheck_helper(**args)
-        except GradcheckError as e:
+        except GradcheckError:
             return False
     else:
         return _gradcheck_helper(**args)
@@ -2150,7 +2152,7 @@ def gradgradcheck(
     .. warning::
        If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
        overlapping memory, i.e., different indices pointing to the same memory
-       address (e.g., from :func:`torch.expand`), this check will likely fail
+       address (e.g., from :func:`torch.Tensor.expand`), this check will likely fail
        because the numerical gradients computed by point perturbation at such
        indices will change values at all other indices that share the same
        memory address.

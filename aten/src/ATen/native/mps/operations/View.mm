@@ -706,7 +706,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
       // Self is the input tensor we are creating view of
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
       newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-      for (const auto C10_UNUSED i : c10::irange(size.size())) {
+      for ([[maybe_unused]] const auto i : c10::irange(size.size())) {
         newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
       }
       if (needsScatter) {
@@ -812,11 +812,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     }
 
     [computeEncoder setComputePipelineState:gatherPSO];
-    mtl_setBuffer(computeEncoder, src, 0);
-    mtl_setBuffer(computeEncoder, dst.has_storage() ? dst : output, 1);
-    mtl_setBytes(computeEncoder, src_sizes, 2);
-    mtl_setBytes(computeEncoder, src_strides, 3);
-    [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+    mtl_setArgs(computeEncoder, src, dst.has_storage() ? dst : output, src_sizes, src_strides, numThreads);
     mtl_dispatch1DJob(computeEncoder, gatherPSO, numThreads);
 
     getMPSProfiler().endProfileKernel(gatherPSO);
@@ -868,11 +864,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
       }
 
       [computeEncoder setComputePipelineState:scatterPSO];
-      mtl_setBuffer(computeEncoder, src, 0);
-      mtl_setBuffer(computeEncoder, output, 1);
-      mtl_setBytes(computeEncoder, output_sizes, 2);
-      mtl_setBytes(computeEncoder, output_strides, 3);
-      [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:4];
+      mtl_setArgs(computeEncoder, src, output, output_sizes, output_strides, numThreads);
       mtl_dispatch1DJob(computeEncoder, scatterPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(scatterPSO);
