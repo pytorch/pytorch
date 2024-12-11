@@ -149,10 +149,18 @@ def lift_constants_pass(
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     for node in gm.graph.nodes:
-        if node.op == "placeholder" and node.name in graph_signature.user_inputs:
+        if node.op == "placeholder":
+            if node.name in graph_signature.user_inputs:
+                first_user_input = node
+                break
+            first_user_input_loc += 1
+        # If we ever hit here, it means that
+        # there was no user input so the constants
+        # should be inserted right before the first
+        # non-placeholder node.
+        if node.op != "placeholder":
             first_user_input = node
             break
-        first_user_input_loc += 1
 
     lifted_objs = ConstantAttrMap()
     renamed_targets = {}
@@ -166,6 +174,7 @@ def lift_constants_pass(
                 const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
+                renamed_targets[node.name] = const_placeholder_node.name
                 continue
 
             # For ScriptObject, Tensor and FakeScriptObject constants:
@@ -264,7 +273,7 @@ def lift_constants_pass(
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
-                renamed_targets[node.target] = const_placeholder_node.name
+                renamed_targets[node.name] = const_placeholder_node.name
 
                 # Add the constant as a buffer to the graph signature
                 graph_signature.input_specs.insert(

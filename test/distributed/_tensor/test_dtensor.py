@@ -2,6 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import pathlib
+import tempfile
+import unittest
 
 from numpy.testing import assert_array_equal
 
@@ -22,14 +25,14 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor._api import _shard_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.serialization import safe_globals
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -539,11 +542,75 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer, weights_only=False)
         self.assertEqual(sharded_tensor, reloaded_st)
-        # Test weights_only load
-        with safe_globals([DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]):
-            buffer.seek(0)
-            reloaded_st = torch.load(buffer, weights_only=True)
-            self.assertEqual(sharded_tensor, reloaded_st)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=True)
+        self.assertEqual(sharded_tensor, reloaded_st)
+
+    @with_comms
+    @unittest.skipIf(
+        IS_FBCODE,
+        "subprocess import torch fails with ModuleNotFoundError: No module named 'torch' in fbcode",
+    )
+    def test_dtensor_save_load_import(self):
+        for should_import in [True, False]:
+            device_mesh = self.build_device_mesh()
+            placements = [Shard(0)]
+            local_tensor = torch.randn(3, 3)
+            sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(sharded_tensor, f)
+                import_string = (
+                    "import torch.distributed.tensor;" if should_import else ""
+                )
+                filename = pathlib.Path(f.name)
+                err_msg = (
+                    (
+                        "_pickle.UnpicklingError: Weights only load failed. "
+                        "``torch.distributed.tensor`` must be imported to load DTensors"
+                    )
+                    if not should_import
+                    else None
+                )
+                self._attempt_load_from_subprocess(filename, import_string, err_msg)
+
+    @with_comms
+    def test_shard_tensor(self):
+        ws = self.world_size
+        device_mesh = DeviceMesh(self.device_type, list(range(ws)))
+        full_tensor = torch.arange(ws * ws).reshape(ws, ws)
+
+        # Shard by row
+        placements = [Shard(0)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+
+        # Shard by column
+        placements = [Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+
+        # assert full tensor is not changed
+        self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
+
+    @with_comms
+    def test_shard_tensor_2d(self):
+        ws = self.world_size
+        full_tensor = torch.arange(ws).reshape(2, ws // 2)
+        device_mesh = DeviceMesh(self.device_type, full_tensor)
+
+        # Shard by row and column
+        placements = [Shard(0), Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([2, ws // 2]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor.item(), self.rank)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -946,9 +1013,11 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 from torch.distributed.tensor._collective_utils import unpad_tensor
 
                 unpadded_list = [
-                    unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
-                    if pad_sizes[i] > 0
-                    else tensor
+                    (
+                        unpad_tensor(tensor, shard_placement.dim, pad_sizes[i])
+                        if pad_sizes[i] > 0
+                        else tensor
+                    )
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
