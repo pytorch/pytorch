@@ -1650,8 +1650,8 @@ def compile_fx(
                     include_device=True,
                     colored=True,
                 ),
+                f"\n\n # graph id: {id(model_.graph)}",
             )
-            pre_grad_graphs_log.debug("pre_grad_graph_id: %s", id(model_.graph))
 
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
