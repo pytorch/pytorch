@@ -6,6 +6,10 @@ import numpy as np
 import torch
 import torch._dynamo.config
 
+
+# to satisfy linter complaining about undefined variable
+foo = None
+
 args = [f"x{i}" for i in range(100)]
 fn_str = f"""\
 def foo({", ".join(args)}):
@@ -31,11 +35,11 @@ def bench(name, fn):
     end = time.perf_counter()
 
     results = timeit.repeat(lambda: run_fn(), number=1000, repeat=10)
-    print(f"{name} {np.median(results)*1000:.1f}us (warmup={end-start:.1f}s)")
+    print(f"{name} {np.median(results) * 1000:.1f}us (warmup={end - start:.1f}s)")
 
 
 def main():
-    bench("compiled", torch.compile(foo, dynamic=False))
+    bench("compiled", torch.compile(foo, dynamic=False))  # type: ignore[F821]
 
 
 if __name__ == "__main__":
