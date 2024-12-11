@@ -100,6 +100,8 @@ from .triton_utils import (
 
 
 if TYPE_CHECKING:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
     from ..ir import IRNode
 
 log = logging.getLogger(__name__)
@@ -593,7 +595,6 @@ class TritonPrinter(PythonPrinter):
         Helper for max/min code genereration.
         cmp: > or <
         """
-        nargs = len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
@@ -729,6 +730,12 @@ class TritonCSEVariable(CSEVariable):
                 self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
+def get_dtype_handler() -> DtypePropagationOpsHandler:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
+    return DtypePropagationOpsHandler()
+
+
 def maybe_upcast_float32(convert_output: bool = True):
     """
     Codegen helper to upcast arguments to float32, depending on the config and dtype.
@@ -759,25 +766,15 @@ def maybe_upcast_float32(convert_output: bool = True):
             upcast_args = [maybe_upcast_arg(arg) for arg in args]
             upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
-            # Infer the output dtype from the inputs.
-            # This promotes to the largest input type.
-            all_args = args + tuple(kwargs.values())
-            input_dtypes = [
-                var.dtype
-                for var in all_args
-                if isinstance(var, CSEVariable) and var.dtype is not None
-            ]
-            result_dtype = (
-                functools.reduce(torch.promote_types, input_dtypes)
-                if len(input_dtypes) > 0
-                else None
-            )
+            result_dtype = getattr(get_dtype_handler(), func.__name__)(*args, **kwargs)
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
             needs_downcast = (
                 convert_output
-                and any(needs_upcast(var) for var in all_args)
+                and any(
+                    needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+                )
                 and result_dtype not in {torch.float32, None}
             )
             downcast_string = (
@@ -901,6 +898,25 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
+
+    # TODO - register these ops as having divergent dtype
+    # output if doing graph pass to remove consecutive casts
+
+    @staticmethod
+    def truediv(x, y):
+        out = f"({x} / {y})"
+        out_dtype = get_dtype_handler().truediv(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
+
+    @staticmethod
+    def mod(x, y):
+        out = f"({x} % {y})"
+        out_dtype = get_dtype_handler().mod(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1541,7 +1557,7 @@ class TritonKernel(SIMDKernel):
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
-        self.triton_meta: Optional[Dict[str, object]] = None
+        self.triton_meta: Optional[Dict[str, Any]] = None
 
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
@@ -2330,8 +2346,11 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
+                assert isinstance(masked_value, CSEVariable)
                 result_var = self.cse.generate(
-                    self.compute, final_reduction(masked_value), dtype=dtype
+                    self.compute,
+                    final_reduction(masked_value),
+                    dtype=masked_value.dtype,
                 )
         else:
             accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)
@@ -2762,7 +2781,6 @@ class TritonKernel(SIMDKernel):
         assert (
             self.persistent_reduction
         ), "ops.sort is only supported in persistent reductions"
-        reduction_range_prefix = self.range_trees[-1].prefix
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
         dim = self.triton_tensor_ndim() - 1
@@ -2877,7 +2895,7 @@ class TritonKernel(SIMDKernel):
 
     def codegen_kernel_benchmark(self, num_gb, grid=None):
         result = IndentedBuffer()
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        _argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
@@ -3047,8 +3065,11 @@ class TritonKernel(SIMDKernel):
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
-        size_hints = []
-        for numel in self.numels.values():
+        size_hints = {}
+        for prefix, numel in self.numels.items():
+            if prefix_is_reduction(prefix) and not self.inside_reduction:
+                continue
+
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
@@ -3065,10 +3086,7 @@ class TritonKernel(SIMDKernel):
                 size_hint = 8192
             else:
                 size_hint = next_power_of_2(int(numel_hint))
-            size_hints.append(size_hint)
-
-        if not self.inside_reduction:
-            size_hints.pop()
+            size_hints[prefix] = size_hint
 
         if name is None:
             code.splice(gen_common_triton_imports())
@@ -3129,7 +3147,7 @@ class TritonKernel(SIMDKernel):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": triton_meta_signature,
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
@@ -3471,6 +3489,9 @@ class TritonKernel(SIMDKernel):
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
 
+        # can be added as an override_mask
+        mask_vars.discard("None")
+
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -3543,7 +3564,7 @@ class TritonScheduling(SIMDScheduling):
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
-        origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
+        origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
         if origins:
             wrapper.writeline(origins)
 
@@ -3595,7 +3616,7 @@ class TritonScheduling(SIMDScheduling):
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
+            _basename, _, kernel_path = get_path(code_hash(src_code.strip()), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
@@ -3618,7 +3639,7 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes):
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
         with preserve_rng_state(), torch.cuda.device(
             V.graph.get_current_device_or_throw()
         ):
@@ -3671,7 +3692,9 @@ class TritonScheduling(SIMDScheduling):
 
             launchers = wrapped_jit_function.launchers
             assert len(launchers) == 1
-            if launchers[0].n_spills > 0:
+            # n_spills does not necessarily mean it's not profitable to fuse,
+            # and sometimes it can be inaccurate
+            if launchers[0].n_spills > n_spills_threshold:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
