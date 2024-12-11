@@ -405,7 +405,7 @@ def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, dim):
 @associative_scan_op.py_functionalize_impl
 def associative_scan_functionalize(ctx, combine_fn, xs, dim):
     unwrapped_xs = ctx.unwrap_tensors(xs)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
