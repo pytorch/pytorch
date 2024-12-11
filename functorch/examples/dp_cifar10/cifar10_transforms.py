@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 
+# flake8: noqa: C901
+
 """
 Runs CIFAR10 training with differential privacy.
 """
@@ -190,7 +192,6 @@ def test(args, model, test_loader, device):
     return np.mean(top1_acc)
 
 
-# flake8: noqa: C901
 def main():
     args = parse_args()
 

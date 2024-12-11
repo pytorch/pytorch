@@ -1,3 +1,4 @@
+# flake8: noqa
 import torch
 from torch._export.passes.constant_folding import constant_fold
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
@@ -231,7 +232,7 @@ def convert_pt2e(
         # for detailed explanation of output quantized model
         quantized_model = convert_pt2e(prepared_model)
 
-    """  # flake8: noqa
+    """
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.convert_pt2e")
     if not isinstance(use_reference_representation, bool):
         raise ValueError(

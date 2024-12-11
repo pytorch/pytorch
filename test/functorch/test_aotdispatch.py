@@ -6,6 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+# flake8: noqa: TOR901
+
 import copy
 import itertools
 import unittest
@@ -5761,7 +5763,6 @@ metadata incorrectly.
 
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
-        # flake8: noqa: TOR901
         self.lib = torch.library.Library("_mylib", "FRAGMENT")
         self.d = {
             torch.channels_last: 0,
