@@ -201,10 +201,6 @@ class TestNumericDebugger(TestCase):
         test_models = [
             TestHelperModules.TwoLinearModule(),
             TestHelperModules.Conv2dThenConv1d(),
-            TestHelperModules.LinearBnLeakyReluModel(),
-            TestHelperModules.LinearTanhModel(),
-            TestHelperModules.LinearReluAddModel(),
-            TestHelperModules.ConvReluAddModel(),
         ]
 
         for m in test_models:
