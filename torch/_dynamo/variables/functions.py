@@ -45,7 +45,7 @@ from .constant import ConstantVariable
 
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
 
@@ -320,7 +320,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
-                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
             if FSDPState is not None and self.fn in [
@@ -410,27 +410,6 @@ class GeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
-    # def reconstruct(self, codegen):
-    #     unimplemented(f"reconstruct {self.__class__.__name__}")
-
-    # if self.generatorstate != "GEN_CREATED":
-    #     unimplemented(f"Cannot reconstruct advanced generator {self.get_name()}")
-
-    # codegen.append_output(codegen.create_load_deref(self.get_name()))
-    # f_locals = self.gen.gi_frame.f_locals
-
-    # for var_name, vt in f_locals.items():
-    #     if not isinstance(vt, VariableTracker):
-    #         unimplemented(
-    #             f"Cannot reconstruct generator {self.get_name()} due to local "
-    #             f"variable {var_name}"
-    #         )
-
-    # for vt in f_locals.values():
-    #     if vt:
-    #         codegen(vt)
-    # codegen.extend_output(create_call_function(len(f_locals), False))
-
     def bind_args(self, tx, args, kwargs):
         return {}
 
@@ -447,13 +426,6 @@ class GeneratorObjectVariable(VariableTracker):
             self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
                 tx, self, [], {}
             )
-            # self.inline_tracer.instruction_pointer = self.value.gi_frame.f_lasti + 1
-            # self.accept_prefix_inst = False
-            # for name, value in self.value.gi_frame.f_locals.items():
-            #     var = variables.LazyVariableTracker.create(
-            #         value, LocalSource(name, is_input=True),
-            #     )
-            #     self.inline_tracer.symbolic_locals[name] = var
         return self.inline_tracer
 
     def _raise_if_generator_is_argument(self, tx):
@@ -467,7 +439,6 @@ class GeneratorObjectVariable(VariableTracker):
         self._raise_if_generator_is_argument(tx)
 
         tracer = self._get_inline_tracer(tx)
-        # self.generatorstate = "GEN_RUNNING"
 
         try:
             # Hierarchically, tx can be seen as the parent of the inline tracer
@@ -479,8 +450,8 @@ class GeneratorObjectVariable(VariableTracker):
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
-            # if "graph_break" not in e.msg:
-            #     raise e
+            if "graph_break" not in e.msg:
+                raise e
 
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
