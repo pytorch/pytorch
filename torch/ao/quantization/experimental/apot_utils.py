@@ -41,10 +41,13 @@ r"""Converts floating point input into
 
 
 def quant_dequant_util(x, levels, indices):
+    levels_lst = list(levels)
+    indices_lst = list(indices)
+
     min_delta = math.inf
     best_fp = 0.0
 
-    for level in levels:
+    for level, idx in zip(levels_lst, indices_lst):
         cur_delta = abs(level - x)
         if cur_delta < min_delta:
             min_delta = cur_delta
