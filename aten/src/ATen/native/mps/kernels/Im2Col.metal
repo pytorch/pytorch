@@ -79,26 +79,38 @@ kernel void col2im(
   const auto L = thread_index.x;
   const auto output_width = input_strides.w;
   const auto output_height  = input_sizes.w;
+  const int64_t pad_height = padding_stride.y;
+  const int64_t pad_width = padding_stride.x;
+  const int64_t dilation_height = kernel_dilation.w;
+  const int64_t dilation_width = kernel_dilation.z;
+  const int64_t kernel_width = kernel_dilation.x;
+  const int64_t kernel_height = kernel_dilation.y;
+  const int64_t stride_width = padding_stride.z;
+  const int64_t stride_height = padding_stride.w;
+  const int64_t height_col = (output_height + 2 * pad_height - (dilation_height * (kernel_height - 1) + 1)) / stride_height + 1;
+  const int64_t width_col = (output_width + 2 * pad_width - (dilation_width * (kernel_width - 1) + 1)) / stride_width + 1;
   T val = static_cast<T>(0);
-  const int64_t w_im = L % output_width + padding_stride.x;
-  const int64_t h_im = L / output_width + padding_stride.y;
-  const int64_t kernel_extent_w = (kernel_dilation.x - 1) * kernel_dilation.z + 1;
-  const int64_t kernel_extent_h = (kernel_dilation.y - 1) * kernel_dilation.w + 1;
-  const int64_t w_col_start = (w_im < kernel_extent_w) ? 0 : (w_im - kernel_extent_w) / padding_stride.z + 1;
-  const int64_t w_col_end = metal::min(w_im / padding_stride.z + 1, input_sizes.x);
-  const int64_t h_col_start = (h_im < kernel_extent_h) ? 0 : (h_im - kernel_extent_h) / padding_stride.w + 1;
-  const int64_t h_col_end = metal::min(h_im / padding_stride.w + 1, input_sizes.y);
+  const int64_t w_im = L % output_width + pad_width;
+  const int64_t h_im = L / output_width + pad_height;
+  const int64_t kernel_extent_w = (kernel_width - 1) * dilation_width + 1;
+  const int64_t kernel_extent_h = (kernel_height - 1) * dilation_height + 1;
+  const int64_t w_col_start = (w_im < kernel_extent_w) ? 0 : (w_im - kernel_extent_w) / stride_width + 1;
+  const int64_t w_col_end = metal::min(w_im / stride_width + 1, width_col);
+  const int64_t h_col_start = (h_im < kernel_extent_h) ? 0 : (h_im - kernel_extent_h) / stride_height + 1;
+  const int64_t h_col_end = metal::min(h_im / stride_height + 1, height_col);
+
   for (int64_t h_col = h_col_start; h_col < h_col_end; h_col += 1) {
     for (int64_t w_col = w_col_start; w_col < w_col_end; w_col += 1) {
-      int64_t h_k = (h_im - h_col * padding_stride.w);
-      int64_t w_k = (w_im - w_col * padding_stride.z);
-      if (h_k % kernel_dilation.w == 0 && w_k % kernel_dilation.z == 0) {
-        h_k /= kernel_dilation.w;
-        w_k /= kernel_dilation.z;
+      int64_t h_k = (h_im - h_col * stride_height);
+      int64_t w_k = (w_im - w_col * stride_width);
+      if (h_k % dilation_height == 0 && w_k % dilation_width == 0) {
+        h_k /= dilation_height;
+        w_k /= dilation_width;
         int64_t data_col_index =
-            ((C * kernel_dilation.y + h_k) * kernel_dilation.x + w_k) * input_strides.z +
-              h_col * input_strides.y +
-              w_col * input_strides.x;
+            (((C * kernel_height + h_k) * kernel_width + w_k) * height_col +
+              h_col) *
+                width_col +
+            w_col;
         val += inputData[data_col_index];
       }
     }

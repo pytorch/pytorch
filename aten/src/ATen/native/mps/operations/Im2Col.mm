@@ -139,6 +139,7 @@ void col2im_out_mps_template(Tensor& output,
   auto col2imPSO = lib.getPipelineStateForFunc("col2im_" + mps::scalarToMetalTypeString(input));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
+      getMPSProfiler().startCapture("col2im");
       std::array<int32_t, 4> kernel_dilation = {static_cast<int32_t>(kernel_width),
                                                 static_cast<int32_t>(kernel_height),
                                                 static_cast<int32_t>(dilation_width),
@@ -150,14 +151,15 @@ void col2im_out_mps_template(Tensor& output,
       std::array<int64_t, 4> input_sizes = {output_height, input_width, n_input_plane, batch_size};
       std::array<int64_t, 4> input_strides = {output_width, input.stride(2), input.stride(1), input.stride(0)};
       std::array<int64_t, 4> output_strides = {output.stride(3), output.stride(2), output.stride(1), output.stride(0)};
-      getMPSProfiler().beginProfileKernel(col2imPSO, "col2im", {input, output});
+      //getMPSProfiler().beginProfileKernel(col2imPSO, "col2im", {input, output});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:col2imPSO];
       mtl_setArgs(
           computeEncoder, input, output, kernel_dilation, padding_stride, input_strides, output_strides, input_sizes);
       [computeEncoder dispatchThreads:MTLSizeMake(output_width * output_height, n_output_plane, batch_size)
                 threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-      getMPSProfiler().endProfileKernel(col2imPSO);
+      //getMPSProfiler().endProfileKernel(col2imPSO);
+      getMPSProfiler().stopCapture();
     }
   });
   if (!batched_input) {
