@@ -17,6 +17,9 @@ from typing import (
 )
 
 import torch
+from torch.distributed._composable.fsdp import (
+    MixedPrecisionPolicy,
+)
 from torch.distributed._tools.ilp_utils import (
     aggregate_stats,
     collect_stats,
@@ -136,7 +139,7 @@ class _SACPolicy:
             self.recompute_counter += 1
         else:
             self.forward_counter += 1
-
+        
         return (
             CheckpointPolicy.PREFER_SAVE
             if self.policy_output[count] == 1
@@ -247,6 +250,7 @@ def get_auto_sac_policies(
     shard_degree: int = 1,
     ac_units: Optional[Set[str]] = None,
     fsdp_units: Optional[Set[str]] = None,
+    mp_policies: Optional[Dict[str, MixedPrecisionPolicy]] = None,
     runtime_kwargs: Optional[Dict[str, Any]] = None,
 ) -> AutoSACResult:
     """
@@ -338,7 +342,7 @@ def get_auto_sac_policies(
         )
         # Aggregate model statistics
         mod_info = aggregate_stats(
-            models, optimizers, mem_tracker, runtime_estimator, sac_estimator, dev
+            models, optimizers, mem_tracker, runtime_estimator, sac_estimator, dev, mp_policies
         )
         # Parse module information into a graph
         graph = parse_module_info(mod_info)

@@ -2,7 +2,6 @@ import copy
 import logging
 import math
 import os
-import warnings
 from collections import defaultdict
 from typing import (
     Any,
@@ -20,6 +19,9 @@ from typing import (
 import numpy as np
 
 import torch
+from torch.distributed._composable.fsdp import (
+    MixedPrecisionPolicy,
+)
 from torch.distributed._tools.mem_tracker import (
     _MemRefType,
     _ModMemStats,
@@ -207,6 +209,8 @@ class ModStats(TypedDict):
 class ModuleInfo(TypedDict):
     mod_order: ModOrder
     mod_stats: List[ModStats]
+    root_fqns: Set[str]
+    root_dtype_factors: Dict[str, Dict[str, float]]
     root_opt_mem: Dict[str, int]
 
 
@@ -217,6 +221,7 @@ def aggregate_stats(
     runtime_estimator: RuntimeEstimator,
     sac_estimator: SACEstimator,
     dev: torch.device,
+    mp_policies: Optional[Dict[str, MixedPrecisionPolicy]]=None,
 ) -> ModuleInfo:
     """
     Collect modulewise stats for a given model, including memory, runtime, and AC tradeoff stats.
@@ -251,12 +256,17 @@ def aggregate_stats(
     root_mods = {
         mod for mod, m_stat in mod_mem_stats.items() if m_stat.mod_fqn.count(".") == 0
     }
-    root_opt_mem = {}
+    mp_policies = mp_policies if mp_policies else {}
+    root_opt_mem:Dict[str, int] = {}
+    root_dtype_factors: Dict[str, Dict[str, int]] = {}
+    root_fqns: Set[str] = set()
     for root_mod in root_mods:
         root_mem_stat = mod_mem_stats[root_mod]
         root_fqn = root_mem_stat.mod_fqn
         opt_state_bytes = 0
+        dtypes: Set[torch.dtype] = set()
         for param in root_mod.parameters():
+            dtypes.add(param.dtype)
             for opt in optimizers:
                 if state := opt.state.get(param, None):
                     for v in state.values():
@@ -270,22 +280,30 @@ def aggregate_stats(
 
         root_opt_mem[root_fqn] = opt_state_bytes
         if root_mod not in models:
-
-            def custom_formatwarning(msg, category, filename, lineno, line=None):  # type: ignore[no-untyped-def]
-                return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
-
-            warnings.formatwarning = custom_formatwarning
-            warnings.warn(
-                f"Found Root Module {root_fqn} but was not provided to Auto-SAC as an input.\n"
-                f" The Module FQNs in AC decisions will include {root_fqn} as one of the root modules."
-                f" If {root_fqn} is a sub-module then its ancestor modules were not called during the forward pass."
-                " This may result in sub-optimal solution."
+            logger.warning(
+                "Found Root Module %s but was not provided to Auto-SAC as an input.\n"
+                "The Module FQNs in AC decisions will include %s as one of the root modules. "
+                "If %s is a sub-module, then its ancestor modules were not called during the forward pass. "
+                "This may result in a sub-optimal solution.",
+                root_fqn,
+                root_fqn,
+                root_fqn,
             )
+        assert len(dtypes) == 1, f"Only uniform dtypes for parameters are supported, found {dtypes} for {root_fqn}."
+        orig_dtype = dtypes.pop()
+        mp_policy = mp_policies.get(root_fqn, MixedPrecisionPolicy())
+        mp_param_dtype = mp_policy.param_dtype or orig_dtype
+        mp_reduce_dtype = mp_policy.reduce_dtype or mp_param_dtype
+        root_dtype_factors[root_fqn] = {
+            "param": mp_param_dtype.itemsize / orig_dtype.itemsize,
+            "reduce": mp_reduce_dtype.itemsize / orig_dtype.itemsize,
+            "act": mp_param_dtype.itemsize / orig_dtype.itemsize
+        }
+        root_fqns.add(root_fqn)
     total_opt_memory = mem_tracker.get_tracker_snapshot("peak")[dev][_MemRefType.OPT]
     assert (
         sum(root_opt_mem.values()) == total_opt_memory
     ), "Mismatch in Optimizer State Memory"
-
     # Runtime stats
     mod_runtime_stats: Dict[str, ModRuntime] = {
         fqn: {"fw": v["fw"], "bw": v["bw"]}
@@ -313,6 +331,8 @@ def aggregate_stats(
     module_info: ModuleInfo = {
         "mod_order": mod_order,
         "mod_stats": [],
+        "root_fqns": root_fqns,
+        "root_dtype_factors": root_dtype_factors,
         "root_opt_mem": root_opt_mem,
     }
 
@@ -370,9 +390,8 @@ def aggregate_stats(
             if has_bw
             else 0,
             "act_grad_per_module": max(
-                mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][_MemRefType.TEMP]
-                - mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][_MemRefType.TEMP],
-                mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][_MemRefType.TEMP],
+                mod_mem_stat.snapshots[_ModState.PEAK_BW][-1][dev][_MemRefType.TEMP],
+                mod_mem_stat.snapshots[_ModState.PRE_BW][-1][dev][_MemRefType.TEMP]
             )
             if has_bw
             else 0,
@@ -404,12 +423,20 @@ class Node(ModStats):
 
 
 class Graph:
-    def __init__(self, n: int) -> None:
+    def __init__(self, 
+            n: int,
+            fw_post_order: List[str] = [],
+            root_fqns: Set[str] = set(),
+            root_dtype_factors: Dict[str, Dict[str, float]] = {},
+            root_opt_mem: Dict[str, int] = {},
+        ) -> None:
         self.nodes: List[Node] = []
         self.name2node: Dict[str, Node] = {}
         self.ad_matrix = np.zeros((n, n))
-        self.fw_post_order: List[str] = []
-        self.root_opt_mem: Dict[str, int] = {}
+        self.fw_post_order = fw_post_order
+        self.root_fqns = root_fqns
+        self.root_dtype_factors = root_dtype_factors
+        self.root_opt_mem = root_opt_mem
 
     def add_node(self, node: Node) -> None:
         self.nodes.append(node)
@@ -425,14 +452,15 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     Parse module info and create a graph (tree) of modules. The graph will be
     used by MILP solver to find optimal SAC and/or FSDP configurations.
     """
-    mod_stats = module_info["mod_stats"]
-    root_opt_mem = module_info["root_opt_mem"]
+    # sort the modules by pre-order and add them to the graph
     fw_pre_order = module_info["mod_order"]["fw_pre_order"]
+    mod_stats = sorted(
+        module_info["mod_stats"], key=lambda x: fw_pre_order.index(x["fqn"])
+    )
     pre_order_fqns = set(fw_pre_order)
     mod_stats_fqns = {m["fqn"] for m in mod_stats}
     missing_fqns = pre_order_fqns - mod_stats_fqns
-    if len(missing_fqns) > 0:
-        raise AssertionError(
+    assert len(missing_fqns) == 0, (
             f"FQNs {missing_fqns} are present in pre-order but missing in"
             " memory staistics. A module maybe reused across multiple root modules."
             " This may result in incorrectness."
@@ -440,15 +468,15 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     n_nodes = len(mod_stats)
 
     # create graph
-    g = Graph(n_nodes)
-    g.fw_post_order = module_info["mod_order"]["fw_post_order"]
-    g.root_opt_mem = root_opt_mem
-
-    # sort the modules by pre-order and add them to the graph
-    module_info["mod_stats"] = sorted(
-        mod_stats, key=lambda x: fw_pre_order.index(x["fqn"])
+    g = Graph(
+        n_nodes,
+        module_info["mod_order"]["fw_post_order"],
+        module_info["root_fqns"],
+        module_info["root_dtype_factors"],
+        module_info["root_opt_mem"]
     )
-    for i, one_mod_stats in enumerate(module_info["mod_stats"]):
+
+    for i, one_mod_stats in enumerate(mod_stats):
         node: Node = cast(Node, one_mod_stats)
         node["index"] = i
         node["pos_fw_post_order"] = g.fw_post_order.index(node["fqn"])
@@ -462,7 +490,7 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
             else:
                 break
     # Check if the list modules provided as input are root modules
-    for root_fqn in root_opt_mem:
+    for root_fqn in g.root_fqns:
         root_idx = g.name2node[root_fqn]["index"]
         num_ancestors = g.ad_matrix[:, root_idx].sum()
         assert num_ancestors == 1, f"Expected {root_fqn} to be a root module."
@@ -474,10 +502,7 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
         fqn,
         count,
     ) in mod_call_cnt.items():
-        if count > 1:
-            raise AssertionError(
-                f"Module {fqn} is called {count} times." f" This is not supported yet."
-            )
+        assert count == 1, f"Module {fqn} is called {count} times." f" This is not supported yet."
 
     return g
 

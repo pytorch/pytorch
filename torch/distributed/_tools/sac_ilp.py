@@ -76,9 +76,9 @@ def sac_milp(
     total_param_memory = 0.0
     total_opt_memory = 0.0
     root_grad_mem: Dict[str, float] = defaultdict(float)
-    for root_fqn, opt_mem in graph.root_opt_mem.items():
+    for root_fqn in graph.root_fqns:
         if fsdp_units and root_fqn in fsdp_units:
-            total_opt_memory += opt_mem / (MEM_MULTIPLIER * shard_degree)
+            total_opt_memory += graph.root_opt_mem[root_fqn] / (MEM_MULTIPLIER * shard_degree)
             root_grad_mem[root_fqn] = graph.name2node[root_fqn]["grad_per_module"] / (
                 MEM_MULTIPLIER * shard_degree
             )
@@ -86,7 +86,7 @@ def sac_milp(
                 MEM_MULTIPLIER * shard_degree
             )
         else:
-            total_opt_memory += opt_mem / MEM_MULTIPLIER
+            total_opt_memory += graph.root_opt_mem[root_fqn] / MEM_MULTIPLIER
             root_grad_mem[root_fqn] = (
                 graph.name2node[root_fqn]["grad_per_module"] / MEM_MULTIPLIER
             )
@@ -153,7 +153,7 @@ def sac_milp(
                             ] -= node_to_param_size[fqn]
 
         # Find maximum parameter count among FSDP units for each root module
-        for root_fqn in graph.root_opt_mem:
+        for root_fqn in graph.root_fqns:
             if root_fqn in fsdp_units:
                 max_unit_memory = max(
                     node_to_param_size[fsdp_unit]
@@ -188,14 +188,13 @@ def sac_milp(
         if (not graph.nodes[i]["is_leaf"]) and graph.nodes[i][
             "sac_memory"
         ] < graph.nodes[i]["act_fw_per_module"]:
-            if _DEBUG_ILP:
-                logger.info(
-                    "For module {%s}: activation memory from memory tracker is {%d}, activation memory from SAC estimator is {%d}. "
-                    "Something is wrong. Please check! Overriding the latter with the former.",
-                    graph.nodes[i]["fqn"],
-                    graph.nodes[i]["act_fw_per_module"],
-                    graph.nodes[i]["sac_memory"],
-                )
+            logger.warning(
+                "For module {%s}: activation memory from memory tracker is {%d}, activation memory from SAC estimator is {%d}. "
+                "Something is wrong. Please check! Overriding the latter with the former.",
+                graph.nodes[i]["fqn"],
+                graph.nodes[i]["act_fw_per_module"],
+                graph.nodes[i]["sac_memory"],
+            )
             graph.nodes[i]["sac_memory"] = graph.nodes[i]["act_fw_per_module"]
         ACM_i = graph.nodes[i]["sac_memory"] / MEM_MULTIPLIER
         IA_i = graph.nodes[i]["act_fw_per_module"] / MEM_MULTIPLIER
@@ -235,23 +234,26 @@ def sac_milp(
         prob += a[i] == TA_i + AG_i - lpDot(coeff, d)
 
     # [Constraint] Express the total amount of memory at each module
-    # TG_i represents the grad memory accumulated so far for the root module of i
-    # ACC_i represents the accumulated grad memory of other root modules the have completed their backward
+    # ACC_i represents the grad memory accumulated so far for the root module of i
+    # RG_i represents the accumulated grad memory of other root modules the have completed their backward
     # total_param_memory/total_opt_memory represents the total sharded + non-sharded param/opt memory for
     #  all modules that stays static throughtout the training
     for i in range(num_nodes):
         root_node = graph.nodes[graph.get_root_idx(i)]
-        TG_i = (graph.nodes[i]["grad_total"] - root_node["grad_total"]) / MEM_MULTIPLIER
+        root_fqn = root_node["fqn"]
+        dtype_factors = graph.root_dtype_factors[root_fqn]
+        ACC_i = (graph.nodes[i]["grad_total"] - root_node["grad_total"]) / MEM_MULTIPLIER
         grad_shard_degree = (
-            shard_degree if fsdp_units and root_node["fqn"] in fsdp_units else 1
+            shard_degree if fsdp_units and root_fqn in fsdp_units else 1
         )
-        ACC_i = 0.0
-        for other_root_fqn in root_grad_mem:
+        RG_i = 0.0
+        for other_root_fqn, grad_mem in root_grad_mem.items():
             if graph.name2node[other_root_fqn]["index"] > root_node["index"]:
-                ACC_i += root_grad_mem[other_root_fqn]
-        prob += m[i] == a[i] + 4 * max_fsdp_unit_memory[
-            root_node["fqn"]
-        ] + total_opt_memory + total_param_memory + ACC_i + (TG_i / grad_shard_degree)
+                RG_i += grad_mem
+        prob += m[i] == a[i] * dtype_factors["act"] \
+        + 3 * max_fsdp_unit_memory[root_fqn] * dtype_factors["param"] \
+        + max_fsdp_unit_memory[root_fqn] * dtype_factors["reduce"] \
+        + total_opt_memory + total_param_memory + RG_i + (ACC_i / grad_shard_degree)
 
     # [Constraint] Express peak memory
     for i in range(num_nodes):
@@ -324,6 +326,7 @@ def get_optimal_checkpointing_policy_per_module(
         raise ValueError(
             f"`memory_budget` must be a float between 0 and 1. Got {memory_budget}."
         )
+    clone_ops = [op_idx for op_idx, f_name in enumerate(sac_stats.func_names) if f_name == "clone"]
     num_ops = len(sac_stats.func_names)
 
     # Create a MILP problem
@@ -343,8 +346,9 @@ def get_optimal_checkpointing_policy_per_module(
         for i1, i2 in zip(sac_stats.rand_ops[:-1], sac_stats.rand_ops[1:]):
             prob += x[i1] == x[i2]
 
-    # [Constraint] view-like ops should always be recomputed
-    for i in sac_stats.view_like_ops:
+    # [Constraint] view-like and clone ops should always be recomputed
+    view_or_clone_ops = sac_stats.view_like_ops + clone_ops
+    for i in view_or_clone_ops:
         prob += x[i] == SACDecision.RECOMPUTE.value
 
     # [Constraint] inplace ops should always be done in conjunction with its parent op

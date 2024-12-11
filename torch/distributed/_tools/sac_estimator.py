@@ -40,7 +40,9 @@ aten = torch.ops.aten
 _ADDITIONAL_IGNORED_OPS = {
     aten.lift_fresh.default,  # type: ignore[attr-defined]
     torch.ops.profiler._record_function_exit._RecordFunction,  # type: ignore[attr-defined]
-    aten.clone.default,  # type: ignore[attr-defined] # seems needed for torch.compile
+    torch.ops.profiler._record_function_enter.default,  # type: ignore[attr-defined]
+    torch.ops.profiler._record_function_exit.default,  # type: ignore[attr-defined]
+    torch.ops.profiler._record_function_enter_new.default,  # type: ignore[attr-defined]
 }
 OPS_TO_ALWAYS_SKIP = SAC_IGNORED_OPS | _ADDITIONAL_IGNORED_OPS
 # This value is hard-coded here:
@@ -275,6 +277,7 @@ class SACEstimator(TorchDispatchMode):
         self._optimizer_hook_handles: Optional[
             Tuple[RemovableHandle, RemovableHandle]
         ] = None
+        self._pre_fw_hook_handles: List[RemovableHandle] = []
 
     def _update_opt_flag(self, val: bool = False) -> None:
         self._in_opt = val
@@ -304,6 +307,21 @@ class SACEstimator(TorchDispatchMode):
             )
         else:
             self._leaf_modules.add(mod_fqn)
+        parents = set(self._mod_tracker.parents) - {mod_fqn}
+        if len(parents) == 1 and "Global" in parents:
+            for submod in mod.modules():
+                if submod is mod:
+                    continue
+                self._pre_fw_hook_handles.append(
+                    submod.register_forward_pre_hook(self._update_start_idx)
+                )
+
+    def _update_start_idx(self, mod: nn.Module, inputs: Any) -> None:
+        mod_fqn = self._mod_tracker.get_known_fqn(mod)
+        assert mod_fqn is not None
+        if sac_meta := self._sac_mod_metadata.get(mod_fqn):
+            sac_meta.start_idx = len(self._sac_metadata)
+        
 
     def _post_fw_hook(self, mod: nn.Module, inputs: Any, outputs: Any) -> None:
         # 1. Retrieves the module's FQN and checks if it's a leaf module
@@ -544,7 +562,8 @@ class SACEstimator(TorchDispatchMode):
 
         # 1. Random or Random-In-place ops are stored if force_store_random is set
         # 2. View-like ops are recomputed by default
-        # 3. For inplace_op_groups:
+        # 3. Clone ops are recomputed by default (needed for torch.compile)
+        # 4. For inplace_op_groups:
         #   a) If the head of this group is an inplace op, then we have to store the entire group.
         #   b) If the head of the group is not an in-place op, then this group can be considered for recomputation
         #        in its entireity.
@@ -555,9 +574,12 @@ class SACEstimator(TorchDispatchMode):
             stored_ops.add(random_group_head_idx)
         # Case 2:
         recomputed_ops.update(set(sac_stats.view_like_ops))
+        # Case 3:
+        clone_ops = {op_idx for op_idx, f_name in enumerate(sac_stats.func_names) if f_name == "clone"}
+        recomputed_ops.update(clone_ops)
 
         for group_head_idx, op_group in inplace_op_groups.items():
-            # Case 3a:
+            # Case 4a:
             if group_head_idx in inplace_op_to_group_head:
                 stored_ops.add(group_head_idx)
 
@@ -983,7 +1005,7 @@ class SACEstimator(TorchDispatchMode):
         """
         for mod_fqn, sac_stats in self.sac_mod_stats.items():
             mod_depth = mod_fqn.count(".") + 1
-            if mod_depth > depth or mod_depth == 1:
+            if mod_depth > depth: # or mod_depth == 1:
                 continue
             print(f"Module: {mod_fqn}")
             self.display_sac_stats(sac_stats, print_tabular)
@@ -1065,6 +1087,8 @@ class SACEstimator(TorchDispatchMode):
     def __exit__(self, *args: Any) -> None:  # type: ignore[no-untyped-def]
         self._saved_tensor_hook_ctx.__exit__()
         self._mod_tracker.__exit__(*args)
+        for handle in self._pre_fw_hook_handles:
+            handle.remove()
         if self._optimizer_hook_handles is not None:
             for handle in self._optimizer_hook_handles:
                 handle.remove()
