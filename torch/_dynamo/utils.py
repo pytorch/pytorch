@@ -2464,17 +2464,6 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             for arg in args
         )
 
-    if (
-        op == "call_function"
-        and node.target in (operator.and_, operator.or_)
-        and any(isinstance(a, torch.SymInt) for a in args)
-        and not torch.fx.experimental._config.symbolic_bitwise_and_or
-    ):
-        unimplemented(
-            "symbolic bitwise and/or on symbolic integers currently disabled, "
-            "to enable set torch.fx.experimental._config.symbolic_bitwise_and_or = True"
-        )
-
     try:
         with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
@@ -2541,6 +2530,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
             unimplemented(f"TypeError {node.target}: {cause}")
+        elif (
+            isinstance(cause, TypeError)
+            and op == "call_function"
+            and node.target in (operator.and_, operator.or_)
+            and any(isinstance(a, torch.SymInt) for a in args)
+            and not torch.fx.experimental._config.symbolic_bitwise_and_or
+        ):
+            unimplemented(
+                "symbolic bitwise and/or on symbolic integers currently disabled, "
+                "to enable set torch.fx.experimental._config.symbolic_bitwise_and_or = True"
+            )
 
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
