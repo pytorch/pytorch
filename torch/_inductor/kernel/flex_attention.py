@@ -2046,6 +2046,10 @@ def flex_attention_backward(*args, **kwargs):
         "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(v_head_dim))
     )
 
+    # Should this just override the kernel options in the forward so we dont need to do it twice?
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_default_config_bwd(query))
