@@ -14,7 +14,12 @@ from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv, get_backend_num_stages
+from ..utils import (
+    ceildiv as cdiv,
+    get_backend_num_stages,
+    get_num_sms,
+    TMA_DESCRIPTOR_SIZE,
+)
 
 
 log = logging.getLogger(__name__)
@@ -224,17 +229,12 @@ mixed_mm_kernel_configs = (
 )
 
 persistent_mm_kernel_configs = [
+    {"config": (128, 256, 64, 3, 8), "cond": True},
     {"config": (128, 128, 64, 3, 8), "cond": True},
     {"config": (128, 128, 128, 3, 8), "cond": True},
-    {"config": (128, 128, 128, 4, 8), "cond": True},
-    {"config": (128, 128, 128, 4, 4), "cond": True},
     {"config": (128, 128, 128, 3, 4), "cond": True},
-    {"config": (128, 128, 128, 5, 4), "cond": True},
-    {"config": (128, 128, 128, 5, 8), "cond": True},
-    {"config": (128, 128, 128, 6, 8), "cond": True},
     {"config": (128, 128, 64, 4, 8), "cond": True},
 ]
-
 
 scaled_mm_kernel_configs = [
     {"config": (128, 256, 32, 3, 8), "cond": True},
@@ -336,6 +336,18 @@ scaled_mm_kernel_configs = [
     {"config": (32, 256, 64, 6, 4), "cond": True},
 ]
 
+scaled_persistent_mm_kernel_configs = [
+    {"config": (128, 128, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 4, 8), "cond": True},
+    {"config": (128, 128, 128, 4, 4), "cond": True},
+    {"config": (128, 128, 128, 3, 4), "cond": True},
+    {"config": (128, 128, 128, 5, 4), "cond": True},
+    {"config": (128, 128, 128, 5, 8), "cond": True},
+    {"config": (128, 128, 128, 6, 8), "cond": True},
+    {"config": (128, 128, 64, 4, 8), "cond": True},
+]
+
 
 # Create filtered list of configs based on cond evaluation
 mm_platform_configs = tuple(
@@ -358,15 +370,19 @@ mixed_mm_platform_configs = tuple(
     for config in mixed_mm_kernel_configs
     if config["cond"]
 )
+persistent_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in persistent_mm_kernel_configs
+    if config["cond"]
+)
 scaled_mm_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
     for config in scaled_mm_kernel_configs
     if config["cond"]
 )
-
-persistent_mm_platform_configs = tuple(
+scaled_persistent_mm_platform_configs = tuple(
     cast(Tuple[int, int, int, int, int], config["config"])
-    for config in persistent_mm_kernel_configs
+    for config in scaled_persistent_mm_kernel_configs
     if config["cond"]
 )
 
@@ -398,13 +414,19 @@ mixed_mm_configs = functools.partial(
     configs=mixed_mm_platform_configs,
 )
 
+persistent_mm_configs = functools.partial(
+    filtered_configs,
+    configs=persistent_mm_platform_configs,
+)
+
 scaled_mm_configs = functools.partial(
     filtered_configs,
     configs=scaled_mm_platform_configs,
 )
 
-persistent_mm_configs = functools.partial(
-    filtered_configs, configs=persistent_mm_platform_configs
+scaled_persistent_mm_configs = functools.partial(
+    filtered_configs,
+    configs=scaled_persistent_mm_platform_configs,
 )
 
 
@@ -415,7 +437,7 @@ def mm_grid(m, n, meta):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
-def persistent_grid(M: int, N: int, meta: Dict[str, Any]):
+def persistent_mm_grid(M: int, N: int, meta: Dict[str, Any]):
     """Defines the grid for persistent kernels."""
     return (
         min(meta["NUM_SMS"], cdiv(M, meta["BLOCK_M"]) * cdiv(N, meta["BLOCK_N"])),
@@ -452,6 +474,15 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,
+    )
+
+
+def persistent_mm_options(mat1, mat2):
+    return dict(
+        A_ROW_MAJOR=not mat1.layout.is_transposed(),
+        B_ROW_MAJOR=not mat2.layout.is_transposed(),
+        NUM_SMS=get_num_sms(),
+        TMA_SIZE=TMA_DESCRIPTOR_SIZE,
     )
 
 
