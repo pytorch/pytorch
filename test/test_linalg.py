@@ -5124,7 +5124,12 @@ class TestLinalg(TestCase):
         ordinal = torch.cuda.current_device()
         filename = f"tunableop_results{ordinal}.csv"
 
-        mp.set_start_method("spawn")
+        # force=True needed according to:
+        # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.set_start_method
+        # This is because a different test in this process could have
+        # already set the start method
+        mp.set_start_method("spawn", force=True)
+
         p = mp.Process(target=tunableop_matmul, args=(device, dtype))
         p.start()
         p.join()
