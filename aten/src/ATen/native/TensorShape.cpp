@@ -471,75 +471,101 @@ Tensor& set_meta_(Tensor& result) {
 
 Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(self.is_sparse(), "input must be sparse tensor");
-  int64_t sparse_extra_ndim = size.size() - self.dim();
-  int64_t sparse_ndim = size.size() - self.dense_dim();
-  TORCH_CHECK(sparse_extra_ndim >= 0, "input not broadcastable to size with smaller dimensionality");
-  Tensor indices = self._indices();
-  Tensor values = self._values();
-  auto nnz = values.size(0);
 
-  std::vector<int64_t> broadcast_sizes;
-  std::vector<int64_t> broadcast_dense_sizes;
-  std::vector<int64_t> broadcast_dims;
-  std::vector<int64_t> unchanged_dims;
-  broadcast_sizes.reserve(sparse_ndim);
-  broadcast_dense_sizes.reserve(self.dense_dim() + 1);
-  broadcast_dims.reserve(self.sparse_dim());
-  unchanged_dims.reserve(self.sparse_dim());
-  int64_t nnz_factor = 1;
-  int64_t min_broadcast_dim = (sparse_extra_ndim > 0 ? 0: -1);
-  int64_t max_unchanged_dim = -1;
-  for (int64_t i=0; i<sparse_extra_ndim; i++) {
-    auto d = size[i];
-    nnz_factor *= d;
-    broadcast_sizes.emplace_back(d);
+  const auto self_size = self.sizes();
+  const int64_t new_sparse_dims = size.size() - self.dim();
+  TORCH_CHECK(new_sparse_dims >= 0, "the requested broadcast shape has fewer dimensions than the input");
+  const int64_t res_sparse_dim = new_sparse_dims + self.sparse_dim();
+
+  for (int64_t i = 0; i < self.dim(); ++i) {
+    TORCH_CHECK(self_size[i] == 1 || self_size[i] == size[i + new_sparse_dims],
+                "The input's length ", self_size[i], " at dimension ", i,
+                " does not broadcast over the requested shape of length ", size[i + new_sparse_dims],
+                " at dimension ", i + new_sparse_dims);
   }
-  for (int64_t i=0; i<self.sparse_dim(); i++) {
-    auto d = size[sparse_extra_ndim + i];
-    if (self.size(i) != d) {
-      TORCH_CHECK(self.size(i) == 1,
-                  "The expanded size of the tensor (",size[sparse_extra_ndim + i],") ",
-                  "must match the existing size (",self.size(i),")");
-      nnz_factor *= d;
-      broadcast_sizes.emplace_back(d);
-      if (min_broadcast_dim == -1) {
-        min_broadcast_dim = sparse_extra_ndim + i;
+
+  const int64_t self_nnz = self._nnz();
+  const auto self_indices = self._indices();
+  int64_t nnz_expand_factor = 1;
+  int64_t largest_sparse_dim_len = -1;
+  int64_t min_broadcast_dim = (new_sparse_dims > 0) ? 0 : -1;
+  int64_t max_unchanged_dim = -1;
+  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+    if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
+      nnz_expand_factor *= size[i];
+      largest_sparse_dim_len = std::max(size[i], largest_sparse_dim_len);
+      if (i >= new_sparse_dims && min_broadcast_dim == -1) {
+        min_broadcast_dim = i;
       }
-      broadcast_dims.emplace_back(i);
     } else {
-      unchanged_dims.emplace_back(i);
-      max_unchanged_dim = sparse_extra_ndim + i;
+      if (i >= new_sparse_dims) {
+        max_unchanged_dim = i;
+      }
     }
   }
+
   // to_broadcast conserves is_coalesced property iff only the last
   // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
-  bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
+  bool is_coalesced = !self.dim() || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
 
-  broadcast_dense_sizes.emplace_back(nnz);
-  for (int64_t i=0; i<self.dense_dim(); i++) {
-    broadcast_dense_sizes.emplace_back(size[sparse_extra_ndim + self.sparse_dim() + i]);
+  // Replace non-broadcastable dims with 1 in the `size` vector {
+  auto res_sparse_dim_broadcast_mask = at::DimVector(size.begin(), size.begin() + res_sparse_dim);
+  for (int64_t i = new_sparse_dims; i < res_sparse_dim; ++i) {
+    res_sparse_dim_broadcast_mask[i] = (size[i] == self_size[i - new_sparse_dims]) ? 1 : size[i];
+  }
+  // }
+
+  // Then define for each sparse dim the number of reps for each nnz index/value due to broadcasting.
+  // Repetitions do not take into accout the current value of nnz - this will be taken care of later {
+  auto nnz_repeats = c10::DimVector(res_sparse_dim);
+  nnz_repeats.back() = res_sparse_dim_broadcast_mask.back();
+  for (int64_t i = res_sparse_dim - 2; i >= 0; --i) {
+    nnz_repeats[i] = res_sparse_dim_broadcast_mask[i] * nnz_repeats[i + 1];
+  }
+  // }
+
+  // Broadcast values. Each nnz value has to be repeated nnz_expand_factor times {
+  auto broadcast_values_shape = DimVector(size.size() - res_sparse_dim + 2);
+  std::copy(size.begin() + res_sparse_dim, size.end(), broadcast_values_shape.begin() + 2);
+  broadcast_values_shape[0] = self_nnz;
+  broadcast_values_shape[1] = nnz_expand_factor;
+  auto broadcast_values = self._values().unsqueeze(1).expand(broadcast_values_shape).flatten(0, 1);
+  // }
+
+  // We can return early if there are no broadcastable sparse dims
+  if (largest_sparse_dim_len < 0) {
+    return at::sparse_coo_tensor(self._indices(), broadcast_values, size, self.options(), self.is_coalesced());
   }
 
-  std::vector<int64_t> new_indices_size{sparse_ndim, nnz * nnz_factor};
-  std::vector<int64_t> new_values_size(values.sizes().vec());
-  new_values_size[0] = new_indices_size[1];
+  auto broadcast_indices = self._indices().new_empty(
+      {res_sparse_dim, self_nnz * nnz_expand_factor}
+  );
 
-  Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
-  Tensor new_indices = indices.new_empty(new_indices_size);
-  if (!broadcast_sizes.empty()) {
-    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
-    new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
-    for (size_t i=0; i<broadcast_dims.size(); i++) {
-      int64_t j=broadcast_dims[i];
-      new_indices.select(0, sparse_extra_ndim + j).copy_(broadcast_indices.select(0, sparse_extra_ndim + i));
+  // Repeat each individual index value in dimension dim nnz_repeats[dim] / size[dim] times,
+  // and then repeat the whole vector self_nnz * (nnz_expand_factor / nnz_repeats[dim]) times to get the final
+  // index vector - only for broadcast dims {
+  const auto dim_arange = at::arange(largest_sparse_dim_len, self._indices().options());
+  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+    Tensor curr_dim_idx;
+    if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
+      // If the dim is either a newly created sparse dim, or an already existing one which is broadcastable,
+      // do the reps over an arange vector
+      curr_dim_idx = dim_arange.narrow(0, 0, size[i]).unsqueeze_(0).unsqueeze_(-1).expand(
+          {self_nnz * (nnz_expand_factor / nnz_repeats[i]), size[i], nnz_repeats[i] / size[i]}
+      );
+    } else {
+      // Otherwise over a slice of self._indices() of length self_nnz
+      curr_dim_idx = self_indices.select(0, i - new_sparse_dims).unsqueeze_(1).expand(
+          {self_nnz, nnz_expand_factor}
+      );
     }
+    broadcast_indices.select(0, i).view(curr_dim_idx.sizes()).copy_(curr_dim_idx);
   }
-  for (int64_t j:unchanged_dims) {
-    new_indices.select(0, sparse_extra_ndim + j).copy_(indices.select(0, j).repeat_interleave(nnz_factor));
-  }
-  return at::sparse_coo_tensor(new_indices, new_values, size, self.options(), is_coalesced);
+  // }
+
+  return at::sparse_coo_tensor(broadcast_indices, broadcast_values, size, self.options(), is_coalesced);
 }
 
 Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
