@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Sized, Tuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -43,18 +43,17 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
     select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
-    default_strategy = []
-    for strategy in select_strategy.strategies:
-        # we create new DTensorSpecs even for default strategy to assure that
-        # the tensor metas are distinct between the arguments and outputs
-        default_strategy.append(
-            PlacementStrategy(
-                output_specs=DTensorSpec(
-                    mesh=strategy.output_spec.mesh,
-                    placements=strategy.output_spec.placements,
-                )
+    # we create new DTensorSpecs even for default strategy to assure that
+    # the tensor metas are distinct between the arguments and outputs
+    default_strategy = [
+        PlacementStrategy(
+            output_specs=DTensorSpec(
+                mesh=strategy.output_spec.mesh,
+                placements=strategy.output_spec.placements,
             )
         )
+        for strategy in select_strategy.strategies
+    ]
     return OpStrategy(default_strategy)
 
 
@@ -770,7 +769,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
             ),
         )
 
-    def size_split(N, i):
+    def size_split(N, i) -> List:
         # Last chunk will be smaller if the tensor size N
         # along the given dimension dim is not divisible by i.
         assert i > 0
@@ -781,6 +780,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
         if isinstance(split_size_or_sections, int)
         else split_size_or_sections
     )
+    assert isinstance(output_size_list, Sized)
     output_spec_list = [
         DTensorSpec(
             mesh=input_spec.mesh,
