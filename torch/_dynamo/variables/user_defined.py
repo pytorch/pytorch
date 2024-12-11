@@ -40,10 +40,12 @@ from ..source import (
 )
 from ..utils import (
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
     check_constant_args,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_invoke_subgraph,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -54,7 +56,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -765,14 +767,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 assert not (args or kwargs)
-                items = []
                 keys = self.call_method(tx, "keys", [], {})
-                for key in keys.force_unpack_var_sequence(tx):
-                    items.append(
-                        TupleVariable(
-                            [key, self.odict_getitem(tx, key)],
-                        )
+                items = [
+                    TupleVariable(
+                        [key, self.odict_getitem(tx, key)],
                     )
+                    for key in keys.force_unpack_var_sequence(tx)
+                ]
                 tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
@@ -781,15 +782,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
-            if (
-                method in (object.__ne__, object.__eq__)
-                and len(args) == 1
-                and not kwargs
-                and hasattr(args[0], "value")
-            ):
-                return ConstantVariable(
-                    (self.value is args[0].value) is (method is object.__eq__)
-                )
+            if len(args) == 1 and not kwargs:
+                if method is object.__eq__:
+                    func_var = VariableTracker.build(tx, polyfills.object_eq)
+                    return func_var.call_function(tx, [self, *args], kwargs)
+
+                if method is object.__ne__:
+                    func_var = VariableTracker.build(tx, polyfills.object_ne)
+                    return func_var.call_function(tx, [self, *args], kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -932,8 +932,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+
+            # TODO(dynamo-team) - Consider calling VariableBuilder directly here
             if is_utils_checkpoint(self.value.func):
                 return build_checkpoint_variable().call_function(
+                    tx, partial_args, partial_kwargs
+                )
+            elif is_invoke_subgraph(self.value.func):
+                return build_invoke_subgraph_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchInGraphFunctionVariable(
@@ -995,10 +1001,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
-    def is_supported_nn_module_method(self, method):
-        return torch._dynamo.config.inline_inbuilt_nn_modules and method in (
-            torch.nn.Module.parameters,
-        )
+    def get_source_by_walking_mro(self, name):
+        assert self.cls_source is not None
+
+        for idx, klass in enumerate(type(self.value).__mro__):
+            if name in klass.__dict__:
+                mro_source = AttrSource(self.cls_source, "__mro__")
+                klass_source = GetItemSource(mro_source, idx)
+                dict_source = AttrSource(klass_source, "__dict__")
+                return GetItemSource(dict_source, name)
+
+        unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         from .. import trace_rules
@@ -1104,10 +1117,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_get_source = None
             if self.cls_source:
                 # To access the method descriptor from the udf object w/o using
-                # inspect.getattr_static, we can look into the class __dict__
-                descriptor_source = GetItemSource(
-                    AttrSource(self.cls_source, "__dict__"), name
-                )
+                # inspect.getattr_static, we can look into the class mro
+                descriptor_source = self.get_source_by_walking_mro(name)
                 descriptor_get_source = AttrSource(descriptor_source, "__get__")
                 descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
             else:
@@ -1126,9 +1137,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
-            if self.is_supported_nn_module_method(subobj):
-                return variables.GetAttrVariable(self, name, source=source)
-
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
@@ -1141,7 +1149,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
-                    unimplemented("__self__ mismatch for bound method")
+                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
+                        unimplemented(
+                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        )
+
+                    from .builder import SourcelessUserDefinedObjectBuilder
+
+                    # This means that we are calling a method of some other object here.
+                    object_vt = SourcelessUserDefinedObjectBuilder.create(
+                        tx, dynamic_subobj.__self__
+                    )
+                    return variables.UserMethodVariable(
+                        dynamic_subobj.__func__, object_vt
+                    )
                 func = subobj.__func__
             else:
                 assert isinstance(subobj, types.FunctionType)
@@ -1384,6 +1405,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
+        self.mutation_type = AttributeMutationExisting()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to
@@ -1393,7 +1415,10 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         # However, users can try to add a new attribute to the class using the
         # __dict__ attribute. To catch this, we save the ConstDictVariable for
         # the __dict__ and then lookup into this vt for each attr lookup.
-        if name == "get" and type(self.value).get is collections.abc.Mapping.get:
+        if name == "get" and type(self.value).get in (
+            collections.abc.Mapping.get,
+            dict.get,
+        ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
         elif name == "__dict__" and self.source:
             self.generic_dict_vt = variables.LazyVariableTracker.create(

@@ -8,7 +8,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
-from torch._dynamo.exc import FailOnCacheLimitHit
+from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
@@ -46,7 +46,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(2)
         for i in range(2):
-            opt_model = torch._dynamo.optimize(compiler)(model)
+            opt_model = torch.compile(model, backend=compiler)
             opt_model(x, i)
 
         self.assertTrue(triggered)
@@ -63,7 +63,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             x = torch.randn(3)
             iters = torch.randint(low=0, high=1000, size=())
-            opt_loop_torture = torch._dynamo.optimize(compile_counter)(loop_torture)
+            opt_loop_torture = torch.compile(loop_torture, backend=compile_counter)
             opt_loop_torture(x, iters)
 
         # Currently, we recompile each time,
@@ -89,7 +89,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
                     x = torch.randn((bsz, 3, 4))
-                    opt_model = torch._dynamo.optimize(compile_counter)(model)
+                    opt_model = torch.compile(model, backend=compile_counter)
                     opt_model(x)
 
         self.assertEqual(compile_counter.frame_count, expected_recompiles)
@@ -117,7 +117,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         compile_counter = torch._dynamo.testing.CompileCounter()
 
         with torch._dynamo.config.patch("cache_size_limit", 2):
-            opt_func = torch._dynamo.optimize(compile_counter)(func)
+            opt_func = torch.compile(func, backend=compile_counter)
             opt_func(a, b, c)  # warmup
             self.assertEqual(compile_counter.frame_count, 1)
 
@@ -148,12 +148,12 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient
             torch._dynamo.reset()
             torch._dynamo.utils.counters.clear()
-            opt_func = torch._dynamo.optimize("eager")(func)
+            opt_func = torch.compile(func, backend="eager")
             # warmup
             opt_func(cached_input)
 
             with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
-                opt_func = torch._dynamo.optimize("eager")(func)
+                opt_func = torch.compile(func, backend="eager")
                 opt_func(missed_input)
             self.assert_single_log_contains(logs, expected_failure)
 
@@ -192,12 +192,12 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         def func(a, b):
             return a + b
 
-        opt_func = torch._dynamo.optimize("eager")(func)
+        opt_func = torch.compile(func, backend="eager")
         # warmup
         opt_func(a, b)
 
         with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
-            opt_func = torch._dynamo.optimize("eager")(func)
+            opt_func = torch.compile(func, backend="eager")
             opt_func(a, 1)
         self.assert_single_log_contains(
             logs,
@@ -214,7 +214,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 return b + 1
 
         func(torch.randn(5), True)
-        with self.assertRaises(FailOnCacheLimitHit):
+        with self.assertRaises(FailOnRecompileLimitHit):
             func(torch.randn(5), False)
 
     @torch._dynamo.config.patch("cache_size_limit", 32)

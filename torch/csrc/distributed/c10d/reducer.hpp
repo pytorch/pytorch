@@ -103,7 +103,7 @@ class TORCH_API Reducer {
   // been applied.
   void set_optimizer_in_backward() {
     optim_in_backward_ = true;
-  };
+  }
 
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
@@ -308,7 +308,7 @@ class TORCH_API Reducer {
           GradCallback,
           torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
-  void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
+  void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's

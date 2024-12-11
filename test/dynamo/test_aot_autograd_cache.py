@@ -17,8 +17,11 @@ from torch._functorch._aot_autograd.autograd_cache import (
     sanitize_gm_for_cache,
 )
 from torch._functorch._aot_autograd.schemas import AOTConfig
+from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._subclasses import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -53,7 +56,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         Clear unrelated caches, like dynamo and PyCodeCache
         """
         torch._dynamo.reset()
-        torch._inductor.codecache.PyCodeCache.cache_clear()
+        torch._inductor.codecache.PyCodeCache.cache_clear(purge=True)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -136,6 +139,28 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         # We save again into the cache
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
+    )
+    def test_view_replay_bypass(self):
+        """
+        Shoud bypass when view replay is turned on
+        """
+
+        def fn(a):
+            tmp = a.detach()
+            a.mul_(2)
+            return a, tmp
+
+        with torch.autograd._force_original_view_tracking(True):
+            compiled_fn = torch.compile(fn)
+            out = compiled_fn(torch.rand(2, 3))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
@@ -608,7 +633,12 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        return autograd_cache_key(fx_g, example_inputs, config, {})
+        shape_env = ShapeEnv()
+        ctx = TracingContext(FakeTensorMode(shape_env=shape_env))
+        # Needs a shape env for FxGraphCache.check_can_cache to pass.
+        # Not needed for actual key calculation.
+        with torch._guards.tracing(ctx):
+            return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):
@@ -737,6 +767,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
 
+    @torch._inductor.config.patch({"freezing": True})
+    def test_freezing(self):
+        def fn(x):
+            return x.cos().sin()
+
+        config = self.default_config()
+        self.assertRaises(
+            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+        )
+
     def test_private_builtin(self):
         # _foreach_add is a private torch function, but
         # it's also a builtin_function_or_method, so it should be allowed to be cached
@@ -777,6 +817,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         config = self.default_config()
         self.gen_cache_key(fn, config)
 
+    def test_safe_torchfunction(self):
+        def fn(x):
+            a = x.size()
+            b = torch.Size([3, 3])
+            c = a == b
+            x = torch.sym_int(9)
+            y = torch.sym_float(x)
+            z = torch.sym_int(torch.sym_sqrt(y))
+            result = torch.sym_sum([x, y, z])
+            return (c, result)
+
+        config = self.default_config()
+        self.gen_cache_key(fn, config, inputs=[torch.ones((3, 3))])
+
     def test_sanitize_gm_for_cache(self):
         def fn(x):
             y = torch.sin(x)
@@ -786,21 +840,24 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             return w
 
         _, fx_g, example_inputs = self._get_dynamo_output(fn, torch.ones(3))
-        fx_g.meta = {"foo": "bar"}
-        fx_g.compile_subgraph_reason = "Blah"
-        config = self.default_config()
-        with sanitize_gm_for_cache(fx_g):
-            c1 = autograd_cache_key(fx_g, example_inputs, config, {})
-        c3 = autograd_cache_key(fx_g, example_inputs, config, {})
 
-        fx_g.meta = {"foo": "baz"}
-        fx_g.compile_subgraph_reason = None
-        with sanitize_gm_for_cache(fx_g):
-            c2 = autograd_cache_key(fx_g, example_inputs, config, {})
-        c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+        ctx = TracingContext(FakeTensorMode(shape_env=ShapeEnv()))
+        with torch._guards.tracing(ctx):
+            fx_g.meta = {"foo": "bar"}
+            fx_g.compile_subgraph_reason = "Blah"
+            config = self.default_config()
+            with sanitize_gm_for_cache(fx_g):
+                c1 = autograd_cache_key(fx_g, example_inputs, config, {})
+            c3 = autograd_cache_key(fx_g, example_inputs, config, {})
 
-        self.assertEqual(c1, c2)
-        self.assertNotEqual(c3, c4)
+            fx_g.meta = {"foo": "baz"}
+            fx_g.compile_subgraph_reason = None
+            with sanitize_gm_for_cache(fx_g):
+                c2 = autograd_cache_key(fx_g, example_inputs, config, {})
+            c4 = autograd_cache_key(fx_g, example_inputs, config, {})
+
+            self.assertEqual(c1, c2)
+            self.assertNotEqual(c3, c4)
 
 
 if __name__ == "__main__":
