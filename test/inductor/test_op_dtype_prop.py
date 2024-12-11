@@ -219,6 +219,7 @@ class TestCase(InductorTestCase):
             return x % y, x / y
 
         x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
+        
         out, code = run_and_get_code(torch.compile(fn), x, y)
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(x, y), out)

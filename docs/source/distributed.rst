@@ -198,6 +198,8 @@ Both block until all processes have joined.
 
 .. autofunction:: is_gloo_available
 
+.. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+
 .. autofunction:: is_torchelastic_launched
 
 --------------------------------------------------------------------------------

@@ -141,11 +141,8 @@ memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 # codegen benchmark harness
 benchmark_harness = True
 
-# fuse pointwise into templates epilogues
+# fuse pointwise into templates
 epilogue_fusion = True
-
-# fuse pointwise into template prologues
-prologue_fusion = False
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -776,6 +773,10 @@ enable_linear_binary_folding = (
 )
 
 
+# Adds NVTX annotations aroung training phases
+annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
+
 # config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
@@ -1358,9 +1359,7 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class test_configs:
-    force_extern_kernel_in_multi_template: bool = False
-
-    max_mm_configs: Optional[int] = None
+    force_extern_kernel_in_multi_template = False
 
     runtime_triton_dtype_assert = False
 

@@ -575,7 +575,7 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr):
-        return f"libdevice.sqrt({self._print(expr)}.to(tl.float32))"
+        return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr):
         return (
@@ -2347,8 +2347,11 @@ class TritonKernel(SIMDKernel):
                     for var_name in (mean, m2, weight)
                 )
             else:
+                assert isinstance(masked_value, CSEVariable)
                 result_var = self.cse.generate(
-                    self.compute, final_reduction(masked_value), dtype=dtype
+                    self.compute,
+                    final_reduction(masked_value),
+                    dtype=masked_value.dtype,
                 )
         else:
             accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)
@@ -3064,8 +3067,11 @@ class TritonKernel(SIMDKernel):
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
-        size_hints = []
-        for numel in self.numels.values():
+        size_hints = {}
+        for prefix, numel in self.numels.items():
+            if prefix_is_reduction(prefix) and not self.inside_reduction:
+                continue
+
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
@@ -3082,10 +3088,7 @@ class TritonKernel(SIMDKernel):
                 size_hint = 8192
             else:
                 size_hint = next_power_of_2(int(numel_hint))
-            size_hints.append(size_hint)
-
-        if not self.inside_reduction:
-            size_hints.pop()
+            size_hints[prefix] = size_hint
 
         if name is None:
             code.splice(gen_common_triton_imports())
@@ -3488,9 +3491,6 @@ class TritonKernel(SIMDKernel):
             if self._has_constant_mask(tree):
                 mask_vars.discard(f"{tree.prefix}mask")
 
-        # can be added as an override_mask
-        mask_vars.discard("None")
-
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -3638,7 +3638,7 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
+    def benchmark_fused_nodes(self, nodes):
         with preserve_rng_state(), torch.cuda.device(
             V.graph.get_current_device_or_throw()
         ):
@@ -3691,9 +3691,7 @@ class TritonScheduling(SIMDScheduling):
 
             launchers = wrapped_jit_function.launchers
             assert len(launchers) == 1
-            # n_spills does not necessarily mean it's not profitable to fuse,
-            # and sometimes it can be inaccurate
-            if launchers[0].n_spills > n_spills_threshold:
+            if launchers[0].n_spills > 0:
                 # skip benchmarking the kernel if there are register spills
                 ms = float("inf")
             else:
