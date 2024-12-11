@@ -217,7 +217,6 @@ def capture_pre_autograd_graph(
                 from torch.export._trace import _restore_state_dict
                 _restore_state_dict(f, m)
 
-            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
             combined_args = _combine_args(f, args, kwargs)
             range_constraints = make_constraints(
                 fake_mode,
@@ -373,6 +372,9 @@ def aot_load(so_path: str, device: str) -> Callable:
         runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
+    elif device == "xpu" or device.startswith("xpu:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
+
     else:
         raise RuntimeError("Unsupported device " + device)
 
