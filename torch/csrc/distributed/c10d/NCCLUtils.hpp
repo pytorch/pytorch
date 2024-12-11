@@ -208,43 +208,17 @@ TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
     std::optional<std::string> processGroupFailureReason = std::nullopt);
 
+using MutexType = std::recursive_mutex;
+using LockType = std::unique_lock<MutexType>;
+
 // RAII wrapper for NCCL communicator
 class NCCLComm {
-  using MutexType = std::recursive_mutex;
-  using LockType = std::unique_lock<MutexType>;
-
  public:
   explicit NCCLComm(ncclComm_t ncclComm);
 
   NCCLComm() = default;
 
   ~NCCLComm() noexcept;
-
-  static std::shared_ptr<NCCLComm> create(
-      int numRanks,
-      int rank,
-      ncclUniqueId commId,
-      at::DeviceIndex deviceIndex);
-
-#ifdef NCCL_HAS_COMM_NONBLOCKING
-  static std::shared_ptr<NCCLComm> create(
-      int numRanks,
-      int rank,
-      ncclUniqueId commId,
-      at::DeviceIndex deviceIndex,
-      ncclConfig_t& config);
-
-  static std::shared_ptr<NCCLComm> split(
-      NCCLComm* source,
-      int color_id,
-      int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
-#endif
-
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-  std::unordered_map<std::string, std::string> ncclCommDump();
-#endif
 
   ncclUniqueId getNcclId();
 
@@ -268,16 +242,6 @@ class NCCLComm {
 
   std::optional<std::string> getNcclCommFailureReason() const;
 
-  void abort(std::optional<std::string> commFailureReason = std::nullopt);
-
-  // Finalize a communicator -- asking it to flush its operations. When the
-  // communicator is marked as nonblocking, this is a nonblocking function;
-  // otherwise, it will block till all operations complete.
-  void finalize();
-
-  // Destroy a communicator. This is a blocking function.
-  void destroy();
-
   bool isInitialized() const;
 
   bool isAborted() const;
@@ -286,15 +250,10 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
-  ncclResult_t registerSegment(void* ptr, size_t size);
-
-  ncclResult_t deregisterSegment(void* ptr);
-
   std::string repr() const;
 
   friend class ProcessGroupNCCL;
 
- protected:
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_{};
   bool aborted_{false};
@@ -318,9 +277,40 @@ class NCCLComm {
   std::unordered_map<void*, void*> registeredSegmentHandles_;
 #endif
 
- private:
   ncclComm_t ncclComm_{nullptr};
 };
+
+// API signatures for `create`, `split`, `destroy`, etc communicator management.
+typedef struct {
+  const char* name;
+  std::shared_ptr<NCCLComm> (*create)(
+      int numRanks,
+      int rank,
+      ncclUniqueId commId,
+      at::DeviceIndex deviceIndex);
+  std::shared_ptr<NCCLComm> (*createWithConfig)(
+      int numRanks,
+      int rank,
+      ncclUniqueId commId,
+      at::DeviceIndex deviceIndex,
+      ncclConfig_t& config);
+  std::shared_ptr<NCCLComm> (*split)(
+      std::shared_ptr<NCCLComm>& source,
+      int color_id,
+      int rank,
+      ncclConfig_t& config,
+      std::vector<uint64_t>& ranks_ull);
+  void (*finalize)(std::shared_ptr<NCCLComm>& comm);
+  void (*destroy)(std::shared_ptr<NCCLComm>& comm);
+  void (*abort)(
+      std::shared_ptr<NCCLComm>& comm,
+      std::optional<std::string> commFailureReason);
+  void (*regMem)(std::shared_ptr<NCCLComm>&, void* ptr, size_t size);
+  void (*deregMem)(std::shared_ptr<NCCLComm>&, void* mhandle);
+  void (*dump)(
+      std::shared_ptr<NCCLComm>&,
+      std::unordered_map<std::string, std::string>& dump);
+} commImpl_t;
 
 // Helper that automatically cleans up premul sums.
 struct ncclRedOpRAII {

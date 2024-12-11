@@ -291,6 +291,12 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 
 } // namespace
 
+// Getting implementation of `create`, `split`, `destroy`, etc from somewhere
+// else. See `NCCLUtils.hpp` for function signatures. See `NCCLUtils.cpp` for a
+// default implementation. Extendable.
+extern commImpl_t defaultImpl;
+commImpl_t* impl = &defaultImpl;
+
 // Map from each communicator to its device index.
 // This map is used when register/deregister cache segments from cache
 // allocator. See design notes below:
@@ -321,7 +327,7 @@ static void cacheAllocatorRegisterHook(
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
-      ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+      impl->regMem(ncclComm, reinterpret_cast<void*>(te.addr_), te.size_);
     }
   }
 }
@@ -340,7 +346,7 @@ static void cacheAllocatorDeregisterHook(
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
-      ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+      impl->deregMem(ncclComm, reinterpret_cast<void*>(te.addr_));
     }
   }
 }
@@ -791,7 +797,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
   // Abort all communicators of this work
-  ncclComm_->abort();
+  impl->abort(ncclComm_, std::nullopt);
 
   ncclCommDevIdxMapMutex.lock();
   ncclCommDevIdxMap.erase(ncclComm_);
@@ -1108,8 +1114,8 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
     LOG(ERROR) << logPrefix()
                << "No parent communicator exists for nocolor split";
   }
-  NCCLComm::split(
-      comm.get(),
+  impl->split(
+      comm,
       NCCL_SPLIT_NOCOLOR,
       rank_,
       options_->config,
@@ -1154,8 +1160,10 @@ void ProcessGroupNCCL::registerMemPool(c10::cuda::MemPool* pool) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
-    ncclComm->registerSegment(
-        reinterpret_cast<void*>(segmentInfo.address), segmentInfo.total_size);
+    impl->regMem(
+        ncclComm,
+        reinterpret_cast<void*>(segmentInfo.address),
+        segmentInfo.total_size);
   }
 }
 
@@ -1181,7 +1189,7 @@ void ProcessGroupNCCL::deregisterMemPool(c10::cuda::MemPool* pool) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
-    ncclComm->deregisterSegment(reinterpret_cast<void*>(segmentInfo.address));
+    impl->deregMem(ncclComm, reinterpret_cast<void*>(segmentInfo.address));
   }
 }
 
@@ -1361,7 +1369,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
     VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
             << ncclComm->repr() << " on CUDA device: " << devName;
     // abort() call now has GPU guard inside
-    ncclComm->abort(abortReason);
+    impl->abort(ncclComm, abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
     // from the cache, it is possible that a new collective operation
@@ -1443,7 +1451,7 @@ void ProcessGroupNCCL::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
-      ncclComm->finalize();
+      impl->finalize(ncclComm);
     }
   }
   // Wait for all operations to complete.  If NCCL comm is non-blocking and
@@ -1473,7 +1481,7 @@ void ProcessGroupNCCL::shutdown() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto& it : devNCCLCommMap_) {
       auto& ncclComm = it.second;
-      ncclComm->destroy();
+      impl->destroy(ncclComm);
     }
   }
   LOG(INFO) << logPrefix() << "Destroy complete.";
@@ -2422,7 +2430,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   std::shared_ptr<NCCLComm>& ncclComm = devNCCLCommMap_[devNCCLCommMapKey];
   // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
   // destroyed, so using ncclCommAbort here.
-  ncclComm->abort();
+  impl->abort(ncclComm, std::nullopt);
   // Remove communicators from the cache.
   devNCCLCommMap_.erase(devNCCLCommMapKey);
   // Clear used device indices.
@@ -2540,8 +2548,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       if (parentComm != nullptr && !parentComm->isAborted()) {
         LOG(INFO) << logPrefix() << "Splitting NCCL communicator from "
                   << parentComm->repr();
-        ncclComm = NCCLComm::split(
-            parentComm.get(),
+        ncclComm = impl->split(
+            parentComm,
             options_->split_color,
             rank,
             options_->config,
@@ -2576,10 +2584,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     }
 
 #ifdef NCCL_HAS_COMM_NONBLOCKING
-    ncclComm =
-        NCCLComm::create(numRanks, rank, ncclID, deviceIndex, options_->config);
+    ncclComm = impl->createWithConfig(
+        numRanks, rank, ncclID, deviceIndex, options_->config);
 #else
-    ncclComm = NCCLComm::create(numRanks, rank, ncclID, deviceIndex);
+    ncclComm = impl->create(numRanks, rank, ncclID, deviceIndex);
 #endif
   }
 
@@ -2652,7 +2660,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         TORCH_INTERNAL_ASSERT(
             segmentInfo.device == device.index(),
             "Mismatch between CUDA memory segment device and current device");
-        ncclComm->registerSegment(
+        impl->regMem(
+            ncclComm,
             reinterpret_cast<void*>(segmentInfo.address),
             segmentInfo.total_size);
       }
