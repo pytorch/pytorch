@@ -10,6 +10,7 @@ _C = TypeVar("_C")
 # Sentinel used to indicate that cache lookup failed.
 _cache_sentinel = object()
 
+
 def cache_method(
     f: Callable[Concatenate[_C, _P], _T]
 ) -> Callable[Concatenate[_C, _P], _T]:
