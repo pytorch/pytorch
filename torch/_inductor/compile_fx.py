@@ -633,7 +633,7 @@ def _compile_fx_inner(
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
+                and is_gpu(input.device.type)
                 and i in static_input_idxs
             ):
                 input._is_inductor_static = True  # type: ignore[attr-defined]
