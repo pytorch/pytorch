@@ -679,9 +679,7 @@ class Mode(Enum):
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_static_shape(
-        sympy.sympify(query.get_size()[-1])
-    )
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     if mode == Mode.fwd:
@@ -960,10 +958,10 @@ def flex_attention(
         )
     kernel_options.setdefault(
         "QK_HEAD_DIM",
-        V.graph.sizevars.evaluate_static_shape(sympy.sympify(qk_head_dim)),
+        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
     )
     kernel_options.setdefault(
-        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(v_head_dim))
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
     )
 
     choices: List[Any] = []
@@ -2023,11 +2021,10 @@ def flex_attention_backward(*args, **kwargs):
             empty(0, device=query.get_device()) for _ in range(4)
         )
     kernel_options.setdefault(
-        "QK_HEAD_DIM",
-        V.graph.sizevars.evaluate_static_shape(sympy.sympify(qk_head_dim)),
+        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
     )
     kernel_options.setdefault(
-        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(v_head_dim))
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
     )
 
     # Should this just override the kernel options in the forward so we dont need to do it twice?
