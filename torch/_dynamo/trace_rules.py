@@ -2921,7 +2921,12 @@ def get_tensor_method():
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
         if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+            method,
+            (
+                types.MethodDescriptorType,
+                types.WrapperDescriptorType,
+                types.BuiltinFunctionType,
+            ),
         ):
             s.add(method)
 
