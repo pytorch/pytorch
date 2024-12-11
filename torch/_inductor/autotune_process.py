@@ -119,7 +119,7 @@ class TuningProcess:
         )
         try:
             TuningProcess.workloop(request_queue, response_queue)
-        except Exception as ex:
+        except Exception:
             log.exception("Exception in TuningProcess")
 
     @staticmethod
