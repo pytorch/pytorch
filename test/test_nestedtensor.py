@@ -8684,7 +8684,9 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b}
         # Create CachedTensor with source_fields="a"
-        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
+        cached_tensor = CachedTensor(
+            metadata, source_field="a", all_fields=("a", "b", "c")
+        )
         # Test that cached_tensor is created correctly
         self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
@@ -8696,7 +8698,9 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         self.assertIsNone(cached_tensor.c, c)
 
         # Create CachedTensor with source_field='b'
-        cached_tensor_b = CachedTensor(metadata, source_field="b", all_fields=("a", "b", "c"))
+        cached_tensor_b = CachedTensor(
+            metadata, source_field="b", all_fields=("a", "b", "c")
+        )
         self.assertEqual(cached_tensor_b.shape, b.shape)
         self.assertEqual(cached_tensor_b + 1, b + 1)
 
@@ -8718,7 +8722,9 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             b = torch.tensor([4, 5, 6], dtype=torch.float32)
             c = torch.tensor([7, 8, 9], dtype=torch.float32)
             metadata = {"a": a, "b": b, "c": c}
-            cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
+            cached_tensor = CachedTensor(
+                metadata, source_field="a", all_fields=("a", "b", "c")
+            )
 
             # Before registration, clone unwraps
             cloned_cached_tensor = cached_tensor.clone()
@@ -8760,7 +8766,9 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b, "c": c}
 
-        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
+        cached_tensor = CachedTensor(
+            metadata, source_field="a", all_fields=("a", "b", "c")
+        )
 
         @torch.compile
         def fn(x):
