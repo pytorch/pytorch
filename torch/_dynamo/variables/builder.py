@@ -2360,9 +2360,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             specialized_props["class_type"] = (
                 torch.nn.Parameter
                 if is_parameter
-                else torch.nn.Buffer
-                if is_buffer
-                else tensor_type
+                else torch.nn.Buffer if is_buffer else tensor_type
             )
 
         options.update(specialized_props)
@@ -3026,20 +3024,20 @@ class SourcelessBuilder:
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
-        handlers[
-            torch.distributions.constraints._Real
-        ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+        handlers[torch.distributions.constraints._Real] = (
+            lambda tx, value: UserDefinedObjectVariable(
+                value, mutation_type=ValueMutationNew()
+            )
         )
-        handlers[
-            torch.distributions.constraints._Interval
-        ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+        handlers[torch.distributions.constraints._Interval] = (
+            lambda tx, value: UserDefinedObjectVariable(
+                value, mutation_type=ValueMutationNew()
+            )
         )
-        handlers[
-            torch.distributions.constraints.Constraint
-        ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+        handlers[torch.distributions.constraints.Constraint] = (
+            lambda tx, value: UserDefinedObjectVariable(
+                value, mutation_type=ValueMutationNew()
+            )
         )
 
         def passthrough(tx: "InstructionTranslator", value):
