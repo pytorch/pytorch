@@ -105,8 +105,7 @@ class ExternalStream(Stream):
     .. note:: This class doesn't manage the queue life-cycle, it is the user
        responsibility to keep the referenced queue alive while this class is
        being used. The different SYCL queue pointers will result in distinct
-       ExternalStream objects, even if they reference the same underlying SYCL
-       queue object.
+       ExternalStream objects, even if the SYCL queues they dereference are equivalent.
 
     Args:
         queue_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
