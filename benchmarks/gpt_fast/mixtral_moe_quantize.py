@@ -132,7 +132,6 @@ class WeightOnlyInt8Linear(torch.nn.Module):
         target_dtype=None,
     ) -> None:
         assert target_dtype is not None
-        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
