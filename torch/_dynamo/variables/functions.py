@@ -365,9 +365,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         )
 
         code = self.vt.get_code()
-        state = "GEN_CREATED"
-        gi_frame = None
-        f_locals = None
         f_globals = self.vt.get_globals()
 
         # This seems super odd but it is to prevent Dynamo on Python 3.11+ to
@@ -380,9 +377,6 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         # calling a generator returns a generator object
         return GeneratorObjectVariable(
             code,
-            state,
-            gi_frame,
-            f_locals,
             f_globals,
             inline_tracer,
             source=self.source,
@@ -393,18 +387,12 @@ class GeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
         code: types.CodeType,
-        state: str,
-        gi_frame: Optional[types.FrameType],
-        f_locals,
         f_globals,
         inline_tracer: Optional["InstructionTranslator"],
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.code = code
-        self.state = state
-        self.gi_frame = gi_frame
-        self.f_locals = f_locals
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
 
@@ -447,22 +435,14 @@ class GeneratorObjectVariable(VariableTracker):
             self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
                 tx, self, [], {}
             )
-            # GEN_SUSPENDED means the generator is not new. Move the instruction
-            # pointer to the correct instruction
-            if self.state == "GEN_SUSPENDED":
-                assert self.gi_frame is not None
-                self.inline_tracer.instruction_pointer = self.gi_frame.f_lasti + 1
-
         return self.inline_tracer
 
     def _raise_if_generator_is_argument(self, tx):
         # We don't support generator as arguments if it takes any arguments
-        if (
-            isinstance(self.source, LocalSource)
-            and self.source.is_input
-            # TODO(guilherme): reconstruct locals for generator
-            and len(self.f_locals) > 0
-        ):
+        if isinstance(self.source, LocalSource) and self.source.is_input:
+            # if tx.inline_depth == 0:
+            #     # skip current frame
+            #     raise SkipFrame
             unimplemented("Generator as graph argument is not supported")
 
     def next_variable(self, tx):

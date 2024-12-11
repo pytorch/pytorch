@@ -196,22 +196,10 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo()
         next(ctx)
-        y = fn(t, ctx)
-        self.assertEqual(y, t + 2)
-        # self.assertEqual(len(eager.graphs), 0)
-        if True:
-            self.assertEqual(len(eager.graphs), 1)
-            self.assertExpectedInline(
-                normalize_gm(eager.graphs[0].print_readable(False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_t_: "f32[2]"):
-        l_t_ = L_t_
-
-        add: "f32[2]" = l_t_ + 2;  l_t_ = None
-        return (add,)
-""",
-            )
+        with self.assertRaisesRegex(
+            Unsupported, "Generator as graph argument is not supported"
+        ):
+            fn(t, ctx)
 
     def test_generator_as_argument_2(self):
         def whoo(x):
@@ -248,20 +236,10 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         ctx = whoo()
-        y = fn(t, ctx)
-        self.assertEqual(y, t + 1)
-        self.assertEqual(len(eager.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(eager.graphs[0].print_readable(False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_t_: "f32[2]"):
-        l_t_ = L_t_
-
-        add: "f32[2]" = l_t_ + 1;  l_t_ = None
-        return (add,)
-""",
-        )
+        with self.assertRaisesRegex(
+            Unsupported, "Generator as graph argument is not supported"
+        ):
+            fn(t, ctx)
 
     def test_generator_as_argument_4(self):
         def whoo(x):
