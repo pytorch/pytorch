@@ -106,6 +106,10 @@ if(HIP_FOUND)
   else() # Win32
     set(ROCM_LIB_NAME "HIP")
   endif()
+
+  # Declare supported archs for composable_kernel
+  set(CK_SUPPORTED_GFX_ARCHS "gfx90a,gfx942" CACHE STRING "GFX targets supported by CK")
+
   # Below we use a RegEx to find ROCM version numbers.
   # Note that CMake does not support \s for blank space. That is
   # why in the regular expressions below we have a blank space in

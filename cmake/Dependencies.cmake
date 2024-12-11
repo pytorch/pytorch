@@ -1050,6 +1050,7 @@ if(USE_ROCM)
     endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
+    add_definitions(-DCK_SUPPORTED_GFX_ARCHS=${CK_SUPPORTED_GFX_ARCHS})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
