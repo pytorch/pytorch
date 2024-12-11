@@ -4,6 +4,8 @@ import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
+import torch
+
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
@@ -449,8 +451,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
+        builder = torch._dynamo.variables.builder
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
