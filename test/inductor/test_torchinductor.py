@@ -11921,6 +11921,28 @@ class CommonTemplate:
         run(9)
         self.assertEqual(cnts.frame_count, 4)
 
+    def test_slice_after_split_dont_specialize_dynamic_dim(self):
+        N = 16
+
+        @torch.compile(backend="inductor", dynamic=False, fullgraph=True)
+        def fn(x):
+            # Creates an upper bound: x.shape[0] <= N
+            splits = torch.ops.aten.split.Tensor(x, N)
+            first = splits[0]
+            # Previously: creates a lower bound: x.shape[0] >= N
+            # Currenty: creates an upper bound: x.shape[0] <= N
+            #
+            # See: https://github.com/pytorch/pytorch/issues/141251
+            r = torch.ops.aten.slice.Tensor(first, 0, 0, N)
+            return r
+
+        x = torch.arange(N)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        # Check it doesn't error because we have specialized a dimension
+        # marked as dynamic.
+        fn(x)
+
 
 @dataclasses.dataclass
 class TestFailure:

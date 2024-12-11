@@ -226,7 +226,7 @@ class CommDebugMode(TorchDispatchMode):
     functional collectives within its context. It does this using a
     ``TorchDispatchMode``.
 
-    .. note: Not all collectives are supported yet.
+    .. note:: Not all collectives are supported yet.
 
     Example usage
 

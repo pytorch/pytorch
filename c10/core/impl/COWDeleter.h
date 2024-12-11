@@ -97,7 +97,7 @@ C10_API void set_error_on_conditional_view_warnings(bool mode);
 C10_API bool get_error_on_conditional_view_warnings();
 
 template <typename... Args>
-C10_API void alert_cowsim(const Args&... args) {
+void alert_cowsim(const Args&... args) {
   if (get_error_on_conditional_view_warnings()) {
     TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(false, args...);
   } else {
