@@ -332,8 +332,6 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
-        # input buffers which we are fusing into, which preserve a zero mask
-        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -709,12 +707,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-
-            xindex_range_root = self.range_trees[0].lookup(
+            self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
-            )
-            xindex_range_root.set_name("xindex")
-            xindex_expr = xindex_range_root.expr
+            ).set_name("xindex")
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
@@ -747,10 +742,9 @@ class TritonTemplateKernel(TritonKernel):
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessariliy be 0 any more
                         # so we need to reapply the mask.
-                        if template_mask == "None" or (
-                            name in V.kernel.prologue_fused_inputs_preserve_zero
-                            and other == 0
-                        ):
+                        # TODO: do analysis with value ranges if the prologue is 0 preserving, such as
+                        # type casting or multiplication, and omit reapplication of mask.
+                        if template_mask == "None":
                             V.kernel.compute.writeline(f"{output_name} = {value}")
                         else:
                             V.kernel.compute.writeline(
