@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo import disable
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.utils import counters, defake, flatten_graph_inputs
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
@@ -72,6 +73,8 @@ class AotAutograd:
                 cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg)
+        except TensorifyScalarRestartAnalysis:
+            raise
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise

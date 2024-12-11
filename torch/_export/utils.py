@@ -635,7 +635,16 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
         for node in body:
             new_node = gm.graph.node_copy(node)
             if node.op == "get_attr":
-                setattr(gm, node.target, getattr(sub_gm, node.target))
+                new_target_name = new_node.target
+                if hasattr(gm, new_target_name):
+                    # Loop through and find the "submod_{i}" that have no name collision
+                    i = 1
+                    new_target_name = f"submod_{i}"
+                    while hasattr(gm, new_target_name):
+                        i += 1
+                        new_target_name = f"submod_{i}"
+                new_node.target = new_target_name
+                setattr(gm, new_node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:
@@ -686,7 +695,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module):
 
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
-    ast_mod = ast.parse(mod.code)
+    ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
     ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
@@ -1027,10 +1036,10 @@ def _special_op_to_preserve_cia(*args, **kwargs):
 # 1. The op should be known statically that it is functional
 # 2. If it is maybe aliasing, we decompose because we must know if an op
 #    is mutating or aliasing.
-# TODO (tmanlaibaatar) make this utility function and share it with functional_tensor
-# decomp part. (https://github.com/pytorch/pytorch/issues/129431)
 def _check_valid_to_preserve(op_overload: "OperatorBase"):
-    if op_overload in FunctionalTensor.maybe_aliasing_or_mutating_ops:
+    from torch._decomp import _should_decompose_because_unsafe_op
+
+    if _should_decompose_because_unsafe_op(op_overload):
         return False
     if op_overload in FunctionalTensor.metadata_fns:
         return False

@@ -323,7 +323,7 @@ class CommonDistributedDataParallelTest:
         # Use this hack to remove files for that test
         try:
             os.remove(self.file_name)
-        except OSError:
+        except (OSError, AttributeError):
             pass
 
     @property

@@ -106,8 +106,7 @@ convolution_batch_rule(const Tensor& lhs, std::optional<int64_t> lhs_bdim, const
     result = std::make_tuple(at::convolution_symint(lhs, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups), std::nullopt);
   }
   if (separate_bias) {
-    auto A = std::get<0>(result);
-    auto A_batch_dim = std::get<1>(result);
+    auto& [A, A_batch_dim] = result;
     auto B = *bias;
     auto B_batch_dim = bias_bdim;
     A = moveBatchDimToFront(A, A_batch_dim);
@@ -273,12 +272,12 @@ convolution_backward_weight_batch_rule(
       const auto grad_output_ = reshape_dim_into(*grad_output_bdim, 1, grad_output);
       const auto out_ch_dim = transposed ? 1 : 0;
       const auto dummy_weight = make_dummy(weight, weight_bdim, out_ch_dim, batch_size);
-      const auto result = at::convolution_backward_symint(
+      auto result = at::convolution_backward_symint(
           grad_output_, input, dummy_weight, std::nullopt, stride, padding,
           dilation, transposed, output_padding, groups, mask);
-      auto grad_weight = std::get<1>(result);
+      auto& grad_weight = std::get<1>(result);
       grad_weight = reshape_dim_outof_symint(out_ch_dim, batch_size, grad_weight);
-      return std::make_tuple(grad_weight, out_ch_dim);
+      return std::make_tuple(std::move(grad_weight), out_ch_dim);
     } else {
       auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim); // BN(GO)
       grad_output_ = reshape_dim_outof_symint(2, groups, grad_output_);              // BNGO
@@ -287,23 +286,23 @@ convolution_backward_weight_batch_rule(
       if (!transposed) {
         // BN(GO), N(GI) -> N(GBO), N(GI) -> (GBO)I
         const auto dummy_weight = make_dummy(weight, weight_bdim, 0, batch_size);
-        const auto result = at::convolution_backward_symint(
+        auto result = at::convolution_backward_symint(
             grad_output_, input, dummy_weight, std::nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
-        auto grad_weight = std::get<1>(result);
+        auto& grad_weight = std::get<1>(result);
         grad_weight = grad_weight.unflatten_symint(0, { groups, batch_size, -1 }); // GBOI
         grad_weight = grad_weight.transpose(0, 1);                          // BGOI
         grad_weight = grad_weight.flatten(1, 2);                            // B(GO)I
-        return std::make_tuple(grad_weight, 0);
+        return std::make_tuple(std::move(grad_weight), 0);
       } else {
         // BN(GO), N(GI) -> N(GBO), N(GI) -> (GI)(BO)
         const auto dummy_weight = make_dummy(weight, weight_bdim, 1, batch_size);
-        const auto result = at::convolution_backward_symint(
+        auto result = at::convolution_backward_symint(
             grad_output_, input, dummy_weight, std::nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
-        auto grad_weight = std::get<1>(result);
+        auto& grad_weight = std::get<1>(result);
         grad_weight = reshape_dim_outof_symint(1, batch_size, grad_weight);
-        return std::make_tuple(grad_weight, 1);
+        return std::make_tuple(std::move(grad_weight), 1);
       }
     }
   } else if (!grad_output_bdim && input_bdim) {
@@ -314,12 +313,12 @@ convolution_backward_weight_batch_rule(
       const auto input_ = reshape_dim_into(*input_bdim, 1, input);
       const auto in_ch_dim = transposed ? 0 : 1;
       const auto dummy_weight = make_dummy(weight, weight_bdim, in_ch_dim, batch_size);
-      const auto result = at::convolution_backward_symint(
+      auto result = at::convolution_backward_symint(
           grad_output, input_, dummy_weight, std::nullopt, stride, padding,
           dilation, transposed, output_padding, groups, mask);
-      auto grad_weight = std::get<1>(result);
+      auto& grad_weight = std::get<1>(result);
       grad_weight = reshape_dim_outof_symint(in_ch_dim, batch_size, grad_weight);
-      return std::make_tuple(grad_weight, in_ch_dim);
+      return std::make_tuple(std::move(grad_weight), in_ch_dim);
     } else {
       auto input_ = moveBatchDimToFront(input, input_bdim); // BN(GI)
       input_ = reshape_dim_outof_symint(2, groups, input_);        // BNGI
@@ -337,23 +336,23 @@ convolution_backward_weight_batch_rule(
       } else {
         // transposed: N(GO), BN(GI) -> N(GO), N(GBI) -> (GBI)O
         const auto dummy_weight = make_dummy(weight, weight_bdim, 0, batch_size);
-        const auto result = at::convolution_backward_symint(
+        auto result = at::convolution_backward_symint(
             grad_output, input_, dummy_weight, std::nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
-        auto grad_weight = std::get<1>(result);
+        auto& grad_weight = std::get<1>(result);
         grad_weight = grad_weight.unflatten_symint(0, { groups, batch_size, -1 }); // GBIO
         grad_weight = grad_weight.transpose(0, 1);                          // BGIO
         grad_weight = grad_weight.flatten(1, 2);                            // B(GI)O
-        return std::make_tuple(grad_weight, 0);
+        return std::make_tuple(std::move(grad_weight), 0);
       }
     }
   } else {
     TORCH_INTERNAL_ASSERT(weight_bdim);
     const auto dummy_weight = make_dummy(weight, weight_bdim, 0, 1);
-    const auto result = at::convolution_backward_symint(
+    auto result = at::convolution_backward_symint(
         grad_output, input, dummy_weight, std::nullopt, stride, padding,
         dilation, transposed, output_padding, groups, mask);
-    return std::make_tuple(std::get<1>(result), std::nullopt);
+    return std::make_tuple(std::move(std::get<1>(result)), std::nullopt);
 
   }
 }
@@ -424,7 +423,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   Tensor grad_input;
   if (output_mask[0]) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    const auto result = convolution_backward_input_batch_rule(
+    auto result = convolution_backward_input_batch_rule(
         grad_output, grad_output_bdim,
         input, input_bdim,
         weight, weight_bdim,

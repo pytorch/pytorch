@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 import os
 import pickle
+from unittest.mock import patch
 
 
 os.environ["ENV_TRUE"] = "1"
@@ -10,7 +11,7 @@ from typing import Optional
 
 from torch.testing._internal import fake_config_module as config
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._config_module import _UNSET_SENTINEL
+from torch.utils._config_module import _UNSET_SENTINEL, Config
 
 
 class TestConfigModule(TestCase):
@@ -319,6 +320,21 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         self.assertFalse(config.e_bool)
         revert()
         self.assertTrue(config.e_bool)
+
+    def test_unittest_patch(self):
+        with patch("torch.testing._internal.fake_config_module.e_bool", False):
+            with patch("torch.testing._internal.fake_config_module.e_bool", False):
+                self.assertFalse(config.e_bool)
+            # unittest.mock has some very weird semantics around deletion of attributes when undoing patches
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+
+    def test_bad_jk_type(self):
+        with self.assertRaises(
+            AssertionError,
+            msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
+        ):
+            Config(default="bad", justknob="fake_knob")
 
 
 if __name__ == "__main__":

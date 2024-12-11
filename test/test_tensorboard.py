@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_CROSSREF,
     TestCase,
+    xfailIfS390X,
     skipIfTorchDynamo,
 )
 
@@ -410,6 +411,7 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
     @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
+    @xfailIfS390X
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 

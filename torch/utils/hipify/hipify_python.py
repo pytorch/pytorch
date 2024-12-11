@@ -1149,14 +1149,12 @@ def hipify(
             header_include_dir_path = Path(header_include_dir)
         else:
             header_include_dir_path = Path(os.path.join(output_directory, header_include_dir))
-        for path in header_include_dir_path.rglob('*'):
-            if (
-                path.is_file()
-                and _fnmatch(str(path), includes)
-                and (not _fnmatch(str(path), ignores))
-                and match_extensions(path.name, header_extensions)
-            ):
-                all_files.append(str(path))
+        all_files.extend(
+            str(path) for path in header_include_dir_path.rglob('*') if path.is_file()
+            and _fnmatch(str(path), includes)
+            and (not _fnmatch(str(path), ignores))
+            and match_extensions(path.name, header_extensions)
+        )
 
     if clean_ctx is None:
         clean_ctx = GeneratedFileCleaner(keep_intermediates=True)

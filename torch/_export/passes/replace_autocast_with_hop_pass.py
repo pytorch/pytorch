@@ -114,15 +114,16 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
     def node_call_back(node: torch.fx.Node):
         nonlocal enter_autocast_node_stack, first_node_after_outer_most_exit
+        increment_id = False
         if first_node_after_outer_most_exit or (
             len(enter_autocast_node_stack) == 0 and _is_enter_autocast_node(node)
         ):
             assert len(enter_autocast_node_stack) == 0
             first_node_after_outer_most_exit = False
-            if _is_enter_autocast_node(node):
-                enter_autocast_node_stack.append(node)
-            return True
-        if _is_exit_autocast_node(node):
+            increment_id = True
+        if _is_enter_autocast_node(node):
+            enter_autocast_node_stack.append(node)
+        elif _is_exit_autocast_node(node):
             assert len(enter_autocast_node_stack) > 0
             last_enter_autocast_node = enter_autocast_node_stack.pop()
             assert node.args[0] == last_enter_autocast_node
@@ -130,7 +131,7 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 # next node should be in the next submodule since
                 # autocast block ends
                 first_node_after_outer_most_exit = True
-        return False
+        return increment_id
 
     return sequential_split(gm, node_call_back)
 

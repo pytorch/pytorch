@@ -95,9 +95,7 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            for inp in example:
-                if isinstance(inp, torch.Tensor):
-                    results.append(inp.grad)
+            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)
@@ -192,7 +190,11 @@ def debug_insert_nops(
         torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
+    return GuardedCode(
+        code,
+        CheckFunctionManager(graph).guard_manager,  # type: ignore[arg-type]
+        CompileId(frame_id=0, frame_compile_id=0),
+    )
 
 
 class CompileCounter:

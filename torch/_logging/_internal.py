@@ -1162,7 +1162,13 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert "name" not in [
+        "rank",
+        "compiled_autograd_id",
+        "frame_id",
+        "frame_compile_id",
+        "attempt",
+    ]
     assert callable(
         metadata_fn
     ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
@@ -1184,6 +1190,9 @@ def trace_structured(
             if (
                 trace_id := torch._guards.CompileContext.current_trace_id()
             ) is not None:
+                record[
+                    "compiled_autograd_id"
+                ] = trace_id.compile_id.compiled_autograd_id
                 record["frame_id"] = trace_id.compile_id.frame_id
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
