@@ -16,7 +16,7 @@ import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
-from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
+from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once, set_feature_use
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
 
@@ -559,6 +559,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
+        set_feature_use("pytorch/remote_cache:dynamo_pgo_version", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
