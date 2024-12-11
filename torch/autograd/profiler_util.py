@@ -690,19 +690,22 @@ class FunctionEventAvg(FormattedTimesMixin):
 
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
-        self.cpu_time_total += other.cpu_time_total
-        self.device_time_total += other.device_time_total
-        self.self_cpu_time_total += other.self_cpu_time_total
-        self.self_device_time_total += other.self_device_time_total
-        self.cpu_memory_usage += other.cpu_memory_usage
-        self.device_memory_usage += other.device_memory_usage
-        self.self_cpu_memory_usage += other.self_cpu_memory_usage
-        self.self_device_memory_usage += other.self_device_memory_usage
-        self.count += other.count
-        if self.flops is None:
-            self.flops = other.flops
-        elif other.flops is not None:
-            self.flops += other.flops
+
+        # Parent nodes already include child totals
+        if self.cpu_children is None or other not in self.cpu_children:
+            self.cpu_time_total += other.cpu_time_total
+            self.device_time_total += other.device_time_total
+            self.self_cpu_time_total += other.self_cpu_time_total
+            self.self_device_time_total += other.self_device_time_total
+            self.cpu_memory_usage += other.cpu_memory_usage
+            self.device_memory_usage += other.device_memory_usage
+            self.self_cpu_memory_usage += other.self_cpu_memory_usage
+            self.self_device_memory_usage += other.self_device_memory_usage
+            self.count += other.count
+            if self.flops is None:
+                self.flops = other.flops
+            elif other.flops is not None:
+                self.flops += other.flops
         return self
 
     def __iadd__(self, other):
