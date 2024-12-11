@@ -4378,7 +4378,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = func(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            if not torch.compiler.is_compiling:  # if not using torch dynamo
+            if not torch.compiler.is_compiling():  # if not using torch dynamo
                 self.assertEqual(len(out.shape), len(ref_shape))
                 for o, r in zip(out.shape, ref_shape):
                     if r is not None:
@@ -8172,13 +8172,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: (sample.input._lengths is not None),
         name="rms_norm_noncontig_holes_ragged_dim_reduction",
     ),
-    # uses fill_ which isn't implemented
-    XFailRule(
-        error_type=NotImplementedError,
-        op_match_fn=lambda device, op: (op.full_name == "atanh"),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="atanh_unimplemented_fill",
-    ),
     # expected: autodiff on complex dtype is not supported
     XFailRule(
         error_type=RuntimeError,
@@ -8274,20 +8267,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name == "isreal"),
         sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
         name="crazy_aot_autograd_bug2",
-    ),
-    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
-    # for these activation ops
-    XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="non-strided meta tensors not supported yet",
-        op_match_fn=lambda device, op: (
-            op.full_name
-            in {
-                "nn.functional.hardshrink",
-                "nn.functional.softshrink",
-            }
-        ),
-        name="empty_with_jagged_layout_activation",
     ),
 ]
 
