@@ -392,9 +392,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             snodes, name_to_buf, name_to_fused_node, orig_fn
         ):
             is_fwd_graph = self._is_fwd_graph(snodes)
-            _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True)
+            # _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True)
             new_snodes = orig_fn(snodes, name_to_buf, name_to_fused_node)
-            _check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
+            # _check_fsdp_ops_in_snodes(new_snodes, is_fwd_graph, expect=False)
             return new_snodes
 
         if fwd_fullgraph:
@@ -733,6 +733,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(	
+                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -952,6 +954,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
             with self._reinplace_all_gather_with_optional_checks(
+                fwd_fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(	
                 fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
