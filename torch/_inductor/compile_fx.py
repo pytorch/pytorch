@@ -52,7 +52,11 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
-from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
+from torch._functorch.aot_autograd import (
+    aot_export_module,
+    make_boxed_func,
+    SerializableAOTDispatchCompiler,
+)
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -86,6 +90,7 @@ from torch.utils._ordered_set import OrderedSet
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
+from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
@@ -967,6 +972,7 @@ class _InProcessFxCompile(FxCompile):
                     const_output_index=const_output_index,
                     const_code=const_code,
                     const_module=const_graph,
+                    inputs_to_check=inputs_to_check,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
                 with V.set_graph_handler(graph):
@@ -1482,7 +1488,7 @@ def get_cpp_wrapper_config() -> Dict[str, object]:
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
         "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
         if config.triton.autotune_at_compile_time is not None
-        else True,
+        else has_triton(),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
@@ -1663,20 +1669,20 @@ def compile_fx(
         )
 
         def fw_compiler_base(
-            model: GraphModule,
-            example_inputs: List[InputType],
+            gm: GraphModule,
+            example_inputs: Sequence[InputType],
             is_inference: bool,
         ) -> OutputCode:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 if is_inference:
                     # partition_fn won't be called
-                    _recursive_joint_graph_passes(model)
+                    _recursive_joint_graph_passes(gm)
 
                 fixed = torch._inductor.utils.num_fw_fixed_arguments(
                     num_example_inputs, len(example_inputs)
                 )
 
-                model_outputs_node = output_node(model)
+                model_outputs_node = output_node(gm)
                 if config.keep_output_stride:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                     num_model_outputs = len(model_outputs)
@@ -1733,7 +1739,7 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 return inner_compile(
-                    model,
+                    gm,
                     example_inputs,
                     static_input_idxs=get_static_input_idxs(fixed),
                     cudagraphs=cudagraphs,
@@ -1742,7 +1748,10 @@ def compile_fx(
                     boxed_forward_device_index=forward_device,
                 )
 
-        fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler: Callable[
+            [GraphModule, Sequence[InputType]], OutputCode
+        ] = functools.partial(fw_compiler_base, is_inference=False)
+        fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
         if config.freezing and not torch.is_grad_enabled():
             inference_compiler: Callable[..., Any] = functools.partial(
@@ -1756,6 +1765,9 @@ def compile_fx(
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
+            inference_compiler = SerializableAOTDispatchCompiler(
+                OutputCode, inference_compiler
+            )
 
         def partition_fn(
             gm: GraphModule,
@@ -1771,14 +1783,14 @@ def compile_fx(
 
         @compile_time_strobelight_meta(phase_name="backward")
         def bw_compiler(
-            model: GraphModule, example_inputs: List[InputType]
+            gm: GraphModule, example_inputs: Sequence[InputType]
         ) -> OutputCode:
             from torch._dynamo.convert_frame import compile_lock
 
             with dynamo_utils.dynamo_timed(
                 "compile_fx.<locals>.bw_compiler"
             ), compile_lock:
-                model_outputs_node = output_node(model)
+                model_outputs_node = output_node(gm)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                     model_outputs_node.meta["user_visible_output_idxs"] = [
@@ -1789,12 +1801,12 @@ def compile_fx(
                 else:
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
-                fixed = count_tangents(model)
+                fixed = count_tangents(gm)
                 with config.patch(
                     get_cpp_wrapper_config()
                 ) if config.cpp_wrapper else contextlib.nullcontext():
                     return inner_compile(
-                        model,
+                        gm,
                         example_inputs,
                         static_input_idxs=list(range(fixed)),
                         cudagraphs=cudagraphs,
@@ -1802,6 +1814,8 @@ def compile_fx(
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
                     )
+
+        bw_compiler = SerializableAOTDispatchCompiler(OutputCode, bw_compiler)
 
         fake_mode = detect_fake_mode(
             example_inputs_
@@ -1952,3 +1966,79 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(node.get_device())
+
+
+def _aoti_flatten_inputs(
+    gm: torch.fx.GraphModule,
+    args: Union[List[Any], Tuple[Any, ...]],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    options: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    """
+    Flatten the inputs to the graph module and return the flat inputs and options.
+    Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.
+    """
+    from .compile_fx import graph_returns_tuple
+
+    assert graph_returns_tuple(gm), (
+        "Graph output must be a tuple(). This is so that we can avoid "
+        "pytree processing of the outputs. Please change the module to "
+        "have tuple outputs."
+    )
+
+    # We will serialize the pytree info into the .so as constant strings
+    in_spec = None
+    out_spec = None
+    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        codegen = gm.graph._codegen
+        gm.graph._codegen = torch.fx.graph.CodeGen()
+        gm.recompile()
+
+        if codegen.pytree_info.in_spec is not None:
+            in_spec = codegen.pytree_info.in_spec
+        if codegen.pytree_info.out_spec is not None:
+            out_spec = codegen.pytree_info.out_spec
+
+    else:
+        if hasattr(gm, "_in_spec"):
+            in_spec = gm._in_spec
+        if hasattr(gm, "_out_spec"):
+            out_spec = gm._out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
+    serialized_out_spec = (
+        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
+    )
+
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, kwargs or {})
+    )
+
+    # Replace non-tensor (constant) inputs with Nones, since these are not being
+    # used anyways by the graph
+    flat_example_inputs = [
+        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
+    ]
+
+    if in_spec is not None and received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
+    return flat_example_inputs, options

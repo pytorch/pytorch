@@ -982,7 +982,7 @@ else:
         # assume valid device types are all letters
         if device_type and not device_type.isalpha():
             raise RuntimeError(
-                f"Device type with GPU index is not supported but got {device_type}. ",
+                f"Device type with index is not supported but got {device_type}. ",
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
