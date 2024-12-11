@@ -1900,12 +1900,14 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: Dict[str, str] = {}
 
-        # Must run first before compute_dependencies
+        # Must run first to correctly set dependencies, before all other passes that rely on
+        # reading from .read_writes.reads or .unmet_dependencies
         self.nodes = comms.decide_global_ordering_of_comms(
             self.nodes,
             self.name_to_buf,
             self.name_to_fused_node,
         )
+
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
