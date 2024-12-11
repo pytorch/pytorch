@@ -22,10 +22,7 @@ fi
 python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
 
 # Set up Python
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  retry conda create -qyn testenv python="$DESIRED_PYTHON"
-  source activate testenv >/dev/null
-elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
+if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
   if [[ "\$python_nodot" = *t ]]; then
     python_digits="\$(echo $DESIRED_PYTHON | tr -cd [:digit:])"
@@ -58,9 +55,6 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 # Install the package
 # These network calls should not have 'retry's because they are installing
 # locally and aren't actually network calls
-# TODO there is duplicated and inconsistent test-python-env setup across this
-#   file, builder/smoke_test.sh, and builder/run_tests.sh, and also in the
-#   conda build scripts themselves. These should really be consolidated
 # Pick only one package of multiple available (which happens as result of workflow re-runs)
 pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
 if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
@@ -69,30 +63,7 @@ else
     CHANNEL="test"
 fi
 
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  (
-    # For some reason conda likes to re-activate the conda environment when attempting this install
-    # which means that a deactivate is run and some variables might not exist when that happens,
-    # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
-    # it comes to the conda installation commands
-    set +u
-    retry conda install \${EXTRA_CONDA_FLAGS} -yq \
-      "numpy\${NUMPY_PIN}" \
-      mkl>=2018 \
-      ninja \
-      sympy>=1.12 \
-      typing-extensions \
-      ${PROTOBUF_PACKAGE}
-    if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
-      retry conda install -c pytorch -y cpuonly
-    else
-      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE="pytorch-cuda"
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "pytorch-\${CHANNEL}" "pytorch-cuda=\${cu_ver}"
-    fi
-    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
-  )
-elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
+if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
     if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
       pkg_no_python="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
@@ -116,15 +87,13 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
 fi
 
 # Test the package
-/builder/check_binary.sh
+/pytorch/.ci/pytorch/check_binary.sh
 
 if [[ "\$GPU_ARCH_TYPE" != *s390x* && "\$GPU_ARCH_TYPE" != *xpu* && "\$GPU_ARCH_TYPE" != *rocm*  && "$PACKAGE_TYPE" != libtorch ]]; then
   # Exclude s390, xpu, rocm and libtorch builds from smoke testing
-  python /builder/test/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
+  python /pytorch/.ci/pytorch/smoke_test/smoke_test.py --package=torchonly --torch-compile-check disabled
 fi
 
-# Clean temp files
-cd /builder && git clean -ffdx
 
 # =================== The above code will be executed inside Docker container ===================
 EOL
