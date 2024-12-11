@@ -390,6 +390,9 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(FloatType::get());
   } else if (PyComplex_CheckExact(input.ptr())) {
     return InferredType(ComplexType::get());
+  } else if (py::isinstance<py::bytes>(input)) {
+    // NOTE: We may need a ByteType in the future
+    return InferredType(StringType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -635,7 +638,7 @@ inline InferredType tryToInferContainerType(
       // used from a bunch of circumstances unrelated to tracing. We can re-use
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
-          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",
           "are supported ",
           "as inputs or outputs of traced functions",
           ", but instead got value of type ",

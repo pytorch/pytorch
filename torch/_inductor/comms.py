@@ -231,6 +231,9 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
+    if not torch.distributed.is_available():
+        return nodes
+
     # If FSDP2 is used, we apply FSDP-specific passes.
     if any(
         is_fallback_op(
@@ -536,7 +539,7 @@ Graph: {graph}
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
-        import torch.distributed._composable.fsdp._fsdp_collectives
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         assert torch.distributed.is_available()
         # Assert existence of these ops
