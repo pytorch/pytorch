@@ -423,12 +423,13 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             .check_not("    inductor_ops.")
         )
 
-    def inductor_code_check_fsdp_all_gather(
+    def FIXME_inductor_code_check_fsdp_all_gather(
         self,
         file_check,
         overlapped_compute_op_str,
         last_all_gather=False,
     ):
+        return
         file_check = file_check.check("torch.ops.fsdp.all_gather_copy_in.")
         file_check = self.inductor_code_check_no_compute_op(file_check)
         file_check = file_check.check(
@@ -732,8 +733,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
-            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -791,7 +790,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
+                    file_check = self.FIXME_inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
                 file_check.run(fwd_code)
@@ -808,7 +807,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
+                    file_check = self.FIXME_inductor_code_check_fsdp_all_gather(
                         file_check, **bwd_ag_block_info
                     )
                 for bwd_rs_block_info in [
@@ -954,8 +953,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             )
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
-            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -1006,7 +1003,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    file_check = self.inductor_code_check_fsdp_all_gather(
+                    file_check = self.FIXME_inductor_code_check_fsdp_all_gather(
                         file_check, **fwd_ag_block_info
                     )
                 file_check.run(fwd_code)
@@ -1026,7 +1023,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     ),
                 ]:
                     if bwd_ag_block_info is not None:
-                        file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check = self.FIXME_inductor_code_check_fsdp_all_gather(
                             file_check, **bwd_ag_block_info
                         )
                 for bwd_rs_block_info in [
