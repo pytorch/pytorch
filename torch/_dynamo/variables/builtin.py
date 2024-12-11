@@ -9,7 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView, MutableMapping
+from collections.abc import KeysView
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
@@ -1394,28 +1394,18 @@ class BuiltinVariable(VariableTracker):
                 return ConstDictVariable(
                     items, user_cls, mutation_type=ValueMutationNew()
                 )
-            elif hasattr(arg, "value") and isinstance(arg.value, MutableMapping):
-                # This handles all other `MutableMapping` instances; for
-                # example, TensorDict which derives from MutableMapping.
-                #
-                # TODO(#142414) `hasattr(arg, 'value')` is a local workaround
-                # for lack of generall multiple inheritance in Dynamo. We can't
-                # use `isinstance(arg, MutableMappingVariable)` here because
-                # `arg` could be, e.g., a `UnspecializedNNModuleVariable` when
-                # `arg.value` has multiple inheritace.
+            elif isinstance(arg, variables.MutableMappingVariable):
+                # This is applicable for user defined objects which seem like dict, but are not really dicts. For
+                # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
+                # method and create a new dict.
                 if does_not_override_dict_iter_methods(type(arg.value)):
-                    # In this case, `arg.value.items()` uses the default impls,
-                    # which are implemented in C and cannot be traced, so we
-                    # will have to manually construct the items. This is safe
-                    # because we know they are side-effect free.
-                    #
-                    # Mutation tracked by Dynamo isn't reflected in `arg.value`,
-                    # so we can't handle such cases by just calling
-                    # `arg.value.items()`
+                    # These are implemeted in C, so we will have to manually construct the items
+
                     if tx.output.side_effects.has_pending_mutation(arg):
                         unimplemented(
                             f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
                         )
+
                     new_dict = dict(arg.value.items())
                     return VariableTracker.build(tx, new_dict)
                 else:
