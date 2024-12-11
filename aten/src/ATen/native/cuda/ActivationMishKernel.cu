@@ -58,7 +58,7 @@ void mish_backward_kernel(TensorIterator& iter) {
 }
 } // namespace
 
-REGISTER_DISPATCH(mish_stub, &mish_kernel);
-REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
+REGISTER_DISPATCH(mish_stub, &mish_kernel)
+REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel)
 
 } // namespace at::native

@@ -6,9 +6,7 @@
 
 #if AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace onednn {
+namespace at::native::onednn {
 
 const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"none", ideep::attr_t()},
@@ -92,8 +90,6 @@ class OnednnConvOpContext final : public ConvOpContext {
       const ideep::attr_t& attr);
 };
 
-} // namespace onednn
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED()

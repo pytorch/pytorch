@@ -5,14 +5,9 @@
 
 #include <torch/csrc/Export.h>
 
-#include <string>
-
 #include <cmath>
 
-#include <iostream>
-
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API ReduceLROnPlateauScheduler {
  public:
@@ -37,28 +32,28 @@ class TORCH_API ReduceLROnPlateauScheduler {
  private:
   void reset();
   void reduce_lr(int epoch);
-  bool in_cooldown();
+  bool in_cooldown() const;
   bool is_better(float a);
   void init_is_better(
       SchedulerMode mode,
       double threshold,
       ThresholdMode threshold_mode);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   Optimizer& optimizer;
-  SchedulerMode mode;
-  float mode_worse;
+  SchedulerMode mode{};
+  float mode_worse{};
   float factor;
   int patience;
-  double threshold;
-  ThresholdMode threshold_mode;
-  int cooldown;
-  int cooldown_counter;
+  double threshold{};
+  ThresholdMode threshold_mode{};
+  int cooldown{};
+  int cooldown_counter{};
   std::vector<float> min_lrs;
   double eps;
-  float best;
+  float best{};
   bool verbose;
-  int last_epoch;
-  int num_bad_epochs;
+  int last_epoch{};
+  int num_bad_epochs{};
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

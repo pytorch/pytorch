@@ -113,8 +113,7 @@ class Freezer:
         # S: skipped (not a package dir)
         # X: skipped (deny-listed)
         # N: skipped (not a python file)
-        for i in range(self.indent):
-            print("    ", end="")
+        print("    " * self.indent, end="")
         print(f"{code} {path}")
 
     def write_bytecode(self, install_root):
