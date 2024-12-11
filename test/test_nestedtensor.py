@@ -8682,19 +8682,21 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         a = torch.tensor([1, 2, 3], dtype=torch.float32)
         b = torch.tensor([4, 5, 6], dtype=torch.float32)
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
-        metadata = {"a": a, "b": b, "c": c}
+        metadata = {"a": a, "b": b}
         # Create CachedTensor with source_fields="a"
-        cached_tensor = CachedTensor(metadata, source_field="a")
+        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
         # Test that cached_tensor is created correctly
         self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
         self.assertEqual(cached_tensor.shape, a.shape)
         # Test that cached_tensor behaves like 'a'
         self.assertEqual(cached_tensor + 1, a + 1)
-        # Test that accessing other fields works
-        self.assertIs(cached_tensor.c, c)
+        # Accessing a field that is listed in all_fields but not present in metadata returns
+        # None instead of raising AttributeError.
+        self.assertIsNone(cached_tensor.c, c)
+
         # Create CachedTensor with source_field='b'
-        cached_tensor_b = CachedTensor(metadata, source_field="b")
+        cached_tensor_b = CachedTensor(metadata, source_field="b", all_fields=("a", "b", "c"))
         self.assertEqual(cached_tensor_b.shape, b.shape)
         self.assertEqual(cached_tensor_b + 1, b + 1)
 
@@ -8716,7 +8718,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             b = torch.tensor([4, 5, 6], dtype=torch.float32)
             c = torch.tensor([7, 8, 9], dtype=torch.float32)
             metadata = {"a": a, "b": b, "c": c}
-            cached_tensor = CachedTensor(metadata, source_field="a")
+            cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
 
             # Before registration, clone unwraps
             cloned_cached_tensor = cached_tensor.clone()
@@ -8732,6 +8734,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
                 return CachedTensor(
                     cloned_metadata,
                     inp.source_field,
+                    inp.all_fields,
                 )
 
             cloned_cached_tensor = cached_tensor.clone()
@@ -8757,7 +8760,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b, "c": c}
 
-        cached_tensor = CachedTensor(metadata, source_field="a")
+        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
 
         @torch.compile
         def fn(x):
