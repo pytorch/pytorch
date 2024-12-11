@@ -719,7 +719,7 @@ def _get_updated_module_call_graph(
     provenance: Dict[str, str] = {}
     for node in gm.graph.nodes:
         if history := node.meta.get("from_node", []):
-            provenance[history[-1][0]] = node.name
+            provenance[history[-1].name] = node.name
 
     # map old names to new names in module call signatures
     for entry in new_module_call_graph:
