@@ -52,8 +52,7 @@ Tensor& onednn_mul_(Tensor& self, const Tensor& other) {
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   if (!self.requires_grad() && !other.requires_grad()) {
@@ -155,7 +154,6 @@ Tensor& onednn_mul_(Tensor& self, const Tensor& other) {
   return native::onednn_mul_out(self, other, self);
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

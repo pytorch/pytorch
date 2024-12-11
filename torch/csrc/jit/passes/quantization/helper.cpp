@@ -5,8 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -706,7 +705,7 @@ static bool is_module(
     return module_name.value() == module_qualified_name;
   }
   return false;
-};
+}
 
 bool aten_add_alpha_is_one(
     const Match& match,
@@ -795,5 +794,4 @@ bool is_batchnorm3d_module(
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

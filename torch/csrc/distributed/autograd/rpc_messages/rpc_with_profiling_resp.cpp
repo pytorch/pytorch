@@ -116,7 +116,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   rpc::MessageType wrappedMsgType =
       static_cast<rpc::MessageType>(tupleElements[0].toInt());
   rpc::ProfilingId profilingId = rpc::ProfilingId::fromIValue(tupleElements[1]);
-  int profiledEventsSize = tupleElements[2].toInt();
+  auto profiledEventsSize = tupleElements[2].toInt();
   std::vector<torch::autograd::profiler::LegacyEvent> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
   for (const auto i : c10::irange(
