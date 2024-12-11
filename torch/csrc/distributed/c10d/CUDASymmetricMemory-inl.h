@@ -5,9 +5,9 @@
 #endif
 
 #include <ATen/ATen.h>
-
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-
+#endif
 namespace c10d::symmetric_memory {
 
 template <typename T>
@@ -59,6 +59,7 @@ __device__ __forceinline__ uint32_t
 cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+  return 0;
 #else
   uint32_t old_val;
   if constexpr (Sem == MemOpSem::Relaxed) {
@@ -72,6 +73,53 @@ cas(uint32_t* addr, uint32_t compare, uint32_t val) {
   }
   return old_val;
 #endif
+}
+
+__device__ __forceinline__ void trap() {
+#if defined(USE_ROCM)
+  assert(0);
+#else
+  __trap();
+#endif
+}
+
+__device__ __forceinline__ size_t global_timer_ns() {
+#if defined(USE_ROCM)
+  CUDA_KERNEL_ASSERT(false);
+  return 0;
+#else
+  size_t val;
+  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(val) : : "memory");
+  return val;
+#endif
+}
+
+constexpr size_t ns_per_ms = 1e6;
+
+template <MemOpSem Sem>
+__device__ __forceinline__ bool try_put_signal(
+    uint32_t* addr,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (cas<Sem>(addr, 0, 1) != 0) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <MemOpSem Sem>
+__device__ __forceinline__ bool try_wait_signal(
+    uint32_t* addr,
+    size_t timeout_ms) {
+  size_t deadline = global_timer_ns() + timeout_ms * ns_per_ms;
+  while (cas<Sem>(addr, 1, 0) != 1) {
+    if (timeout_ms != 0 && global_timer_ns() > deadline) {
+      return false;
+    }
+  }
+  return true;
 }
 
 template <MemOpSem Sem>
@@ -371,9 +419,8 @@ __device__ __inline__ Vec<Alignment> add_vec(
 // With world_size specialization: perform balanced load from all peers before
 // performing reduction.
 template <typename T, int alignment, int k_world_size>
-__device__ inline
-    typename std::enable_if<(k_world_size > 0), Vec<alignment>>::type
-    load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
+__device__ inline std::enable_if_t<(k_world_size > 0), Vec<alignment>>
+load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> vecs[k_world_size];
 #pragma unroll k_world_size
   for (size_t step = 0; step < k_world_size; ++step) {
@@ -391,9 +438,8 @@ __device__ inline
 // Without world_size specialization: perform ordered (unbalanced) load and
 // accumulate on each load.
 template <typename T, int alignment, int k_world_size>
-__device__ inline
-    typename std::enable_if<(k_world_size <= 0), Vec<alignment>>::type
-    load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
+__device__ inline std::enable_if_t<(k_world_size <= 0), Vec<alignment>>
+load_and_reduce(T** ptrs, size_t rank, size_t world_size, size_t offset) {
   Vec<alignment> acc{};
   for (size_t step = 0; step < world_size; ++step) {
     auto vec = ld_vec<alignment>(ptrs[step] + offset);

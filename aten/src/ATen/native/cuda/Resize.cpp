@@ -30,7 +30,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   c10::cuda::CUDAGuard guard(device.index());
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
-    at::globalContext().lazyInitCUDA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(

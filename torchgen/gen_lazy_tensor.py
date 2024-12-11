@@ -4,7 +4,7 @@ import argparse
 import os
 from collections import namedtuple
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import yaml
 
@@ -23,6 +23,10 @@ from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager, NamespaceHelper
 from torchgen.yaml_utils import YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -143,8 +147,8 @@ at::Tensor to_meta(const at::Tensor& tensor) {
   // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
   if (!tensor.defined()) return tensor;
   auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
-/*dtype=*/std::make_optional(tensor.scalar_type()), /*layout=*/std::make_optional(tensor.layout()), \
-/*device=*/std::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/std::nullopt);
+/*dtype=*/tensor.scalar_type(), /*layout=*/tensor.layout(), \
+/*device=*/c10::Device(c10::kMeta), /*pin_memory=*/std::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -176,9 +180,9 @@ class default_args:
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     lazy_ir_generator: type[GenLazyIR] = GenLazyIR
-    native_func_definition_generator: type[
+    native_func_definition_generator: type[GenLazyNativeFuncDefinition] = (
         GenLazyNativeFuncDefinition
-    ] = GenLazyNativeFuncDefinition
+    )
     backend_name: str = "TorchScript"
 
 
@@ -257,9 +261,9 @@ def main() -> None:
     lazy_ir_generator: type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
         lazy_ir_generator = GenTSLazyIR
-    native_func_definition_generator: type[
-        GenLazyNativeFuncDefinition
-    ] = default_args.native_func_definition_generator
+    native_func_definition_generator: type[GenLazyNativeFuncDefinition] = (
+        default_args.native_func_definition_generator
+    )
 
     run_gen_lazy_tensor(
         aten_path,

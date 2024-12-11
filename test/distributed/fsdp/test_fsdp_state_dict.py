@@ -16,6 +16,12 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._shard.sharded_tensor.metadata import (
+    MEM_FORMAT_ENCODING,
+    ShardedTensorMetadata,
+    TensorProperties,
+)
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec, ShardMetadata
 from torch.distributed._state_dict_utils import (
     _all_gather_sharded_tensor,
     _gather_state_dict,
@@ -37,6 +43,7 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp._common_utils import FSDP_PREFIX
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
+from torch.distributed.remote_device import _remote_device
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -156,8 +163,7 @@ class TestFSDPStateDict(FSDPTest):
     def world_size(self):
         return min(torch.cuda.device_count(), 2)
 
-    def _broadcast_state_dict(self, model, state_dict):
-        # TODO (rohan-varma): remove model
+    def _broadcast_state_dict(self, state_dict):
         return _broadcast_state_dict(self.rank, state_dict)
 
     def _state_compare(self, model, model_new, assert_fn, state_generator="parameters"):
@@ -361,7 +367,7 @@ class TestFSDPStateDict(FSDPTest):
                 _zero_model(model_new)
                 self._compare_models(model, model_new, self.assertNotEqual)
                 if rank0_only_and_offload:
-                    state_dict = self._broadcast_state_dict(model, state_dict)
+                    state_dict = self._broadcast_state_dict(state_dict)
                 # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
                 model_new.load_state_dict(state_dict, strict=True)
                 self._compare_models(model, model_new, self.assertEqual)
@@ -417,8 +423,8 @@ class TestFSDPStateDict(FSDPTest):
             state_dict_ac = model_ac.state_dict()
         self.assertEqual(state_dict_ac.keys(), state_dict_no_ac.keys())
         if rank0_only_and_offload:
-            state_dict_no_ac = self._broadcast_state_dict(model_no_ac, state_dict_no_ac)
-            state_dict_ac = self._broadcast_state_dict(model_ac, state_dict_ac)
+            state_dict_no_ac = self._broadcast_state_dict(state_dict_no_ac)
+            state_dict_ac = self._broadcast_state_dict(state_dict_ac)
         with self._get_state_dict_mgr(
             model_no_ac, state_dict_type, rank0_only_and_offload
         ):
@@ -612,7 +618,7 @@ class TestFSDPStateDict(FSDPTest):
 
             # Verify parameters are the same in the new model.
             if state_dict_rank0_and_offload:
-                fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
+                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
             with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
                 model_new.load_state_dict(fsdp_state_dict, strict=True)
 
@@ -679,7 +685,7 @@ class TestFSDPStateDict(FSDPTest):
 
         # Verify parameters are the same in the new model.
         if state_dict_rank0_and_offload:
-            fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
+            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
         with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
             model_new.load_state_dict(fsdp_state_dict, strict=True)
 
@@ -746,7 +752,7 @@ class TestFSDPStateDict(FSDPTest):
 
         # Load state_dict into zeroed model
         if state_dict_rank0_and_offload:
-            state_dict = self._broadcast_state_dict(model, state_dict)
+            state_dict = self._broadcast_state_dict(state_dict)
 
         with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
             model.load_state_dict(state_dict, strict=True)
@@ -926,7 +932,7 @@ class TestFSDPStateDict(FSDPTest):
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
         if state_dict_rank0_and_offload:
-            fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
+            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
 
         blank_local_model.load_state_dict(fsdp_state_dict, strict=True)
         local_params = list(blank_local_model.parameters())
@@ -1161,7 +1167,21 @@ class TestFSDPStateDict(FSDPTest):
             checkpoint = io.BytesIO()
             torch.save(state_dict, checkpoint)
             checkpoint.seek(0)
-            state_dict_saved = torch.load(checkpoint)
+            with torch.serialization.safe_globals(
+                [
+                    Shard,
+                    ShardMetadata,
+                    ShardedTensor,
+                    ShardedTensorMetadata,
+                    TensorProperties,
+                    MEM_FORMAT_ENCODING,
+                    _remote_device,
+                    getattr,
+                    ShardedTensor.ProcessGroupState,
+                    ChunkShardingSpec,
+                ]
+            ):
+                state_dict_saved = torch.load(checkpoint)
             for k, v in state_dict_saved.items():
                 if isinstance(v, ShardedTensor):
                     self.assertEqual(

@@ -22,7 +22,7 @@
 #endif
 
 
-namespace at { namespace native {
+namespace at::native {
 
 #if AT_ONEDNN_ENABLED()
 
@@ -637,4 +637,4 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
 
 #endif // AT_MKL_ENABLED && AT_ONEDNN_ENABLED
 
-}}
+}

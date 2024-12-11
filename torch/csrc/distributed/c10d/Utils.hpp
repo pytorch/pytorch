@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/error.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
@@ -569,40 +570,40 @@ using SizeType = uint64_t;
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
-#define SYSCHECK(expr, success_cond)                                      \
-  while (true) {                                                          \
-    auto __output = (expr);                                               \
-    auto errno_local = WSAGetLastError();                                 \
-    (void)__output;                                                       \
-    if (!(success_cond)) {                                                \
-      if (errno == EINTR) {                                               \
-        continue;                                                         \
-      } else if (                                                         \
-          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
-      } else {                                                            \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
-      }                                                                   \
-    } else {                                                              \
-      break;                                                              \
-    }                                                                     \
+#define SYSCHECK(expr, success_cond)                                           \
+  while (true) {                                                               \
+    auto __output = (expr);                                                    \
+    auto errno_local = WSAGetLastError();                                      \
+    (void)__output;                                                            \
+    if (!(success_cond)) {                                                     \
+      if (errno == EINTR) {                                                    \
+        continue;                                                              \
+      } else if (                                                              \
+          errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) {      \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");                   \
+      } else {                                                                 \
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno_local)); \
+      }                                                                        \
+    } else {                                                                   \
+      break;                                                                   \
+    }                                                                          \
   }
 #else
-#define SYSCHECK(expr, success_cond)                             \
-  while (true) {                                                 \
-    auto __output = (expr);                                      \
-    (void)__output;                                              \
-    if (!(success_cond)) {                                       \
-      if (errno == EINTR) {                                      \
-        continue;                                                \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
-        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
-      } else {                                                   \
-        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
-      }                                                          \
-    } else {                                                     \
-      break;                                                     \
-    }                                                            \
+#define SYSCHECK(expr, success_cond)                                     \
+  while (true) {                                                         \
+    auto __output = (expr);                                              \
+    (void)__output;                                                      \
+    if (!(success_cond)) {                                               \
+      if (errno == EINTR) {                                              \
+        continue;                                                        \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {              \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");             \
+      } else {                                                           \
+        C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(errno)); \
+      }                                                                  \
+    } else {                                                             \
+      break;                                                             \
+    }                                                                    \
   }
 #endif
 

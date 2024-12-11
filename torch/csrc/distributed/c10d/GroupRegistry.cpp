@@ -10,10 +10,12 @@ namespace {
 class GroupRegistry {
  public:
   void register_group(
-      const std::string& group_name,
+      std::string group_name,
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       c10::intrusive_ptr<c10d::ProcessGroup> group) {
     std::unique_lock write_lock(lock_);
-    auto [_, inserted] = registry_.try_emplace(group_name, std::move(group));
+    auto [_, inserted] =
+        registry_.try_emplace(std::move(group_name), std::move(group));
     TORCH_CHECK(
         inserted,
         "A process group is already registered under the name",
@@ -70,12 +72,11 @@ bool get_thread_isolation_mode() {
 
 void register_process_group(
     const std::string& group_name,
-    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+    const c10::intrusive_ptr<c10d::ProcessGroup>& group) {
   if (thread_isolation_mode) {
-    RankLocal<::GroupRegistry>::get().register_group(
-        group_name, std::move(group));
+    RankLocal<::GroupRegistry>::get().register_group(group_name, group);
   } else {
-    process_registry.register_group(group_name, std::move(group));
+    process_registry.register_group(group_name, group);
   }
 }
 

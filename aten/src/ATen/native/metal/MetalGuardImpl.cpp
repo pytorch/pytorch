@@ -1,8 +1,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 
 struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   MetalGuardImpl() = default;
@@ -58,7 +57,6 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       noexcept override {}
 };
 
-C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);
+C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl)
 
-} // namespace detail
 } // namespace at
