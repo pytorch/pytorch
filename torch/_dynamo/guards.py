@@ -618,8 +618,8 @@ class GuardManagerType(enum.Enum):
 
 
 @functools.lru_cache(None)
-def code_framelocals_names_cached(code: types.CodeType):
-    return code_framelocals_names(code)
+def code_framelocals_names_reversed_cached(code: types.CodeType):
+    return list(reversed(code_framelocals_names(code)))
 
 
 class GuardBuilder(GuardBuilderBase):
@@ -972,14 +972,20 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # RootGuardManager accepts a dict but still its not a
-            # DictGuardManager because we will eventually move to
-            # fastlocals.
-            # NOTE: assumes scope["L"].keys() has the same order as the
-            # names in frame's f_locals. This should be the case if self.scope["L"]
-            # is set to frame.f_locals.
-            framelocals_names = code_framelocals_names_cached(self.f_code)
-            framelocals_idx = framelocals_names.index(source.local_name)
+            # Refer to index in the frame's localsplus directly.
+            # NOTE: name order for a code object doesn't change.
+            # NOTE: we need to find the LAST matching index because <= 3.10 contains
+            # duplicate names in the case of cells: a name can be both local and cell
+            # and will take up 2 slots of the frame's localsplus. The correct behavior
+            # is to refer to the cell, which has a higher index.
+            framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                self.f_code
+            )
+            framelocals_idx = (
+                len(framelocals_names_reversed)
+                - framelocals_names_reversed.index(source.local_name)
+                - 1
+            )
             out = root_guard_manager.framelocals_manager(
                 key=(source.local_name, framelocals_idx),
                 source=source_name,

@@ -134,7 +134,7 @@ void FrameLocalsMapping::_realize_dict() {
 
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
-    PyObject* value = _framelocals[i];
+    PyObject* value = _framelocals[i].ptr();
     if (value == nullptr) {
       _dict.attr("pop")(framelocals_names[i], py::none());
     } else {
