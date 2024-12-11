@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-set -ex
+set -ex -o pipefail
 
 # Suppress ANSI color escape sequences
 export TERM=vt100
@@ -1244,7 +1244,7 @@ EOF
 }
 
 test_bazel() {
-  set -e
+  set -e -o pipefail
 
   # bazel test needs sccache setup.
   # shellcheck source=./common-build.sh
