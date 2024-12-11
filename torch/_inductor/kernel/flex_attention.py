@@ -679,7 +679,7 @@ class Mode(Enum):
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     if mode == Mode.fwd:
@@ -712,7 +712,7 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
@@ -956,8 +956,13 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM",
+        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -2015,8 +2020,16 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
+
+    # Should this just override the kernel options in the forward so we dont need to do it twice?
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
