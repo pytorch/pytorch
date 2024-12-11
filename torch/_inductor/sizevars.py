@@ -247,9 +247,11 @@ class SizeVarAllocator:
             # for which "strides" don't make sense so we ignore them here.
             # NOTE: These expressions may still block merging dims in the sound
             # substitution test performed in can_merge_dims.
-            self.stride_vars(x, index_vars)
-            if isinstance(x, sympy.Expr)
-            else [0] * len(index_vars)
+            (
+                self.stride_vars(x, index_vars)
+                if isinstance(x, sympy.Expr)
+                else [0] * len(index_vars)
+            )
             for x in index_formulas
         ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -296,7 +298,7 @@ class SizeVarAllocator:
             new_index = []
             for size in sizes:
                 if size is None:
-                    new_index.append(sympy.Integer(0))
+                    new_index.append(sympy.S.Zero)
                 else:
                     new_index.append(it.pop())
             assert not it
@@ -415,14 +417,29 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+
+        expr = sympy.Eq(left, right)
+        static_expr = self.shape_env._maybe_evaluate_static(expr)
+
+        if static_expr is not None:
+            assert bool(static_expr)
+            return left
+
+        assert self.shape_env.defer_runtime_assert(expr, "guard_equals")
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
+        expr = sympy.Lt(left, right)
+        static_expr = self.shape_env._maybe_evaluate_static(expr)
+
+        if static_expr is not None:
+            assert bool(static_expr)
+            return
+
+        assert self.shape_env.defer_runtime_assert(expr, "guard_lt")
 
     def guarded_order(self, seq):
         """
@@ -600,26 +617,26 @@ class SizeVarAllocator:
         index = self.simplify(index)
         # remove any offset
         index = index - sympy_subs(
-            index, {v: sympy.Integer(0) for v in support_vars if v != 0}
+            index, {v: sympy.S.Zero for v in support_vars if v != 0}
         )
         for i in range(len(vars)):
             # drop all the other dims
             index_dim = sympy_subs(
                 index,
                 {
-                    support_vars[j]: sympy.Integer(0)
+                    support_vars[j]: sympy.S.Zero
                     for j in range(len(support_vars))
                     if vars[i] != support_vars[j] and support_vars[j] != 0
                 },
             )
             v = vars[i]
             if v == 0:
-                strides.append(sympy.Integer(0))
+                strides.append(sympy.S.Zero)
             else:
                 # TODO(jansel): should we use sympy.diff here?
                 strides.append(
-                    sympy_subs(index_dim, {v: sympy.Integer(1)})
-                    - sympy_subs(index_dim, {v: sympy.Integer(0)})
+                    sympy_subs(index_dim, {v: sympy.S.One})
+                    - sympy_subs(index_dim, {v: sympy.S.Zero})
                 )
         return strides
 
@@ -644,7 +661,7 @@ class SizeVarAllocator:
     def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
-        return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
+        return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
     def stride_hints(
         self,
@@ -809,7 +826,7 @@ class SizeVarAllocator:
 
         # Construct the new expression and remember the denominator
         denominator = factorlist[floor_div_index]
-        new_index = sympy.Integer(0)
+        new_index = sympy.S.Zero
 
         for var, factor, idx in zip(varlist, factorlist, itertools.count()):
             if idx == floor_div_index:

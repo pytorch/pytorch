@@ -21,7 +21,7 @@ struct sum_functor {
 };
 
 // jiterated specialization for `complex<Half>`
-CONSTEXPR_EXCEPT_WIN_CUDA char sum_name[] = "sum";
+constexpr char sum_name[] = "sum";
 template <>
 struct sum_functor<c10::complex<at::Half>> {
 // jiterator reduction fails on windows
@@ -57,7 +57,7 @@ struct nansum_functor {
   }
 };
 
-CONSTEXPR_EXCEPT_WIN_CUDA char nansum_name[] = "nansum";
+constexpr char nansum_name[] = "nansum";
 template <typename scalar_t>
 struct nansum_functor_complex {
 #if AT_USE_JITERATOR()
@@ -79,7 +79,7 @@ struct nansum_functor_complex {
 #endif
 };
 
-CONSTEXPR_EXCEPT_WIN_CUDA char prod_name[] = "prod";
+constexpr char prod_name[] = "prod";
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
   // jiterator reduction fails on windows
@@ -208,8 +208,8 @@ static void prod_kernel_cuda(TensorIterator& iter) {
   reduce_dispatch<prod_functor>(iter, general_dispatcher);
 }
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
-REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda);
-REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
+REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda)
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda)
+REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda)
 
 } // namespace at::native

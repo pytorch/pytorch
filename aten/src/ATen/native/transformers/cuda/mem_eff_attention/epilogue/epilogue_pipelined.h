@@ -589,7 +589,6 @@ class EpiloguePipelined : public EpilogueBase<
     }
   }
 
-  // This should be constexpr, but it's only supported on c++14
   constexpr int CUTLASS_HOST_DEVICE getRowOffset(int i) {
     using ThreadMap = typename OutputTileIterator::ThreadMap;
 
