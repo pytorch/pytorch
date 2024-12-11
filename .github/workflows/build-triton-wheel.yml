@@ -83,8 +83,6 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Build Triton wheel
-        env:
-          IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
@@ -120,11 +118,8 @@ jobs:
             ;;
           esac
 
-          RELEASE=""
           WITH_CLANG_LDD=""
-          if [[ "${IS_RELEASE_TAG}" == true ]]; then
-            RELEASE="--release"
-          fi
+          RELEASE="--release"
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1 auditwheel
