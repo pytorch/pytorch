@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <atomic>
@@ -86,9 +87,22 @@ C10_API void cow_deleter(void* ctx);
 
 C10_API void cowsim_deleter(void* ctx);
 
-// Enables future behavior to make operators always return a copy in cases where
-// they currently conditionally return a view or a copy
+// Emits extra warnings when COWSim views are created, read, or modified.
 C10_API void set_extra_conditional_view_warnings(bool mode);
 C10_API bool get_extra_conditional_view_warnings();
+
+// Upgrades conditional view warnings to errors with a backtrace. This is
+// helpful for debugging.
+C10_API void set_error_on_conditional_view_warnings(bool mode);
+C10_API bool get_error_on_conditional_view_warnings();
+
+template <typename... Args>
+C10_API void alert_cowsim(const Args&... args) {
+  if (get_error_on_conditional_view_warnings()) {
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(false, args...);
+  } else {
+    TORCH_WARN(args...);
+  }
+}
 
 } // namespace c10::impl::cow

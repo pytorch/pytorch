@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import sympy
 from sympy import Expr
@@ -20,7 +20,7 @@ from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
-from .common import IndentedBuffer, Kernel
+from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import cexpr, DEVICE_TO_ATEN, DTYPE_TO_ATEN, DTYPE_TO_CPP
 from .triton_utils import should_unwrap_unspec_arg
 from .wrapper import (
@@ -45,8 +45,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.ending = ";"
         self.comment = "//"
         self.none_str = "nullptr"
-        self.size = "sizes()"
-        self.stride = "strides()"
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
@@ -68,6 +66,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: Dict[str, Kernel] = {}
+        self.device_codegen = get_device_op_overrides(self.device)
 
     @staticmethod
     def create(
@@ -255,6 +254,47 @@ class CppWrapperCpu(PythonWrapperCodegen):
         name: str,
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
+
+    def codegen_input_symbol_assignment(
+        self,
+        name: str,
+        value: ir.TensorBox,
+        bound_vars: Set[sympy.Symbol],
+    ):
+        code = self.prefix
+
+        @functools.lru_cache(None)
+        def sizeof(name):
+            self.codegen_input_size_var_decl(code, name)
+            return f"{name}_size"
+
+        @functools.lru_cache(None)
+        def strideof(name):
+            self.codegen_input_stride_var_decl(code, name)
+            return f"{name}_stride"
+
+        if isinstance(value, sympy.Expr):
+            if not isinstance(value, sympy.Symbol) or value in bound_vars:
+                return
+            if value.is_integer:
+                decl = "int64_t"
+            elif value.is_float:
+                decl = "double"
+            else:
+                raise AssertionError("Unexpected symbol type")
+            code.writeline(f"{decl} {value} = {name};")
+            bound_vars.add(value)
+        elif isinstance(value, ir.TensorBox):
+            for dim, size in enumerate(value.get_size()):
+                if isinstance(size, sympy.Symbol) and size not in bound_vars:
+                    code.writeline(f"int64_t {size} = {sizeof(name)}[{dim}];")
+                    bound_vars.add(size)
+            for dim, stride in enumerate(value.get_stride()):
+                if isinstance(stride, sympy.Symbol) and stride not in bound_vars:
+                    code.writeline(f"int64_t {stride} = {strideof(name)}[{dim}];")
+                    bound_vars.add(stride)
+        else:
+            raise AssertionError(f"Unknown value type: {type(value)}")
 
     def generate_input_output_runtime_checks(self):
         # In debug_compile mode, we generate checks to ensure the dtype/shape/stride of each
@@ -483,7 +523,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
@@ -500,10 +540,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
+        code.writeline(f"auto {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
+        code.writeline(f"auto {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -532,7 +572,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
         for kernel in sorted(declare_kernel):
             self.prefix.writeline(
-                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
+                maybe_hipify_code_wrapper(
+                    f"    {self.device_codegen.cpp_kernel_type()} {kernel}{{nullptr}};"
+                )
             )
         for name, kernel in self.initialized_kernels.items():
             assert hasattr(
@@ -1220,10 +1262,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
-    @cache_on_self
-    def write_triton_header_once(self) -> None:
-        pass
-
     def generate_start_graph(self):
         pass
 
@@ -1796,7 +1834,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if outputs is None:
+        if op_overload and not op_overload._schema.returns:
+            # kernel does not return a value
+            output_args = []
+        elif outputs is None:
             # outputs is not specified, the default is to write to buf_name
             output_args = [buf_name]
         else:

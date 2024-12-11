@@ -62,7 +62,7 @@ enum class AccessType { READ, WRITE };
 void COWSimDeleterContext::raise_warning(AccessType access_type) {
   if (!has_raised_) {
     // TODO: Improve this message
-    TORCH_WARN(
+    alert_cowsim(
         "Detected divergent behavior on ",
         (access_type == AccessType::READ) ? "read" : "write");
     has_raised_ = true;
@@ -72,7 +72,7 @@ void COWSimDeleterContext::raise_warning(AccessType access_type) {
 void COWSimDeleterContext::check_write(COWSimAccessorID writer) {
   if (!has_first_writer_) {
     if (get_extra_conditional_view_warnings()) {
-      TORCH_WARN("Detected first write to a deprecated conditional view")
+      alert_cowsim("Detected first write to a deprecated conditional view");
     }
     has_first_writer_ = true;
     first_writer_ = writer;
@@ -95,6 +95,16 @@ C10_API void set_extra_conditional_view_warnings(bool mode) {
 
 C10_API bool get_extra_conditional_view_warnings() {
   return _extra_conditional_view_warnings;
+}
+
+static bool _error_on_conditional_view_warnings = false;
+
+C10_API void set_error_on_conditional_view_warnings(bool mode) {
+  _error_on_conditional_view_warnings = mode;
+}
+
+C10_API bool get_error_on_conditional_view_warnings() {
+  return _error_on_conditional_view_warnings;
 }
 
 } // namespace c10::impl::cow

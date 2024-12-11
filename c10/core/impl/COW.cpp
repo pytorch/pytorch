@@ -98,7 +98,7 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage(
   if (has_simple_data_ptr(storage)) {
     // Case 1) We have a simple data pointer: wrap it.
     if (!future && get_extra_conditional_view_warnings()) {
-      TORCH_WARN(
+      alert_cowsim(
           "This operation creates a conditional view. This behavior is ",
           "deprecated, and in the future it will unconditionally create a ",
           "lazy clone (semantic copy) instead.");

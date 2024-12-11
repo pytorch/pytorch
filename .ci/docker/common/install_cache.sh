@@ -9,12 +9,7 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  if [ -n "$CUDA_VERSION" ]; then
-      # TODO: Remove this
-      git clone https://github.com/pytorch/sccache
-  else
-      git clone https://github.com/mozilla/sccache -b v0.8.2
-  fi
+  git clone https://github.com/mozilla/sccache -b v0.8.2
   cd sccache
   echo "Building sccache"
   cargo build --release
@@ -44,16 +39,7 @@ export PATH="/opt/cache/bin:$PATH"
 if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
-  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  if [ -n "$CUDA_VERSION" ]; then
-    # TODO: Install the pre-built binary from S3 as building from source
-    # https://github.com/pytorch/sccache has started failing mysteriously
-    # in which sccache server couldn't start with the following error:
-    #   sccache: error: Invalid argument (os error 22)
-    install_binary
-  else
-    install_ubuntu
-  fi
+  install_ubuntu
 fi
 chmod a+x /opt/cache/bin/sccache
 
@@ -61,21 +47,26 @@ function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
   if [ $1 == "gcc" ]; then
-  # Do not call sccache recursively when dumping preprocessor argument
-  # For some reason it's very important for the first cached nvcc invocation
-    cat > "/opt/cache/bin/$1" <<EOF
+    # Do not call sccache recursively when dumping preprocessor argument
+    # For some reason it's very important for the first cached nvcc invocation
+    cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
-if [ "\$1" = "-E" ] || [ "\$2" = "-E" ]; then
-  exec $(which $1) "\$@"
-elif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
+# sccache does not support -E flag, so we need to call the original compiler directly in order to avoid calling this wrapper recursively
+for arg in "\$@"; do
+  if [ "\$arg" = "-E" ]; then
+    exec $(which $1) "\$@"
+  fi
+done
+
+if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
   exec sccache $(which $1) "\$@"
 else
   exec $(which $1) "\$@"
 fi
 EOF
   else
-    cat > "/opt/cache/bin/$1" <<EOF
+    cat >"/opt/cache/bin/$1" <<EOF
 #!/bin/sh
 
 if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
@@ -125,7 +116,7 @@ if [ -n "$ROCM_VERSION" ]; then
     TOPDIR=$(dirname $OLDCOMP)
     WRAPPED="$TOPDIR/original/$COMPNAME"
     mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" > "$OLDCOMP"
+    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
     chmod a+x "$OLDCOMP"
   }
 

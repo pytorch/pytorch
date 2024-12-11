@@ -188,6 +188,45 @@ class TestFxGraphCache(TestCase):
                     grad_multiplier * read_and_emit_kernel_count,
                 )
 
+            self.reset()
+
+            a1 = a_orig.clone().requires_grad_(grad)
+            b1 = b_orig.clone().requires_grad_(grad)
+            a2 = a_orig.clone().requires_grad_(grad)
+            b2 = b_orig.clone().requires_grad_(grad)
+
+            eager_result = fn(a1, b1)
+            if grad:
+                eager_result.sum().backward()
+            with torch.compiler.config.patch({"cache_key_tag": "test"}):
+                compiled_result = compiled_fn(a2, b2)
+                if grad:
+                    compiled_result.sum().backward()
+            self.assertEqual(eager_result, compiled_result)
+            if grad:
+                self.assertEqual(a1.grad, a2.grad)
+                self.assertEqual(b1.grad, b2.grad)
+
+            self.assertEqual(
+                counters["inductor"]["fxgraph_cache_miss"], grad_multiplier * 2
+            )
+            self.assertEqual(
+                counters["inductor"]["fxgraph_cache_hit"], grad_multiplier * 1
+            )
+            self.assertEqual(
+                counters["inductor"]["fxgraph_lookup_write_file"], grad_multiplier * 1
+            )
+
+            if bundle_triton and device != "cpu":
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_save_kernel"],
+                    grad_multiplier * save_kernel_count * 2,
+                )
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"],
+                    grad_multiplier * read_and_emit_kernel_count,
+                )
+
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -221,12 +260,19 @@ class TestFxGraphCache(TestCase):
                     self.assertEqual(fn(a, b), compiled_fn(a, b))
                 reset()
 
-        self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
+            self.assertEqual(global_stats.fx_graph, Stats(1, 3, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.fx_graph.cache.keys():
-                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
+            with torch.compiler.config.patch(
+                {"cache_key_tag": "test"}
+            ), fresh_inductor_cache():
+                compiled_fn = torch.compile(fn, dynamic=dynamic)
+                self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+            self.assertEqual(global_stats.fx_graph, Stats(2, 3, 2))
+
+        # Check that the cache entries seem reasonable
+        for k in global_stats.fx_graph.cache.keys():
+            self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -1185,12 +1231,11 @@ class TestAutotuneCache(TestCase):
 
         self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.autotune_remote.cache.keys():
-                self.assertRegex(k, r"[0-9a-z]{52}\.py")
-            for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c11")
+        # Check that the cache entries seem reasonable
+        for k in global_stats.autotune_remote.cache.keys():
+            self.assertRegex(k, r"[0-9a-z]{52}")
+        for k in global_stats.triton.cache.keys():
+            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
@@ -1226,17 +1271,30 @@ class TestAutotuneCache(TestCase):
             self.reset()
             f_compiled(a, b, c, d, e, f)
 
-        self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
-        self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
+            self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+            self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.autotune_local.cache.keys():
-                self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
-            for k in global_stats.bundled_autotune.cache.keys():
-                self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
-            for k in global_stats.triton.cache.keys():
-                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+            with torch.compiler.config.patch({"cache_key_tag": "test"}):
+                global_stats.reset()
+                self.reset()
+                f_compiled(a, b, c, d, e, f)
+
+                self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+                self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
+
+                self.reset()
+                f_compiled(a, b, c, d, e, f)
+
+                self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+                self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
+
+        # Check that the cache entries seem reasonable
+        for k in global_stats.autotune_local.cache.keys():
+            self.assertRegex(k, r"tmp[^/]*/([^/]{2})/[^/]{64}\.best_config")
+        for k in global_stats.bundled_autotune.cache.keys():
+            self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
+        for k in global_stats.triton.cache.keys():
+            self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
 
 class TestRemoteAOTAutogradCache(TestCase):
@@ -1265,13 +1323,19 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(global_stats.aot_autograd, Stats(1, 1, 1))
             self.assertEqual(global_stats.fx_graph, Stats(1, 1, 1))
 
-        if config.is_fbcode():
-            # Check that the cache entries seem reasonable
-            for k in global_stats.aot_autograd.cache.keys():
-                self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c10")
+            torch._dynamo.reset()
 
-            for k in global_stats.fx_graph.cache.keys():
-                self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c10")
+            with torch.compiler.config.patch({"cache_key_tag": "test"}):
+                f_compiled(a, b)
+            self.assertEqual(global_stats.aot_autograd, Stats(2, 1, 2))
+            self.assertEqual(global_stats.fx_graph, Stats(2, 1, 2))
+
+        # Check that the cache entries seem reasonable
+        for k in global_stats.aot_autograd.cache.keys():
+            self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c[0-9]+")
+
+        for k in global_stats.fx_graph.cache.keys():
+            self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")

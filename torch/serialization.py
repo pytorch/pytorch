@@ -261,21 +261,29 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Any]:
+def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Any]) -> None:
+def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
     and have state set.
 
+    Each item in the list can either be a function/class or a tuple of the form
+    (function/class, string) where string is the full path of the function/class.
+
+    Within the serialized format, each function is identified with its full
+    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    full path that should match the one in the checkpoint otherwise the default
+    ``{fn.__module__}.{fn.__name__}`` will be used.
+
     Args:
-        safe_globals (List[Any]): list of globals to mark as safe
+        safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
 
     Example:
         >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
@@ -1020,7 +1028,12 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
             offset = 0
-            storage_key = str(storage._cdata)
+            if torch._C._is_cowsim_storage(cast(Storage, storage)):
+                # COWSim aliases have different _cdata, so use data_ptr as the
+                # key to preserve their view relationship.
+                storage_key = str(storage.data_ptr())
+            else:
+                storage_key = str(storage._cdata)
             location = location_tag(storage)
 
             # TODO: There's an issue here with FC. It might be impossible to
@@ -1153,7 +1166,12 @@ def _save(
                 else:
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
-            storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
+            if torch._C._is_cowsim_storage(cast(Storage, storage)):
+                # COWSim aliases have different _cdata, so use data_ptr as the
+                # key to preserve their view relationship.
+                storage_key = id_map.setdefault(storage.data_ptr(), str(len(id_map)))
+            else:
+                storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
             if hasattr(obj, "_fake_device") and obj._fake_device is not None:
                 location = str(obj._fake_device)
             else:

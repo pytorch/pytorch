@@ -692,6 +692,29 @@ static PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
+static PyObject* THPModule_setSDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  auto priority_order = THPUtils_unpackLongs(arg);
+  at::globalContext().setSDPPriorityOrder(priority_order);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_sDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
+  auto ordervec = at::globalContext().sDPPriorityOrder();
+  auto order =
+      THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(ordervec.size())));
+  for (const auto i : c10::irange(ordervec.size())) {
+    PyObject* i64 = THPUtils_packInt64(static_cast<int64_t>(ordervec[i]));
+    if (!i64)
+      return nullptr;
+    PyList_SET_ITEM(order.get(), i, i64);
+  }
+  return order.release();
+}
 static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1424,6 +1447,11 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_userEnabledFlashSDP,
      METH_NOARGS,
      nullptr},
+    {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
+    {"_get_sdp_priority_order",
+     THPModule_sDPPriorityOrder,
+     METH_NOARGS,
+     nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
@@ -1782,6 +1810,9 @@ PyObject* initModule() {
 #endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
+#endif
+#ifdef USE_MPS
+  torch::mps::initModule(module);
 #endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);
@@ -2402,6 +2433,18 @@ Call this whenever a new thread is created in order to propagate values from
       "_get_extra_conditional_view_warnings",
       []() { return c10::impl::cow::get_extra_conditional_view_warnings(); },
       "Check if extra warnings related to deprecation of conditional views are enabled.");
+
+  py_module.def(
+      "_set_error_on_conditional_view_warnings",
+      [](bool mode) {
+        c10::impl::cow::set_error_on_conditional_view_warnings(mode);
+      },
+      "Upgrades conditional view warnings to errors.");
+
+  py_module.def(
+      "_get_error_on_conditional_view_warnings",
+      []() { return c10::impl::cow::get_error_on_conditional_view_warnings(); },
+      "Check if conditional view warnings are emitted as errors.");
 
   py_module.def(
       "_set_future_lazy_clone",

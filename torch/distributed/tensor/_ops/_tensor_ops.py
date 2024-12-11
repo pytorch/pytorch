@@ -65,6 +65,7 @@ register_op_strategy(
         aten.detach.default,
         aten.fill_.Scalar,
         aten.zero_.default,
+        aten._lazy_clone_alias.default,
     ]
 )(default_strategy)
 
