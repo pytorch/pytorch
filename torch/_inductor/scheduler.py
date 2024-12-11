@@ -681,10 +681,6 @@ class BaseSchedulerNode:
                 # falling back to 0
                 log.info(e)
                 return 0
-            except TypeError as e:
-                # this happens when the collective is not of type ir._CollectiveKernel
-                log.info(e)
-                return 0
 
         elif is_wait(self.node):
             # ir.Wait is only used for collective ops.
@@ -1853,11 +1849,12 @@ class Scheduler:
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
-        self.nodes = comms.decide_global_ordering_of_comms(
-            self.nodes,
-            self.name_to_buf,
-            self.name_to_fused_node,
-        )
+        if config.reorder_for_compute_comm_overlap:
+            self.nodes = comms.decide_global_ordering_of_comms(
+                self.nodes,
+                self.name_to_buf,
+                self.name_to_fused_node,
+            )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -3121,7 +3118,10 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
-        if shared_data_score == 0:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+            and config.loop_ordering_after_fusion
+        ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
@@ -3302,7 +3302,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
