@@ -41,7 +41,7 @@ __global__ void write_indices(
     int64_t * total = nullptr,
     int64_t fill_value = -1) {
   auto index = threadIdx.x + (int64_t)blockIdx.x * blockDim.x;
-  bool cond = (total == nullptr || index < (uint)*total);
+  bool cond = (total == nullptr || index < *total);
   if (index < n && cond) {
     index_t div = 1;
     int64_t idx_flat = inp[index];
@@ -71,7 +71,7 @@ __global__ void write_fill_value(int64_t * inp, int64_t * total, int64_t fill_va
 }
 
 template <int BLOCK_THREADS>
-__global__ void compute_agg(int * agg, int64_t * agg_cum, uint n_blocks) {
+__global__ void compute_agg(int32_t * agg, int64_t * agg_cum, uint32_t n_blocks) {
 
   using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int64_t, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
   __shared__ typename BlockScanT::TempStorage temp_storage;
