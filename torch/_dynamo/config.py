@@ -1,14 +1,11 @@
 # mypy: allow-untyped-defs
 import getpass
-import inspect
 import os
-import re
 import sys
 import tempfile
 from os.path import abspath, dirname
 from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
-import torch
 from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
 
@@ -465,9 +462,9 @@ _autograd_backward_strict_mode_banned_ops = [
     "data",
 ]
 
-_autograd_backward_strict_mode_banned_ops.extend(
-    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
-)
+# _autograd_backward_strict_mode_banned_ops.extend(
+#     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
+# )
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (

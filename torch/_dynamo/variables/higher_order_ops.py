@@ -76,8 +76,8 @@ def raise_hard_error_if_graph_break(reason):
 def discard_graph_changes(tx):
     ctx = tx.output.subtracer("subgraph_wrapper", None)
     try:
-        ctx.__enter__()
-        yield
+        tracer = ctx.__enter__()
+        yield tracer
     finally:
         ctx.__exit__(None, None, None)
 
@@ -287,6 +287,7 @@ def validate_args_and_maybe_create_graph_inputs(
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
+                # breakpoint()
                 example_value = a.as_proxy().node.meta["example_value"]
                 arg_name = (
                     a.as_proxy().node.name
@@ -2375,7 +2376,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             UserFunctionVariable,
             UserMethodVariable,
         )
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         """
         Consider the following:
@@ -2448,33 +2449,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             ):
                 unimplemented("NYI")
 
-        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-            tx.output,
-            parent=fwd_tracer,
-            source_target="autograd.Function",
-        )
-
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
-
-        if isinstance(fwd_out, variables.BaseListVariable):
-            bwd_args = [ctx, *fwd_out.items]
-        else:
-            bwd_args = [ctx, fwd_out]
-
-        bwd_src = AttrSource(self.parent_source, member="backward")
-        if isinstance(self.bwd_graph, types.FunctionType):
-            bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
-        elif isinstance(self.bwd_graph, types.MethodType):
-            bwd_fn = UserMethodVariable(
-                self.bwd_graph.__func__,
-                UserDefinedClassVariable(self.bwd_graph.__class__),
-                source=bwd_src,
-            )
-            bwd_args = [bwd_fn.obj, *bwd_args]
-        else:
-            unimplemented("non-function or method")
 
         def is_strict_for(v: VariableTracker):
             if isinstance(v, variables.TensorVariable):
@@ -2482,20 +2459,93 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
+        def generate_fake_grad_out(unbacked_symint_var, fwd_out):
+            fwd_out_tensor = fwd_out.as_proxy().node.meta["example_value"]
+            stride = SourcelessBuilder.create(
+                tx, [unbacked_symint_var] * len(fwd_out_tensor.stride())
+            )
+            size = SourcelessBuilder.create(tx, fwd_out_tensor.size())
+            device = SourcelessBuilder.create(tx, fwd_out_tensor.device)
+            dtype = SourcelessBuilder.create(tx, fwd_out_tensor.dtype)
+            requires_grad = SourcelessBuilder.create(tx, fwd_out_tensor.requires_grad)
+            grad_out = variables.TorchInGraphFunctionVariable(
+                torch.empty_strided
+            ).call_function(
+                tx,
+                [size, stride],
+                {
+                    "device": device,
+                    "dtype": dtype,
+                    "requires_grad": requires_grad,
+                },
+            )
+            return grad_out
+
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                tx,
-                bwd_fn,
-                bwd_args,
-                kwargs,
-                "autograd.Function",
-                enable_grad=False,
-                set_subgraph_inputs="manual",
-                restore_side_effects=False,
-                tracer=bwd_tracer,
-            )
+            with discard_graph_changes(tx) as dummy_tracer:
+                bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                    tx.output,
+                    parent=dummy_tracer,
+                    source_target="autograd.Function",
+                )
+
+                unbacked_symint_var = (
+                    variables.TorchInGraphFunctionVariable(torch.empty)
+                    .call_function(
+                        tx,
+                        [variables.ConstantVariable.create(1)],
+                        {"dtype": SourcelessBuilder.create(tx, torch.int)},
+                    )
+                    .call_method(tx, "item", [], {})
+                )
+
+                if isinstance(fwd_out, variables.BaseListVariable):
+                    bwd_args = [ctx, *fwd_out.items]
+                    bwd_args = [
+                        (
+                            generate_fake_grad_out(unbacked_symint_var, arg)
+                            if isinstance(arg, variables.TensorVariable)
+                            else arg
+                        )
+                        for arg in bwd_args
+                    ]
+                else:
+                    assert isinstance(fwd_out, variables.TensorVariable)
+                    grad_out = generate_fake_grad_out(unbacked_symint_var, fwd_out)
+                    bwd_args = [ctx, grad_out]
+
+                bwd_src = AttrSource(self.parent_source, member="backward")
+                if isinstance(self.bwd_graph, types.FunctionType):
+                    bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
+                elif isinstance(self.bwd_graph, types.MethodType):
+                    bwd_fn = UserMethodVariable(
+                        self.bwd_graph.__func__,
+                        UserDefinedClassVariable(self.bwd_graph.__class__),
+                        source=bwd_src,
+                    )
+                    bwd_args = [bwd_fn.obj, *bwd_args]
+                else:
+                    unimplemented("non-function or method")
+
+                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                    tx,
+                    bwd_fn,
+                    bwd_args,
+                    kwargs,
+                    "autograd.Function",
+                    enable_grad=False,
+                    set_subgraph_inputs="manual",
+                    restore_side_effects=False,
+                    tracer=bwd_tracer,
+                )
+
+                for node in bwd_graph.find_nodes(
+                    op="placeholder", target=str(unbacked_symint_var.sym_num)
+                ):
+                    bwd_graph.erase_node(node)
+                    break
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
@@ -2526,6 +2576,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_graph.erase_node(node)
             break
 
+        print(fwd_graph)
+        print(bwd_graph)
+
+        # breakpoint()
         # Because we lift the bwd_freevars as inputs of the bwd_graph,
         # we have to manually add the bwd_freevars as output of fwd_graph.
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
@@ -2534,12 +2588,16 @@ class AutogradFunctionApplyVariable(VariableTracker):
         for k in bwd_freevars.keys():
             if k in fwd_freevars:
                 fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
+            elif k is unbacked_symint_var.as_proxy():
+                continue
             else:
                 fwd_proxy_of_bwd_freevars.append(k)
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
+        print(fwd_graph)
         fwd_graph.output(new_fwd_graph_outputs)
+        print(fwd_graph)
         fwd_graph.lint()
 
         # Store fwd_body
