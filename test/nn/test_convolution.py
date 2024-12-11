@@ -653,6 +653,32 @@ class TestConvolutionNN(NNTestCase):
                 dtype,
             )
 
+    def test_ConvTranspose_output_channels_0(self):
+        class Model(nn.Module):
+            def __init__(self, operator, dim):
+                super().__init__()
+                self.op = eval(
+                    f"torch.nn.{operator}{dim}d(in_channels=1, out_channels=0, kernel_size={tuple([1] * dim)})"
+                )
+
+            def forward(self, x):
+                x = self.op(x)
+                return x
+
+        for dim in [1, 2, 3]:
+            x = torch.randn([1] * (dim + 1))
+            model = Model("ConvTranspose", dim)
+            y = model(x)
+            self.assertEqual(
+                y.size(),
+                tuple(
+                    [
+                        0,
+                    ]
+                    + [1] * dim
+                ),
+            )
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = torch.randn(2, 3, 6, 6)
