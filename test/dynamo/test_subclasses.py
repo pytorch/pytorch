@@ -26,12 +26,12 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    fresh_tensor_registry,
+    fresh_tensor_registry_ctx,
     instantiate_parametrized_tests,
     NestedTensorTestCase,
     parametrize,
     subtest,
-    fresh_tensor_registry,
-    fresh_tensor_registry_ctx,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3074,11 +3074,7 @@ class GraphModule(torch.nn.Module):
 
         def get_njt(device):
             return torch.nested.nested_tensor(
-                [
-                    torch.randn(2, 5),
-                    torch.randn(3, 5),
-                    torch.randn(18, 5)
-                ],
+                [torch.randn(2, 5), torch.randn(3, 5), torch.randn(18, 5)],
                 layout=torch.jagged,
                 device=device,
                 requires_grad=True,
@@ -3088,7 +3084,9 @@ class GraphModule(torch.nn.Module):
         t_cuda = get_njt("cuda")
         t_cpu = t_cuda.to("cpu")
         # Creating a fresh NJT to clear the cache
-        t_cpu_cleared = torch.nested.nested_tensor_from_jagged(t_cpu.values(), t_cpu.offsets())
+        t_cpu_cleared = torch.nested.nested_tensor_from_jagged(
+            t_cpu.values(), t_cpu.offsets()
+        )
 
         # Check guards
         curr_var_to_val = None
@@ -3122,27 +3120,27 @@ class GraphModule(torch.nn.Module):
         fn(t_cpu_cleared, t_cuda)
 
         expected_var_to_val = {
-            's0': SingletonInt(0),
-            's1': 2,
-            's2': 18,
-            's3': 23,
-            's4': SingletonInt(0),
-            's5': SingletonInt(0),
-            's6': 23,
-            's7': 23,
-            's8': SingletonInt(0)
+            "s0": SingletonInt(0),
+            "s1": 2,
+            "s2": 18,
+            "s3": 23,
+            "s4": SingletonInt(0),
+            "s5": SingletonInt(0),
+            "s6": 23,
+            "s7": 23,
+            "s8": SingletonInt(0),
         }
         # We have different symbols for the same s0 because CachedTensor is 1:1 with symbolic int
         expected_var_to_sources = {
-            's0': "L['a']._base.size()[1]",
-            's1': "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
-            's2': "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
-            's3': "L['a']._base._values.size()[0]",
-            's4': "torch._nested_int_from_offsets(L['a']._base.size()[1].node.nested_int_cache()._host_offsets)",
-            's5': "L['a'].size()[1]",
-            's6': "L['a']._values.size()[0]",
-            's7': "L['b']._base.size()[0]",
-            's8': "L['b'].size()[1]"
+            "s0": "L['a']._base.size()[1]",
+            "s1": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
+            "s2": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
+            "s3": "L['a']._base._values.size()[0]",
+            "s4": "torch._nested_int_from_offsets(L['a']._base.size()[1].node.nested_int_cache()._host_offsets)",
+            "s5": "L['a'].size()[1]",
+            "s6": "L['a']._values.size()[0]",
+            "s7": "L['b']._base.size()[0]",
+            "s8": "L['b'].size()[1]",
         }
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
@@ -3161,7 +3159,9 @@ Eq(s0, s8)""",
             return b.clone()
 
         t2_cpu = get_njt("cpu").clone()
-        t2_cpu_cleared = torch.nested.nested_tensor_from_jagged(t2_cpu.values(), t2_cpu.offsets())
+        t2_cpu_cleared = torch.nested.nested_tensor_from_jagged(
+            t2_cpu.values(), t2_cpu.offsets()
+        )
         # Clone to ensure that the t4 is a view whose base is a NT to mimic the .to
         # (torch.nested.nested_tensor produces a view whose base is a plain tensor!)
         self.assertTrue(t2_cpu_cleared._base.is_nested)
@@ -3171,7 +3171,11 @@ Eq(s0, s8)""",
         # to being from .to), it should fail a symbolic shapes guard.
         # We cannot rely on dynamo deduping guards because there was no overlap between
         # t_cpu_cleared and t_cuda caches.
-        self.assertTrue(_recompiles_for_inputs(fn2, (t_cpu_cleared, t_cuda), (t2_cpu_cleared, t2_cuda), dynamic=False))
+        self.assertTrue(
+            _recompiles_for_inputs(
+                fn2, (t_cpu_cleared, t_cuda), (t2_cpu_cleared, t2_cuda), dynamic=False
+            )
+        )
 
     def test_return_shape(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
