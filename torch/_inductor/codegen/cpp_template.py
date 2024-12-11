@@ -33,7 +33,7 @@ class CppTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
+        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
@@ -113,8 +113,7 @@ class CppTemplate(KernelTemplate):
         res.writeline(codecache.cpp_prefix())
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
         res.splice("""#include <c10/util/Unroll.h>""")
-        if config.abi_compatible:
-            res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
+        res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
         enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
             "linux",
             "win32",

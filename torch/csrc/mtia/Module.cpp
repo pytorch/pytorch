@@ -39,7 +39,7 @@ void initModule(PyObject* module) {
   m.def("_mtia_init", []() {
     TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
     poison_fork();
-    at::globalContext().lazyInitMTIA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
   });
 
   m.def("_mtia_isBuilt", []() {
@@ -85,6 +85,8 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().getDeviceCapability(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
 }
 
 } // namespace torch::mtia

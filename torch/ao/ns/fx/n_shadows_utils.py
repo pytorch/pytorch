@@ -296,8 +296,6 @@ def create_submodule_from_subgraph(
     #
 
     cur_node_orig = first_node
-    cur_args_orig = cur_node_orig.args
-    cur_kwargs_orig = cur_node_orig.kwargs
 
     cur_name_idx = 0
 
@@ -358,7 +356,7 @@ def create_submodule_from_subgraph(
                     new_kwarg = []
                     for inner_kwarg in kwarg:
                         p = _add_placeholder(
-                            g, inner_kwarg, seen_names, old_name_to_new_node
+                            g, inner_kwarg, seen_names, old_name_to_new_node  # type: ignore[arg-type]
                         )
                         new_kwarg.append(p)
                     cur_kwargs_copy[kwarg_name] = new_kwarg
@@ -387,11 +385,11 @@ def create_submodule_from_subgraph(
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
                     if isinstance(arg, torch.nn.Parameter):
-                        new_arg = arg.clone().detach()  # type: ignore[assignment]
+                        new_arg = arg.detach().clone()  # type: ignore[assignment]
                         mod_name = f"mod_{cur_name_idx}"
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
-                        new_arg_placeholder = gm.placeholder(mod_name)
+                        new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
                         cur_args_copy.append(arg)
@@ -433,9 +431,6 @@ def create_submodule_from_subgraph(
             len(cur_node_orig.users.keys()) == 1
         ), f"{cur_node_orig} has more than 1 users, not supported yet"
         cur_node_orig = next(iter(cur_node_orig.users.keys()))
-        cur_args_orig = cur_node_orig.args
-        cur_kwargs_orig = cur_node_orig.kwargs
-
         cur_iteration += 1
         if cur_iteration > iteration_limit:
             raise AssertionError("iteration limit exceeded")
@@ -568,9 +563,9 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     and len(arg)
                     and isinstance(arg[0], Node)
                 ):
-                    for inner_arg in arg:
-                        if isinstance(inner_arg, Node):
-                            new_args.append(inner_arg)
+                    new_args.extend(
+                        inner_arg for inner_arg in arg if isinstance(inner_arg, Node)
+                    )
 
             new_kwargs = {}
             for name, old_kwarg in first_node.kwargs.items():
@@ -578,7 +573,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     new_kwargs[name] = old_kwarg
                 elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
                     # TODO(future PR): clarify why we are adding kwargs to args
-                    new_args.extend(old_kwarg)
+                    new_args.extend(old_kwarg)  # type: ignore[arg-type]
 
             new_args = tuple(new_args)  # type: ignore[assignment]
 

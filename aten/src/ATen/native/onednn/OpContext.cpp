@@ -3,9 +3,7 @@
 #if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/ConvPrepack.h>
 
-namespace at {
-namespace native {
-namespace onednn {
+namespace at::native::onednn {
 
 c10::intrusive_ptr<ConvOpContext> OnednnConvOpContext::create_context(
     at::Tensor&& weight,
@@ -40,8 +38,6 @@ void OnednnConvOpContext::run(const Tensor& input, void* output) {
   onednn::internal::convolution::run(op_context_, input, output);
 }
 
-} // namespace onednn
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED()
