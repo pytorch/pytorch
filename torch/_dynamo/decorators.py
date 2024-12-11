@@ -523,7 +523,6 @@ def maybe_mark_dynamic(t, index):
     for i in index:
         maybe_mark_dynamic(t, i)
 
-
 def mark_static(t, index=None):
     """
     Mark a tensor as having a static dim or mark a nn module class as static.

@@ -124,6 +124,12 @@ def tensorify_python_scalars(
     first_non_placeholder = None
     placeholders = set()
     for node in graph.nodes:
+        if node.target == torch.ops.aten.mul.Tensor:
+            for a in node.args:
+                if isinstance(a, fx.Node) and isinstance(a.meta['val'], torch.SymInt):
+                    guard_scalar(a.meta['val'])
+
+
         if node.op != "placeholder":
             first_non_placeholder = node
             break
