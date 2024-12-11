@@ -66,9 +66,10 @@ class CompileId:
     compiled_autograd_id: Optional[int] = None
 
     def __str__(self):
+        # Keep this in sync with tlparse repo
         if self.compiled_autograd_id is not None:
             assert (self.frame_id is None) == (self.frame_compile_id is None)
-            return f"{self.compiled_autograd_id}/{self.frame_id}/{self.frame_compile_id}".replace(
+            return f"!{self.compiled_autograd_id}/{self.frame_id}/{self.frame_compile_id}".replace(
                 "None", "-"
             )
         else:
@@ -83,6 +84,7 @@ class TraceId(NamedTuple):
     attempt: int
 
     def __str__(self):
+        # Keep this in sync with tlparse repo
         if self.attempt == 0:
             return str(self.compile_id)
         else:
