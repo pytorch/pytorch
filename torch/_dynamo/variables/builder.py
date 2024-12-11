@@ -1486,8 +1486,11 @@ class VariableBuilder:
                 not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_specialized_nn_module()
+                # NN modules on the fly), unless explicitly disabled
+                or (
+                    self.source.guard_source().is_specialized_nn_module() and 
+                    not config.disable_force_spec_int_on_specialized_nn_module
+                )
                 or self.source.guard_source().is_unspecialized_builtin_nn_module()
                 or is_from_defaults(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
