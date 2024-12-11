@@ -307,11 +307,9 @@ def uninteresting_files() -> Set[str]:
     ]
     import torch._dynamo.guards
 
-    return (
-        {inspect.getfile(m) for m in mods}
-        | torch._dynamo.guards.uninteresting_files()
-        | {"<string>"}
-    )
+    return {
+        inspect.getfile(m) for m in mods
+    } | torch._dynamo.guards.uninteresting_files()
 
 
 class ConstraintViolationError(RuntimeError):
