@@ -178,7 +178,6 @@ class BaseSchedulerNode:
     group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
-    op_deps: OrderedSet[str]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
     # e.g. if the FusedSchedulerNode includes nodes (op_1, op_2, op_3), and op_X is X-th node
     # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
@@ -1871,8 +1870,6 @@ class Scheduler:
             self.create_combo_kernel_nodes(num_ck_nodes=None)
 
         # Peak memory and overlap passes should always run last
-        self.compute_op_deps()
-        self.remove_dep_cycles()
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
 
@@ -1905,47 +1902,6 @@ class Scheduler:
                 "num_nodes_after_fusion": len(self.nodes),
             }
         )
-
-    def compute_op_deps(self):
-        # Tracking op deps instead of buffer deps is important because buffer deps doesn't
-        # reliably reflect the ordering between different mutation ops that write to the same buffer.
-        snode_to_idx = {node: idx for idx, node in enumerate(self.nodes)}
-        buf_name_to_snodes = defaultdict(list)
-        for snode in self.nodes:
-            for buf_name in snode.get_buffer_names():
-                buf_name_to_snodes[buf_name].append(snode)
-        for snode in self.nodes:
-            snode_idx = snode_to_idx[snode]
-            op_deps: OrderedSet[str] = OrderedSet()
-            for dep in snode.unmet_dependencies:
-                if dep.name not in self.available_buffer_names:
-                    # Only include dependency if producer node comes before current node.
-                    # In .unmet_dependencies there could be wrong ordering (e.g. S1 says it depends on S2 while S1 runs before S2), and this cleans it up.
-                    assert dep.name in buf_name_to_snodes
-                    producer_ops = buf_name_to_snodes[dep.name]
-                    for producer_op in producer_ops:
-                        if snode_to_idx[producer_op] < snode_idx:
-                            op_deps.add(producer_op.get_name())
-            snode.op_deps = op_deps
-
-    def remove_dep_cycles(self):
-        # Use existing node execution order to resolve dep cycles.
-        snode_to_idx = {node: idx for idx, node in enumerate(self.nodes)}
-        # TODO(yf225): this assumes only one op writes to the buffer, which might be wrong in the future.
-        # Ideally we want to use op dependency not buffer dependency (see `compute_op_deps()`).
-        buf_name_to_snode = {buf_name: snode for snode in self.nodes for buf_name in snode.get_buffer_names()}
-        for snode in self.nodes:
-            snode_idx = snode_to_idx[snode]
-            deps: OrderedSet[Dep] = OrderedSet()
-            for dep in snode.unmet_dependencies:
-                if dep.name not in self.available_buffer_names:
-                    # Only include dependency if producer node comes before current node
-                    # In .unmet_dependencies there could be wrong ordering (e.g. S1 says it depends on S2 while S1 runs before S2), and this cleans it up.
-                    assert dep.name in buf_name_to_snode
-                    producer = buf_name_to_snode[dep.name]
-                    if snode_to_idx[producer] < snode_idx:
-                        deps.add(dep)
-            snode.set_read_writes(snode.read_writes.set_reads(deps))
 
     def get_donated_buffers(self) -> Dict[str, SchedulerDonatedBuffer]:
         name_to_donated_buf = {}

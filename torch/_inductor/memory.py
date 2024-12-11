@@ -85,33 +85,29 @@ def get_freeable_input_buf(
             pass
         return res
 
-    # TODO(yf225): my take is there is actually no "freeable input buffer" in general,
-    # because arguments passed to the `call()` function still have a reference to it outside of the `call()` function
-    # and thus cannot actually be freed even if we delete the reference within the `call()` function.
-
-    # # get freeable input buffers' successor nodes and their sizes
-    # # note that different deps can have the same name, so we use name as keys
-    # dep_name_to_succ_nodes: Dict[
-    #     str, OrderedSet[BaseSchedulerNode]
-    # ] = collections.defaultdict(OrderedSet)
-    # dep_name_to_size: Dict[str, int] = dict()
-    # for node in nodes:
-    #     for dep in node.read_writes.reads:
-    #         if dep.name in graph_inputs and not dep.name.startswith(
-    #             ("primals_", "arg")
-    #         ):
-    #             dep_name_to_succ_nodes[dep.name].add(node)
-    #             dep_name_to_size[dep.name] = _dep_size_hint(dep)
+    # get freeable input buffers' successor nodes and their sizes
+    # note that different deps can have the same name, so we use name as keys
+    dep_name_to_succ_nodes: Dict[
+        str, OrderedSet[BaseSchedulerNode]
+    ] = collections.defaultdict(OrderedSet)
+    dep_name_to_size: Dict[str, int] = dict()
+    for node in nodes:
+        for dep in node.read_writes.reads:
+            if dep.name in graph_inputs and not dep.name.startswith(
+                ("primals_", "arg")
+            ):
+                dep_name_to_succ_nodes[dep.name].add(node)
+                dep_name_to_size[dep.name] = _dep_size_hint(dep)
 
     # create FreeableInputBuffer objects and add them to the returned dictionary
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer] = dict()
-    # for dep_name, succ_nodes in dep_name_to_succ_nodes.items():
-    #     name_to_freeable_input_buf[dep_name] = FreeableInputBuffer(
-    #         dep_name,
-    #         MemoryPlanningInfoForBuffer(
-    #             size_free=dep_name_to_size[dep_name], succ_nodes=succ_nodes
-    #         ),
-    #     )
+    for dep_name, succ_nodes in dep_name_to_succ_nodes.items():
+        name_to_freeable_input_buf[dep_name] = FreeableInputBuffer(
+            dep_name,
+            MemoryPlanningInfoForBuffer(
+                size_free=dep_name_to_size[dep_name], succ_nodes=succ_nodes
+            ),
+        )
     return name_to_freeable_input_buf
 
 

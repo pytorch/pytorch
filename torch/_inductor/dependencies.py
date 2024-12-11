@@ -431,15 +431,6 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def set_reads(self, reads):
-        return ReadWrites(
-            reads,
-            self.writes,
-            self.index_exprs,
-            self.range_vars,
-            self.var_ranges,
-        )
-
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
 

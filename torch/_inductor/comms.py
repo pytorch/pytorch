@@ -36,6 +36,24 @@ if TYPE_CHECKING:
     from .scheduler import BaseSchedulerNode
 
 
+def sink_waits(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+    """
+    Greedily schedules waits as late as possible.
+    """
+    return _schedule_for_comm(
+        snodes, raise_comms=False, sink_waits=True, reorder_for_overlap=False
+    )
+
+
+def raise_comms(snodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNode]:
+    """
+    Greedily schedules comms as early as possible.
+    """
+    return _schedule_for_comm(
+        snodes, raise_comms=True, sink_waits=False, reorder_for_overlap=False
+    )
+
+
 def reorder_compute_for_overlap(
     snodes: List[BaseSchedulerNode],
 ) -> List[BaseSchedulerNode]:
@@ -134,19 +152,19 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    snode_to_op_deps: Dict[str, OrderedSet[str]] = {snode.get_name(): snode.op_deps for snode in snodes}
+    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
+        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    }
 
     ready: List[Runnable] = []
-    op_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
+    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
-    name_to_snode = {snode.get_name(): snode for snode in snodes}
 
-    for snode_name, op_deps in snode_to_op_deps.items():
-        snode = name_to_snode[snode_name]
-        if len(op_deps) == 0:
+    for snode, deps in unmet_deps.items():
+        if len(deps) == 0:
             heapq.heappush(ready, Runnable(snode))
-        for op_dep in op_deps:
-            op_users[op_dep].add(snode)
+        for dep in deps:
+            buffer_users[dep].add(snode)
 
     scheduled = []
 
@@ -155,10 +173,11 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for sn in op_users[snode.get_name()]:
-            snode_to_op_deps[sn.get_name()].remove(snode.get_name())
-            if len(snode_to_op_deps[sn.get_name()]) == 0:
-                heapq.heappush(ready, Runnable(sn))
+        for buf_name in snode.get_buffer_names():
+            for snode in buffer_users[buf_name]:
+                unmet_deps[snode].remove(buf_name)
+                if len(unmet_deps[snode]) == 0:
+                    heapq.heappush(ready, Runnable(snode))
 
     def get_overlapping_candidate():
         """
@@ -200,10 +219,11 @@ def _schedule_for_comm(
         else:
             schedule(snode)
 
-    assert all(len(op_deps) == 0 for op_deps in snode_to_op_deps.values()), (
-        "Detected unscheduled nodes. "
-        f"Nodes with unmet dependencies: {[(snode_name, op_deps) for snode_name, op_deps in op_deps.items() if len(op_deps) > 0]}"
-    )
+    for snode, deps in unmet_deps.items():
+        assert len(deps) == 0, (
+            "Detected unscheduled nodes. "
+            f"Nodes with unmet dependencies: {unmet_deps}"
+        )
     return scheduled
 
 
@@ -215,18 +235,18 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # # If FSDP2 is used, we apply FSDP-specific passes.
-    # if any(
-    #     is_fallback_op(
-    #         x.node,
-    #         {
-    #             torch.ops.fsdp.all_gather_copy_in.default,
-    #             torch.ops.fsdp.chunk_cat.default,
-    #         },
-    #     )
-    #     for x in nodes
-    # ):
-    #     nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    # If FSDP2 is used, we apply FSDP-specific passes.
+    if any(
+        is_fallback_op(
+            x.node,
+            {
+                torch.ops.fsdp.all_gather_copy_in.default,
+                torch.ops.fsdp.chunk_cat.default,
+            },
+        )
+        for x in nodes
+    ):
+        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
@@ -1150,7 +1170,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = OrderedSet()
+    scheduled = set()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -1177,7 +1197,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -1248,7 +1268,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,
