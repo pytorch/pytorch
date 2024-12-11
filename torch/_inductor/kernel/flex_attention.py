@@ -935,7 +935,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
+    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
