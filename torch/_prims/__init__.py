@@ -1921,7 +1921,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
         # TODO: update meta objects so this can be acquired directly
         try:
             requires_grad = a.requires_grad
-        except Exception as e:
+        except Exception:
             requires_grad = False
 
     result = torch.empty_like(

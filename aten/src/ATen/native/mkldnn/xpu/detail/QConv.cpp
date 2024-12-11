@@ -67,11 +67,11 @@ at::Tensor quantized_convolution(
     double accum_scale,
     int64_t accum_zero_point,
     c10::optional<c10::ScalarType> output_dtype,
-    c10::optional<c10::string_view> binary_attr,
+    c10::optional<std::string_view> binary_attr,
     c10::optional<at::Scalar> binary_alpha,
-    c10::optional<c10::string_view> unary_attr,
+    c10::optional<std::string_view> unary_attr,
     torch::List<c10::optional<at::Scalar>> unary_scalars,
-    c10::optional<c10::string_view> unary_algorithm) {
+    c10::optional<std::string_view> unary_algorithm) {
   Attr attr =
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 

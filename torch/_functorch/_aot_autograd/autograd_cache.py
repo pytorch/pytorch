@@ -665,6 +665,7 @@ class AOTAutogradCache:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
+
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         with sanitize_gm_for_cache(gm):
             compiled_fn = None

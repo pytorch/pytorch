@@ -250,17 +250,16 @@ class DistributedState:
 
 
 class TensorifyState:
-    # These are the set of string symfloats names (eg. "zf0") that we collect
-    # from the tensorify_python_scalars.py joint fx pass to inform us about
-    # which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[str] = set()
+    # These are the set of source that we collect from the tensorify_python_scalars.py joint
+    # fx pass to inform us about which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[Source] = set()
 
     @classmethod
-    def specialize(cls, index: str) -> None:
+    def specialize(cls, index: Source) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: str) -> bool:
+    def should_specialize(cls, index: Source) -> bool:
         return index in cls.force_specializations
 
     @classmethod
@@ -1879,14 +1878,13 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        result = obj.call_method(self, "__setitem__", [key, val], {})
+        obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
         obj, key = self.popn(2)
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        name_tuple = None
         items = self.popn(inst.argval)
         self.push(TupleVariable(items))
 
@@ -1992,7 +1990,6 @@ class InstructionTranslatorBase(
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
-        old_stack = list(self.stack)
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -3274,7 +3271,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         assert self.symbolic_result is not None
@@ -3344,6 +3341,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
         self.funcvar = funcvar
         self.parent = parent
+        self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
@@ -3416,7 +3414,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

@@ -16,6 +16,7 @@ from typing import Any, BinaryIO
 
 
 LINTER_CODE = "RUFF"
+SYNTAX_ERROR = "E999"
 IS_WINDOWS: bool = os.name == "nt"
 
 
@@ -188,7 +189,7 @@ def get_issue_severity(code: str) -> LintSeverity:
 
     # "F821": Undefined name
     # "E999": syntax error
-    if any(code.startswith(x) for x in ("F821", "E999", "PLE")):
+    if any(code.startswith(x) for x in ("F821", SYNTAX_ERROR, "PLE")):
         return LintSeverity.ERROR
 
     # "F": PyFlakes Error
@@ -270,27 +271,28 @@ def check_files(
     else:
         rules = {}
 
-    return [
-        LintMessage(
+    def lint_message(vuln: dict[str, Any]) -> LintMessage:
+        code = vuln["code"] or SYNTAX_ERROR
+        return LintMessage(
             path=vuln["filename"],
-            name=vuln["code"],
+            name=code,
             description=(
                 format_lint_message(
                     vuln["message"],
-                    vuln["code"],
+                    code,
                     rules,
-                    show_disable,
+                    show_disable and bool(vuln["code"]),
                 )
             ),
             line=int(vuln["location"]["row"]),
             char=int(vuln["location"]["column"]),
             code=LINTER_CODE,
-            severity=severities.get(vuln["code"], get_issue_severity(vuln["code"])),
+            severity=severities.get(code, get_issue_severity(code)),
             original=None,
             replacement=None,
         )
-        for vuln in vulnerabilities
-    ]
+
+    return [lint_message(v) for v in vulnerabilities]
 
 
 def check_file_for_fixes(
