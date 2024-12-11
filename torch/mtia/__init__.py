@@ -327,6 +327,7 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "max_memory_allocated",
     "get_device_capability",
     "empty_cache",
     "set_device",
