@@ -276,7 +276,7 @@ def get_matching_overload(
                 if isinstance(arg, (list, tuple)) and any(
                     isinstance(t, torch.fx.Node) for t in arg
                 ):
-                    first_tensor = _get_first_tensor_in_node_list(arg)
+                    first_tensor = _get_first_tensor_in_node_list(arg)  # type: ignore[arg-type]
                     assert first_tensor is not None
                     # FIXME: Handle symfloat here
                     arg = ir.SequenceType(_get_type_from_tensor(first_tensor))  # type: ignore[assignment]

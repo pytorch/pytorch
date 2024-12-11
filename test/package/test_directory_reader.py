@@ -178,6 +178,7 @@ class DirectoryReaderTest(PackageTestCase):
             self.assertIsNone(importer.get_resource_reader("nonexistent_package"))
 
     @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
+    @skipIf(version_info >= (3, 13), "https://github.com/python/cpython/issues/127012")
     def test_package_resource_access(self):
         """Packaged modules should be able to use the importlib.resources API to access
         resources saved in the package.
