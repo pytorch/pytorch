@@ -33,8 +33,7 @@ STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("general")
 
-    stepcurrent = parser.getgroup("stepcurrent")
-    stepcurrent.addoption("--sc", action="store", default=None, dest="stepcurrent")
+    parser.addoption("--sc", action="store", default=None, dest="stepcurrent")
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -288,8 +287,21 @@ def pytest_collection_modifyitems(items: List[Any]) -> None:
 
 class StepcurrentPlugin:
     """
-    This mean to work in with test/run_test.py to ensure that every test is run,
-    gets a retries in new subprocesses, and create xml.
+    This is meant to work in with test/run_test.py to ensure that every test is
+    run, gets retries in new subprocesses, and creates xml.  To do this, it
+    keeps track of each test's status in the cache.  Normal tests are run
+    together in the same process, but when a test fails, it needs to be run
+    singly.  This class and run_test.py have logic to ensure that this happens,
+    especially for unusual cases like segfaults where the process exits
+    immediately and doesn't produce xml for any of the tests, and tests that
+    cause the process to fail at exit which creates xml that believes the test
+    is successful.
+
+    If a test fails normally, it gets run singly in a new subprocess.  If a test
+    segfaults, all tests prior to the segfault get rerun to generate xml, and
+    the segfaulting test gets run singly in a new subprocess.  If a process
+    exist with non 0 exit code but no tests seem to fail, then all the test will
+    be rerun singly to narrow down which test caused the failure.
 
     Cache file contents:
     pytest_previous_status: None on the first run, and then is either an exit
@@ -304,6 +316,11 @@ class StepcurrentPlugin:
     Test that are still to be run have 4 possible statuses, which are in
     test/run_test.py and are: cont, s, r2, and r1, abbreviated c, s, 2, and 1 in
     the table
+
+    cont: Test can be run in same process as other tests, this is the default status
+    s: Test should be run singly
+    r2: Test should be run singly, and has 2 retries left
+    r1: Test should be run singly, and has 1 retry left
 
     At the start of the run, all tests get the status c. This plugin will either
     run all tests with status c, or run a single test with the status s, 2, or
