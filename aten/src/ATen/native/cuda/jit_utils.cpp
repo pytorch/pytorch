@@ -171,6 +171,7 @@ const std::string jit_common_types = R"ESCAPE(
   #define ERROR_UNSUPPORTED_CAST ;
   // corresponds to aten/src/ATen/native/cuda/thread_constants.h
   #define CUDA_OR_ROCM_NUM_THREADS 256
+  #define CUDA_OR_ROCM_THREAD_WORK_SIZE 8
   // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
   #define MAX_DIMS 16
   #ifndef __forceinline__
@@ -180,6 +181,7 @@ const std::string jit_common_types = R"ESCAPE(
   //TODO use _assert_fail, because assert is disabled in non-debug builds
   #define ERROR_UNSUPPORTED_CAST assert(false);
   #define CUDA_OR_ROCM_NUM_THREADS 128
+  #define CUDA_OR_ROCM_THREAD_WORK_SIZE 4
   #define MAX_DIMS 25
   #endif
   #define POS_INFINITY __int_as_float(0x7f800000)
@@ -196,7 +198,7 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
-  constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
+  constexpr int thread_work_size = CUDA_OR_ROCM_THREAD_WORK_SIZE; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
 
   ${traits_string}
@@ -964,7 +966,11 @@ std::string generate_code(
 }
 
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
+#ifdef USE_ROCM
+#define THREAD_WORK_SIZE 8
+#else
 #define THREAD_WORK_SIZE 4
+#endif
 constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(

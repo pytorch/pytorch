@@ -62,6 +62,12 @@ constexpr auto sum_of_sizes(args_t args, std::index_sequence<Is...>) {
     }
 }
 
+#ifdef USE_ROCM
+template <int io_sizes>
+constexpr auto elems_per_thread(){
+  return 8;
+}
+#else
 template <int io_sizes>
 constexpr auto elems_per_thread(){
   if constexpr (io_sizes == 1) {
@@ -72,6 +78,7 @@ constexpr auto elems_per_thread(){
     return 4;
   }
 }
+#endif
 
 template <int io_sizes>
 constexpr auto io_block_work_size() {
@@ -92,9 +99,7 @@ template <int vec_size, int dtype_size>
 constexpr auto calc_optimal_vec_size() {
   static_assert(vec_size != 0);
   static_assert(dtype_size != 0);
-  if constexpr (dtype_size == 1 && vec_size >= 16) {
-    return 16;
-  } else if constexpr (dtype_size <= 2 && vec_size >= 8) {
+  if constexpr (dtype_size <= 2 && vec_size >= 8) {
     return 8;
   } else if constexpr (dtype_size <= 4 && vec_size >= 4) {
     return 4;
@@ -193,11 +198,6 @@ static inline void launch_vectorized_kernel(
 
   switch (vec_size) {
 #ifdef USE_ROCM
-    case 16:
-      vectorized_elementwise_kernel<16, func_t, array_t>
-          <<<grid, num_threads(), 0, stream>>>(N, f, data);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      break;
      case 8:
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
