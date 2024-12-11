@@ -144,7 +144,6 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::opt
     value_ = value.to(self.device());
   }
   at::assert_no_overlap(self, value);
-  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);

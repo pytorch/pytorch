@@ -677,7 +677,6 @@ def argument_type_str(
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
-            BaseTy.ConstQuantizerPtr,
             BaseTy.SymInt,
         ]:
             # These python schema type names line up with their function schema names
@@ -994,7 +993,7 @@ def return_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.Device:
             return "_device"
         elif t.name == BaseTy.Dimname:
-            ret = "Optional[str]"  # noqa: F841
+            return "Optional[str]"
         else:
             return argument_type_str_pyi(t)
 

@@ -1074,6 +1074,28 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
         dist.destroy_process_group()
 
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("eager_init", [True, False])
+    def test_subgroup_p2p(self, eager_init: bool):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device if eager_init else None,
+        )
+        send_tensor = torch.ones(10, 10, device=device)
+        group = dist.new_group()
+        if self.rank == 0:
+            dist.send(send_tensor, 1, group=group)
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, device=device)
+            dist.recv(recv_tensor, 0, group=group)
+            self.assertEqual(send_tensor, recv_tensor)
+        dist.destroy_process_group()
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_get_uid(self):
@@ -4441,6 +4463,28 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["output_dtypes"], ["Float"])
         self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_barrier_profiling(self):
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        a = torch.full((3, 4), float(self.rank), device=device)
+        f = pg.barrier()
+        f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        t = t["entries"]
+        self.assertEqual(len(t), 2)
+        first = t[0]
+        last = t[-1]
+        self.assertEqual(first["profiling_name"], "nccl:all_reduce_barrier")
+        self.assertEqual(last["profiling_name"], "nccl:all_reduce")
         dist.destroy_process_group()
 
     @requires_nccl()

@@ -1268,8 +1268,16 @@ class AOTInductorTestsTemplate:
 
                 return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
-        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        input1 = (
+            torch.ones(3, 3, device=self.device),
+            torch.ones(5, device=self.device),
+            torch.ones(3, 3, device=self.device),
+        )
+        input2 = (
+            torch.ones(10, 3, device=self.device),
+            torch.ones(6, device=self.device),
+            torch.ones(10, 3, device=self.device),
+        )
         inputs = (input1, input2)
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         self.check_model_with_multiple_inputs(
@@ -1394,7 +1402,11 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(self.device), (torch.randn(5, 5, device=self.device),))
 
+    @unittest.skipIf(IS_MACOS, "no CUDA on Mac")
     def test_zero_grid_with_backed_symbols(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1417,7 +1429,7 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load(GPU_TYPE, so_path)
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -1920,7 +1932,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -4042,6 +4054,51 @@ class AOTInductorTestsTemplate:
             torch.tensor([True]).to(self.device),
             torch.tensor([1, 2, 3]).to(self.device),
         )
+        self.check_model(Model(), example_inputs)
+
+    def test_misaligned_input_1(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA test only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.cos()
+
+        N = 64 * 64 * 64 + 64
+        arg = torch.randn(N, device=self.device)
+        example_inputs = (arg,)
+        model = Model()
+        expected = model(*example_inputs)
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
+
+        misaligned_arg = torch.zeros(N + 1, device=self.device)
+        misaligned_arg = misaligned_arg[1:]
+        misaligned_arg.copy_(arg)
+        # If the model is compiled with aligned inputs, the generated
+        # code will check inputs alignment at runtime, and throws an
+        # error if any alignment assumption is violated.
+        msg = ".* API call failed at .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            actual = optimized(misaligned_arg)
+            torch.testing.assert_close(actual, expected)
+
+    def test_misaligned_input_2(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA test only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.cos()
+
+        N = 64 * 64 * 64 + 64
+        arg = torch.randn(N, device=self.device)
+        misaligned_arg = torch.zeros(N + 1, device=self.device)
+        misaligned_arg = misaligned_arg[1:]
+        misaligned_arg.copy_(arg)
+        example_inputs = (misaligned_arg,)
+        # If the model is already compiled with a misaligned input, the
+        # generated code should NOT contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
 
 
