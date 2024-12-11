@@ -36,7 +36,7 @@ jobs:
     outputs:
       pt_release_name: ${{ steps.release_name.outputs.pt_release_name }}
     steps:
-      - uses: malfet/checkout@silent-checkout
+      - uses: ./.github/actions/silent-checkout
         with:
           submodules: 'recursive'
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
