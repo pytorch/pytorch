@@ -2377,23 +2377,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def is_aligned_realized_tensor(x):
-            aligned_strides = all(
-                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
-                for i in range(len(x.get_stride()) - 1)
-            )
-            # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-            )
-            return aligned_last_dim and aligned_strides
-
-        if (
-            isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
-        ):
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return V.graph.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride
             )
@@ -3894,7 +3878,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds_precomp):
+        for idx, (low, _high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)
@@ -4181,7 +4165,7 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
-    *batch, height, width = x.get_size()
+    *_batch, _height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
 
     indices_loader = indices.make_loader()
@@ -4279,7 +4263,6 @@ def max_pool2d_with_indices_backward(
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
-    *_, h, w = x.get_size()
     x_loader = x.make_loader()
 
     def load(prefix, increments, start_indices, end_indices):
@@ -4673,11 +4656,11 @@ def upsample_nearest2d_backward(
 ):
     x.realize_hint()
 
-    *batch, inp_h, inp_w = x.get_size()
+    *_batch, inp_h, inp_w = x.get_size()
     inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
     inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
-    *batch, out_h, out_w = input_size
+    *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
         return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
@@ -4855,7 +4838,6 @@ def _avg_poolnd(
     else:
 
         def fn(idx):
-            prefix = idx[:-dim]
             bh = idx[-dim:]
 
             divide_factors = []
@@ -4911,10 +4893,12 @@ def avg_pool2d_backward(
 
     grad_output.realize_hint()  # we will read this many times, so make sure it is computed
 
-    *batch, height, width = x.get_size()
+    *_, height, width = x.get_size()
 
-    h_out, ceil_mode1 = pooling_size(height, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
+    _h_out, ceil_mode1 = pooling_size(
+        height, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
 
     grad_loader = grad_output.make_loader()
 
@@ -5080,13 +5064,17 @@ def avg_pool3d_backward(
 
     grad_output.realize_hint()
 
-    *batch, depth, height, width = x.get_size()
+    *_batch, depth, height, width = x.get_size()
 
-    d_out, ceil_mode_d = pooling_size(depth, 0, kernel_size, stride, padding, ceil_mode)
-    h_out, ceil_mode_h = pooling_size(
+    _d_out, ceil_mode_d = pooling_size(
+        depth, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _h_out, ceil_mode_h = pooling_size(
         height, 1, kernel_size, stride, padding, ceil_mode
     )
-    w_out, ceil_mode_w = pooling_size(width, 2, kernel_size, stride, padding, ceil_mode)
+    _w_out, ceil_mode_w = pooling_size(
+        width, 2, kernel_size, stride, padding, ceil_mode
+    )
 
     grad_loader = grad_output.make_loader()
     had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
@@ -5339,7 +5327,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
-    size = x.get_size()
     axis = _validate_dim(x, axis)
 
     return dict(
@@ -5831,16 +5818,6 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5859,16 +5836,6 @@ def cummin(x, axis=None):
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
         "argmin", dtype=dtype, arg_break_ties_left=False
-    )
-
-    max_value = (
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
     )
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)

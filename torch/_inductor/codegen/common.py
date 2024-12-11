@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import enum
@@ -19,8 +21,15 @@ from typing import (
     NamedTuple,
     Optional,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
+
+from torch.utils._ordered_set import OrderedSet
+
+
+if TYPE_CHECKING:
+    from typing import Never
 
 import sympy
 
@@ -29,7 +38,6 @@ import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -605,50 +613,15 @@ class PythonPrinter(_PythonPrinter):
         return super().doprint(expr)
 
 
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
-
-    @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
-        if (
-            isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
-        ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
-            return string
-        return f"({string})"
-
-    def __getattr__(self, item):
-        return getattr(self._parent, item)
+class OpDecompositions:
+    """
+    Decomposes inductor ops
+    """
 
     @staticmethod
     def identity(value):
         # used to trigger cse
         return value
-
-    @staticmethod
-    def constant(value, dtype):
-        return repr(value)
 
     @staticmethod
     def reciprocal(x):
@@ -692,13 +665,84 @@ class OpOverrides:
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
+
+
+class OpOverrides(OpDecompositions):
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    @staticmethod
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
+        if (
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
+            or string == ""
+        ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
+            return string
+        return f"({string})"
+
+    def __getattr__(self, item):
+        return getattr(self._parent, item)
+
+    @staticmethod
+    def constant(value, dtype):
+        return repr(value)
+
+    @staticmethod
     def libdevice_sigmoid(x):
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def relu(x):
-        return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
     def libdevice_abs(x):
@@ -751,36 +795,6 @@ class OpOverrides:
     @staticmethod
     def bitwise_right_shift(x, y):
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
-
-    @staticmethod
-    def remainder(a, b):
-        r = ops.mod(a, b)
-        cond = ops.and_(
-            ops.ne(r, ops.constant(0, torch.int32)),
-            ops.ne(ops.signbit(r), ops.signbit(b)),
-        )
-        return ops.where(cond, ops.add(r, b), r)
-
-    @staticmethod
-    def fma(x, y, z):
-        # for backends that don't override this (halide)
-        return ops.add(ops.mul(x, y), z)
-
-    @staticmethod
-    def trunc_to_int(a, dtype):
-        return ops.to_dtype(ops.trunc(a), dtype)
-
-    @staticmethod
-    def floor_to_int(a, dtype):
-        return ops.to_dtype(ops.floor(a), dtype)
-
-    @staticmethod
-    def ceil_to_int(a, dtype):
-        return ops.to_dtype(ops.ceil(a), dtype)
-
-    @staticmethod
-    def round_to_int(a, dtype):
-        return ops.to_dtype(ops.round(a), dtype)
 
     @staticmethod
     def int_truediv(a, b):
@@ -1451,10 +1465,10 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
+        self.invalidated_stores = OrderedSet[str]()
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: OrderedSet[str]):
+    def invalidate(self, keep_vars: Union[OrderedSet[str], OrderedSet[Never]]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -2320,7 +2334,7 @@ class KernelTemplate:
         except NotImplementedError as e:
             return e
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

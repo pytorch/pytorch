@@ -439,8 +439,7 @@ def write(
     # hashes just because the content begins/ends with different number of
     # spaces.
     key: str = get_hash(content.strip(), extra, hash_type)
-    basename, subdir, path = get_path(key, extension, specified_dir)
-    encode_utf_8: bool = hash_type == "code"
+    basename, _subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(path):
         write_atomic(path, content, make_dirs=True)
     return basename, path
@@ -473,7 +472,7 @@ def write_atomic(
         f.write(content)
     try:
         tmp_path.rename(target=path)
-    except FileExistsError as e_file_exist:
+    except FileExistsError:
         if not _IS_WINDOWS:
             raise
         # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
@@ -1114,8 +1113,8 @@ class FxGraphCache:
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
-        output_code_log.debug("Output code written to: %s", artifact_path)
         output_code_log.debug("Output code: \n%s", code)
+        output_code_log.debug("Output code written to: %s", artifact_path)
         # On cache hit, use artifact path as filename
         trace_structured(
             "inductor_output_code",
@@ -1569,7 +1568,7 @@ class AotCodeCompiler:
                         pos += rc
             return consts_o
 
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -2004,7 +2003,7 @@ class CppCodeCache:
         key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
@@ -2069,7 +2068,7 @@ def _worker_compile_cpp(
     fb_input_path: str,
     fb_output_path: str,
 ) -> None:
-    from filelock import FileLock
+    from torch.utils._filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         binary_path = (
@@ -2647,10 +2646,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         afile = str(dirpath / "standalone_halide_runtime.a")
         sofile = str(dirpath / libname)
         if not os.path.exists(donefile):
-            import filelock
             import halide as hl  # type: ignore[import-untyped,import-not-found]
 
-            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
+            from torch.utils._filelock import FileLock
+
+            with FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
                     with open(hookfile, "w") as f:
                         if device_type == "cuda":
@@ -2681,7 +2681,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
 
 def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
-    from filelock import FileLock
+    from torch.utils._filelock import FileLock
 
     try:
         with FileLock(lockfile, LOCK_TIMEOUT):
@@ -3076,7 +3076,7 @@ class CUDACodeCache:
         """
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils._filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -3167,7 +3167,7 @@ class ROCmCodeCache:
 
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from filelock import FileLock
+            from torch.utils._filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)

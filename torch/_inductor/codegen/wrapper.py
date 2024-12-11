@@ -44,7 +44,6 @@ from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import async_compile, config, ir
 from ..codecache import output_code_log
-from ..graph import GraphLowering
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -69,6 +68,8 @@ from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 if TYPE_CHECKING:
     import triton
+
+    from ..graph import GraphLowering
 
 
 pexpr = PythonPrinter().doprint
@@ -294,7 +295,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                     else:
                         symbol_str = f"{symbol!r}"
                     if annotation := global_annotations.get(symbol_name):
-                        annotion_code = ""
                         if isinstance(annotation, type):
                             annotation_code = (
                                 f": {annotation.__module__}.{annotation.__name__}"
@@ -635,7 +635,7 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr = OrderedSet[Tuple[str, GraphLowering]]()
+        self.kernel_numel_expr: OrderedSet[Tuple[str, GraphLowering]] = OrderedSet()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
