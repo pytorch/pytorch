@@ -1201,6 +1201,12 @@ class BuiltinVariable(VariableTracker):
                 "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
+        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+            value = self.fn(
+                a.as_python_constant(),
+                b.as_python_constant(),
+            )
+            return ConstantVariable(value)
 
     call_min = _call_min_max
     call_max = _call_min_max
