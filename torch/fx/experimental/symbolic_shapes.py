@@ -3873,9 +3873,21 @@ class ShapeEnv:
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         if is_contiguous:
-            stride = [sympy.Integer(1)] * len(size)
+            contiguous_striding = True
             for i in range(len(size) - 2, -1, -1):
-                stride[i] = stride[i + 1] * size[i + 1]
+                # Even though a tensor is contiguous, it may not
+                # conform to stride[i] = size[i+1] * stride[i+1]
+                contiguous_stride = ex_stride[i + 1] * size[i + 1]
+                if (
+                    not isinstance(contiguous_stride, sympy.Symbol)
+                    and ex_stride[i] != contiguous_stride
+                ):
+                    contiguous_striding = False
+
+            if contiguous_striding:
+                stride = [sympy.Integer(1)] * len(size)
+                for i in range(len(size) - 2, -1, -1):
+                    stride[i] = stride[i + 1] * size[i + 1]
         else:
             for i, val in enumerate(ex_stride):
                 if val in (0, 1):
