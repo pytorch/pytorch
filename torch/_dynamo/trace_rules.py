@@ -2918,11 +2918,20 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 
 @functools.lru_cache(None)
 def get_tensor_method():
+    disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
         ):
             s.add(method)
 
