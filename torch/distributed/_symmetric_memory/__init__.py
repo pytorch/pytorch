@@ -429,7 +429,8 @@ def _pipelined_produce_and_all2all(
 
 lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
-    "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
+    "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
@@ -438,10 +439,12 @@ lib.define(
     "Tensor?[] biases, "
     "Tensor?[] result_scales, "
     "ScalarType?[] out_dtypes, "
-    "bool[] use_fast_accum) -> (Tensor, Tensor[])"
+    "bool[] use_fast_accum) -> (Tensor, Tensor[])",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
-    "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
+    "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
@@ -450,7 +453,8 @@ lib.define(
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
-    "bool use_fast_accum = False) -> Tensor"
+    "bool use_fast_accum = False) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(

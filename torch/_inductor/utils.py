@@ -41,12 +41,13 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, dataclass_transform, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec, TypeGuard
 from unittest import mock
 
 import sympy
 
 import torch
+from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
@@ -124,7 +125,7 @@ class align(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, value):
+    def eval(cls, value: sympy.Expr) -> Optional[sympy.Expr]:
         if isinstance(value, (int, sympy.Integer)):
             return _align(int(value))
         if _is_aligned(value):
@@ -240,11 +241,11 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     return device
 
 
-def sympy_product(it):
+def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
     return functools.reduce(operator.mul, it, sympy.S.One)
 
 
-def sympy_dot(seq1, seq2):
+def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
@@ -336,7 +337,7 @@ def convert_shape_to_symint(
     ]
 
 
-def is_view(op: torch._ops.OpOverload):
+def is_view(op: torch._ops.OpOverload) -> bool:
     """
     Does this op overload have aliasing
     """
@@ -346,7 +347,7 @@ def is_view(op: torch._ops.OpOverload):
 
 def is_pointwise_use(
     use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
-):
+) -> bool:
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
 
@@ -391,7 +392,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, graph_args
 
 
-def synchronize(device: str = "cuda"):
+def synchronize(device: str = "cuda") -> None:
     if device == "cpu":
         return
     device_interface = get_interface_for_device(device)
@@ -447,7 +448,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x):
+def tuple_sorted(x: Tuple[_T, ...]) -> List[_T]:
     if len(x) == 0:
         return []
 
@@ -586,7 +587,7 @@ def get_kernel_metadata(node_schedule, wrapper):
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
-            key = node.meta["from_node"][0][0]
+            key = node.meta["from_node"][0].name
             from_node_dict[key].append(node.name)
     sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
@@ -731,7 +732,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     )
 
 
-def is_symbolic(a: Any) -> bool:
+def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor)
         and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
@@ -1113,12 +1114,18 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index) -> bool:
-    prop = torch.cuda.get_device_properties(index)
+def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if isinstance(index_or_device, torch.device):
+        device = index_or_device
+    else:
+        device = torch.device("cuda", index_or_device)
+
+    prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
     if torch.version.hip:
+        assert prop.major is not None
         if prop.major < 9 or prop.major == 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
@@ -1145,7 +1152,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
-        and is_big_gpu(layout.device.index or 0)
+        and is_big_gpu(layout.device)
     )
 
 
@@ -1648,23 +1655,23 @@ def get_device_tflops(dtype):
 
 
 @functools.lru_cache(None)
-def get_gpu_dram_gbps():
+def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
 
 
-def get_gpu_shared_memory():
+def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
-def is_welford_reduction(reduction_type):
+def is_welford_reduction(reduction_type: str) -> bool:
     return reduction_type.startswith("welford")
 
 
-def reduction_num_outputs(reduction_type):
+def reduction_num_outputs(reduction_type: str) -> int:
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
@@ -1672,15 +1679,15 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def is_windows():
+def is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def has_free_symbols(itr: Iterable[Any]):
+def has_free_symbols(itr: Iterable[Any]) -> bool:
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
-def is_dynamic(*args):
+def is_dynamic(*args) -> bool:
     from . import ir
 
     for t in args:
@@ -1747,7 +1754,31 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    return (
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    ) or (
+        # TODO: this is a temporary solution to ensure that we can identify torchrec's
+        # communication ops. But in order to allow better communication and computation
+        # overlap, torchrec's communication ops should be not used.
+        type(node) == ir.FallbackKernel
+        and (
+            # NOTE: the `hasattr()` check is to bypass errors such as the following:
+            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
+            (
+                hasattr(torch.ops.torchrec, "all_to_all_single")
+                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
+                and node.op_overload
+                == torch.ops.torchrec.all_gather_into_tensor.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
+                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
+            )
+        )
+    )
 
 
 def is_wait(node):
@@ -1922,8 +1953,13 @@ def device_need_guard(device: str):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+    # tl.atomic add has bfloat16 support in fbcode
+    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
+    # we will fallback until the code is upstreamed to OSS
+    if config.is_fbcode() and dtype == torch.bfloat16:
+        return False
+    else:
+        return dtype in {torch.int64, torch.bool, torch.bfloat16}
 
 
 def use_scatter_fallback(
