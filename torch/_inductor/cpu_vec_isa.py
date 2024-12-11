@@ -68,7 +68,7 @@ extern "C" void __avx_chk_kernel() {
 """  # noqa: B950
 
     _avx_py_load = """
-import torch
+# import torch
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
 """
