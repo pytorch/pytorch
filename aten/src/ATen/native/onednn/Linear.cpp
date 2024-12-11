@@ -83,8 +83,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor onednn_linear(
     const Tensor& self,
@@ -235,9 +234,9 @@ Tensor onednn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    c10::string_view attr,
+    std::string_view attr,
     c10::List<std::optional<at::Scalar>> scalars,
-    std::optional<c10::string_view> algorithm) {
+    std::optional<std::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
@@ -310,7 +309,7 @@ Tensor onednn_linear_pointwise_binary(
     const Tensor& other_t,
     const Tensor& weight_t,
     const std::optional<Tensor>& bias_opt,
-    c10::string_view attr) {
+    std::string_view attr) {
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -349,8 +348,8 @@ Tensor onednn_linear_pointwise_binary(
   }
 
   TORCH_CHECK(
-      output.sizes() == other_reshaped.sizes(),
-      "linear_binary_run expects the size of output and other tensor to be the same");
+      output.dim() == other_reshaped.dim(),
+      "linear_binary_run expects the dimension of output and other tensor to be the same");
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor onednn_output = itensor_from_tensor(output);
@@ -389,7 +388,7 @@ Tensor onednn_linear_pointwise_binary(
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 
-static Tensor mkl_linear(
+Tensor mkl_linear(
     const Tensor& self,
     const Tensor& mkl_weight_t,
     const Tensor& origin_weight_t,
@@ -495,7 +494,6 @@ TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
       TORCH_FN(onednn_linear_pointwise_binary));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

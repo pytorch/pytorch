@@ -78,8 +78,11 @@ def create_build_plan() -> list[tuple[str, str]]:
         if line.startswith(": &&") and line.endswith("&& :"):
             line = line[4:-4]
         line = line.replace("-O2", "-g").replace("-O3", "-g")
-        name = line.split("-o ", 1)[1].split(" ")[0]
-        rc.append((name, line))
+        try:
+            name = line.split("-o ", 1)[1].split(" ")[0]
+            rc.append((name, line))
+        except IndexError:
+            print(f"Skipping {line} as it does not specify output file")
     return rc
 
 

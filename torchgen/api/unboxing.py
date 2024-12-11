@@ -194,9 +194,7 @@ if ({arg_name}_opt.has_value()) {{
 }} else {{
     {out_name} = {ctype.cpp_type(strip_ref=True)}();
 }}
-        """.split(
-            "\n"
-        ),
+        """.split("\n"),
         decl,
     )
 
@@ -213,9 +211,7 @@ def _gen_code_list_type(
         code.extend(
             f"""
 {ctype.cpp_type(strip_ref=True)} {out_name} = as_array<{res_ctype.cpp_type(strip_ref=True)}, {t.size}>({in_name});
-            """.split(
-                "\n"
-            )
+            """.split("\n")
         )
     # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
     elif isinstance(t.elem, OptionalType):
@@ -226,9 +222,7 @@ for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
     {out_name}.push_back({res_name});
 }}
-            """.split(
-                "\n"
-            )
+            """.split("\n")
         )
     else:
         # use ArrayRef as default.
@@ -242,8 +236,6 @@ for (c10::IValue {elem_name}: {in_name}) {{
     {vec_name}.push_back({res_name});
 }}
 {ctype.cpp_type(strip_ref=True)} {out_name}({vec_name});
-            """.split(
-                "\n"
-            )
+            """.split("\n")
         )
     return code, decl
