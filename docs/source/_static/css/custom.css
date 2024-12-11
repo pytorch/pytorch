@@ -1,5 +1,9 @@
 /* styles needed for the Google Search button */
 
+.gsc-overflow-hidden {
+    overflow: visible;
+}
+
 .gsc-control-cse {
    padding-left: 0px !important;
    padding-bottom: 0px !important;
