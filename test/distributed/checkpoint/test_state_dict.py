@@ -368,7 +368,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     def _test_strict(self, parallelism: str) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
-        if parallelism =="DDP":
+        if parallelism == "DDP":
             model = DDP(model)
         else:
             model = fully_shard(model)
