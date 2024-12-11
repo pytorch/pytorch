@@ -59,7 +59,9 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    raise ValueError(
+        f"Received unsupported type {type(a)}. Expected TensorLike, Number, or Sequence."
+    )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -383,9 +385,6 @@ def _maybe_remove_out_wrapper(fn: Callable):
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.ADInplaceOrView
-            )
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):

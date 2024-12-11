@@ -283,7 +283,7 @@ def activation_is_dynamically_quantized(qconfig):
     dynamically quantized or not, this includes dynamically quantizing to
     quint8, qint8 and float16
     """
-    activation_dtype, _, activation_is_dynamic = get_qconfig_dtypes(qconfig)
+    _activation_dtype, _, activation_is_dynamic = get_qconfig_dtypes(qconfig)
     return activation_is_dynamic
 
 
@@ -649,6 +649,7 @@ def determine_qparams(
     device = min_val_neg.device
     scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+    eps = eps.to(device)
 
     if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
         max_val_pos = torch.max(-min_val_neg, max_val_pos)

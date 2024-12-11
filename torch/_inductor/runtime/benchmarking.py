@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Tuple
 from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, dynamo_timed
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -100,27 +100,28 @@ class Benchmarker:
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
+        with dynamo_timed("Benchmarker.benchmark", log_pt2_compile_event=True):
+            inferred_device = None
+            for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+                if not isinstance(arg_or_kwarg, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg.device
+                elif arg_or_kwarg.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
             if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
                 raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
                 )
-        if inferred_device is None:
-            raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
-            )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
-        if inferred_device == torch.device("cpu"):
-            return self.benchmark_cpu(_callable, **kwargs)
-        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
-        # implementation which was written specifically with CUDA devices in mind, we may want to
-        # explore alternate implementations for other device types.
-        return self.benchmark_gpu(_callable, **kwargs)
+            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+            if inferred_device == torch.device("cpu"):
+                return self.benchmark_cpu(_callable, **kwargs)
+            # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+            # implementation which was written specifically with CUDA devices in mind, we may want to
+            # explore alternate implementations for other device types.
+            return self.benchmark_gpu(_callable, **kwargs)
 
     @maybe_time
     @count
