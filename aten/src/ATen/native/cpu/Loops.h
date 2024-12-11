@@ -89,7 +89,7 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
   using result_type = typename traits::result_type;
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(op, dereference<traits>(
+    *out_ptr = std::apply(op, dereference<traits>(
         &data[1],
         &strides[1],
         i));
@@ -102,7 +102,7 @@ inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t&& op) {
   using traits = function_traits<func_t>;
   for (; i < n; i++) {
-    c10::guts::apply(op, dereference<traits>(
+    std::apply(op, dereference<traits>(
         &data[0],
         &strides[0],
         i));
@@ -162,7 +162,7 @@ void handle_tuple_outputs(char* C10_RESTRICT data[],
 }
 
 // Loop operation for `cpu_kernel_multiple_outputs`.
-// 1. Use `c10::guts::apply` to make dynamic method invocation
+// 1. Use `std::apply` to make dynamic method invocation
 //    for the lambda passed in `cpu_kernel_multiple_outputs`.
 // 2. Iterate over the members of the returned tuple, set the corresponding
 //    output tensor by the tuple member in `handle_tuple_outputs` function.
@@ -183,7 +183,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   }
 
   for (; i < n; i++) {
-    auto output = c10::guts::apply(op, dereference<traits>(
+    auto output = std::apply(op, dereference<traits>(
       &data[num_outputs],
       &strides[num_outputs],
       i));
@@ -213,8 +213,8 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
     auto args2 = dereference_vec<traits>(&data[1], opt_scalar, S, i + Vec::size());
-    auto out1 = c10::guts::apply(vop, std::move(args1));
-    auto out2 = c10::guts::apply(vop, std::move(args2));
+    auto out1 = std::apply(vop, std::move(args1));
+    auto out2 = std::apply(vop, std::move(args2));
     out1.store(data[0] + i * sizeof(scalar_t));
     out2.store(data[0] + (i + Vec::size()) * sizeof(scalar_t));
   }
