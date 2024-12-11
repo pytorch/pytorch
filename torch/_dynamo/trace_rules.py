@@ -2925,8 +2925,9 @@ def get_tensor_method():
         ):
             s.add(method)
 
-    # mlazos: this is a function which we handle specially in TensorVariable
+    # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
+    s.add(torch.Tensor.register_hook)  # type: ignore[arg-type]
     return frozenset(s)
 
 

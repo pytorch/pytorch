@@ -1171,11 +1171,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
     def is_tensor_method(self):
+        from ..trace_rules import get_tensor_method
+
         return (
             inspect.ismethoddescriptor(self.get_function())
             and hasattr(self.get_function(), "__objclass__")
             and self.get_function().__objclass__ == torch._C.TensorBase
-        ) or self.get_function() is torch.Tensor.__contains__
+        ) or self.get_function() in get_tensor_method()
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (
