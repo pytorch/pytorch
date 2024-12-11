@@ -5,6 +5,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
+from torch.ao.quantization.pt2e.graph_utils import get_control_flow_submodules
+from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.nn import functional as F
 
@@ -15,30 +17,75 @@ CUSTOM_KEY = "custom"
 log = logging.getLogger(__name__)
 
 
-def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
-    """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
-    The graph nodes of input model is modified inplace.
+def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     """
-    unique_id = -1
-    # Find the max ID that exists in the graph first, in case part of the graph
-    # has already been annotated. This way we guarantee there are no duplicate
-    # handle IDs.
-    for node in graph_module.graph.nodes:
-        unique_id = max(
-            unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, -1)
+    Attach numeric_debug_handle_id for all nodes in the graph module of the given
+    ExportedProgram, like conv2d, squeeze, conv1d, etc, except for placeholder.
+    Notice that nodes like getattr are out of scope since they are not in the graph.
+
+    The graph nodes of input exported program are modified inplace.
+
+    Here's an example of using debug handle quantize flow::
+
+        ep = export_for_training(eager_model, example_inputs)
+        generate_numeric_debug_handle(ep)
+
+        m = ep.module()
+        quantizer = XNNPACKQuantizer()
+        m = prepare_pt2e(m, quantizer)
+        m = convert_pt2e(m)
+    """
+
+    # Sanity check the input data type
+    if not isinstance(ep, ExportedProgram):
+        raise ValueError(
+            f"Expected ep to be ExportedProgram, got {type(ExportedProgram)}"
         )
-    unique_id += 1
 
-    for node in graph_module.graph.nodes:
-        if node.op in ["output", "placeholder"]:
-            continue
+    unique_id = 0
 
+    def _bfs_trace_graph_with_node_process(node_op: Callable) -> None:
+        nonlocal ep
+        queue = [ep.graph_module]
+        while queue:
+            current_graph_module = queue.pop(0)
+            for node in current_graph_module.graph.nodes:
+                if node.op in ["output", "placeholder"]:
+                    continue
+
+                node_op(node)
+
+            control_flow_submodules = [
+                submodule
+                for _, submodule, _ in get_control_flow_submodules(current_graph_module)
+            ]
+            queue.extend(control_flow_submodules)
+
+    def _find_max_id(node: torch.fx.Node) -> None:
+        nonlocal unique_id
+        unique_id = max(
+            unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, 0)
+        )
+
+    def _assign_debug_handle(node: torch.fx.Node) -> None:
+        nonlocal unique_id
         if CUSTOM_KEY not in node.meta:
             node.meta[CUSTOM_KEY] = {}
 
         if NUMERIC_DEBUG_HANDLE_KEY not in node.meta[CUSTOM_KEY]:
             node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = unique_id
             unique_id += 1
+
+    # Find the max ID that exists in the graph first, in case part of the graph
+    # has already been annotated. This way we guarantee there are no duplicate
+    # handle IDs.
+    _bfs_trace_graph_with_node_process(_find_max_id)
+
+    unique_id += 1
+
+    # Assign debug handles to all nodes in the graph that don't have one based on the
+    # max ID found in the previous step.
+    _bfs_trace_graph_with_node_process(_assign_debug_handle)
 
 
 class OutputLogger(torch.nn.Module):

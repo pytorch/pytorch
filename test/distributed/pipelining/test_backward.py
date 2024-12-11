@@ -75,7 +75,7 @@ class StageBackwardTests(TestCase):
         out = mod(x)
         loss = loss_fn(out, target)
         dinputs, param_groups = stage_backward_input(
-            stage_outputs=(loss,),
+            stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
             weights=mod.parameters(),
@@ -110,7 +110,7 @@ class StageBackwardTests(TestCase):
         out = mod(x)
         loss = loss_fn(out, target)
         dinputs, param_groups = stage_backward_input(
-            stage_outputs=(loss,),
+            stage_outputs_or_loss=(loss,),
             output_grads=None,
             input_values=[x],
             weights=mod.parameters(),
@@ -158,7 +158,7 @@ class StageBackwardTests(TestCase):
             out = mod(x)
             loss = loss_fn(out, target)
             dinputs, param_groups = stage_backward_input(
-                stage_outputs=(loss,),
+                stage_outputs_or_loss=(loss,),
                 output_grads=None,
                 input_values=[x],
                 weights=mod.parameters(),

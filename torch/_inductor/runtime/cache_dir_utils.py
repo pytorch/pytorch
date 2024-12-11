@@ -21,3 +21,13 @@ def default_cache_dir() -> str:
         tempfile.gettempdir(),
         "torchinductor_" + sanitized_username,
     )
+
+
+def triton_cache_dir(device: int) -> str:
+    if (directory := os.getenv("TRITON_CACHE_DIR")) is not None:
+        return directory
+    return os.path.join(
+        cache_dir(),
+        "triton",
+        str(device),
+    )

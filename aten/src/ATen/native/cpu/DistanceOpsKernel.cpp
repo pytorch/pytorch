@@ -267,7 +267,7 @@ struct Dist {
 
   // This does a backward pass down a Vec column of the input
   template <typename F>
-  inline static void backward_down_column_pdist(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
+  static void backward_down_column_pdist(const scalar_t * self_i, scalar_t * res_i, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t n, int64_t m, int64_t gs, int64_t count = Vec::size()) {
     for (const scalar_t * const self_end = self_i + m * n; self_i != self_end - m; self_i += m, res_i += m) {
 
       const Vec self_vec_i = Vec::loadu(self_i, count);
@@ -391,11 +391,11 @@ struct Dist {
   }
 
   template <typename F>
-  inline static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
+  static void backward_down_column_cdist(const scalar_t * t1, const scalar_t * t2, scalar_t * res, const scalar_t * grad_k, const scalar_t * dist_k, const Vec& pvec, int64_t r1, int64_t r2, int64_t m, int64_t d, int64_t gs, int64_t l1_size, int64_t l2_size, int64_t count = Vec::size()) {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (const auto l C10_UNUSED : c10::irange(d)) {
+    for ([[maybe_unused]] const auto l : c10::irange(d)) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -443,9 +443,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
-REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
-REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
-REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl)
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl)
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl)
+REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl)
 
 }  // namespace at::native
