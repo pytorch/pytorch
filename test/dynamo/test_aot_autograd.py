@@ -8,6 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import (
@@ -45,7 +46,7 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
-class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
+class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
