@@ -296,8 +296,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # becuase they introduce mutation. Ideally we should use `torch.ops.higher_order.auto_functionalized_v2`
         # to wrap those mutation ops, but we need to figure out how to auto-generate the metadata needed for auto_functionalized_v2
         # (See tlparse of `pytest -rA test/distributed/_composable/fsdp/test_fully_shard_compile.py::TestFullyShardCompile::test_transformer_backend_inductor_fullgraph_True` for how it should look like)
-        comms.bucket_fsdp_all_gather_concat(gm, all_gather_bucket_cap_mb=100)
-        comms.bucket_fsdp_reduce_scatter_concat(gm, reduce_scatter_bucket_cap_mb=100)
+        # comms.bucket_fsdp_all_gather_concat(gm, all_gather_bucket_cap_mb=100)
+        # comms.bucket_fsdp_reduce_scatter_concat(gm, reduce_scatter_bucket_cap_mb=100)
+        pass
 
     gm_str = gm.print_readable(
         print_output=False, include_stride=True, include_device=True

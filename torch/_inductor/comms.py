@@ -235,18 +235,18 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    # # If FSDP2 is used, we apply FSDP-specific passes.
+    # if any(
+    #     is_fallback_op(
+    #         x.node,
+    #         {
+    #             torch.ops.fsdp.all_gather_copy_in.default,
+    #             torch.ops.fsdp.chunk_cat.default,
+    #         },
+    #     )
+    #     for x in nodes
+    # ):
+    #     nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
