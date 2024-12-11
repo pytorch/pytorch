@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -525,6 +525,12 @@ automatic_dynamic_local_pgo: bool = (
 # Like above, but using remote cache
 automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
+# Run GC at the end of compilation
+run_gc_after_compile = Config(
+    default=True, justknob="pytorch/compiler:enable_run_gc_after_compile", 
+    env_name_default="ENABLE_RUN_GC_AFTER_TORCH_COMPILE",
 )
 
 # HACK: this is for testing custom ops profiling only
