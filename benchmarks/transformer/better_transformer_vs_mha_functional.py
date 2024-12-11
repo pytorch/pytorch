@@ -152,8 +152,8 @@ def run(
     result_entry["sequence_length"] = sequence_length
     result_entry["n_heads"] = num_heads
     result_entry["embed_dim"] = embed_dim
-    result_entry["time_native_mha_slow(\u00B5s)"] = f"{time_native_mha_slow:.3f}"
-    result_entry["time_native_mha_fast (\u00B5s)"] = f"{time_native_mha_fast:.3f}"
+    result_entry["time_native_mha_slow(\u00b5s)"] = f"{time_native_mha_slow:.3f}"
+    result_entry["time_native_mha_fast (\u00b5s)"] = f"{time_native_mha_fast:.3f}"
     result_entry["speedup flash_mha v native_mha"] = f"{speedup_fast_internal:.3f}"
     result_entry["padding"] = f"{padding:.3f}"
     return result_entry

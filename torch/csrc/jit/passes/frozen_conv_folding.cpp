@@ -327,8 +327,8 @@ bool FoldFrozenConvMulOrDiv(Block* b) {
       // channels-out resize it to the shape that will broadcast to
       // weight_tensor when the op is run so we dont change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
-      for (const auto i : c10::irange(1, weight_tensor.ndimension())) {
-        (void)i; // Suppress unused variable warning
+      for ([[maybe_unused]] const auto i :
+           c10::irange(1, weight_tensor.ndimension())) {
         weight_compatible_size.push_back(1);
       }
 

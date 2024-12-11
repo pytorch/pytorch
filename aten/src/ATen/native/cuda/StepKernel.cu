@@ -27,7 +27,7 @@ void heaviside_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
-REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda)
 
 } // namespace at::native

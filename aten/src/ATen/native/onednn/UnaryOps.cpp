@@ -37,8 +37,7 @@ Tensor& onednn_tanh_(Tensor& self) {
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor onednn_sigmoid(const Tensor& self) {
   ideep::tensor& x = itensor_from_onednn(self);
@@ -72,7 +71,6 @@ Tensor& onednn_tanh_(Tensor& self) {
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

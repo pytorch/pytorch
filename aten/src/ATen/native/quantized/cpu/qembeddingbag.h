@@ -2,8 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <cstdint>
 
-namespace at {
-namespace native {
+namespace at::native {
 Tensor& embedding_bag_byte_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
@@ -30,5 +29,4 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
 
 Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight);
 
-} // native
-} // at
+} // namespace at::native
