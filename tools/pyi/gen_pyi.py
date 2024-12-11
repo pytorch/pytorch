@@ -5,23 +5,32 @@ import collections
 import importlib
 import sys
 from pprint import pformat
-from typing import Sequence
+from typing import Callable, Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
 
 from tools.autograd.gen_python_functions import (
     group_overloads,
+    is_py_nn_function,
     load_signatures,
     should_generate_py_binding,
 )
 
 from torchgen.api.python import (
+    PythonSignature,
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
+    returns_str_pyi,
     returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.model import (
+    _TorchDispatchModeKey,
+    BaseType,
+    DispatchKey,
+    NativeFunction,
+    Variant,
+)
 from torchgen.utils import FileManager
 
 
@@ -307,305 +316,30 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> list[str]:
     return type_hints
 
 
-def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]]:
-    flag_pos = arg_list.index("{return_indices}")
-    # If return_indices is positional arg, everything before should have no default
-    arg_list_positional = (
-        [
-            ", ".join(single_arg.split(" = ")[0] for single_arg in arg.split(", "))
-            for arg in arg_list[: flag_pos + 1]
-        ]
-        + ["/"]
-        + arg_list[flag_pos + 1 :]
-    )
-    # Otherwise force return_indices to be kwarg
-    arg_list_keyword = arg_list.copy()
-    arg_list_keyword.insert(flag_pos, "*")
-    tmpl = "def {name}({args}) -> {{return_type}}: ..."
-    return {
-        name: [
-            tmpl.format(name=name, args=", ".join(arg_list)).format(
-                return_indices="return_indices: Literal[False] = False",
-                return_type="Tensor",
-            ),
-            tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
-                return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
-            ),
-            tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
-                return_indices="return_indices: Literal[True]",
-                return_type="Tuple[Tensor, Tensor]",
-            ),
-        ]
-    }
+def gen_nn_module_stubs(
+    out: str,
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    deprecated_yaml_path: str,
+    template_path: str,
+    *,
+    symint: bool = True,
+) -> None:
+    """
+    This function generates the type stubs for the torch._C._nn module.
+    """
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    native_functions = parse_native_yaml(
+        native_yaml_path, tags_yaml_path
+    ).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
 
-
-def gen_nn_functional(fm: FileManager) -> None:
-    INPUT = "input: Tensor"
-    KERNEL_SIZE = "kernel_size: Union[_int, _size]"
-    STRIDE_PADDING = ", ".join(
-        [
-            "stride: Optional[Union[_int, _size]] = None",
-            "padding: Union[_int, _size] = 0",
-        ]
-    )
-
-    # TODO the list for `torch._C._nn` is nonexhaustive
-    unsorted_c_nn_function_hints: dict[str, list[str]] = {}
-
-    for d in (2, 3):
-        unsorted_c_nn_function_hints.update(
-            {
-                f"avg_pool{d}d": [
-                    f"def avg_pool{d}d({{}}) -> Tensor: ...".format(
-                        ", ".join(
-                            [
-                                f"{INPUT}",
-                                f"{KERNEL_SIZE}",
-                                f"{STRIDE_PADDING}",
-                                "ceil_mode: bool = False",
-                                "count_include_pad: bool = True",
-                                "divisor_override: Optional[int] = None",
-                            ]
-                        )
-                    )
-                ],
-                f"fractional_max_pool{d}d": [
-                    f"def fractional_max_pool{d}d({{}}) -> {{}}: ...".format(
-                        ", ".join(
-                            [
-                                f"{INPUT}",
-                                f"{KERNEL_SIZE}",
-                                "output_size: Union[_int, _size]",
-                                "_random_samples: Tensor",
-                            ]
-                        ),
-                        "Tuple[Tensor, Tensor]",
-                    )
-                ],
-                f"adaptive_max_pool{d}d": [
-                    f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
-                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
-                        "Tuple[Tensor, Tensor]",
-                    )
-                ],
-            }
-        )
-
-    unsorted_c_nn_function_hints.update(
-        {
-            "hardtanh": [
-                "def hardtanh({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "min_val: float = ...",
-                            "max_val: float = ...",
-                            "*",
-                            "out: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "hardtanh_": [
-                "def hardtanh_({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "min_val: float = ...",
-                            "max_val: float = ...",
-                        ]
-                    )
-                )
-            ],
-            "elu_": ["def elu_(input: Tensor, alpha: float = ...) -> Tensor: ..."],
-            "leaky_relu": [
-                "def leaky_relu({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "negative_slope: float = ...",
-                            "*",
-                            "out: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "leaky_relu_": [
-                f"def leaky_relu_({', '.join(['input: Tensor', 'negative_slope: float = ...'])}) -> Tensor: ..."
-            ],
-            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
-            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
-            "softplus": [
-                "def softplus({}) -> Tensor: ...".format(
-                    ", ".join(
-                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
-                    )
-                )
-            ],
-            "softshrink": [
-                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
-            ],
-            "hardsigmoid": [
-                f"def hardsigmoid({', '.join(['input: Tensor', '*', 'out: Optional[Tensor] = None'])}) -> Tensor: ..."
-            ],
-            "linear": [
-                "def linear({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "weight: Tensor",
-                            "bias: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "pad": [
-                "def pad({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "pad: Sequence[int]",
-                            "mode: str = ...",
-                            "value: Optional[float] = None",
-                        ]
-                    )
-                )
-            ],
-            "one_hot": [
-                "def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ..."
-            ],
-            "scaled_dot_product_attention": [
-                "def scaled_dot_product_attention({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "query: Tensor",
-                            "key: Tensor",
-                            "value: Tensor",
-                            "attn_mask: Optional[Tensor] = None",
-                            "dropout_p: float = 0.0",
-                            "is_causal: bool = False",
-                            "scale: Optional[float] = None",
-                            "enable_gqa: bool = False",
-                        ]
-                    )
-                )
-            ],
-        }
-    )
-
-    c_nn_function_hints: list[str] = []
-    for _, hints in sorted(unsorted_c_nn_function_hints.items()):
-        if len(hints) > 1:
-            hints = ["@overload\n" + h for h in hints]
-        c_nn_function_hints += hints
-
-    # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
-    # through an `_add_docstr` call
-    torch_imports = [
-        "conv1d",
-        "conv2d",
-        "conv3d",
-        "conv_transpose1d",
-        "conv_transpose2d",
-        "conv_transpose3d",
-        "conv_tbc",
-        "avg_pool1d",
-        "adaptive_avg_pool1d",
-        "relu_",
-        "selu_",
-        "celu_",
-        "prelu",
-        "rrelu_",
-        "hardshrink",
-        "bilinear",
-        "pixel_shuffle",
-        "pixel_unshuffle",
-        "channel_shuffle",
-        "native_channel_shuffle",
-        "pairwise_distance",
-        "pdist",
-        "cosine_similarity",
-    ]
-    imported_hints = [f"from torch import {_} as {_}" for _ in torch_imports]
-
-    # Functions imported into `torch.nn.functional` from `torch._C._nn`
-    c_nn_imports = [
-        "avg_pool2d",
-        "avg_pool3d",
-        "hardtanh_",
-        "elu_",
-        "leaky_relu_",
-        "gelu",
-        "softplus",
-        "softshrink",
-        "linear",
-        "pad",
-        "one_hot",
-        "scaled_dot_product_attention",
-    ]
-    imported_hints += [f"from torch._C._nn import {_} as {_}" for _ in c_nn_imports]
-    # This is from `torch._C._nn` but renamed
-    imported_hints.append(
-        "from torch._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid"
-    )
-
-    # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
-    unsorted_dispatched_hints: dict[str, list[str]] = {}
-
-    for d in (1, 2, 3):
-        unsorted_dispatched_hints.update(
-            **get_max_pool_dispatch(
-                f"max_pool{d}d",
-                [
-                    f"{INPUT}",
-                    f"{KERNEL_SIZE}",
-                    f"{STRIDE_PADDING}",
-                    "dilation: Union[_int, _size] = 1",
-                    "ceil_mode: bool = False",
-                    "{return_indices}",
-                ],
-            ),
-            **get_max_pool_dispatch(
-                f"fractional_max_pool{d}d",
-                [
-                    f"{INPUT}",
-                    f"{KERNEL_SIZE}",
-                    "output_size: Optional[Union[_int, _size]] = None",
-                    "output_ratio: Optional[_ratio_any_t] = None",
-                    "{return_indices}",
-                    "_random_samples: Optional[Tensor] = None",
-                ],
-            ),
-            **get_max_pool_dispatch(
-                f"adaptive_max_pool{d}d",
-                [f"{INPUT}", "output_size: Union[_int, _size]", "{return_indices}"],
-            ),
-        )
-
-    # There's no fractional_max_pool1d
-    del unsorted_dispatched_hints["fractional_max_pool1d"]
-
-    dispatched_hints: list[str] = []
-    for _, hints in sorted(unsorted_dispatched_hints.items()):
-        if len(hints) > 1:
-            hints = ["@overload\n" + h for h in hints]
-        dispatched_hints += hints
-
-    fm.write_with_template(
-        "torch/nn/functional.pyi",
-        "torch/nn/functional.pyi.in",
-        lambda: {
-            "imported_hints": imported_hints,
-            "dispatched_hints": dispatched_hints,
-        },
-    )
-    fm.write_with_template(
-        "torch/_C/_nn.pyi",
-        "torch/_C/_nn.pyi.in",
-        lambda: {
-            "c_nn_function_hints": c_nn_function_hints,
-        },
+    methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
+    gen_module_stubs(
+        fm,
+        methods,
+        is_py_nn_function,
+        "_nn.pyi",
     )
 
 
@@ -1467,7 +1201,117 @@ def gen_pyi(
         "torch/_C/return_types.pyi.in",
         lambda: env,
     )
-    gen_nn_functional(fm)
+
+    gen_nn_module_stubs(
+        out="torch/_C",
+        native_yaml_path=native_yaml_path,
+        tags_yaml_path=tags_yaml_path,
+        deprecated_yaml_path=deprecated_yaml_path,
+        template_path="torch/_C",
+    )
+
+
+# If input_tensor is true, inserts "input: Tensor" instead of self
+def signature_str_pyi_stubs(
+    signature: PythonSignature, input_tensor: bool = True, *, skip_outputs: bool = False
+) -> str:
+    args = signature.arguments(skip_outputs=skip_outputs)
+    schema_formals: list[str] = [
+        a.argument_str_pyi(method=signature.method) for a in args
+    ]
+    positional_argc = len(signature.input_args)
+    if len(schema_formals) > positional_argc:
+        schema_formals.insert(positional_argc, "*")
+
+    # only pyi signatures include returns
+    returns_str = returns_str_pyi(signature)
+    # pyi also includes self (with no typing/defaults) for methods
+    if signature.method and input_tensor:
+        schema_formals.insert(0, "input: Tensor")
+    return f'def {signature.name}({", ".join(schema_formals)}) -> {returns_str}: ...'
+
+
+def meth_stub(pair: PythonSignatureGroup) -> str:
+    signature = pair.signature
+    self_arg = pair.base.func.arguments.self_arg
+    # add_input determins if there is a self argument of type Tensor
+    add_input = (
+        self_arg is not None
+        and self_arg.argument.name == "self"
+        and isinstance(self_arg.argument.type, BaseType)
+        and self_arg.argument.type.name.name == "Tensor"
+    )
+
+    stub = signature_str_pyi_stubs(signature, input_tensor=add_input)
+
+    return stub
+
+
+def filter_functions(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+) -> list[PythonSignatureNativeFunctionPair]:
+    filtered: list[PythonSignatureNativeFunctionPair] = []
+    for pair in pairs:
+        if pred(pair.function):
+            filtered.append(pair)
+    return filtered
+
+
+def gen_module_stubs(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    filename: str,
+) -> None:
+    function_hints: list[str] = []
+    unsorted_nn_function_hints: dict[str, list[str]] = collections.defaultdict(list)
+    structseqs: dict[str, str] = {}
+
+    filtered = filter_functions(pairs, pred)
+    sig_groups = group_overloads(filtered)
+
+    for group in sorted(sig_groups, key=lambda g: g.signature.name):
+        name = group.signature.name
+        unsorted_nn_function_hints[name] += [meth_stub(group)]
+
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
+            else:
+                structseqs[tuple_name] = tuple_def
+
+    def replace_special_case(hint: str) -> str:
+        # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
+        hint = hint.replace("at::Reduction::Mean", "1")
+        hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
+        # Match both:
+        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
+        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
+        hint = hint.replace(
+            "Tuple[Tensor, ...], List[Tensor]] = None",
+            "Tuple[Tensor, ...], List[Tensor], None] = None",
+        )
+        return hint
+
+    for name, hints in sorted(unsorted_nn_function_hints.items()):
+        hints = [replace_special_case(h) for h in hints]
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        function_hints += hints
+
+    fm.write_with_template(
+        filename,
+        filename + ".in",
+        lambda: {
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
+            "stubs": function_hints,
+        },
+    )
 
 
 def main() -> None:
