@@ -9,19 +9,24 @@ namespace {
 extern PyTypeObject vtc_type;
 
 bool py_equal(const PyObject* a, const PyObject* b) {
-    auto result = PyObject_RichCompareBool(const_cast<PyObject*>(a), const_cast<PyObject*>(b), Py_EQ);
-    switch (result) {
-      case 0:
-        return false;
-      case 1:
-        return true;
-      default:
-        throw std::runtime_error("PyObject_RichCompareBool failed");
-    }
+  auto result = PyObject_RichCompareBool(
+      const_cast<PyObject*>(a), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+      const_cast<PyObject*>(b), // NOLINT(cppcoreguidelines-pro-type-const-cast)
+      Py_EQ);
+  switch (result) {
+    case 0:
+      return false;
+    case 1:
+      return true;
+    default:
+      throw std::runtime_error("PyObject_RichCompareBool failed");
+  }
 }
 
 Py_hash_t py_hash(const PyObject* p) {
-  return PyObject_Hash(const_cast<PyObject*>(p));
+  return PyObject_Hash(
+      const_cast<PyObject*>( // NOLINT(cppcoreguidelines-pro-type-const-cast)
+          p));
 }
 
 struct VariableTrackerCacheKey {
@@ -33,16 +38,19 @@ struct VariableTrackerCacheKey {
   /// some other parts as well. So, cache also relies on the source.
   THPObjectPtr m_source;
 
+  ~VariableTrackerCacheKey() = default;
   VariableTrackerCacheKey(PyObject* value, PyObject* source)
       : m_value(reinterpret_cast<uintptr_t>(value)),
         m_source(THPObjectPtr::dup(source)) {}
-
   VariableTrackerCacheKey(const VariableTrackerCacheKey& o)
-    : m_value(o.m_value),
-      m_source(o.m_source.dup()) {}
+      : m_value(o.m_value), m_source(o.m_source.dup()) {}
+  VariableTrackerCacheKey& operator=(const VariableTrackerCacheKey&) = delete;
+  VariableTrackerCacheKey(VariableTrackerCacheKey&& o) = default;
+  VariableTrackerCacheKey& operator=(VariableTrackerCacheKey&& o) = delete;
 
   bool operator==(const VariableTrackerCacheKey& other) const {
-    return (m_value == other.m_value) && py_equal(m_source.get(), other.m_source.get());
+    return (m_value == other.m_value) &&
+        py_equal(m_source.get(), other.m_source.get());
   }
 
   size_t hash() const {
@@ -106,7 +114,8 @@ struct VariableTrackerCache {
 
   THPObjectPtr clone() {
     THPObjectPtr new_cache(PyObject_CallObject((PyObject*)&vtc_type, Py_None));
-    VariableTrackerCache* p = reinterpret_cast<VariableTrackerCache*>(new_cache.get());
+    VariableTrackerCache* p =
+        reinterpret_cast<VariableTrackerCache*>(new_cache.get());
     for (const auto& i : m_cache) {
       p->m_cache.emplace(i.first, i.second.dup());
     }
@@ -198,10 +207,8 @@ std::array<PyMethodDef, 5> vtc_methods = {
 };
 
 const char* vtc_doc =
-  "VariableTrackerCache is used to map (value, source) pairs to a corresponding "
-  "VariableTracker.";
-
-
+    "VariableTrackerCache is used to map (value, source) pairs to a corresponding "
+    "VariableTracker.";
 
 PyTypeObject vtc_type = {
   PyVarObject_HEAD_INIT(nullptr, 0)
