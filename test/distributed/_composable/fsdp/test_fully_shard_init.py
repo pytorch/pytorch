@@ -9,13 +9,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_init import (
-    _get_managed_modules,
-    _get_managed_states,
-)
-from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
-from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
 from torch.distributed._tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -24,6 +17,15 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
+    _get_managed_modules,
+    _get_managed_states,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_param import ParamModuleInfo
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+    _get_param_module_infos,
+)
 from torch.distributed.fsdp._init_utils import (
     _init_inter_node_process_group,
     _init_intra_node_process_group,
@@ -1154,6 +1156,32 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
             AssertionError, "Shard dim 1 is invalid for 1D tensor"
         ):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
+
+
+# TODO: Remove this test class once we remove the old import path:
+# torch/distributed/_composable/fsdp
+class TestFullyShardOldImport(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_old_import_training(self):
+        from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+        from torch.distributed._composable.fsdp.fully_shard import FSDPModule
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        fully_shard(model[0], mp_policy=mp_policy)
+        fully_shard(model[1], mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        self.assertIsInstance(model[0], FSDPModule)
+        self.assertIsInstance(model[1], FSDPModule)
+        self.assertIsInstance(model, FSDPModule)
+
+        inp = torch.randn((8, 16), device="cuda")
+        model(inp).sum().backward()
 
 
 if __name__ == "__main__":

@@ -100,14 +100,9 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
-        return (
-            self
-            in (
-                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
-                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
-            )
-            # TODO (anijain2305) - Investigate why is_fsdp_module required.
-            or self.is_fsdp_module()
+        return self in (
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
         )
 
     def is_unspecialized_nn_module(self) -> bool:
@@ -371,6 +366,26 @@ class DuplicateInputs(GuardEnvExpr):
 
 
 """
+A class representing storage overlap relations among inputs that aliases the same storage.
+
+Given that a set of tensors alias the same storage, this guard checks whether they actually
+have overlapping storages.
+
+While non_overlapping_sources represent input tensors that definitely don't have any storage
+overlapping with any other input, overlapping_sources represent tensors that either:
+
+1. Do overlap some other input tensor
+2. Might not overlap some other input tensor, but we are not sure
+"""
+
+
+@dataclasses.dataclass
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: List[Source]
+    non_overlapping_sources: List[Source]
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -570,6 +585,66 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
+class HopSubgraphCache:
+    @abstractmethod
+    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: Dict[str, Callable] = {}
+        self.proxy_dispatch_cache: Dict[str, Callable] = {}
+        self.dynamo_identifiers: Dict[str, str] = {}
+
+    def add_dynamo_identifier(self, cache_key: str, identifier: str):
+        self.dynamo_identifiers[cache_key] = identifier
+
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+        return self.dynamo_identifiers.get(cache_key, None)
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
+
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
+
+
 _TLS = threading.local()
 
 """
@@ -605,6 +680,8 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Verbose ShapeEnv guards produced.
+        self.shape_env_guards: List[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -686,6 +763,7 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
