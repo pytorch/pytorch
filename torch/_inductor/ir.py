@@ -355,6 +355,22 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
+    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+        return False
+
+    aligned_strides = all(
+        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
+        for i in range(len(x.get_stride()) - 1)
+    )
+    # if the last dim size is <= 1, stride doesnt matter
+    aligned_last_dim = (
+        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
+        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+    )
+    return aligned_last_dim and aligned_strides
+
+
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
@@ -2270,7 +2286,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2339,7 +2355,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -2966,7 +2982,6 @@ class SliceView(View):
         except TypeError:
             pass
 
-        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -4052,7 +4067,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4181,7 +4196,18 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):  # type: ignore[no-untyped-def]
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
         return deps
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -4214,6 +4240,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -4243,8 +4270,15 @@ class TritonTemplateBuffer(TemplateBuffer):
                 for buf in mutated_inputs
             ]
 
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
+
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
+
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -4322,8 +4356,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
     ) -> None:
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=None,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
@@ -4735,7 +4775,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -5328,7 +5368,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -6253,7 +6293,6 @@ class FallbackKernel(ExternKernelAlloc):
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
 
-        schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg) -> None:  # type: ignore[no-untyped-def]
@@ -6470,23 +6509,17 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
-            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
-            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
-            # fix would require changing all the uses of self.mutation_outputs.
+            # NOTE: [special handling of all_reduce_coalesced_'s return value]
+            # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
+            outputs = self.outputs if self.outputs else self.mutation_outputs
             return_type = returns[0].real_type
-            output_arguments = [
-                handle_single_output(
-                    return_type, [*self.outputs, *self.mutation_outputs]
-                )
-            ]
+            output_arguments = [handle_single_output(return_type, outputs)]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(
-                    returns, [*self.outputs, *self.mutation_outputs]
-                )
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -6541,7 +6574,8 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.op_overload,
                 exported_args,
-                [*self.outputs, *self.mutation_outputs],
+                # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
             self.codegen_comment(wrapper)
@@ -7416,7 +7450,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7543,7 +7577,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def]
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
