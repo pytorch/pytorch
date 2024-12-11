@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import copy
+import functools
 import io
 import sys
 import tempfile
 import unittest
+from typing import Callable
 
 from parameterized import parameterized_class
 
@@ -13,7 +15,20 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
-from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+
+
+def skipif(predicate: Callable[[str, bool], bool], reason: str):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if predicate(self.device, self.package_cpp_only):
+                self.skipTest(reason)
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def compile(
@@ -54,8 +69,8 @@ def compile(
     )
     + (
         [
-            {"device": "cuda", "package_cpp_only": False},
-            {"device": "cuda", "package_cpp_only": True},
+            {"device": GPU_TYPE, "package_cpp_only": False},
+            {"device": GPU_TYPE, "package_cpp_only": True},
         ]
         if sys.platform != "darwin"
         else []
@@ -354,15 +369,82 @@ class TestAOTInductorPackage(TestCase):
         buffer = torch._inductor.aoti_compile_and_package(
             ep, package_path=buffer
         )  # type: ignore[arg-type]
-        loaded = load_package(buffer)
-        self.assertTrue(
-            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+        for _ in range(2):
+            loaded = load_package(buffer)
+            self.assertTrue(
+                torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+            )
+
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
+        "No support for cpp only and cpu",
+    )
+    def test_package_without_weight(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        inductor_configs = {
+            "always_keep_tensor_constants": True,
+            "aot_inductor.package_constants_in_so": False,
+        }
+        compiled = compile(model, example_inputs, inductor_configs=inductor_configs)
+
+        self.assertEqual(
+            set(compiled.get_constant_fqns()), set(model.state_dict().keys())
         )
+
+        compiled.load_constants(model.state_dict(), check_full_update=True)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = compiled(test_inputs)
+        self.assertEqual(expected, output)
+
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
+        "No support for cpp only and cpu",
+    )
+    def test_update_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.linear = torch.nn.Linear(k, n, device=device)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        M, N, K = 128, 2048, 4096
+        model = Model(N, K, self.device)
+        example_inputs = (torch.randn(M, K, device=self.device),)
+
+        compiled = self.check_model(model, example_inputs)
+
+        new_state_dict = {
+            "linear.weight": torch.randn(N, K, device=self.device),
+            "linear.bias": torch.randn(N, device=self.device),
+        }
+        model.load_state_dict(new_state_dict)
+
+        compiled.load_constants(model.state_dict(), check_full_update=True)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = compiled(test_inputs)
+        self.assertEqual(expected, output)
 
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")

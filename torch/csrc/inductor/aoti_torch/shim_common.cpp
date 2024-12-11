@@ -478,7 +478,7 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
+AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,
     AtenTensorHandle indices,
     AtenTensorHandle offsets,
@@ -513,7 +513,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch__fft_c2c(
+AOTITorchError aoti_torch__fft_c2c(
     AtenTensorHandle self,
     const int64_t* dim_ptr,
     int64_t dim_size,
@@ -615,8 +615,7 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
       ret8);
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch__scaled_dot_product_efficient_attention(
+AOTITorchError aoti_torch__scaled_dot_product_efficient_attention(
     AtenTensorHandle query,
     AtenTensorHandle key,
     AtenTensorHandle value,
@@ -653,7 +652,7 @@ aoti_torch__scaled_dot_product_efficient_attention(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
+AOTITorchError aoti_torch_convolution(
     AtenTensorHandle input,
     AtenTensorHandle weight,
     AtenTensorHandle bias, // optional argument
@@ -827,7 +826,7 @@ AOTITorchError aoti_torch_bmm_out(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
+AOTITorchError aoti_torch_copy_(
     AtenTensorHandle self,
     AtenTensorHandle src,
     int32_t non_blocking) {
@@ -850,7 +849,7 @@ AOTITorchError aoti_torch_mm_out(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch__mm_plus_mm_out(
+AOTITorchError aoti_torch__mm_plus_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle a,
     AtenTensorHandle b,
@@ -1038,7 +1037,7 @@ AOTITorchError aoti_torch_index_put_out(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
+AOTITorchError aoti_torch_view_as_real(
     AtenTensorHandle self,
     AtenTensorHandle* ret // returns new reference
 ) {
@@ -1048,7 +1047,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
+AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle self,
     int32_t dtype,
     AtenTensorHandle* ret // returns new reference
@@ -1060,7 +1059,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
   });
 }
 
-AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
+void aoti_torch_save_tensor_handle(
     AtenTensorHandle self,
     const char* tensor_name,
     const char* launch_prefix,
@@ -1094,9 +1093,7 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
 #endif // !defined(C10_MOBILE)
 }
 
-AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
-    AtenTensorHandle self,
-    const char* msg) {
+void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 
   // Display message

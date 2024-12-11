@@ -4549,6 +4549,7 @@ class TestLinalg(TestCase):
                 self.check_single_matmul(x, y)
 
     @onlyCUDA
+    @skipCUDAIfNotRocm  # Skipping due to SM89 OOM in CI, UT doesn't do much on NV anyways
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
@@ -4753,9 +4754,9 @@ class TestLinalg(TestCase):
                 self.assertTrue(os.path.exists(result_filename))
 
             # Check the full results files was written, one per gpu
-            # for i in range(total_gpus):
-            #     result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-            #     self.assertTrue(os.path.exists(result_full_filename))
+            for i in range(total_gpus):
+                result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
+                self.assertTrue(os.path.exists(result_full_filename))
 
         finally:
             # disables TunableOp

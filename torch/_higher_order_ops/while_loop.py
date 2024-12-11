@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    diff_tensor_meta,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -21,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -233,9 +235,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             "call_function", while_loop_op, proxy_args, {}, name="while_loop"
         )
 
-        # body_fn return output with the same pytree and tensor meta data as carried_inputs
-        # so we could just return the output after one iteration.
-        out = body_fn(*carried_inputs, *additional_inputs)
+        out = while_loop_op(cond_graph, body_graph, carried_inputs, additional_inputs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
@@ -245,12 +245,64 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
+def check_outputs_carry_consistency(
+    outs: List[torch.Tensor], carries: List[torch.Tensor]
+) -> None:
+    all_diffs_in_meta = []
+    for out, cry in zip(outs, carries):
+        if diff := diff_tensor_meta(
+            _extract_tensor_metadata(cry), _extract_tensor_metadata(out)
+        ):
+            all_diffs_in_meta.append(",".join(diff))
+    if all_diffs_in_meta:
+        diff_str = "\n".join(all_diffs_in_meta)
+        raise RuntimeError(
+            f"Expected carried_inputs and body outputs return tensors with same metadata but found:\n{diff_str}"
+        )
+
+
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
 ):
     with mode:
-        return body_fn(*carried_inputs, *additional_inputs)
+        # NOTE: [Handling unback symints created in subgraph of while_loop]
+        # The idea is that the scope of unbacked symints are limited to the subgraph.
+        #
+        # We're implementing the fake tensor mode of while_loop operator.
+        # and we run body_fn once to get an fake output.
+        # Let's only consider tensor output for now:
+        #
+        # Case 1:
+        # if the unbacked symints is local to the subgraph e.g.
+        #   def body_fn(it, x):
+        #     nz = x.nonzero()
+        #     return it+1. nz.sum()
+        # we can just ignore the newly created unbacked symints because it has
+        # no effect on the output of while_loop and it's tracked when we tracing.
+        # the subgraph.
+        #
+        # Case 2.1:
+        # if the unbacked symints are part of output of while_loop e.g.
+        #   def body_fn(it, x):
+        #     nz = x.nonzero()
+        #     return it+1, nz
+        # This will fail the shape check because in each iteration, the carried_input's shape
+        # must match the output shape as nz.shape contains newly allocated unbacked symint, this
+        # won't match the carried_input's shape.
+        #
+        # Case 2.2:
+        # if the unbacked symints are part of carried_inputs e.g.
+        #   nz = a.nonzero()
+        #   body_fn(it, nz):
+        #     return it+1. nz.sin() + 1,
+        # There's no new unbacked symints allocated in subgraph, so we're safe.
+        with mode.shape_env.ignore_fresh_unbacked_symbols():
+            # body_fn return output with the same pytree and tensor meta data as carried_inputs
+            # so we could just return the output after one iteration.
+            body_outs = body_fn(*carried_inputs, *additional_inputs)
+            check_outputs_carry_consistency(body_outs, carried_inputs)
+            return body_outs
 
 
 @while_loop_op.py_functionalize_impl
