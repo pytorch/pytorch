@@ -109,9 +109,9 @@ class DeviceInterface:
     def synchronize(device: _device_t = None):
         raise NotImplementedError
 
-    @staticmethod
-    def get_device_properties(device: _device_t = None):
-        raise NotImplementedError
+    @classmethod
+    def get_device_properties(cls, device: _device_t = None):
+        return cls.Worker.get_device_properties(device)
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
@@ -346,13 +346,13 @@ def register_interface_for_device(
     device: Union[str, torch.device], device_interface: Type[DeviceInterface]
 ):
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     device_interfaces[device] = device_interface
 
 
 def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     if not _device_initialized:
         init_device_reg()
     if device in device_interfaces:

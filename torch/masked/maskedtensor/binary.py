@@ -96,8 +96,8 @@ def _binary_helper(fn, args, kwargs, inplace):
             "Input masks must match. If you need support for this, please open an issue on Github."
         )
 
-    data_args, data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
-    mask_args, mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())
+    data_args, _data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
+    mask_args, _mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())
 
     args0_layout = data_args[0].layout
     same_layout = (
@@ -139,9 +139,10 @@ def _binary_helper(fn, args, kwargs, inplace):
 
         crow = data_args[0].crow_indices()
         col = data_args[0].col_indices()
+        size = data_args[0].size()
         data_args[0] = data_args[0].values()
         v = fn(*data_args)
-        result_data = torch.sparse_csr_tensor(crow, col, v)
+        result_data = torch.sparse_csr_tensor(crow, col, v, size)
 
     else:
         result_data = fn(*data_args)

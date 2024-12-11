@@ -27,8 +27,7 @@ Tensor onednn_softmax(
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor onednn_softmax(
     const Tensor& self,
@@ -45,7 +44,6 @@ Tensor onednn_softmax(
                                  self.options().device_opt());
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

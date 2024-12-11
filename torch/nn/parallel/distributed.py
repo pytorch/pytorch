@@ -1487,7 +1487,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1496,11 +1496,11 @@ class DistributedDataParallel(Module, Joinable):
 
         # Disable the python reducer if compiled_autograd is not enabled.
         if self._accum_grad_hooks:
-            for index, h in enumerate(self._accum_grad_hooks):
+            for h in self._accum_grad_hooks:
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch._utils.is_compiling():
+        if not self._lazy_init_ran and not torch.compiler.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:

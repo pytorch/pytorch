@@ -24,8 +24,7 @@ Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
   TORCH_CHECK(
@@ -43,7 +42,6 @@ Tensor& copy_onednn_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

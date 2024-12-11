@@ -82,7 +82,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
         std::copy_n(base, 2, data.data());
         const int64_t *outer_strides = &strides[2];
 
-        for (const auto it C10_UNUSED : c10::irange(size1)) {
+        for ([[maybe_unused]] const auto it : c10::irange(size1)) {
           Vecd dst_s;
           if (strides_in[0] == 0) {
             dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
@@ -151,7 +151,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
         std::copy_n(base, 2, data.data());
         const int64_t *outer_strides = &strides[2];
 
-        for (const auto it C10_UNUSED : c10::irange(size1)) {
+        for ([[maybe_unused]] const auto it : c10::irange(size1)) {
           Vecd dst_s;
           if (strides_in[0] == 0) {
             dst_s = Vecd(dest_t(*((source_t*)data[1])));
@@ -325,6 +325,6 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 } // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(copy_stub, &copy_kernel);
+REGISTER_DISPATCH(copy_stub, &copy_kernel)
 
 } // namespace at::native
