@@ -656,15 +656,14 @@ def argument_type_str(
     t: Type, *, simple_type: bool = False, symint: bool = True
 ) -> str:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
-            return "Tensor"
-        elif t.name == BaseTy.int:
+        if t.name == BaseTy.int:
             return "int64_t"
         elif t.name == BaseTy.float:
             return "double"
         elif t.name == BaseTy.str:
             return "c10::string_view"
         elif t.name in [
+            BaseTy.Tensor,
             BaseTy.bool,
             BaseTy.QScheme,
             BaseTy.Scalar,
@@ -677,16 +676,12 @@ def argument_type_str(
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
-            BaseTy.ConstQuantizerPtr,
             BaseTy.SymInt,
         ]:
             # These python schema type names line up with their function schema names
             return t.name.name
 
     elif isinstance(t, OptionalType):
-        if str(t.elem) == "Tensor":
-            # Is it desired to keep '?' for simple_type with new style dispatcher?
-            return "Tensor?"
         elem = argument_type_str(t.elem, simple_type=simple_type, symint=symint)
         return f"{elem}?"
     elif isinstance(t, ListType):

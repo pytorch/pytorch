@@ -61,6 +61,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -117,6 +118,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
@@ -154,6 +156,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -193,6 +196,7 @@ jobs:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     needs: get-label-type
     with:
+      timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
@@ -203,8 +207,8 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Test tools
-        python3 -m unittest discover -vs tools/test -p 'test_*.py'
-        python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+        PYTHONPATH=$(pwd) pytest tools/test/test_*.py
+        PYTHONPATH=$(pwd) pytest .github/scripts/test_*.py
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3
@@ -225,7 +229,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* fbscribelogger==0.1.* numpy==1.24.*
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.3.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |
