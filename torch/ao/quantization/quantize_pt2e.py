@@ -35,9 +35,7 @@ def prepare_pt2e(
     """Prepare a model for post training quantization
 
     Args:
-      * `model` (torch.fx.GraphModule): a model captured by `torch.export` API
-        in the short term we are using `torch._export.capture_pre_autograd_graph`,
-        in the long term we'll migrate to some `torch.export` API
+      * `model` (torch.fx.GraphModule): a model captured by `torch.export.export_for_training` API.
       * `quantizer`: A backend specific quantizer that conveys how user want the
         model to be quantized. Tutorial for how to write a quantizer can be found here:
         https://pytorch.org/tutorials/prototype/pt2e_quantizer.html
@@ -49,7 +47,6 @@ def prepare_pt2e(
 
         import torch
         from torch.ao.quantization.quantize_pt2e import prepare_pt2e
-        from torch._export import capture_pre_autograd_graph
         from torch.ao.quantization.quantizer import (
             XNNPACKQuantizer,
             get_symmetric_quantization_config,
@@ -127,7 +124,6 @@ def prepare_qat_pt2e(
     Example::
         import torch
         from torch.ao.quantization.quantize_pt2e import prepare_qat_pt2e
-        from torch._export import capture_pre_autograd_graph
         from torch.ao.quantization.quantizer import (
             XNNPACKQuantizer,
             get_symmetric_quantization_config,
