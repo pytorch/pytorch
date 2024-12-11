@@ -1113,8 +1113,8 @@ class FxGraphCache:
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
         counters["inductor"] += graph.counter_deltas
 
-        output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
+        output_code_log.debug("Output code: \n%s", code)
         # On cache hit, use artifact path as filename
         trace_structured(
             "inductor_output_code",

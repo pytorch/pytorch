@@ -313,7 +313,6 @@ test_dynamo_wrapped_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
-    --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
