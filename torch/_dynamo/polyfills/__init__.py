@@ -59,7 +59,7 @@ def index(iterator, item, start=0, end=None):
 
 
 def repeat(item, count):
-    for i in range(count):
+    for _ in range(count):
         yield item
 
 
@@ -199,3 +199,16 @@ def predicate(obj: Any) -> bool:
     if obj:
         return True
     return False
+
+
+def object_eq(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
+    return self is other
+
+
+def object_ne(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
+    # Using `==` is important because `self` might have a user-defined `__eq__`.
+    return not (self == other)
