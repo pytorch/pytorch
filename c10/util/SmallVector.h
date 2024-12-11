@@ -81,7 +81,7 @@ class C10_API SmallVectorBase {
     return Capacity;
   }
 
-  C10_NODISCARD bool empty() const {
+  [[nodiscard]] bool empty() const {
     return !Size;
   }
 
@@ -710,7 +710,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     this->set_size(this->size() - NumItems);
   }
 
-  C10_NODISCARD T pop_back_val() {
+  [[nodiscard]] T pop_back_val() {
     T Result = ::std::move(this->back());
     this->pop_back();
     return Result;
@@ -842,7 +842,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     // If we just moved the element we're inserting, be sure to update
     // the reference (never happens if TakesParamByValue).
     static_assert(
-        !TakesParamByValue || std::is_same<ArgType, T>::value,
+        !TakesParamByValue || std::is_same_v<ArgType, T>,
         "ArgType must be 'T' when taking by value!");
     if (!TakesParamByValue && this->isReferenceToRange(EltPtr, I, this->end()))
       ++EltPtr;

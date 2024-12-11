@@ -53,8 +53,9 @@ env:
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -145,7 +146,6 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -167,7 +167,6 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
