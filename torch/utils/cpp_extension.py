@@ -1592,7 +1592,7 @@ def load_inline(name,
     file and  prepended with ``torch/types.h``, ``cuda.h`` and
     ``cuda_runtime.h`` includes. The ``.cpp`` and ``.cu`` files are compiled
     separately, but ultimately linked into a single library. Note that no
-    bindings are generated for functions in ``cuda_sources`` per  se. To bind
+    bindings are generated for functions in ``cuda_sources`` per se. To bind
     to a CUDA kernel, you must create a C++ function that calls it, and either
     declare or define this C++ function in one of the ``cpp_sources`` (and
     include its name in ``functions``).
@@ -1630,8 +1630,15 @@ def load_inline(name,
         ...                      functions=['sin_add'])
 
     .. note::
-        By default, the Ninja backend uses #CPUS + 2 workers to build the
-        extension. This may use up too many resources on some systems. One
+        Since load_inline will just-in-time compile the source code, please ensure
+        that you have the right toolchains installed in the runtime. For example,
+        when loading C++, make sure a C++ compiler is available. If you're loading
+        a CUDA extension, you will need to additionally install the corresponding CUDA
+        toolkit (nvcc and any other dependencies your code has). Compiling toolchains
+        are not included when you install torch and must be additionally installed.
+
+        During compiling, by default, the Ninja backend uses #CPUS + 2 workers to build
+        the extension. This may use up too many resources on some systems. One
         can control the number of workers by setting the `MAX_JOBS` environment
         variable to a non-negative number.
     '''
@@ -2080,7 +2087,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+                  f'cu{torch.version.cuda.replace(".", "")}')
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
