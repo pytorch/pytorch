@@ -1,0 +1,13 @@
+#pragma once
+
+#include <ATen/OpMathType.h>
+#include <ATen/hip/HIPBlas.h>
+
+namespace at::native {
+void bgemm_kernel_bf16bf16bf16_64_16x16x64_16x16_1x1_8x8x1_8x8x1_1x16x1x4_4_Intrawave_v1(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+void bgemm_kernel_bf16bf16bf16_128_16x32x64_16x16_1x1_8x16x1_8x16x1_1x16x1x8_4_Intrawave_v1(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+void bgemm_kernel_bf16bf16bf16_64_16x16x64_16x16_1x1_8x8x1_8x8x1_1x16x1x4_4_Intrawave_v2(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+void bgemm_kernel_bf16bf16bf16_256_256x224x64_16x16_8x7_8x32x1_8x32x1_1x32x1x8_4_Intrawave_v3(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+void bgemm_kernel_bf16bf16bf16_256_128x128x64_32x32_2x2_8x32x1_8x32x1_1x16x1x16_4_Intrawave_v3(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+void bgemm_kernel_bf16bf16bf16_256_256x256x32_32x32_4x4_8x32x1_8x32x1_1x16x1x16_4_Intrawave_v4(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
+}; // namespace at::native

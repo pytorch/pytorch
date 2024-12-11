@@ -71,6 +71,10 @@ class Config:
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
         self.value_type = value_type
+        if self.justknob is not None:
+            assert isinstance(
+                self.default, bool
+            ), f"justknobs only support booleans, {self.default} is not a boolean"
 
 
 # Types saved/loaded in configs
