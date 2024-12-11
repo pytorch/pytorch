@@ -22,7 +22,7 @@ TORCH_PYTHON_API extern PyObject* THPGeneratorClass;
 
 bool THPGenerator_init(PyObject* module);
 
-TORCH_PYTHON_API PyObject* THPGenerator_Wrap(at::Generator gen);
+TORCH_PYTHON_API PyObject* THPGenerator_Wrap(const at::Generator& gen);
 
 TORCH_PYTHON_API at::Generator THPGenerator_Unwrap(PyObject* state);
 

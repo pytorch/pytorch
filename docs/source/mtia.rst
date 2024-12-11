@@ -20,6 +20,7 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     is_initialized
     memory_stats
     get_device_capability
+    empty_cache
     set_device
     set_stream
     stream

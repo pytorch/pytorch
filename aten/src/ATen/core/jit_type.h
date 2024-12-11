@@ -592,8 +592,8 @@ struct TORCH_API TensorType : public SharedType {
   static TensorTypePtr create(
       std::optional<at::ScalarType> scalar_type,
       std::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& stride_,
+      SymbolicShape sizes,
+      VaryingShape<Stride> stride_,
       std::optional<bool> requires_grad,
       std::optional<bool> undefined = false);
 
@@ -1154,7 +1154,7 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr createNamed(const std::optional<c10::QualifiedName>& name,
-      const std::vector<c10::string_view>& field_names,
+      const std::vector<std::string_view>& field_names,
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr create(
@@ -1190,7 +1190,7 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
-  std::optional<std::vector<c10::string_view>> names() const;
+  std::optional<std::vector<std::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 
@@ -1955,7 +1955,7 @@ struct getTypePtr_<std::string> final {
   }
 };
 template <>
-struct getTypePtr_<c10::string_view> final {
+struct getTypePtr_<std::string_view> final {
   static decltype(auto) call() {
     return StringType::get();
   }

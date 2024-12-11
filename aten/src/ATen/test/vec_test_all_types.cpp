@@ -75,6 +75,7 @@ namespace {
     template <typename T>
     class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
+    using RealFloatReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vBFloat16, vHalf>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
@@ -83,12 +84,13 @@ namespace {
         ::testing::Types<vqint8, vquint8>;
 #endif
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
+    using RealFloatIntReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort, vBFloat16, vHalf>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
     TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(Comparison, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
@@ -924,6 +926,24 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fmsub(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
     TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
         using VT = ValueType<TypeParam>;
         using vec = at::vec::VectorizedN<VT, 1>;
@@ -1688,44 +1708,51 @@ namespace {
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
 #if !defined(CPU_CAPABILITY_SVE)
+    template <typename vec, typename dst_t>
+    void test_convert_to(const char* dst_t_name) {
+      using src_t = ValueType<vec>;
+      constexpr auto N = vec::size();
+      CACHE_ALIGN src_t x[N];
+      CACHE_ALIGN dst_t y[N];
+      CACHE_ALIGN dst_t ref[N];
+      auto seed = TestSeed();
+      auto low = std::is_signed_v<dst_t> ? src_t(-100) : src_t(0);
+      ValueGen<src_t> generator(low, src_t(100), seed);
+      for (const auto i : c10::irange(N)) {
+        x[i] = generator.get();
+      }
+      for (const auto i : c10::irange(N)) {
+        ref[i] = static_cast<dst_t>(x[i]);
+      }
+      auto x_vec = vec::loadu(x);
+      auto y_vec = at::vec::convert<dst_t>(x_vec);
+      constexpr int num_dst_elements =
+        std::min(N, at::vec::Vectorized<dst_t>::size());
+      y_vec.store(y, num_dst_elements);
+      for (const auto i : c10::irange(num_dst_elements)) {
+        if (check_both_nan(y[i], ref[i])) {
+          continue;
+        }
+        ASSERT_EQ(y[i], ref[i])
+          << "Failure Details:nTest Seed to reproduce: " << seed
+          << " x[" << i << "]=" << x[i] << " dst_t=" << dst_t_name;
+      }
+      constexpr int dst_n = N / num_dst_elements;
+      auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(
+          at::vec::VectorizedN<src_t, 1>(x_vec));
+      y_vec_n.store(y, N);
+      for (const auto i : c10::irange(N)) {
+        if (check_both_nan(y[i], ref[i])) {
+          continue;
+        }
+        ASSERT_EQ(y[i], ref[i])
+          << "Failure Details:nTest Seed to reproduce: " << seed
+          << " x[" << i << "]=" << x[i] << " dst_t=" << dst_t_name;
+      }
+    }
     TYPED_TEST(VecConvertTests, Convert) {
       using vec = TypeParam;
-      using src_t = ValueType<TypeParam>;
-      constexpr auto N = vec::size();
-    #define TEST_CONVERT_TO(dst_t)                                     \
-      do {                                                             \
-        CACHE_ALIGN src_t x[N];                                        \
-        CACHE_ALIGN dst_t y[N];                                        \
-        CACHE_ALIGN dst_t ref[N];                                      \
-        auto seed = TestSeed();                                        \
-        auto low = std::is_signed_v<dst_t> ? src_t(-100) : 0;          \
-        ValueGen<src_t> generator(low, src_t(100), seed);              \
-        for (const auto i : c10::irange(N)) {                          \
-          x[i] = generator.get();                                      \
-        }                                                              \
-        for (const auto i : c10::irange(N)) {                          \
-          ref[i] = static_cast<dst_t>(x[i]);                           \
-        }                                                              \
-        auto x_vec = vec::loadu(x);                                    \
-        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
-        constexpr int num_dst_elements =                               \
-            std::min(N, at::vec::Vectorized<dst_t>::size());           \
-        y_vec.store(y, num_dst_elements);                              \
-        for (const auto i : c10::irange(num_dst_elements)) {           \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-        constexpr int dst_n = N / num_dst_elements;                    \
-        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
-            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
-        y_vec_n.store(y, N);                                           \
-        for (const auto i : c10::irange(N)) {                          \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-      } while (0)
+      #define TEST_CONVERT_TO(dst_t) test_convert_to<vec, dst_t>(#dst_t)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(int16_t);
@@ -1738,50 +1765,26 @@ namespace {
       TEST_CONVERT_TO(c10::Half);
       TEST_CONVERT_TO(float);
       TEST_CONVERT_TO(double);
-    #undef TEST_CONVERT_TO
     }
     TYPED_TEST(VecConvertTestsReducedFloat, ConvertReduced) {
       using vec = TypeParam;
-      using src_t = UholdType<TypeParam>;
-      constexpr auto N = vec::size();
-    #define TEST_CONVERT_TO(dst_t)                                     \
-      do {                                                             \
-        CACHE_ALIGN src_t x[N];                                        \
-        CACHE_ALIGN dst_t y[N];                                        \
-        CACHE_ALIGN dst_t ref[N];                                      \
-        auto seed = TestSeed();                                        \
-        auto low = std::is_signed_v<dst_t> ? src_t(-100.0) : src_t(0); \
-        ValueGen<src_t> generator(low, src_t(100), seed);              \
-        for (const auto i : c10::irange(N)) {                          \
-          x[i] =  generator.get();                                     \
-        }                                                              \
-        for (const auto i : c10::irange(N)) {                          \
-          ref[i] = static_cast<dst_t>(x[i]);                           \
-        }                                                              \
-        auto x_vec = vec::loadu(x);                                    \
-        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
-        constexpr int num_dst_elements =                               \
-            std::min(N, at::vec::Vectorized<dst_t>::size());           \
-        y_vec.store(y, num_dst_elements);                              \
-        for (const auto i : c10::irange(num_dst_elements)) {           \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-        constexpr int dst_n = N / num_dst_elements;                    \
-        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
-            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
-        y_vec_n.store(y, N);                                           \
-        for (const auto i : c10::irange(N)) {                          \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-      } while (0)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(float);
-    #undef TEST_CONVERT_TO
+      #undef TEST_CONVERT_TO
+    }
+    TEST(VecConvertBFloat16, ExhaustiveToFloat) {
+      for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
+        c10::BFloat16 val(ii, c10::BFloat16::from_bits());
+        const auto expected = static_cast<float>(val);
+        CACHE_ALIGN float actual_vals[vfloat::size()];
+        at::vec::convert<float>(vBFloat16(val)).store(actual_vals);
+        for (int jj = 0; jj < vfloat::size(); ++jj) {
+          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_vals[jj]))
+            << "convert-to-float failure for bf16 bit pattern "
+            << std::hex << ii << std::dec;
+        }
+      }
     }
 #endif
     TYPED_TEST(VecMaskTests, MaskedLoad) {
@@ -1795,7 +1798,8 @@ namespace {
         CACHE_ALIGN dst_t y[mask_n * size];                                 \
         CACHE_ALIGN dst_t ref[mask_n * size];                               \
         auto seed = TestSeed();                                             \
-        ValueGen<dst_t> generator(dst_t(-100), dst_t(100), seed);           \
+        dst_t generator_min = std::numeric_limits<dst_t>::is_signed ? dst_t(-100) : dst_t(0); \
+        ValueGen<dst_t> generator(generator_min, dst_t(100), seed);     \
         for (const auto i : c10::irange(mask_n * size)) {                   \
           x[i] = generator.get();                                           \
         }                                                                   \

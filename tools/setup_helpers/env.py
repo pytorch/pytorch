@@ -5,7 +5,11 @@ import platform
 import struct
 import sys
 from itertools import chain
-from typing import cast, Iterable
+from typing import cast, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 IS_WINDOWS = platform.system() == "Windows"

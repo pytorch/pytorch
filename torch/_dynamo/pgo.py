@@ -198,6 +198,15 @@ class FrameStateSizeEntry:
         # Fallback
         return "unusual {repr(self)}"
 
+    def __post_init__(self) -> None:
+        assert not isinstance(self.scalar, torch.SymInt), self.scalar
+        if isinstance(self.size, tuple):
+            for s in self.size:
+                assert not isinstance(s, torch.SymInt), s
+        if isinstance(self.stride, tuple):
+            for s1 in self.stride:
+                assert not isinstance(s1, torch.SymInt), s1
+
     def is_size_dynamic(self, dim: int) -> bool:
         if self.size is auto_dynamic:
             return True
@@ -232,15 +241,30 @@ class FrameStateSizeEntry:
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def make_scalar(x: int) -> FrameStateSizeEntry:
+    def _munge_symint(xs: Tuple[int, ...]) -> Tuple[Union[AutoDynamic, int], ...]:
+        return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
+
+    @classmethod
+    def make_scalar(cls, x: int) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(scalar=x, size=auto_dynamic, stride=auto_dynamic)
 
-    # NB: steals the inputs
-    @staticmethod
+    @classmethod
     def make_tensor(
-        size: Tuple[int, ...], stride: Tuple[int, ...]
+        cls, size: Tuple[int, ...], stride: Tuple[int, ...]
     ) -> FrameStateSizeEntry:
-        return FrameStateSizeEntry(scalar=auto_dynamic, size=size, stride=stride)
+        return FrameStateSizeEntry(
+            scalar=auto_dynamic,
+            size=cls._munge_symint(size),
+            stride=cls._munge_symint(stride),
+        )
+
+    @classmethod
+    def make_size(cls, size: Tuple[int, ...]) -> FrameStateSizeEntry:
+        return FrameStateSizeEntry(
+            scalar=auto_unset,
+            size=cls._munge_symint(size),
+            stride=auto_unset,
+        )
 
     @staticmethod
     def _merge_atom(x: _T, y: _T) -> Union[AutoDynamic, _T]:
@@ -434,6 +458,8 @@ def get_cache_key() -> Optional[str]:
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
 
+    tag = torch.compiler.config.cache_key_tag
+
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
     if (r := torch.compiler.config.job_id) is not None:
@@ -443,11 +469,11 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}"
+        return f"{r}:{rank}:{tag}"
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
 
     return None
 
