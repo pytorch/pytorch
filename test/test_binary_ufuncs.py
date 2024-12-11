@@ -3470,6 +3470,7 @@ class TestBinaryUfuncs(TestCase):
             weights = [
                 torch.randn(shapes[2], device=device, dtype=dtype),
                 random.random(),
+                torch.randn([], device="cpu", dtype=dtype),
             ]
             if dtype.is_complex:
                 weights += [complex(0, 1), complex(0.4, 1.2)]
