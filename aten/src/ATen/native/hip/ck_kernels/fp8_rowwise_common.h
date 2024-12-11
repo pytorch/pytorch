@@ -14,7 +14,6 @@
 
 #include <ATen/ATen.h>
 #include <c10/hip/HIPStream.h>
-#include <torch/torch.h>
 
 #include <ck/ck.hpp>
 #include <ck/tensor_operation/gpu/device/gemm_specialization.hpp>
