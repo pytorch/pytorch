@@ -1267,7 +1267,7 @@ class Tensor(torch._C.TensorBase):
         typestr = {
             torch.complex64: "<c8",
             torch.complex128: "<c16",
-            torch.bfloat16: "<f2",
+            torch.bfloat16: "<V2",
             torch.float16: "<f2",
             torch.float32: "<f4",
             torch.float64: "<f8",
