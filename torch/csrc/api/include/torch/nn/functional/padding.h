@@ -3,9 +3,7 @@
 #include <ATen/PadNd.h>
 #include <torch/nn/options/padding.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -53,6 +51,4 @@ inline Tensor pad(const Tensor& input, const PadFuncOptions& options) {
   return detail::pad(input, options.pad(), options.mode(), options.value());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

@@ -124,7 +124,7 @@ Tensor _sparse_semi_structured_apply_dense(
     const Tensor& threads_masks) {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_sparse_semi_structured_apply_dense: not supported");
+  TORCH_CHECK(false, "_sparse_semi_structured_apply_dense: not supported");
   return Tensor{};
 #else
   TORCH_CHECK(

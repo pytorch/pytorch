@@ -2479,10 +2479,8 @@ except RuntimeError as e:
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
     @slowTest
     def test_proper_exit(self):
-        (
-            r"""There might be ConnectionResetError or leaked semaphore warning """
-            r"""(due to dirty process exit), but they are all safe to ignore"""
-        )
+        """There might be ConnectionResetError or leaked semaphore warning
+        (due to dirty process exit), but they are all safe to ignore"""
 
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.
@@ -3132,10 +3130,6 @@ class DummyDataset(torch.utils.data.Dataset):
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
-)
 class TestDataLoaderPersistentWorkers(TestDataLoader):
     def setUp(self):
         super().setUp()
@@ -3407,10 +3401,6 @@ class TestWorkerQueueDataset(Dataset):
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727",
-)
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super().setUp()
@@ -3503,16 +3493,113 @@ class ConvDataset(Dataset):
 
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
-@unittest.skipIf(
-    TEST_WITH_ASAN,
-    "This test hangs when running with ASAN, see https://github.com/pytorch/pytorch/issues/75492",
-)
 class TestConvAfterFork(TestCase):
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):
         loader = DataLoader(ConvDataset(), num_workers=1)
         for x in loader:
             self.assertEqual(x.shape, (1, 1, 1, 23999))
+
+
+class TestSlowIndexDataset(Dataset):
+    def __init__(self, end: int, slow_index: int):
+        self.end = end
+        self.slow_index = slow_index
+
+    def __getitem__(self, idx):
+        if idx == self.slow_index:
+            time.sleep(0.5)
+        return idx
+
+    def __len__(self):
+        return self.end
+
+
+class TestSlowIterableDataset(IterableDataset):
+    def __init__(self, start: int, end: int):
+        self.start = start
+        self.end = end
+        self.mid = math.ceil((self.end - self.start) / 2)
+
+    def give_data(self, iter_start, iter_end):
+        for i in range(iter_start, iter_end):
+            if i >= self.mid:
+                time.sleep(0.5)
+            yield i
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        per_worker = int(
+            math.ceil((self.end - self.start) / float(worker_info.num_workers))
+        )
+        worker_id = worker_info.id
+        iter_start = self.start + worker_id * per_worker
+        iter_end = min(iter_start + per_worker, self.end)
+        return self.give_data(iter_start, iter_end)
+
+
+class TestOutOfOrderDataLoader(TestCase):
+    def test_in_order_index_ds(self):
+        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=True,
+        )
+
+        expected_order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_index_ds(self):
+        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
+        )
+
+        # normally, this should be [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        expected_order = [0, 1, 3, 5, 7, 2, 4, 6, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertNotEqual(output, list(range(10)))
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:5]), set(expected_order[:5]))
+        self.assertEqual(set(output[5:]), set(expected_order[5:]))
+
+    def test_in_order_iterable_ds(self):
+        dataset = TestSlowIterableDataset(start=0, end=10)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=True,
+        )
+
+        expected_order = [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_iterable_ds(self):
+        dataset = TestSlowIterableDataset(start=0, end=10)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
+        )
+
+        # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        expected_order = [0, 1, 2, 3, 5, 4, 6, 7, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertNotEqual(output, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:4]), set(expected_order[:4]))
+        self.assertEqual(set(output[4:]), set(expected_order[4:]))
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
