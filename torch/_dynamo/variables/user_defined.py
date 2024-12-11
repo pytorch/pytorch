@@ -839,9 +839,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 return variables.GeneratorObjectVariable(
                     code=self.value.gi_code,
-                    state=inspect.getgeneratorstate(self.value),
-                    gi_frame=self.value.gi_frame,
-                    f_locals=inspect.getgeneratorlocals(self.value),
                     f_globals=self.value.gi_frame.f_globals,
                     inline_tracer=None,
                     source=self.source,
