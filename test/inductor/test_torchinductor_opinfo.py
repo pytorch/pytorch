@@ -285,8 +285,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "einsum": {f64},
     "inner": {f64},
     "linalg.cholesky_ex": {f64},
-    "linalg.cholesky": {f64},
-    ("linalg.det", "singular"): {f64},
     "linalg.ldl_factor_ex": {f64},
     "linalg.ldl_factor": {f64},
     "linalg.ldl_solve": {f64},
@@ -338,8 +336,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.eigvalsh": {f64},
     "linalg.eigh": {f64},
     "linalg.det": {f64},
-    "linalg.cond": {f64},
-    "geqrf": {f64},
     "cholesky_solve": {f64},
     "cholesky_inverse": {f64},
     # could not create a primitive
