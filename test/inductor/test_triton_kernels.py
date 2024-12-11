@@ -1408,46 +1408,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
-    def test_triton_kernel_reset_to_zero(self):
-        @triton.autotune(
-            configs=[
-                triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
-                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
-            ],
-            key=["n_elements"],
-            reset_to_zero=["out_ptr"],
-        )
-        @triton.jit
-        def add_kernel_autotuned_reset(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        @torch.compile(fullgraph=True)
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel_autotuned_reset[grid](x, y, output, n_elements)
-            return output
-
-        x = torch.randn(4, device=GPU_TYPE)
-        msg = "Only configs, keys, and restore_value are supported for triton.autotune"
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            f(x, x)
-
-    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_triton_dtype(self, dynamic, backend):
@@ -1530,6 +1490,50 @@ def forward(self, x_1, output_1):
                 n_elements,
                 num_warps=8,
                 num_stages=3,
+            )
+            return output
+
+        x = torch.randn(4, device=GPU_TYPE)
+        f(x, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_empty_autotune_config_dict(self, backend):
+        @triton.autotune(
+            configs=[
+                triton.Config({}, num_stages=2),
+                triton.Config({}, num_stages=3),
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](
+                x,
+                y,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
             )
             return output
 
@@ -2159,7 +2163,7 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         if wrapped:
-            triton_kernel = torch._library.triton_op(
+            triton_kernel = torch.library.triton_op(
                 "constexpr_test::square", triton_kernel_impl, mutates_args={}
             )
         else:
@@ -3094,7 +3098,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3132,7 +3136,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3168,7 +3172,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3190,7 +3194,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(out, expected)
 
     @requires_gpu
-    def test_capture_triton_disabled_in_triton_op(self):
+    def test_wrap_triton_disabled_in_triton_op(self):
         import triton  # @manual
         import triton.language as tl  # @manual
 
@@ -3211,18 +3215,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        add_kernel_decorated = torch._library.capture_triton(add_kernel)
+        add_kernel_decorated = torch.library.wrap_triton(add_kernel)
 
         status = []
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             import torch._higher_order_ops.triton_kernel_wrap
 
-            status.append(torch._library.triton.is_capture_triton_enabled())
+            status.append(torch._library.triton.is_wrap_triton_enabled())
 
             # capture_triton should return the kernel directly if disabled
-            result = torch._library.capture_triton(add_kernel)
+            result = torch.library.wrap_triton(add_kernel)
             self.assertIs(result, add_kernel)
 
             # Smoke test: check that with capture_triton disabled this still does something
@@ -3305,7 +3309,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
 
-    @skipIfXpu
     @requires_gpu
     @patch.object(torch._inductor.config, "cpp_wrapper", True)
     @patch.object(torch._inductor.config, "triton.autotune_at_compile_time", True)
@@ -3424,17 +3427,19 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
-        FileCheck().check("Compile-time auto-tuning code").check(
+        FileCheck().check("Compile-time auto-tuning block:").check(
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
+    # Triton 3.2.0 adds the required flags to the Autotuner object for this test
+    # PR: https://github.com/triton-lang/triton/pull/5092
     @requires_gpu
-    def test_autotune_no_pre_or_post_hook(self):
+    def test_autotune_no_pre_or_post_hook_user_defined(self):
+        from triton.runtime.autotuner import Autotuner
+
         def init_to_zero(name):
             return lambda nargs: nargs[name].zero_()
 
-        # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
-        # https://github.com/pytorch/pytorch/issues/139059
         @triton.autotune(
             configs=[
                 triton.Config(
@@ -3444,6 +3449,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                     pre_hook=init_to_zero("output_ptr"),
                 )
             ],
+            pre_hook=init_to_zero("output_ptr"),
+            post_hook=init_to_zero("output_ptr"),
             key=["n_elements"],
         )
         @triton.jit
@@ -3472,11 +3479,76 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # should always pass
         assert add(x, y).mean() == 2, "Problem with add kernel"
 
+        # assert that the user_defined_* flags are properly set on the kernel before compilation
+        self.assertEqual(isinstance(add_kernel, Autotuner), True)
+        if not hasattr(add_kernel, "user_defined_pre_hook") or not hasattr(
+            add_kernel, "user_defined_post_hook"
+        ):
+            raise unittest.SkipTest(
+                "test requires Triton version >= 3.2.0 for Autotuner.user_defined* hooks"
+            )
+
+        self.assertEqual(add_kernel.user_defined_pre_hook, True)
+        self.assertEqual(add_kernel.user_defined_post_hook, True)
+
         # this should cause an exception, since pre_hook is not allowed
-        msg = "pre_hook is not supported in triton.Autotune Configs"
+        msg = "pre_hook and post_hook are not supported in triton.Autotune or triton.Config"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
             add_compiled(x, y).mean()
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
+        if autotune_at_compile_time and backend != "inductor":
+            raise unittest.SkipTest("compile-time autotuning only exists in inductor")
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            reset_to_zero=["increment_ptr"],
+        )
+        @triton.jit
+        def increment_kernel(
+            in_ptr0,
+            increment_ptr,  # reset this to zero every time
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            in_ptr_vals = tl.load(in_ptr0 + offsets, mask=mask)
+            increment_val = tl.load(increment_ptr + offsets, mask=mask)
+            # increment_val should always be zero
+            tl.store(in_ptr0 + offsets, in_ptr_vals + increment_val, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, increment):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            increment_kernel[grid](x, increment, n_elements=n_elements)
+            return x
+
+        x = torch.rand(4, device=GPU_TYPE)
+        y = torch.clone(x)
+        increment = torch.rand(4, device=GPU_TYPE)
+
+        # during autotuning, x should not change in value
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            # we will add rand a single time to x
+            f(x, increment)
+
+        self.assertEqual(y + increment, x)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

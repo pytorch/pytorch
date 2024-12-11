@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfS390X,
 )
 
 
@@ -288,7 +289,7 @@ class TestOptimRenewed(TestCase):
             inpt = torch.randn(5, device=device, dtype=dtype)
 
             # avoid endless recompiles by wrapping LR in a tensor if we're compiling
-            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
+            lr = torch.tensor(0.01) if torch.compiler.is_compiling() else 0.01
             optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
@@ -580,6 +581,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
     @skipMPS
+    @xfailIfS390X
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -1025,8 +1027,11 @@ class TestOptimRenewed(TestCase):
         if _get_device_type(device) == "mps" and dtype not in (
             torch.float16,
             torch.float32,
+            torch.bfloat16,
         ):
-            self.skipTest("MPS supports only torch.float16 and torch.float32")
+            self.skipTest(
+                "MPS supports only torch.float16, torch.float32 and torch.bfloat16"
+            )
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
     @optims(

@@ -284,7 +284,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIteratorBase& iter, const func_t& f)
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ntensors() == ntensors);
 
-  at::detail::Array<char*, ntensors> data;
+  std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
