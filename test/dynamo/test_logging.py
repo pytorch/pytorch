@@ -838,6 +838,7 @@ exclusions = {
     "overlap",
     "aot_graphs",
     "aot_graphs_effects",
+    "pre_grad_graphs",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
