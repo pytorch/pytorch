@@ -1729,6 +1729,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, packed)
         self.assertTrue(same(ref, res))
 
+    def test_namedtuple_with_custom_getitem(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(my_tuple):
+            return my_tuple.a + 1
+
+        class MyTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+            def __getitem__(self, index):
+                return MyTuple(a[index], b[index])
+
+        a = torch.randn(2)
+        b = torch.randn(2)
+
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
+        # Test guard evaluation in the second call
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
@@ -2992,6 +3014,45 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Different order recompiles
         self.assertEqual(fn(args2, x), opt_fn(args2, x))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_mutable_mapping_multiple_inheritance(self):
+        class MyWeirdDict(collections.abc.MutableMapping, torch.nn.Module):
+            def __init__(self, **kwargs):
+                super().__init__()
+                self._items = kwargs
+
+            def keys(self):
+                return self._items.keys()
+
+            def __getitem__(self, item):
+                return self._items[item]
+
+            def __setitem__(self, key, value):
+                self._items[key] = value
+
+            def __delitem__(self, item):
+                del self._items[item]
+
+            def __len__(self):
+                return len(self._items)
+
+            def __iter__(self):
+                yield from self._items
+
+            def __hash__(self):
+                return hash(id(self))
+
+            def items(self):
+                for k, v in self._items.items():
+                    yield (k, v)
+
+        @torch.compile(fullgraph=True)
+        def to_weird_dict(td):
+            return MyWeirdDict(**td)
+
+        d = MyWeirdDict(a=1, b=2, c=3)
+        res = to_weird_dict(d)
+        self.assertEqual(tuple(d.items()), tuple(res.items()))
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
@@ -6089,6 +6150,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(backend="eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    def test_enum_method(self):
+        class Bool(enum.IntEnum):
+            TRUE = enum.auto()
+            FALSE = enum.auto()
+
+            def is_true(self, x):
+                # Return `x + 1` to make sure Dynamo actually traced into this,
+                # rather than invoking it.
+                return self == Bool.TRUE, x + 1
+
+        def f(x, e):
+            cond, y = e.is_true(x)
+            if cond:
+                return y + 2
+            else:
+                return y - 2
+
+        opt_f = torch.compile(fullgraph=True)(f)
+        args = [torch.zeros(1), Bool.TRUE]
+        ref_out = f(*args)
+        opt_out = opt_f(*args)
+        self.assertTrue(same(ref_out, opt_out))
 
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
