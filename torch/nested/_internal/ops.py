@@ -617,8 +617,6 @@ def to_copy_default(func, *args, **kwargs):
     # NB: Device conversion for NT metadata
     # - Performs moves synchronously
     # - Only move offsets/lengths ignore {max,min}_seqlen, and inv_indices, etc.
-    # - Keep host copy of offsets/lengths cached when .to(device)
-    #   but no longer keep alive device copy when .to(cpu)
     # - Registers new offsets/lengths to the same int in the tensor registry
     new_raw_metadata = inp._metadata.metadata.copy()
     for k in ("lengths", "offsets"):
@@ -629,12 +627,22 @@ def to_copy_default(func, *args, **kwargs):
                 host_tensor = device_tensor.to(new_device)
                 register_tensor(host_tensor, try_get_int(device_tensor))
                 new_raw_metadata[f"_host_{k}"] = host_tensor
+            if device_tensor is not None:
                 del new_raw_metadata[f"_device_{k}"]
         else:
             if host_tensor is not None and device_tensor is None:
                 device_tensor = host_tensor.to(new_device)
                 register_tensor(device_tensor, try_get_int(host_tensor))
                 new_raw_metadata[f"_device_{k}"] = device_tensor
+            if host_tensor is not None:
+                # It would be better to not have to get rid of the host tensor but
+                # if we keep the host tensor around, doing
+                # t_cuda.to("cpu").backward() causes mismatch of the metadata
+                # on t_cuda and t_cuda.grad: t_cuda.grad will have the host tensor
+                # (in addition to device tensor), but t_cuda will only have device
+                # tensor. This breaks fakification logic which expects t and t.grad
+                # to have the same symbolic context (we should fix that).
+                del new_raw_metadata[f"_host_{k}"]
 
     new_metadata = make_cached_tensor_for_nested(new_raw_metadata)
 

@@ -4060,7 +4060,7 @@ class ShapeEnv:
                     fx_node=fx_node,
                 )
             )
-            if coeff != 1:
+            if coeff == 1:
                 # Don't participate in caching when coeff != 1
                 fake_mode = _try_get_fake_mode(cache)
                 assert fake_mode is not None

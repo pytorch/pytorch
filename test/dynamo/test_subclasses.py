@@ -30,6 +30,8 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     subtest,
+    fresh_tensor_registry,
+    fresh_tensor_registry_ctx,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -2635,12 +2637,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             else:
                 return (torch.ones_like(out_val),)
 
-        with self.branch_nested_state():
-            # from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        with fresh_tensor_registry_ctx():
+            from torch.nested._internal.tensor_registry import _global_tensor_registry
 
             # Validate that compilation does not modify eager state
-            # registry_before = list(_tensor_symint_registry.items())
-            # count_before = torch.nested._internal.nested_tensor._tensor_id_counter
+            registry_before = list(_global_tensor_registry._tensor_to_id.items())
+            count_before = _global_tensor_registry._next_id
 
             guards_exported = []
             guards_failed = []
@@ -2659,10 +2661,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                 guard_export_fn=append_guard_export,
                 guard_fail_fn=append_guard_fail,
             )(fn)
-            # registry_after = list(_tensor_symint_registry.items())
-            # count_after = torch.nested._internal.nested_tensor._tensor_id_counter
-            # self.assertEqual(registry_before, registry_after)
-            # self.assertEqual(count_before, count_after)
+
+            # Validate that compilation does not modify eager state
+            registry_after = list(_global_tensor_registry._tensor_to_id.items())
+            count_after = _global_tensor_registry._next_id
+            self.assertEqual(registry_before, registry_after)
+            self.assertEqual(count_before, count_after)
 
             args = arg_fn()
             compile_out = compiled(*args)
@@ -2674,7 +2678,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                     compile_out, inputs=g_args, grad_outputs=compile_grad_outputs
                 )
 
-        with self.branch_nested_state():
+        with fresh_tensor_registry_ctx():
             args = arg_fn()
             ref_out = fn(*args)
             ref_grads = []
@@ -3063,6 +3067,111 @@ class GraphModule(torch.nn.Module):
             return nt, values, offsets
 
         self._validate_compile(fn, arg_fn)
+
+    @fresh_tensor_registry
+    def test_different_devices(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        def get_njt(device):
+            return torch.nested.nested_tensor(
+                [
+                    torch.randn(2, 5),
+                    torch.randn(3, 5),
+                    torch.randn(18, 5)
+                ],
+                layout=torch.jagged,
+                device=device,
+                requires_grad=True,
+            )
+
+        # Test shape comparison when the two inputs are the result of doing .to
+        t_cuda = get_njt("cuda")
+        t_cpu = t_cuda.to("cpu")
+        # Creating a fresh NJT to clear the cache
+        t_cpu_cleared = torch.nested.nested_tensor_from_jagged(t_cpu.values(), t_cpu.offsets())
+
+        # Check guards
+        curr_var_to_val = None
+        curr_var_to_sources = None
+        guards = None
+
+        def backend(gm, args):
+            context = torch._guards.TracingContext.get()
+
+            # Grab info on sources and guards from the shapeenv
+            nonlocal curr_var_to_val
+            nonlocal curr_var_to_sources
+            nonlocal guards
+
+            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+            curr_var_to_val = {
+                str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
+            }
+            curr_var_to_sources = {
+                str(k): v[0].name()
+                for k, v in context.fake_mode.shape_env.var_to_sources.items()
+            }
+            return gm
+
+        @torch.compile(backend=backend)
+        def fn(a, b):
+            if a.shape[1] == b.shape[1]:
+                return a.clone()
+            return b.clone()
+
+        fn(t_cpu_cleared, t_cuda)
+
+        expected_var_to_val = {
+            's0': SingletonInt(0),
+            's1': 2,
+            's2': 18,
+            's3': 23,
+            's4': SingletonInt(0),
+            's5': SingletonInt(0),
+            's6': 23,
+            's7': 23,
+            's8': SingletonInt(0)
+        }
+        # We have different symbols for the same s0 because CachedTensor is 1:1 with symbolic int
+        expected_var_to_sources = {
+            's0': "L['a']._base.size()[1]",
+            's1': "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
+            's2': "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
+            's3': "L['a']._base._values.size()[0]",
+            's4': "torch._nested_int_from_offsets(L['a']._base.size()[1].node.nested_int_cache()._host_offsets)",
+            's5': "L['a'].size()[1]",
+            's6': "L['a']._values.size()[0]",
+            's7': "L['b']._base.size()[0]",
+            's8': "L['b'].size()[1]"
+        }
+        self.assertEqual(curr_var_to_val, expected_var_to_val)
+        self.assertEqual(curr_var_to_sources, expected_var_to_sources)
+        self.assertExpectedInline(
+            "\n".join(guards),
+            """\
+Eq(s4, s0)
+Eq(s3, s6)
+Eq(s0, s5)
+Eq(s0, s8)""",
+        )
+
+        def fn2(a, b):
+            if a.shape[1] == b.shape[1]:
+                return a.clone()
+            return b.clone()
+
+        t2_cpu = get_njt("cpu").clone()
+        t2_cpu_cleared = torch.nested.nested_tensor_from_jagged(t2_cpu.values(), t2_cpu.offsets())
+        # Clone to ensure that the t4 is a view whose base is a NT to mimic the .to
+        # (torch.nested.nested_tensor produces a view whose base is a plain tensor!)
+        self.assertTrue(t2_cpu_cleared._base.is_nested)
+        t2_cuda = get_njt("cuda")
+
+        # This time, t2_cpu_cleared and t2_cpu are independently created (as opposed
+        # to being from .to), it should fail a symbolic shapes guard.
+        # We cannot rely on dynamo deduping guards because there was no overlap between
+        # t_cpu_cleared and t_cuda caches.
+        self.assertTrue(_recompiles_for_inputs(fn2, (t_cpu_cleared, t_cuda), (t2_cpu_cleared, t2_cuda), dynamic=False))
 
     def test_return_shape(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)

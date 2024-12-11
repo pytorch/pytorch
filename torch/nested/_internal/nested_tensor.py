@@ -565,7 +565,7 @@ def make_cached_tensor_for_nested(metadata):
     ), f"At least one of {SOURCE_FIELDS} must be passed"
 
     return CachedTensor(
-        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None)
+        metadata, next(k for k in SOURCE_FIELDS if metadata.get(k) is not None), SOURCE_FIELDS + EXTRA_FIELDS
     )
 
 

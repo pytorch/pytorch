@@ -2538,7 +2538,11 @@ class FakeTensorMode(TorchDispatchMode):
             ret = self.create_symbolic_nested_int(cache=cache)
             self.nt_cache_to_nested_int[cache] = weakref.ref(ret)
         assert isinstance(ret, torch.SymInt)
-        return ret * coeff
+        if coeff == 1:
+            # Make sure to return the exact instance we just cached
+            return ret
+        else:
+            return ret * coeff
 
     def create_symbolic_nested_int(self, *, cache: CachedTensor) -> torch.SymInt:
         # Precondition: The cache, upon creation has already registered tensors to have

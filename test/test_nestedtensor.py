@@ -6998,6 +6998,45 @@ torch.cuda.synchronize()
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
 
+    @onlyCUDA
+    def test_device_conversion(self):
+        # cpu -> cuda
+        t_cpu = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+            device="cpu",
+        )
+        t_cuda = t_cpu.to("cuda")
+
+        # Shape comparison
+        self.assertEqual(t_cpu.shape, t_cuda.shape)
+
+        # Conversion from host to device and vice versa, discards
+        # the old offsets.
+        self.assertIsNone(t_cuda._metadata._host_offsets)
+
+        # cuda -> cpu
+        t_cuda = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+            device="cuda",
+        )
+        t_cpu = t_cuda.to("cpu")
+        # Shape comparison
+        self.assertEqual(t_cpu.shape, t_cuda.shape)
+
+        # Conversion from host to device and vice versa, discards
+        # the old offsets.
+        self.assertIsNone(t_cpu._metadata._device_offsets)
+
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
         values = torch.randn(
@@ -8703,19 +8742,21 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         a = torch.tensor([1, 2, 3], dtype=torch.float32)
         b = torch.tensor([4, 5, 6], dtype=torch.float32)
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
-        metadata = {"a": a, "b": b, "c": c}
+        metadata = {"a": a, "b": b}
         # Create CachedTensor with source_fields="a"
-        cached_tensor = CachedTensor(metadata, source_field="a")
+        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
         # Test that cached_tensor is created correctly
         self.assertIsInstance(cached_tensor, CachedTensor)
         # Test that cached_tensor's shape matches 'a'
         self.assertEqual(cached_tensor.shape, a.shape)
         # Test that cached_tensor behaves like 'a'
         self.assertEqual(cached_tensor + 1, a + 1)
-        # Test that accessing other fields works
-        self.assertIs(cached_tensor.c, c)
+        # Accessing a field that is listed in all_fields but not present in metadata returns
+        # None instead of raising AttributeError.
+        self.assertIsNone(cached_tensor.c, c)
+
         # Create CachedTensor with source_field='b'
-        cached_tensor_b = CachedTensor(metadata, source_field="b")
+        cached_tensor_b = CachedTensor(metadata, source_field="b", all_fields=("a", "b", "c"))
         self.assertEqual(cached_tensor_b.shape, b.shape)
         self.assertEqual(cached_tensor_b + 1, b + 1)
 
@@ -8737,7 +8778,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
             b = torch.tensor([4, 5, 6], dtype=torch.float32)
             c = torch.tensor([7, 8, 9], dtype=torch.float32)
             metadata = {"a": a, "b": b, "c": c}
-            cached_tensor = CachedTensor(metadata, source_field="a")
+            cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
 
             # Before registration, clone unwraps
             cloned_cached_tensor = cached_tensor.clone()
@@ -8753,6 +8794,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
                 return CachedTensor(
                     cloned_metadata,
                     inp.source_field,
+                    inp.all_fields,
                 )
 
             cloned_cached_tensor = cached_tensor.clone()
@@ -8778,7 +8820,7 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         c = torch.tensor([7, 8, 9], dtype=torch.float32)
         metadata = {"a": a, "b": b, "c": c}
 
-        cached_tensor = CachedTensor(metadata, source_field="a")
+        cached_tensor = CachedTensor(metadata, source_field="a", all_fields=("a", "b", "c"))
 
         @torch.compile
         def fn(x):
