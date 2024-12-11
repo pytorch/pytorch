@@ -1671,6 +1671,7 @@ def _backward_prologue_functional(
 
     return all_args
 
+
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
     # Toss out the backward output tokens
@@ -1686,10 +1687,7 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
 
     # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
     if maybe_subclass_metadata is not None:
-        assert (
-            maybe_subclass_metadata.grad_input_metas
-            is not None
-        )
+        assert maybe_subclass_metadata.grad_input_metas is not None
         outs_wrapped = wrap_tensor_subclasses(
             out,
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
@@ -1950,7 +1948,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def impl_fn(double_ctx=None):
                     out = CompiledFunction._backward_impl(ctx, all_args)
-                    return _backward_epilogue_functional(CompiledFunction.metadata, CompiledFunction.maybe_subclass_metadata, out)
+                    return _backward_epilogue_functional(
+                        CompiledFunction.metadata,
+                        CompiledFunction.maybe_subclass_metadata,
+                        out,
+                    )
 
                 needs_grad = torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
@@ -1987,6 +1989,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 return CompiledFunctionBackward.apply(*all_args)
 
+            @staticmethod
             def _backward_impl(ctx, all_args):
                 if ctx._is_compiled_autograd_tracing():
                     if lazy_backward_info is None:
