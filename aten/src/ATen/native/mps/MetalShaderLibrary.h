@@ -13,7 +13,6 @@ typedef void* MTLComputePipelineState_t;
 typedef void* MTLComputeCommandEncoder_t;
 #endif
 
-#include <c10/util/OptionalArrayRef.h>
 #include <functional>
 #include <optional>
 #include <type_traits>
@@ -81,8 +80,8 @@ class MetalKernelFunction {
       uint64_t length,
       std::optional<uint64_t> groupSize = std::nullopt);
   void dispatch(
-      c10::ArrayRef<uint64_t> length,
-      c10::OptionalArrayRef<uint64_t> groupSize = std::nullopt);
+      std::array<uint64_t, 2> length,
+      std::optional<std::array<uint64_t, 2>> groupSize = std::nullopt);
 
  private:
   MTLComputePipelineState_t cps;
