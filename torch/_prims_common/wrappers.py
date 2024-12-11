@@ -318,6 +318,8 @@ def out_wrapper(
                     _maybe_resize_out(
                         out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
+                    if(out.stride() != result.stride()):
+                        out.as_strided_(size = result.shape, stride = result.stride())
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
