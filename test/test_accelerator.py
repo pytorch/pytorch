@@ -27,23 +27,23 @@ class TestAccelerator(TestCase):
                 with self.assertRaisesRegex(
                     ValueError, "doesn't match the current accelerator"
                 ):
-                    torch.accelerator.set_device_idx("cpu")
+                    torch.accelerator.set_device_index("cpu")
 
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_generic_multi_device_behavior(self):
-        orig_device = torch.accelerator.current_device_idx()
+        orig_device = torch.accelerator.current_device_index()
         target_device = (orig_device + 1) % torch.accelerator.device_count()
 
-        torch.accelerator.set_device_idx(target_device)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
-        torch.accelerator.set_device_idx(orig_device)
-        self.assertEqual(orig_device, torch.accelerator.current_device_idx())
+        torch.accelerator.set_device_index(target_device)
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
+        torch.accelerator.set_device_index(orig_device)
+        self.assertEqual(orig_device, torch.accelerator.current_device_index())
 
         s1 = torch.Stream(target_device)
         torch.accelerator.set_stream(s1)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
         torch.accelerator.synchronize(orig_device)
-        self.assertEqual(target_device, torch.accelerator.current_device_idx())
+        self.assertEqual(target_device, torch.accelerator.current_device_index())
 
     def test_generic_stream_behavior(self):
         s1 = torch.Stream()
