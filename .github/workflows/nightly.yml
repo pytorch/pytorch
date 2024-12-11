@@ -19,7 +19,7 @@ concurrency:
 jobs:
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.6
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
@@ -58,7 +58,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-vision-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.6
         with:
           repo-name: vision
           branch: main
@@ -73,7 +73,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-audio-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.6
         with:
           repo-name: audio
           branch: main
@@ -88,7 +88,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-executorch-commit-hash
-        uses: pytorch/test-infra/.github/actions/update-commit-hash@main
+        uses: pytorch/test-infra/.github/actions/update-commit-hash@release/2.6
         with:
           repo-name: executorch
           branch: main
