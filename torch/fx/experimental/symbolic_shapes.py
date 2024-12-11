@@ -11,6 +11,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 
 import abc
 import atexit
+import builtins
 import collections
 import functools
 import inspect
