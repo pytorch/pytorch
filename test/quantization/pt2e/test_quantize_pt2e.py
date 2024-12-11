@@ -2012,6 +2012,47 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
         _assert_ops_are_correct(m, train=True)
 
+    def test_allow_exported_model_train_eval_idempotent(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.bn(x)
+                return x
+
+        m = M().train()
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = export_for_training(m, example_inputs).module()
+        torch.ao.quantization.allow_exported_model_train_eval(m)
+
+        # Mock m.recompile() to count how many times it's been called
+        m._recompile_count = 0
+
+        def _fake_recompile():
+            m._recompile_count += 1
+
+        m.recompile = _fake_recompile
+
+        # First train after export should always recompile
+        m.train()
+        self.assertNotEqual(m._recompile_count, 0)
+        count1 = m._recompile_count
+
+        # Train -> train should not recompile
+        m.train()
+        self.assertEqual(m._recompile_count, count1)
+
+        # Train -> eval should recompile
+        m.eval()
+        self.assertNotEqual(m._recompile_count, count1)
+        count2 = m._recompile_count
+
+        # Eval -> eval should not recompile
+        m.eval()
+        self.assertEqual(m._recompile_count, count2)
+
     def test_model_is_exported(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.rand(3, 3, 5, 5),)
@@ -2409,6 +2450,30 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 # Entire graph share the same qspec which was overriden by FixedQParamsObserver
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
+
+    def test_preserve_nn_module_stack(self):
+        """Test we can preserve nn_module_stack on replaced pattern's nodes"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True)
+        )
+
+        def check_nn_module(node):
+            self.assertTrue("nn_module_stack" in node.meta)
+            self.assertTrue(
+                "ConvWithBNRelu" in node.meta["nn_module_stack"]["L__self__"][1]
+            )
+
+        m.conv_bn_relu = export_for_training(m.conv_bn_relu, example_inputs).module()
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.op not in ["placeholder", "output", "get_attr"]:
+                check_nn_module(node)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        for node in m.conv_bn_relu.graph.nodes:
+            if node.name == "mul":
+                check_nn_module(node)
 
 
 instantiate_parametrized_tests(TestQuantizePT2E)

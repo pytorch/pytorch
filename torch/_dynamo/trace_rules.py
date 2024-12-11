@@ -190,6 +190,7 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.sym_sum": TorchInGraphFunctionVariable,
+    "torch.sym_fresh_size": UserFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
@@ -2269,10 +2270,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
-        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2558,6 +2556,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
+        "torch.cuda.memory.get_per_process_memory_fraction",
         "torch.cuda.memory.list_gpu_processes",
         "torch.cuda.memory.max_memory_allocated",
         "torch.cuda.memory.max_memory_cached",
@@ -2926,8 +2925,9 @@ def get_tensor_method():
         ):
             s.add(method)
 
-    # mlazos: this is a function which we handle specially in TensorVariable
+    # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
+    s.add(torch.Tensor.register_hook)  # type: ignore[arg-type]
     return frozenset(s)
 
 
@@ -3155,7 +3155,6 @@ BUILTIN_SKIPLIST = (
     contextlib,
     copy,
     copyreg,
-    dataclasses,
     enum,
     functools,
     importlib,
@@ -3265,7 +3264,7 @@ if torch.distributed.is_available():
         "torch.distributed._composable.replicate",
     }
     if not torch._dynamo.config.skip_fsdp_hooks:
-        LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        LEGACY_MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 # Force inline functions under these modules, even they are in *_SKIPLIST.
@@ -3276,6 +3275,7 @@ MOD_INLINELIST = [
     "torch._dynamo._trace_wrapped_higher_order_op",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
@@ -3310,6 +3310,7 @@ MOD_INLINELIST = [
     "torch.testing",
     "torch.utils._content_store",
     "torch.utils._contextlib",
+    "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
     "torch.utils._python_dispatch",
@@ -3323,7 +3324,7 @@ MOD_INLINELIST = set(MOD_INLINELIST)
 if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     if not torch._dynamo.config.skip_fsdp_hooks:
-        MOD_INLINELIST.add("torch.distributed._composable.fsdp")
+        MOD_INLINELIST.add("torch.distributed.fsdp._fully_shard")
 
 
 @functools.lru_cache(None)

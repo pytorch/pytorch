@@ -54,7 +54,7 @@ on:
           since we are investigating the behaviour of the monitor script with different tests.
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -329,6 +329,14 @@ jobs:
           sha: ${{ github.event.pull_request.head.sha || github.sha }}
           test_config: ${{ matrix.config }}
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+
+      - name: Upload the benchmark results
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Print remaining test logs
         shell: bash

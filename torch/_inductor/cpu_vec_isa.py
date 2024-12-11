@@ -398,9 +398,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
         _cpu_supported_x86_isa = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
-                isa_list.append(isa)
+        isa_list.extend(
+            isa
+            for isa in supported_vec_isa_list
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa
+        )
 
     return isa_list
 

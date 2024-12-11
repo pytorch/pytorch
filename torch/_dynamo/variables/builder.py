@@ -115,6 +115,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -140,6 +141,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
@@ -430,11 +432,6 @@ class VariableBuilder:
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
-    def set_source_and_track_mutable(self, value, var):
-        assert isinstance(var, VariableTracker)
-        var.source = self.source
-        return self.tx.output.side_effects.track_mutable(value, var)
-
     @classmethod
     def _type_dispatch(cls):
         return cls._type_dispatch_impl(config.trace_numpy)
@@ -580,8 +577,18 @@ class VariableBuilder:
         ):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
-            return self.wrap_listlike(value)
-
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            output = [
+                LazyVariableTracker.create(
+                    getattr(value, name),
+                    source=AttrSource(self.source, name),
+                )
+                for name in namedtuple_fields(type(value))
+            ]
+            result = NamedTupleVariable(
+                output, tuple_cls=type(value), source=self.source
+            )
+            return result
         elif value is torch.utils._pytree.SUPPORTED_NODES:
             # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
             # under the assumption that the values themselves don't change.
@@ -591,7 +598,7 @@ class VariableBuilder:
             # key order.
             self.tx.output.guard_on_key_order.add(self.source.name())
             result = {
-                ConstantVariable.create(k): UserDefinedObjectVariable(
+                TypingVariable(k): UserDefinedObjectVariable(
                     v,
                     source=GetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
@@ -606,7 +613,6 @@ class VariableBuilder:
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = CustomizedDictVariable.wrap(self, value)
-            result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -670,7 +676,7 @@ class VariableBuilder:
                     result, user_cls=type(value), source=self.source
                 )
 
-            return self.set_source_and_track_mutable(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -679,13 +685,23 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, frozenset) and (
-            ConstantVariable.is_literal(x) for x in value
+        elif istype(value, frozenset) and all(
+            (
+                # For DBR quantization, we could get a frozenset of torch funcs.
+                (type(x) is types.BuiltinMethodType and x.__module__ == "torch")
+                or
+                # Another commonly used frozenset of types.
+                x in torch.utils._pytree.BUILTIN_TYPES
+            )
+            for x in value
         ):
-            # For frozenset, we can guard by object ID instead of value
-            # equality, this allows us to handle non-literal values
+            # For the limited cases of frozenset here, we know the items won't
+            # change across runs, so we can safely create sourceless VTs for
+            # them and only guard on the frozenset id.
+            # TODO support source for sets and remove the special logics here.
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable.create(value=value, source=self.source)
+            return FrozensetVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
@@ -878,9 +894,6 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
-        elif isinstance(value, torch._C._SDPBackend):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ConstantVariable(value)
         elif isinstance(value, torch.Event):
             self.install_guards(GuardBuilder.ID_MATCH)
             torch._dynamo.utils.store_user_object_weakref(value)
@@ -983,12 +996,10 @@ class VariableBuilder:
                 example_strong_ref=new_symint,
             )
             # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
             sym_expr = new_symint.node.expr
             assert isinstance(
                 sym_expr, sympy.Symbol
             ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -1129,7 +1140,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.set_source_and_track_mutable(
+            return self.tx.output.side_effects.track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -1140,6 +1151,7 @@ class VariableBuilder:
                     ],
                     user_cls=type(value),
                     user_cls_source=AttrSource(self.source, "__class__"),
+                    source=self.source,
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
@@ -1239,10 +1251,6 @@ class VariableBuilder:
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-        for item in value:
-            if item is value:
-                unimplemented("list elements are pointing to the list itself")
-
         # Tuples are immutable objects, so we should mark its items static. This
         # avoids wrapping of tuple items as symints. This helps for nn module
         # attributes like conv2d strides, dilations.
@@ -1318,11 +1326,9 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
-        )
-        if istype(value, list):
-            return self.set_source_and_track_mutable(value, result)
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        if istype(value, (list, collections.deque)):
+            return self.tx.output.side_effects.track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -1333,17 +1339,16 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        result = TupleIteratorVariable(
-            output, mutation_type=ValueMutationNew(), source=self.source
-        )
-
-        return self.set_source_and_track_mutable(value, result)
+        result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator):
-        self.install_guards(GuardBuilder.TYPE_MATCH)
-        # Get all the values from the range iterator
+        self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
+        # Get all the values from the range iterator; no need to install guards
+        # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
-        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+        result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1504,7 +1509,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
-                return self.set_source_and_track_mutable(value, result)
+                return self.tx.output.side_effects.track_mutable(value, result)
             return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
@@ -1666,6 +1671,17 @@ class VariableBuilder:
             **options,
         )
 
+        if value._is_view():
+            # If value is a view, add its base tensor to the tracked fakes list.
+            # This is so we are able to access the correct source for its symbolic
+            # shape values, in case we need them.
+            wrap_to_fake_tensor_and_record(
+                value._base,
+                tx=self.tx,
+                source=AttrSource(source, "_base"),
+                is_tensor=True,
+            )
+
         guard_type = GuardBuilder.TENSOR_MATCH
 
         if isinstance(source, GradSource) and is_from_optimizer_source(source):
@@ -1826,7 +1842,9 @@ class VariableBuilder:
             if (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
-            ) or not config.assume_static_by_default:
+            ):
+                dynamic_dim = get_automatic_dynamic_shapes_mark_as()
+            elif not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1887,6 +1905,9 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
+        # To prevent circular import
+        from ..symbolic_convert import TensorifyState
+
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1895,6 +1916,13 @@ class VariableBuilder:
 
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
+
+        frame_state_entry = process_automatic_dynamic(
+            self.tx,
+            self.source.name(),
+            FrameStateSizeEntry.make_scalar(value),
+            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+        )
 
         # NB: we specialize on nan input, because our guard modeling in
         # ShapeEnv cannot deal with nan
@@ -1909,6 +1937,9 @@ class VariableBuilder:
             # when specialize_float=False
             # python test/inductor/test_compiled_optimizers.py CompiledOptimizerTests.test_rmsprop_weight_decay_maximize_capturable_cuda # noqa: B950
             or torch._inductor.config.triton.cudagraphs
+            or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
+            or frame_state_entry.scalar is not auto_dynamic
+            or TensorifyState.should_specialize(self.source)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2360,6 +2391,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                 )
 
                 if "source" in options:
+                    # This path should only trigger for list stealing, so it's
+                    # safe to use `GetItemSource`.
+                    assert isinstance(example_value, list)
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
@@ -2386,7 +2420,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
-            return ListVariable(unpacked, mutation_type=ValueMutationNew(), **options)
+            return ListVariable(unpacked, **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -2484,6 +2518,19 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}",
             case_name="unsupported_operator",
+        )
+
+
+def get_automatic_dynamic_shapes_mark_as():
+    if config.automatic_dynamic_shapes_mark_as == "dynamic":
+        return DimDynamic.DYNAMIC
+    elif config.automatic_dynamic_shapes_mark_as == "unbacked":
+        return DimDynamic.SIZE_LIKE_UNBACKED
+    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
+        return DimDynamic.OBLIVIOUS_SIZE
+    else:
+        raise ValueError(
+            f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
         )
 
 
@@ -2744,10 +2791,14 @@ def _automatic_dynamic(
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
             # case
-            dynamic_size = DimDynamic.DYNAMIC
+            if automatic_dynamic:
+                dynamic_size = get_automatic_dynamic_shapes_mark_as()
+            else:
+                dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
         else:
+            # TODO: When does this show up?
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:

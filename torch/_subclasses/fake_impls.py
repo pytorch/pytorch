@@ -585,14 +585,13 @@ def has_meta(func):
     lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
