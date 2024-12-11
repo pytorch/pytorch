@@ -126,3 +126,42 @@ class MetricsContext:
         if metric not in self._metrics:
             self._metrics[metric] = set()
         self._metrics[metric].add(value)
+
+
+class RuntimeMetricsContext:
+    def __init__(self, on_exit: OnExitType):
+        """
+        Similar to MetricsContext, but used to gather the runtime metrics that are
+        decoupled from compilation, where there's not a natural place to insert a
+        context manager.
+        """
+        self._on_exit = on_exit
+        self._metrics: Dict[str, Any] = {}
+        self._start_time_ns: int = 0
+
+    def increment(
+        self, metric: str, value: int, extra: Optional[Dict[str, Any]]
+    ) -> None:
+        """
+        Increment a metric by a given amount.
+        """
+        if not self._metrics:
+            # Start timing on the first entry
+            self._start_time_ns = time.time_ns()
+        if metric not in self._metrics:
+            self._metrics[metric] = 0
+        self._metrics[metric] += value
+
+        if extra:
+            for k, v in extra.items():
+                if k not in self._metrics and v is not None:
+                    self._metrics[k] = v
+
+    def finish(self) -> None:
+        """
+        Call the on_exit function with the metrics gathered so far and reset.
+        """
+        if self._metrics:
+            end_time_ns = time.time_ns()
+            self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
+            self._metrics = {}

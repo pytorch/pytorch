@@ -431,11 +431,6 @@ class VariableBuilder:
         install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
-    def set_source_and_track_mutable(self, value, var):
-        assert isinstance(var, VariableTracker)
-        var.source = self.source
-        return self.tx.output.side_effects.track_mutable(value, var)
-
     @classmethod
     def _type_dispatch(cls):
         return cls._type_dispatch_impl(config.trace_numpy)
@@ -607,7 +602,6 @@ class VariableBuilder:
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = CustomizedDictVariable.wrap(self, value)
-            result.source = self.source
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
@@ -671,7 +665,7 @@ class VariableBuilder:
                     result, user_cls=type(value), source=self.source
                 )
 
-            return self.set_source_and_track_mutable(value, result)
+            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -950,40 +944,53 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, torch.SymBool):
-            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
-            # user provided SymBool with a SymInt in dynamo.
+        elif isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
+            value.node, torch.nested._internal.nested_int.NestedIntNode
+        ):
+            # Note: this doesn't handle nested symints.
+            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
             # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
-
-            new_source = ConvertIntSource(self.source)
+            source = (
+                self.source
+                if isinstance(value, torch.SymInt)
+                else ConvertIntSource(self.source)
+            )
             if value.node.has_hint():
-                value_hint = value.node.require_hint()
-
                 new_symint = (
                     self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value_hint),
-                        new_source,
+                        int(value.node.hint),
+                        source,
                         dynamic_dim=DimDynamic.DYNAMIC,
                     )
                 )
             else:
-                # We need to create an unbacked symint to replace the unbacked symbool.
-                new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                if isinstance(value, torch.SymBool):
+                    # We need to create an unbacked symint to replace the unbacked symbool.
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                else:
+                    # TODO (yidi): we need to figure out a way to propagate the guards
+                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
+                    # this is automatically done by evaluating the guards once but this
+                    # will cause data-dependent error when we evaluate the outer unbacked symints.
+                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                    unimplemented(
+                        "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
+                    )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
                 new_symint,
-                source=new_source,
+                source=source,
             )
 
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                new_source,
+                source,
                 new_symint,
                 False,
                 None,
@@ -991,19 +998,17 @@ class VariableBuilder:
                 example_strong_ref=new_symint,
             )
             # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
             sym_expr = new_symint.node.expr
             assert isinstance(
                 sym_expr, sympy.Symbol
             ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
-            self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, new_source, None)
-            )
-            return SymNodeVariable(
-                sym_node_proxy,
-                new_symint == 1,
-            )
+            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+
+            tracing_symint = (
+                new_symint if isinstance(value, torch.SymInt) else new_symint == 1
+            )  # cast it back to symbool for tracing
+            return SymNodeVariable(sym_node_proxy, tracing_symint)
+
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
@@ -1137,7 +1142,7 @@ class VariableBuilder:
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return self.set_source_and_track_mutable(
+            return self.tx.output.side_effects.track_mutable(
                 value,
                 RestrictedListSubclassVariable(
                     [
@@ -1148,6 +1153,7 @@ class VariableBuilder:
                     ],
                     user_cls=type(value),
                     user_cls_source=AttrSource(self.source, "__class__"),
+                    source=self.source,
                 ),
             )
         elif TorchScriptObjectVariable.is_matching_cls(type(value)):
@@ -1326,11 +1332,9 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
-        result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
-        )
-        if istype(value, list):
-            return self.set_source_and_track_mutable(value, result)
+        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        if istype(value, (list, collections.deque)):
+            return self.tx.output.side_effects.track_mutable(value, result)
         return result
 
     def wrap_tuple_iterator(self, value: tuple_iterator):
@@ -1341,17 +1345,16 @@ class VariableBuilder:
             )
             for i in range(tuple_iterator_len(value))
         ]
-        result = TupleIteratorVariable(
-            output, mutation_type=ValueMutationNew(), source=self.source
-        )
-
-        return self.set_source_and_track_mutable(value, result)
+        result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator):
-        self.install_guards(GuardBuilder.TYPE_MATCH)
-        # Get all the values from the range iterator
+        self.install_guards(GuardBuilder.RANGE_ITERATOR_MATCH)
+        # Get all the values from the range iterator; no need to install guards
+        # on items since `RANGE_ITERATOR_MATCH` guarantees the same items.
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
-        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+        result = ListIteratorVariable(items, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1512,7 +1515,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
-                return self.set_source_and_track_mutable(value, result)
+                return self.tx.output.side_effects.track_mutable(value, result)
             return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
@@ -1673,6 +1676,17 @@ class VariableBuilder:
             source=source,
             **options,
         )
+
+        if value._is_view():
+            # If value is a view, add its base tensor to the tracked fakes list.
+            # This is so we are able to access the correct source for its symbolic
+            # shape values, in case we need them.
+            wrap_to_fake_tensor_and_record(
+                value._base,
+                tx=self.tx,
+                source=AttrSource(source, "_base"),
+                is_tensor=True,
+            )
 
         guard_type = GuardBuilder.TENSOR_MATCH
 
@@ -2403,7 +2417,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
-            return ListVariable(unpacked, mutation_type=ValueMutationNew(), **options)
+            return ListVariable(unpacked, **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"

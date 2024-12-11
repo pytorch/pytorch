@@ -7,6 +7,7 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
+from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -113,10 +114,19 @@ def get_scan_combine_fn(name, associative=True):
     def div(x: torch.Tensor, y: torch.Tensor):
         return x / y
 
-    def s5_operator(x, y):
+    def s5_operator(x: torch.Tensor, y: torch.Tensor):
         A_i, Bu_i = x
         A_j, Bu_j = y
         return A_j * A_i, A_j * Bu_i + Bu_j
+
+    def different_input_size_operator(x: torch.Tensor, y: torch.Tensor):
+        x_o, dA_o, dB_o, C_o, y_o = x
+        x_n, dA_n, dB_n, C_n, y_n = y
+
+        x_new = x_n + x_o
+        y_new = torch.einsum("bdn,bn->bd", x_new, C_n)
+
+        return x_new, dA_n + 0.0, dB_n + 0.0, C_n + 0.0, y_new
 
     def tuple_fct(x, y):
         return (x[0] + y[0], x[1] * y[1])
@@ -144,6 +154,8 @@ def get_scan_combine_fn(name, associative=True):
         fct = div
     elif name == "s5_operator":
         fct = s5_operator
+    elif name == "different_input_size_operator":
+        fct = different_input_size_operator
     elif name == "tuple_fct":
         fct = tuple_fct
     elif name == "complex_pointwise":
@@ -3253,6 +3265,82 @@ class AssociativeScanTests(TestCase):
             inputs=elements,
         )
 
+    @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_different_input_size(self, compile_mode, reverse, device):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        C = torch.randn((batch, dstate, length), requires_grad=True, device=device)
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), requires_grad=True, device=device
+        )
+        y = torch.randn((batch, hidden_dim, length), requires_grad=True, device=device)
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("different_input_size_operator", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    def test_associative_scan_different_input_size_wrong_dim(self):
+        batch = 5
+        hidden_dim = 3
+        length = 10
+        dstate = 7
+
+        deltaA = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        deltaB_u = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        C = torch.randn((batch, dstate, length), device=torch.device("cuda"))
+        x = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        y = torch.randn(
+            (batch, hidden_dim, length, dstate), device=torch.device("cuda")
+        )
+        elements = (x, deltaA, deltaB_u, C, y)
+
+        with self.assertRaisesRegex(
+            # Should be
+            # ValueError,
+            # "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
+            torch._dynamo.exc.Unsupported,
+            "Observed exception.*",
+        ):
+            out = associative_scan(
+                get_scan_combine_fn("different_input_size_operator", True),
+                elements,
+                3,
+                combine_mode="pointwise",
+            )
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
@@ -6094,6 +6182,19 @@ class TestHopSchema(TestCase):
         )
         self.assertEqual(schema.parse(str(schema)), schema)
 
+    # Return the .module() graph str result of non-strict export
+    def _check_export(self, fn, args, dynamic_shapes=None) -> str:
+        strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=True
+        )
+        non_strict_ep = torch.export.export(
+            fn, args, dynamic_shapes=dynamic_shapes, strict=False
+        )
+        eager_res = fn(*args)
+        self.assertEqual(strict_ep.module()(*args), eager_res)
+        self.assertEqual(non_strict_ep.module()(*args), eager_res)
+        return normalize_gm(non_strict_ep.module().print_readable(print_output=False))
+
     @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_eager_run_with_item(self):
@@ -6117,20 +6218,122 @@ class TestHopSchema(TestCase):
         )
         model = M()
         ep = torch.export.export(model, args)
+        graph_str = self._check_export(model, args, None)
         self.assertExpectedInline(
-            ep.module().code.strip(),
+            graph_str,
             """\
-def forward(self, a, b1, b2, c):
-    a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
-    getitem = cond[0];  cond = None
-    mul = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
-    return pytree.tree_unflatten((mul,), self._out_spec)""",  # noqa: B950
+class GraphModule(torch.nn.Module):
+    def forward(self, a, b1, b2, c):
+        a: "b8[]"; b1: "i64[1]"; b2: "i64[1]"; c: "f32[10]";
+
+        a, b1, b2, c, = fx_pytree.tree_flatten_spec(([a, b1, b2, c], {}), self._in_spec)
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(a, true_graph_0, false_graph_0, [c, b1, b2]);  a = true_graph_0 = false_graph_0 = c = b1 = b2 = None
+        getitem: "f32[10]" = cond[0];  cond = None
+
+        mul: "f32[10]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+        return pytree.tree_unflatten((mul,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u0)" = torch.ops.aten.item.default(b1);  b1 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, c: "f32[10]", b1: "i64[1]", b2: "i64[1]"):
+            item: "Sym(u1)" = torch.ops.aten.item.default(b2);  b2 = None
+
+            mul: "f32[10]" = torch.ops.aten.mul.Tensor(c, item);  c = item = None
+            return (mul,)
+""",  # noqa: B950
         )
-        expected_output = model(*args)
-        self.assertEqual(expected_output, x * 3 * 2)
+
+    @skipIfTorchDynamo("Skip because dynamo cannot trace torch.export.")
+    def test_cond_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+
+                def true_fn(x):
+                    return x + a
+
+                def false_fn(x):
+                    return x + b * z
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        non_strict_graph_str = self._check_export(model, args, dynamic_shapes)
+        self.assertExpectedInline(
+            non_strict_graph_str,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x, y, z):
+        x: "f32[s0, 3]"; y: "f32[s1]"; z: "f32[s0, 3]";
+
+        x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
+        sym_size_int_3: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+        sym_size_int_4: "Sym(s1)" = torch.ops.aten.sym_size.int(y, 0);  y = None
+
+        gt: "Sym(s0 > 5)" = sym_size_int_3 > 5
+
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [x, sym_size_int_4, sym_size_int_3, z]);  gt = true_graph_0 = false_graph_0 = x = sym_size_int_4 = sym_size_int_3 = z = None
+        getitem: "f32[s0, 3]" = cond[0];  cond = None
+        return pytree.tree_unflatten((getitem,), self._out_spec)
+
+    class true_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, sym_size_int_4);  x = sym_size_int_4 = None
+            return (add,)
+
+    class false_graph_0(torch.nn.Module):
+        def forward(self, x: "f32[s0, 3]", sym_size_int_4: "Sym(s1)", sym_size_int_3: "Sym(s0)", z: "f32[s0, 3]"):
+            mul: "f32[s0, 3]" = torch.ops.aten.mul.Tensor(z, sym_size_int_3);  z = sym_size_int_3 = None
+
+            add: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x, mul);  x = mul = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+    # unbacked symint inputs are created during non-strict export,
+    # which causes a graph break
+    @unittest.expectedFailure
+    def test_cond_unbacked_symint_closure(self):
+        from torch.export import Dim
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                a = y.shape[0]
+                b = z.shape[0]
+                # c is an unbacked symint in non-strict export
+                c = y.sum().item()
+
+                def true_fn(x):
+                    return x + a + c
+
+                def false_fn(x):
+                    return x + b * z * c
+
+                # When exporting with non-strict: a and b are symints,
+                # so torch.compile need to wrap and trace symint inputs.
+                return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
+        args = (torch.ones(3, 3), torch.ones(5, dtype=torch.int32), torch.ones(3, 3))
+        model = M()
+        dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
+        _ = self._check_export(model, args, dynamic_shapes)
 
 
 instantiate_parametrized_tests(TestHopSchema)
