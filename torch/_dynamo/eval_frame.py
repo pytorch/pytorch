@@ -52,6 +52,7 @@ from torch import _guards
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
     set_guard_error_hook,
+    set_skip_guard_eval_unsafe,
     skip_code,
     unsupported,
 )
@@ -122,6 +123,7 @@ def _maybe_set_eval_frame(callback: DynamoCallback):
 @dataclass
 class DynamoStance:
     stance: str = "default"
+    skip_guard_eval_unsafe: bool = False
     backend: Union[str, Callable[..., Any], None] = None
 
 
@@ -181,6 +183,10 @@ def _callback_from_stance(callback):
         return fail_callback
     else:
         raise RuntimeError(f"invalid torch.compile stance '{_stance}'")
+
+
+def _is_skip_guard_eval_unsafe_stance():
+    return _stance.skip_guard_eval_unsafe
 
 
 def _reset_guarded_backend_cache():
@@ -300,7 +306,11 @@ class OptimizedModule(torch.nn.Module):
         return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
-        if hasattr(self._orig_mod, "_initialize_hook"):
+        if (
+            hasattr(self._orig_mod, "_initialize_hook")
+            and hasattr(self._orig_mod, "_infer_parameters")
+            and callable(self._orig_mod._infer_parameters)
+        ):
             # In the case of a lazy module, we want to run
             # the pre-hooks which initialize it.
             # Afterwards, lazy module deletes its pre-hooks
@@ -446,10 +456,14 @@ class _TorchDynamoContext:
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+        self.prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+            _is_skip_guard_eval_unsafe_stance()
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         _maybe_set_eval_frame(self.prior)
+        set_skip_guard_eval_unsafe(self.prior_skip_guard_eval_unsafe)
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -541,6 +555,9 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(_callback_from_stance(callback))
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -561,6 +578,7 @@ class _TorchDynamoContext:
                 )
 
                 _maybe_set_eval_frame(prior)
+                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                 for cleanup in cleanups:
                     cleanup()
 
@@ -651,7 +669,9 @@ class OptimizeContext(_TorchDynamoContext):
             def call_compiled_autograd():
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
-                ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+                ctx = torch._dynamo.compiled_autograd._enable(
+                    compiler_fn, dynamic=self._dynamic
+                )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
 
@@ -717,10 +737,14 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                _is_skip_guard_eval_unsafe_stance()
+            )
             try:
                 return fn(*args, **kwargs)
             finally:
                 _maybe_set_eval_frame(prior)
+                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -774,8 +798,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
@@ -968,7 +992,7 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
@@ -1069,12 +1093,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def transform(self):
         result_gm = super().transform()
-        if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                "dynamo_flat_name_to_original_fqn"
+        if "dynamo_flat_name_to_original_fqn" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[  # type: ignore[index]
+                "dynamo_flat_name_to_original_fqn"  # type: ignore[index]
             ]
-        if "dynamo_compile_id" in self.module.meta:
-            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
+        if "dynamo_compile_id" in self.module.meta:  # type: ignore[operator]
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]  # type: ignore[index]
         return result_gm
 
 
@@ -1479,6 +1503,7 @@ def export(
                 # NB: this is wrong if graph_captured_result has
                 # data-dependent output size!
                 ignore_fresh_unbacked = null_context()
+                assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 
@@ -1788,7 +1813,6 @@ class TorchPatcher:
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
-            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(

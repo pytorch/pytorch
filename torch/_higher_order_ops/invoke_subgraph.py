@@ -15,6 +15,8 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -41,8 +43,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            List[Union[torch.Tensor, torch.SymInt]],
-            Tuple[Union[torch.Tensor, torch.SymInt]],
+            List[Union[torch.Tensor, int, torch.SymInt]],
+            Tuple[Union[torch.Tensor, int, torch.SymInt]],
         ],
     ):
         assert identifier is None or isinstance(
@@ -51,10 +53,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         assert isinstance(
             operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors and SymInts {operands}"
+        ), f"invoke_subgraph operands must be a list or tuple of tensors/ints/SymInts {operands}"
         assert all(
-            isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors and SymInts {operands}"
+            isinstance(o, (torch.Tensor, int, torch.SymInt)) for o in operands
+        ), f"invoke_subgraph operands must be a list of tensors/ints/SymInts {operands}"
 
         return super().__call__(subgraph, identifier, operands)
 
@@ -136,21 +138,24 @@ def trace_joint_graph(fn, fw_inputs, fw_outputs):
     return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
 
 
-def create_fw_bw_graph(subgraph, operands):
+def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # args are functional tensors, generate some example tensors
             fw_inputs = pytree.tree_map(_from_fun, operands)
 
-            fw_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
+            if grad_outputs is None:
+                # Infer grad_outputs to be the same properties as the fw_outputs
+                # if they're not passed in.
+                grad_outputs = pytree.tree_map(_from_fun, subgraph(*fw_inputs))
             if any(
                 not isinstance(out, torch.Tensor)
-                for out in fw_outputs
+                for out in grad_outputs
                 if out is not None
             ):
                 raise RuntimeError(
                     "Expect outputs of invoke_subgraph to only contains tensors or None. "
-                    f"Got types {[type(out) for out in fw_outputs]}."
+                    f"Got types {[type(out) for out in grad_outputs]}."
                 )
 
             # Trace the forward subgraph
@@ -160,9 +165,9 @@ def create_fw_bw_graph(subgraph, operands):
             bw_graph = trace_joint_graph(
                 subgraph,
                 fw_inputs,
-                fw_outputs,
+                grad_outputs,
             )
-            return fw_graph, bw_graph, len(fw_outputs)
+            return fw_graph, bw_graph, len(grad_outputs)
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -185,14 +190,14 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 operands,
             )
 
-        ctx.save_for_backward(*operands)
+        save_tensors_and_symints_for_backward(ctx, operands)
         return out
 
     @staticmethod
     def backward(ctx, *grad_outs):
         bw_graph = ctx._bw_graph
         identifier = ctx._identifier
-        primals = ctx.saved_tensors
+        primals = saved_tensors_and_symints(ctx)
         num_fw_outs = ctx._num_fw_outs
 
         # While tracing we made the assumption that tangents are contiguous. So,
@@ -259,7 +264,7 @@ def _(subgraph, identifier, operands):
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.

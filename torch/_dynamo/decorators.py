@@ -97,11 +97,17 @@ class set_stance(_DecoratorContextManager):
 
     _dynamo_forbidden = True
 
-    def __init__(self, stance: str, force_backend=None) -> None:
+    def __init__(
+        self,
+        stance: str = "default",
+        *,
+        skip_guard_eval_unsafe: bool = False,
+        force_backend=None,
+    ) -> None:
         if force_backend is not None and stance != "default":
             raise RuntimeError("non-default stance cannot have force_backend set")
 
-        self.stance = DynamoStance(stance, force_backend)
+        self.stance = DynamoStance(stance, skip_guard_eval_unsafe, force_backend)
         self.prev = _set_stance(self.stance)
 
     def __call__(self, fn):
@@ -404,7 +410,7 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
-    attrs, ctx = t.__tensor_flatten__()
+    attrs, _ctx = t.__tensor_flatten__()
     assert isinstance(t, torch.Tensor)
     for attr in attrs:
         inner = getattr(t, attr)

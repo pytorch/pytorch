@@ -231,6 +231,9 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
+    if not torch.distributed.is_available():
+        return nodes
+
     # If FSDP2 is used, we apply FSDP-specific passes.
     if any(
         is_fallback_op(
@@ -272,17 +275,10 @@ def node_summary(snode):
     if isinstance(snode.node, ir.ExternKernelOut):
         detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
-    if (
-        hasattr(snode.node, "layout")
-        and hasattr(snode.node.layout, "size")
-        and hasattr(snode.node.layout, "stride")
-    ):
-        out_tensor_info = (
-            f" (size={snode.node.layout.size}, stride={snode.node.layout.stride})"
-        )
-    node_name = ""
-    if hasattr(snode.node, "name"):
-        node_name = snode.node.name
+    layout = snode.node.get_output_spec()
+    if isinstance(layout, ir.Layout):
+        out_tensor_info = f" (size={layout.size}, stride={layout.stride})"
+    node_name = snode.node.maybe_get_name() or ""
     return f"{snode.node.__class__.__name__}{detail}{out_tensor_info} ({node_name})"
 
 
@@ -543,7 +539,7 @@ Graph: {graph}
 
 def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
     try:
-        import torch.distributed._composable.fsdp._fsdp_collectives
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
 
         assert torch.distributed.is_available()
         # Assert existence of these ops

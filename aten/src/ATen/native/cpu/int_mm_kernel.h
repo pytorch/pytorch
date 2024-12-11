@@ -5,8 +5,8 @@
 
 namespace at::native {
 
-using weight_to_int4pack_fn = void(*)(const Tensor&, const Tensor&, int, int);
-using int4pack_mm_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, int, const Tensor&, int, int);
+using weight_to_int4pack_fn = void(*)(const Tensor&, const Tensor&);
+using int4pack_mm_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, int, const Tensor&);
 using int8pack_mm_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const Tensor&);
 
 DECLARE_DISPATCH(weight_to_int4pack_fn, weight_to_int4pack_stub)
