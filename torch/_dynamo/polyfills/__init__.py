@@ -59,7 +59,7 @@ def index(iterator, item, start=0, end=None):
 
 
 def repeat(item, count):
-    for _ in range(count):
+    for i in range(count):
         yield item
 
 
