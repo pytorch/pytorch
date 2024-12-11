@@ -175,6 +175,8 @@ source activate "$tmp_env_name"
 pip install -q "numpy=${NUMPY_PINNED_VERSION}"  "pyyaml${PYYAML_PINNED_VERSION}" requests
 retry conda install ${EXTRA_CONDA_INSTALL_FLAGS} -yq  llvm-openmp=14.0.6 cmake ninja "setuptools${SETUPTOOLS_PINNED_VERSION}" typing_extensions
 retry pip install -qr "${pytorch_rootdir}/requirements.txt" || true
+# TODO : Remove me (but in the interim, use Anaconda cmake, to find Anaconda installed OpenMP)
+retry pip uninstall -y cmake
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv and pkg-config to find libuv.
 export USE_DISTRIBUTED=1
