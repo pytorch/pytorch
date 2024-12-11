@@ -45,8 +45,7 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(false,
@@ -95,7 +94,6 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(false, "mkldnn_transpose_: in-place mkldnn operations are not supported yet");
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED

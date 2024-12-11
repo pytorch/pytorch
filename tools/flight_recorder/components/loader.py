@@ -74,8 +74,8 @@ def read_dir(args: argparse.Namespace) -> Tuple[Dict[str, Dict[str, Any]], str]:
     t0 = time.time()
     version = ""
     filecount = 0
-    assert os.path.isdir(args.folder), f"folder {args.folder} does not exist"
-    for root, _, files in os.walk(args.folder):
+    assert os.path.isdir(args.trace_dir), f"folder {args.trace_dir} does not exist"
+    for root, _, files in os.walk(args.trace_dir):
         if prefix is None:
             prefix = _determine_prefix(files)
         for f in files:
@@ -86,6 +86,8 @@ def read_dir(args: argparse.Namespace) -> Tuple[Dict[str, Dict[str, Any]], str]:
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
-    assert len(details) > 0, f"no files loaded from {args.folder} with prefix {prefix}"
+    assert (
+        len(details) > 0
+    ), f"no files loaded from {args.trace_dir} with prefix {prefix}"
     logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version

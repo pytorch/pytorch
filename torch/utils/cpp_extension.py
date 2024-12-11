@@ -1592,7 +1592,7 @@ def load_inline(name,
     file and  prepended with ``torch/types.h``, ``cuda.h`` and
     ``cuda_runtime.h`` includes. The ``.cpp`` and ``.cu`` files are compiled
     separately, but ultimately linked into a single library. Note that no
-    bindings are generated for functions in ``cuda_sources`` per  se. To bind
+    bindings are generated for functions in ``cuda_sources`` per se. To bind
     to a CUDA kernel, you must create a C++ function that calls it, and either
     declare or define this C++ function in one of the ``cpp_sources`` (and
     include its name in ``functions``).
@@ -1630,8 +1630,15 @@ def load_inline(name,
         ...                      functions=['sin_add'])
 
     .. note::
-        By default, the Ninja backend uses #CPUS + 2 workers to build the
-        extension. This may use up too many resources on some systems. One
+        Since load_inline will just-in-time compile the source code, please ensure
+        that you have the right toolchains installed in the runtime. For example,
+        when loading C++, make sure a C++ compiler is available. If you're loading
+        a CUDA extension, you will need to additionally install the corresponding CUDA
+        toolkit (nvcc and any other dependencies your code has). Compiling toolchains
+        are not included when you install torch and must be additionally installed.
+
+        During compiling, by default, the Ninja backend uses #CPUS + 2 workers to build
+        the extension. This may use up too many resources on some systems. One
         can control the number of workers by setting the `MAX_JOBS` environment
         variable to a non-negative number.
     '''
@@ -1991,10 +1998,12 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
+        ('Blackwell', '10.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
+                        '10.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2040,7 +2049,10 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         if arch not in valid_arch_strings:
             raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
-            num = arch[0] + arch[2:].split("+")[0]
+            # Handle both single and double-digit architecture versions
+            version = arch.split('+')[0]  # Remove "+PTX" if present
+            major, minor = version.split('.')
+            num = f"{major}{minor}"
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
@@ -2075,7 +2087,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+                  f'cu{torch.version.cuda.replace(".", "")}')
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
@@ -2109,6 +2121,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     return None
 
 
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils
+        return distutils._msvccompiler._get_vc_env(vc_arch)
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler
+        return _msvccompiler._get_vc_env(vc_arch)
+
+
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
@@ -2121,9 +2142,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
-
-        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        vc_env = {k.upper(): v for k, v in _get_vc_env(plat_spec).items()}
         for k, v in env.items():
             uk = k.upper()
             if uk not in vc_env:

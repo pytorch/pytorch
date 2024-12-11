@@ -17,10 +17,12 @@ from torch._decomp import (
 )
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
+    _index_add,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
+from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -48,6 +50,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
+        aten.index_select,
         aten.addmv,
         aten.arange,
         aten.bitwise_and_,
@@ -58,7 +61,6 @@ inductor_decompositions = get_decompositions(
         aten.flip,
         aten.gelu,
         aten.hardtanh,
-        aten.index_select,
         aten.lcm,
         aten.leaky_relu,
         aten.linalg_vector_norm,
@@ -76,6 +78,7 @@ inductor_decompositions = get_decompositions(
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
         aten.permute_copy,
+        aten.rrelu_with_noise_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -100,6 +103,7 @@ decomps_to_exclude = [
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
+    aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -107,6 +111,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -169,6 +174,24 @@ def full(
         kwargs["dtype"] = type_to_dtype(type(fill_value))
         return torch.full(size, fill_value, **kwargs)
     return NotImplemented
+
+
+@register_decomposition([aten.index_add])
+def index_add(
+    x: torch.Tensor,
+    dim: int,
+    index: torch.Tensor,
+    tensor: torch.Tensor,
+    *,
+    alpha: torch.types.Number = 1,
+) -> torch.Tensor:
+    # If we are not in fbcode and dtype is bfloat16
+    # fallback to index_add kernel
+    # see https://github.com/pytorch/pytorch/issues/137425 for details
+    if not is_fbcode() and x.dtype == torch.bfloat16:
+        return NotImplemented
+    else:
+        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -440,16 +463,6 @@ def conj_physical(self: torch.Tensor) -> torch.Tensor:
 @register_decomposition([aten.lift, aten.detach_])
 def lift(self: torch.Tensor) -> torch.Tensor:
     return self
-
-
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(
-    self: torch.Tensor,
-    *,
-    generator: Optional[torch.Generator] = None,
-) -> torch.Tensor:
-    assert generator is None
-    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
@@ -749,6 +762,20 @@ def _foreach_lerp_scalar(
     )
 
 
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: List[torch.Tensor],
+    end_tensors: List[torch.Tensor],
+    scalars: List[torch.types.Number],
+) -> List[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
+        ),
+    )
+
+
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
 @register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
@@ -1017,3 +1044,23 @@ def searchsorted_scalar(
         side=side,
         sorter=sorter,
     )[0]
+
+
+@register_decomposition(aten.rrelu_with_noise_functional)
+def rrelu_with_noise_functional(
+    self: torch.Tensor,
+    noise: torch.Tensor,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
+    training: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    if training:
+        not_positive = self <= 0
+        r = aten.uniform(self, lower, upper, generator=generator)
+        output = torch.where(not_positive, self * r, self)
+        noise_out = torch.where(not_positive, r, 1)
+        return output, noise_out
+    else:
+        negative_slope = (lower + upper) / 2
+        return aten.leaky_relu(self, negative_slope), torch.Tensor()
