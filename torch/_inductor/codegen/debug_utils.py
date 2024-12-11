@@ -150,24 +150,31 @@ class DebugPrinterManager:
         # get the list of args_to_print_or_save
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
-            args_to_print_or_save_extern = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_extern.append(arg)
+            args_to_print_or_save_extern = [
+                arg for arg in args_to_print_or_save if arg.startswith(("buf", "arg"))
+            ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
-            args_to_print_or_save_cpp = []
-            for arg in args_to_print_or_save:
-                if arg.startswith(("buf", "arg")):
-                    args_to_print_or_save_cpp.append(
-                        f"convert_arrayref_tensor_to_tensor({arg})"
-                    )
+            args_to_print_or_save_cpp = [
+                f"copy_arrayref_tensor_to_tensor({arg})"
+                for arg in args_to_print_or_save
+                if arg.startswith(("buf", "arg"))
+            ]
             self.args_to_print_or_save = args_to_print_or_save_cpp
         else:
             self.args_to_print_or_save = args_to_print_or_save
         self.kernel_name = kernel_name
         self.arg_signatures = arg_signatures
         self.kernel = kernel
+
+    def codegen_model_inputs_value_print(self, input_args_to_print: List[str]) -> None:
+        if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
+            return
+        for arg in input_args_to_print:
+            if V.graph.cpp_wrapper:
+                V.graph.wrapper_code.prefix.writeline(
+                    f'aoti_torch_print_tensor_handle({arg}, "aoti_model_inputs - {arg}");'
+                )
 
     def codegen_intermediate_tensor_value_save(
         self,
@@ -184,13 +191,9 @@ class DebugPrinterManager:
                 continue
             launch_prefix = "before_launch" if before_launch else "after_launch"
             if V.graph.cpp_wrapper:
-                if config.abi_compatible:
-                    V.graph.wrapper_code.writeline(
-                        f'aoti_torch_save_tensor_handle({arg}, "{arg}", "{launch_prefix}", "{kernel_name}");'
-                    )
-                else:
-                    # TODO: add non-abi compatible mode debug printing info
-                    pass
+                V.graph.wrapper_code.writeline(
+                    f'aoti_torch_save_tensor_handle({arg}, "{arg}", "{launch_prefix}", "{kernel_name}");'
+                )
             else:
                 cwd = os.getcwd()
                 saved_dir = cwd + "/tmp/jit_inductor/"
@@ -226,11 +229,10 @@ class DebugPrinterManager:
             == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
         ):
             if V.graph.cpp_wrapper:
-                if config.abi_compatible:
-                    V.graph.wrapper_code.writeline(
-                        f'printf("[ {launch_prefix}: {kernel_name} ]");'
-                    )
-                    V.graph.wrapper_code.writeline('printf("\\n");')
+                V.graph.wrapper_code.writeline(
+                    f'printf("[ {launch_prefix}: {kernel_name} ]");'
+                )
+                V.graph.wrapper_code.writeline('printf("\\n");')
             return
 
         if self.debug_printer_level != IntermediateValueDebuggingLevel.PRINT_ONLY:
@@ -244,38 +246,30 @@ class DebugPrinterManager:
             ):
                 continue
             if V.graph.cpp_wrapper:
-                if config.abi_compatible:
-                    if arg_signatures is not None and isinstance(
-                        arg_signatures[i], (torch_dtype)
-                    ):
-                        # infer from the arg data type (has torch.dtype) to see if it is a tensor type
+                if arg_signatures is not None and isinstance(
+                    arg_signatures[i], (torch_dtype)
+                ):
+                    # infer from the arg data type (has torch.dtype) to see if it is a tensor type
+                    V.graph.wrapper_code.writeline(
+                        f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
+                    )
+                elif arg_signatures is not None and isinstance(
+                    arg_signatures[i],
+                    (
+                        type(torch._inductor.codegen.wrapper.SymbolicCallArg),
+                        type(int),
+                        type(float),
+                        type(bool),
+                    ),
+                ):
+                    V.graph.wrapper_code.writeline(
+                        f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\n");'
+                    )
+                else:
+                    if arg_signatures is None and self.kernel_type == "cpp" or "extern":
                         V.graph.wrapper_code.writeline(
                             f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
                         )
-                    elif arg_signatures is not None and isinstance(
-                        arg_signatures[i],
-                        (
-                            type(torch._inductor.codegen.wrapper.SymbolicCallArg),
-                            type(int),
-                            type(float),
-                            type(bool),
-                        ),
-                    ):
-                        V.graph.wrapper_code.writeline(
-                            f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\n");'
-                        )
-                    else:
-                        if (
-                            arg_signatures is None
-                            and self.kernel_type == "cpp"
-                            or "extern"
-                        ):
-                            V.graph.wrapper_code.writeline(
-                                f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
-                            )
-                else:
-                    # TODO: add non-abi compatible mode debug printing info
-                    pass
             else:
                 V.graph.wrapper_code.writeline(
                     f'_print_debugging_tensor_value_info("inductor: {launch_prefix} - {kernel_name} - {arg}", {arg})'

@@ -516,6 +516,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
             use_libuv=self._use_libuv,
         )
 
+    @skip_if_win32()
+    def test_world_size_0_raises(self):
+        with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
+            dist.TCPStore("localhost", 0, world_size=0, is_master=False)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True

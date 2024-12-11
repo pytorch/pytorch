@@ -19,6 +19,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 from ._compatibility import compatibility
 from .graph import _custom_builtins, _is_from_torch, _PyTreeCodeGen, Graph, PythonCode
 
+
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
@@ -386,11 +387,9 @@ class _WrappedCall:
                 return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
-            topmost_framesummary: (
-                traceback.FrameSummary
-            ) = traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[
-                -1
-            ]  # type: ignore[arg-type]
+            topmost_framesummary: traceback.FrameSummary = (
+                traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]
+            )
             if "eval_with_key" in topmost_framesummary.filename:
                 print(
                     _WrappedCall._generate_error_message(topmost_framesummary),
@@ -529,7 +528,7 @@ class GraphModule(torch.nn.Module):
 
         # Dictionary to store metadata
         self.meta: Dict[str, Any] = {}
-        self._replace_hook = None
+        self._replace_hooks: List[Callable] = []
         self._create_node_hooks: List[Callable] = []
         self._erase_node_hooks: List[Callable] = []
 
@@ -612,20 +611,20 @@ class {module_name}(torch.nn.Module):
                 module_str = (
                     f"torch.load(r'{module_file}', weights_only=False) # {module_repr}"
                 )
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
                 continue
-            model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"
+            model_str += f"{tab * 2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}, dtype={buffer.dtype}))\n"  # noqa: B950
 
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"
+            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"  # noqa: B950
 
         model_str += (
-            f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
+            f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         )
         model_str += f"{_addindent(self.code, 4)}\n"
 
@@ -667,7 +666,6 @@ class {module_name}(torch.nn.Module):
         mod: torch.nn.Module = self
 
         for item in prefix:
-
             submod = getattr(mod, item, None)
 
             if submod is None:
@@ -707,7 +705,6 @@ class {module_name}(torch.nn.Module):
 
         # Get the parent module
         for item in path:
-
             if not hasattr(mod, item):
                 return False
 
@@ -743,9 +740,7 @@ class {module_name}(torch.nn.Module):
         used: List[str] = []
 
         for node in self.graph.nodes:
-
             if node.op == "call_module" or node.op == "get_attr":
-
                 # A list of strings representing the different parts
                 # of the path. For example, `foo.bar.baz` gives us
                 # ["foo", "bar", "baz"]
@@ -890,7 +885,7 @@ class {module_name}(torch.nn.Module):
             "_state_dict_hooks",
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
-            "_replace_hook",
+            "_replace_hooks",
             "_create_node_hooks",
             "_erase_node_hooks",
         ]
@@ -951,11 +946,29 @@ class {module_name}(torch.nn.Module):
         user node which consumes the old node to be replaced.
         """
         assert callable(f), "Replace hook must be a callable."
-        prev, self._replace_hook = self._replace_hook, f
+        self._register_replace_node_hook(f)
         try:
             yield
         finally:
-            self._replace_hook = prev
+            self._unregister_replace_node_hook(f)
+
+    def _register_replace_node_hook(self, f):
+        """
+        Takes a callable which will be called everytime when we replace a node
+        to a new node, or change the node's name. Callable takes three arguments:
+        the old node we're changing, and NAME of the new node, followed by the
+        user node which consumes the old node to be replaced.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._replace_hooks.append(f)
+
+    def _unregister_replace_node_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called everytime when we replace a node.
+        This function will unregister that callable so it is no longer invoked on node replacement.
+        """
+        assert callable(f), "create_node hook must be a callable."
+        self._replace_hooks.remove(f)
 
     def _register_create_node_hook(self, f):
         """

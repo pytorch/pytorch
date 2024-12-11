@@ -13,6 +13,6 @@ using nested_dense_elementwise_fn = void (*)(
     const Tensor& other,
     const NESTED_DENSE_OP& op);
 
-DECLARE_DISPATCH(nested_dense_elementwise_fn, nested_dense_elementwise_stub);
+DECLARE_DISPATCH(nested_dense_elementwise_fn, nested_dense_elementwise_stub)
 
 } // namespace at::native
