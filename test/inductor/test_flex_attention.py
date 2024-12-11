@@ -38,7 +38,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
@@ -123,9 +123,21 @@ else:
         # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
         # TODO: check reason of long compile time
         LONG_COMPILATION_ON_CPU = True
+
+    import os
+
+    # skip since currently flex attention requires at least `avx2` support on CPU.
+    IS_PLATFORM_SUPPORTED = (
+        not torch.xpu.is_available()
+        and not IS_MACOS
+        and torch.cpu._is_avx2_supported()
+        and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
+
     test_dtypes = (
         [torch.float32, torch.bfloat16]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+        if torch.backends.mkldnn.is_available()
+        and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
     )
     test_dtypes_fast = [torch.float32]
@@ -310,8 +322,13 @@ class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
-        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        if self.device == "cpu":
+            if LONG_COMPILATION_ON_CPU:
+                self.skipTest(
+                    "skip UT for CPU due to long compilation time found in CI"
+                )
+            if not IS_PLATFORM_SUPPORTED:
+                self.skipTest("skip UT due to not support on those platforms")
 
     def _check_equal(
         self,
@@ -4002,8 +4019,13 @@ class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
-        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        if self.device == "cpu":
+            if LONG_COMPILATION_ON_CPU:
+                self.skipTest(
+                    "skip UT for CPU due to long compilation time found in CI"
+                )
+            if not IS_PLATFORM_SUPPORTED:
+                self.skipTest("skip UT due to not support on those platforms")
 
     def _check_equal(
         self,
