@@ -3040,6 +3040,8 @@ class TritonKernel(SIMDKernel):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
+            "compile_id": str(torch._guards.CompileContext.current_compile_id()),
+            "is_forward": not V.graph.is_backward,
         }
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True

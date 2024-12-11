@@ -43,7 +43,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -465,6 +465,7 @@ class CompiledFxGraph(OutputCode):
         try:
             return self.current_callable(inputs)
         finally:
+            get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
 
     def post_compile(
