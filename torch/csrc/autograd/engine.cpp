@@ -874,6 +874,7 @@ const InputMetadata& get_input_metadata(const T& thing);
 template <>
 const InputMetadata& get_input_metadata<c10::optional<InputMetadata>>(
     const c10::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return thing.value();
 }
 

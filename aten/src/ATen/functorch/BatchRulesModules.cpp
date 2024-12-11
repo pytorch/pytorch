@@ -57,7 +57,7 @@ embedding_dense_backward_batch_rule(
     c10::SymInt num_weights, c10::SymInt padding_idx, bool scale_grad_by_freq) {
   Tensor grad = grad_;
   Tensor indices = indices_;
-  if (!indices_bdim && grad_bdim) {
+  if (!indices_bdim.has_value() && grad_bdim) {
     const auto bdim_size = grad.sym_size(*grad_bdim);
     grad = reshape_dim_into(*grad_bdim, -1, grad);
     auto result = at::embedding_dense_backward_symint(
@@ -162,12 +162,12 @@ grid_sample_backward_helper_in(
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
     std::tuple<Tensor, Tensor> bw_out,
-    std::optional<int64_t> grad_input_out_bdim,
-    std::optional<int64_t> grad_grid_out_bdim,
+    int64_t grad_input_out_bdim,
+    int64_t grad_grid_out_bdim,
     int64_t bdim_size) {
   auto& [grad_input, grad_grid] = bw_out;
-  grad_input = reshape_dim_outof(*grad_input_out_bdim, bdim_size, grad_input);
-  grad_grid = reshape_dim_outof(*grad_grid_out_bdim, bdim_size, grad_grid);
+  grad_input = reshape_dim_outof(grad_input_out_bdim, bdim_size, grad_input);
+  grad_grid = reshape_dim_outof(grad_grid_out_bdim, bdim_size, grad_grid);
   return std::make_tuple(std::move(grad_input), grad_input_out_bdim, std::move(grad_grid), grad_grid_out_bdim);
 }
 

@@ -81,7 +81,7 @@ struct TORCH_API BatchNormFuncOptions {
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(std::optional<double>, momentum) = 0.1;
+  TORCH_ARG(double, momentum) = 0.1;
 
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.

@@ -66,7 +66,7 @@ struct TORCH_API EnumType : public NamedType {
   }
 
   const QualifiedName& qualifiedClassName() const {
-    // NOLINTLEXTLINE(bugprone-unchecked-optional-access)
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return name().value();
   }
 
