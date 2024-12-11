@@ -171,6 +171,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    def as_proxy(self):
+        return self.fn
+
     def self_args(self):
         return []
 
