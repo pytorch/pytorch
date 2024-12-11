@@ -767,13 +767,21 @@ class TritonTemplateKernel(TritonKernel):
                 )
 
             output_index = self.rename_indexing(output_index)
+
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex", integer=True)
+                output_index_str = "xindex"
             else:
-                output_index = f"({output_index}).broadcast_to(xindex.shape)"
+                out_indexing = self.indexing(
+                    output_index,
+                    copy_shape=self.template_out,
+                    override_mask=self.template_mask
+                )
+                from .codegen.triton import IndexingOptions
+                assert isinstance(out_indexing,  IndexingOptions)
+                output_index_str = f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
 
             # Generate load code
-            load_code = f"{output_name} = tl.load({input_name} + ({output_index})"
+            load_code = f"{output_name} = tl.load({input_name} + ({output_index_str})"
 
             if mask:
                 load_code += f", mask={mask}, other={other})"
