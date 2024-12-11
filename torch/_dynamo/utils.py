@@ -1053,8 +1053,15 @@ def record_compilation_metrics(
         inductor_fx_remote_cache_backend_type = None
         remote_cache_version = None
 
+    # Populate the compile_id from the metrics context if it's set. Otherwise
+    # look for it in the compile context.
+    if compile_id_str := metrics.get("compile_id"):
+        compile_id = CompileId.from_string(compile_id_str)
+    else:
+        compile_id = torch._guards.CompileContext.current_compile_id()
+
     common_metrics = {
-        "compile_id": str(torch._guards.CompileContext.current_compile_id()),
+        "compile_id": str(compile_id) if compile_id else None,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
@@ -1102,10 +1109,6 @@ def record_compilation_metrics(
         name = "bwd_" + name
     if compilation_metrics.is_runtime is True:
         name = name + "_runtime"
-
-    compile_id = None
-    if compilation_metrics.compile_id is not None:
-        compile_id = CompileId.from_string(compilation_metrics.compile_id)
 
     torch._logging.trace_structured(
         name,
