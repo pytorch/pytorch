@@ -27,7 +27,8 @@ class TORCH_PYTHON_API THPPointer {
   }
   static THPPointer dup(const T* ptr) {
     Py_XINCREF(ptr);
-    return THPPointer(const_cast<T*>(ptr));
+    return THPPointer(
+        const_cast<T*>(ptr)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
   }
   T* release() {
     T* tmp = ptr;
