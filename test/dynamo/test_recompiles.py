@@ -378,6 +378,21 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_f(torch.ones(3), 1), torch.ones(3) + 5)
         self.assertEqual(counter.frame_count, 2)
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="unbacked")
+    def test_automatic_dynamic_shapes_mark_as_unbacked(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x):
+            return x * x
+
+        f(torch.randn(3))
+        f(torch.randn(2))
+        f(torch.randn(1))
+        f(torch.randn(0))
+
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
