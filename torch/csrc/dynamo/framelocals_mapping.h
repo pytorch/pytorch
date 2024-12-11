@@ -12,23 +12,40 @@
 
 extern "C" {
 
+#if IS_PYTHON_3_11_PLUS
+using FrameLocalsFrameType = _PyInterpreterFrame;
+#else
+using FrameLocalsFrameType = PyFrameObject;
+#endif // IS_PYTHON_3_11_PLUS
+
+/**
+ * Utility to view a frame's localsplus (locals + cells + freevars)
+ * in C/C++ and Python, without changing the state of the frame.
+ *
+ * Notes on usage:
+ *  - C/C++ can directly read the frame's localsplus using an index.
+ *  - Cell/free variables are unboxed.
+ *  - Can be converted into a dict for use in Python.
+ *    The dict is constructed once per FrameLocalsMapping, lazily.
+ *  - Lifetime should not exceed the lifetime of the frame
+ */
 typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
  private:
-  std::unordered_map<std::string, PyObject*> _map;
-  std::vector<std::string> names_ordered;
+  py::object _code_obj;
+  // can't use localsplus directly due to closure variables:
+  // - in 3.11+, the closure vars in the frame's closure object and
+  //   the corresponding localsplus entry is nullptr
+  // - regardless of Python version, we need to unbox the cell variable
+  std::vector<py::handle> _framelocals;
+
   py::object _dict{py::none()};
 
- public:
-  void set(const std::string& key, PyObject* value) {
-    if (!_map.count(key)) {
-      names_ordered.push_back(key);
-    }
-    _map[key] = value;
-  }
+  void _realize_dict();
 
-  void erase(const std::string& key) {
-    _map.erase(key);
-  }
+ public:
+  explicit FrameLocalsMapping(FrameLocalsFrameType* frame);
+
+  PyObject* get(int idx);
 
   bool dict_realized() const {
     return _dict.is_none();
@@ -37,10 +54,7 @@ typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
   // Borrowed reference
   PyDictObject* to_dict() {
     if (this->dict_realized()) {
-      _dict = py::dict();
-      for (auto& name : names_ordered) {
-        _dict[py::str(name)] = py::cast<py::object>(_map[name]);
-      }
+      _realize_dict();
     }
     return (PyDictObject*)_dict.ptr();
   }
@@ -67,4 +81,6 @@ PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map);
 
 #ifdef __cplusplus
 } // extern "C"
+
+py::tuple code_framelocals_names(py::handle code);
 #endif

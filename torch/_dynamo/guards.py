@@ -39,6 +39,7 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
+from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -616,9 +617,15 @@ class GuardManagerType(enum.Enum):
     DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
+@functools.lru_cache(None)
+def code_framelocals_names_cached(code: types.CodeType):
+    return code_framelocals_names(code)
+
+
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
+        f_code: types.CodeType,
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
@@ -627,6 +634,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
+        self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
@@ -967,8 +975,13 @@ class GuardBuilder(GuardBuilderBase):
             # RootGuardManager accepts a dict but still its not a
             # DictGuardManager because we will eventually move to
             # fastlocals.
-            out = root_guard_manager.dict_getitem_manager(
-                key=source.local_name,
+            # NOTE: assumes scope["L"].keys() has the same order as the
+            # names in frame's f_locals. This should be the case if self.scope["L"]
+            # is set to frame.f_locals.
+            framelocals_names = code_framelocals_names_cached(self.f_code)
+            framelocals_idx = framelocals_names.index(source.local_name)
+            out = root_guard_manager.framelocals_manager(
+                key=(source.local_name, framelocals_idx),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -1901,11 +1914,12 @@ class GuardBuilder(GuardBuilderBase):
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        if code_parts:
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
@@ -2243,6 +2257,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class CheckFunctionManager:
     def __init__(
         self,
+        f_code,
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -2275,6 +2290,7 @@ class CheckFunctionManager:
             return r_builder.arg_ref(source.name())
 
         builder = GuardBuilder(
+            f_code,
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
