@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import itertools
 import logging
 import math
@@ -33,6 +34,7 @@ from .functions import (
     IntTrueDiv,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -224,6 +226,8 @@ class ValueRanges(Generic[_T]):
         return ValueRanges.wrap(x).issubset(self)
 
     def issubset(self, other):
+        if other is self.unknown_int():
+            return True
         return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(
             self.upper, other.upper
         )
@@ -248,9 +252,9 @@ class ValueRanges(Generic[_T]):
         ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
-        if other == ValueRanges.unknown():
+        if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
             return self
-        if self == ValueRanges.unknown():
+        if self in (ValueRanges.unknown(), ValueRanges.unknown_int()):
             return other
         assert self.is_bool == other.is_bool, (self, other)
         assert self.is_int == other.is_int, (self, other)
@@ -298,14 +302,17 @@ class ValueRanges(Generic[_T]):
         return self.lower == self.upper
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-sympy.oo, sympy.oo)
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown_int() -> ValueRanges[sympy.Expr]:
         return ValueRanges(-int_oo, int_oo)
 
     @staticmethod
+    @functools.lru_cache(maxsize=None)
     def unknown_bool() -> ValueRanges[SympyBoolean]:
         return ValueRanges(sympy.false, sympy.true)
 
@@ -445,7 +452,7 @@ class SymPyValueRangeAnalysis:
             elif dtype.is_floating_point:
                 return ValueRanges.unknown()
             else:
-                return ValueRanges(-int_oo, int_oo)
+                return ValueRanges.unknown_int()
 
         if is_python:
             type_ = dtype_to_type(dtype)
@@ -492,6 +499,59 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def and_(a, b):
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
+
+    @staticmethod
+    def _bool_to_int(x):
+        if x.is_singleton():
+            return ValueRanges.wrap(sympy.Integer(1 if x.lower else 0))
+        else:
+            return ValueRanges(sympy.Integer(0), sympy.Integer(1))
+
+    @classmethod
+    def bitwise_and(cls, a, b):
+        a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool and b.is_bool:
+            return cls.and_(a, b)
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
+        lower = min(a.lower, b.lower)
+        if lower < 0 and lower != -sympy.oo and lower != -int_oo:
+            # If both lower bounds are negative, then bits start like
+            # 1...10..., so the smallest possible value is 1...101...1.
+            # Thus, we need to find the next smallest power of 2 (inclusive).
+            try:
+                lower = -(1 << int(-lower - 1).bit_length())
+            except Exception:
+                lower = -int_oo
+        else:
+            lower = 0
+        return ValueRanges(lower, max(a.upper, b.upper))
+
+    @classmethod
+    def bitwise_or(cls, a, b):
+        a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool and b.is_bool:
+            return cls.or_(a, b)
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
+        upper = max(a.upper, b.upper)
+        if upper == 0:
+            upper = 0
+        elif upper > 0 and upper != sympy.oo and upper != int_oo:
+            # If both upper bounds are positive, then the largest
+            # possible value is 01...1, so we need to find
+            # next largest power of 2 (exclusive), minus 1
+            try:
+                upper = (1 << int(upper).bit_length()) - 1
+            except Exception:
+                upper = int_oo
+        elif upper < 0:
+            upper = -1
+        return ValueRanges(min(a.lower, b.lower), upper)
 
     @staticmethod
     def eq(a, b):
@@ -753,6 +813,13 @@ class SymPyValueRangeAnalysis:
         if x.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_log)
+
+    @staticmethod
+    def log2(x):
+        x = ValueRanges.wrap(x)
+        if x.lower <= 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, OpaqueUnaryFn_log2)
 
     @classmethod
     def minimum(cls, a, b):
@@ -1047,12 +1114,14 @@ def bound_sympy(
         "bound_sympy(%s)%s",
         expr,
         LazyString(
-            lambda: "\n"
-            + "\n".join(
-                f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
+            lambda: (
+                "\n"
+                + "\n".join(
+                    f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
+                )
+                if ranges
+                else ""
             )
-            if ranges
-            else ""
         ),
     )
     if isinstance(expr, sympy.Number):

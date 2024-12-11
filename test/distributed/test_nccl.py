@@ -45,6 +45,13 @@ if (
 ) or TEST_WITH_ROCM:
     datatypes.append(torch.bfloat16)
 
+# Broadcast (and alltoall) support float8, while reduce and allreduce do not support float8 currently
+broadcast_dtypes = (
+    datatypes + [torch.float8_e4m3fnuz, torch.float8_e5m2fnuz]
+    if TEST_WITH_ROCM
+    else [torch.float8_e4m3fn, torch.float8_e5m2]
+)
+
 
 class TestNCCL(TestCase):
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -58,7 +65,7 @@ class TestNCCL(TestCase):
     )
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "only one GPU detected")
-    @dtypes(*datatypes)
+    @dtypes(*broadcast_dtypes)
     def test_broadcast(self, device, dtype):
         expected = torch.zeros(128).uniform_().to(dtype=dtype)
         tensors = [expected.cuda()]

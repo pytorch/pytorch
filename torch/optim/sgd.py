@@ -12,6 +12,7 @@ from .optimizer import (
     _foreach_doc,
     _fused_doc,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     DeviceDict,
     Optimizer,
@@ -185,8 +186,7 @@ SGD.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
@@ -435,7 +435,7 @@ def _multi_tensor_sgd(
 
         if not device_has_sparse_grad:
             # handle internal item() call if lr is a tensor
-            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+            if isinstance(lr, torch.Tensor) and torch.compiler.is_compiling():
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:

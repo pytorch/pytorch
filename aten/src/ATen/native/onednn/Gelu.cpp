@@ -14,12 +14,12 @@
 
 namespace at { namespace native {
 
-Tensor onednn_gelu(const Tensor& input, c10::string_view approximate) {
+Tensor onednn_gelu(const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(false, "onednn_gelu: ATen not compiled with ONEDNN support");
 }
 
-Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10::string_view approximate) {
-  TORCH_CHECK(false, "onednn_gelu_backward: ATen not compiled with ONEDNN support");
+Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
+  TORCH_CHECK(false, "ONEdnn_gelu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
@@ -29,9 +29,9 @@ Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
-Tensor onednn_gelu(const Tensor& input, c10::string_view approximate) {
+Tensor onednn_gelu(const Tensor& input, std::string_view approximate) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
         "onednn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -46,7 +46,7 @@ Tensor onednn_gelu(const Tensor& input, c10::string_view approximate) {
                                  input.options().device_opt());
 }
 
-Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10::string_view approximate) {
+Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "onednn_gelu_backward: fast, approximate gelu is not supported");
   const ideep::tensor& x = itensor_from_tensor(input);
@@ -59,6 +59,6 @@ Tensor onednn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
                                  grad_output.options().device_opt());
 }
 
-}}
+}
 
 #endif // AT_ONEDNN_ENABLED
