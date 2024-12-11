@@ -22,6 +22,13 @@ class TORCH_PYTHON_API THPPointer {
   const T* get() const {
     return ptr;
   }
+  THPPointer dup() const {
+    return dup(ptr);
+  }
+  static THPPointer dup(const T* ptr) {
+    Py_XINCREF(ptr);
+    return THPPointer(const_cast<T*>(ptr));
+  }
   T* release() {
     T* tmp = ptr;
     ptr = nullptr;
