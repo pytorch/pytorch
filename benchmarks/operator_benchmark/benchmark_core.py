@@ -2,9 +2,9 @@ import ast
 import copy
 import functools
 import json
+import re
 import timeit
 from collections import namedtuple
-import re
 
 import benchmark_utils
 
@@ -255,24 +255,30 @@ class BenchmarkRunner:
         """This function is the parallel of _print_perf_result, which instead of
         writing information to terminal, returns a dictionary.
         """
-        if self.args.report_aibench: return {}
+        if self.args.report_aibench:
+            return {}
         out = {
-            "test_name":     test_case.test_config.test_name,
-            "input_config":  test_case.test_config.input_config,
-            "mode":         "JIT" if self.use_jit else "Eager",
-            "run":          "Backward" if test_case.test_config.run_backward else "Forward",
-            "latency":       round(reported_run_time_us[0], 3),
-            "latency unit": "us"
+            "test_name": test_case.test_config.test_name,
+            "input_config": test_case.test_config.input_config,
+            "mode": "JIT" if self.use_jit else "Eager",
+            "run": "Backward" if test_case.test_config.run_backward else "Forward",
+            "latency": round(reported_run_time_us[0], 3),
+            "latency unit": "us",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
         # input: 'M: 1, N: 1, K: 1, device: cpu'
         # output: {'M':'1', 'N':'1', 'K':'1', 'device': 'cpu'}
         # splitting the string on unnested commas
-        key_vals = re.split(r',(?![^(){}[\]]*[)\]}])', test_case.test_config.input_config)                    # 'M: (32, 16), ZPB: 2' -> ['M: (32, 16)', 'ZPB: 2']
-        key_vals = [(key.strip(), value.strip()) for key, value in map(lambda str: str.split(':'), key_vals)] # ['M: (32, 16)', 'ZPB: 2'] -> [('M', '(32, 16)'), ('ZPB', '2')]
+        key_vals = re.split(
+            r",(?![^(){}[\]]*[)\]}])", test_case.test_config.input_config
+        )  # 'M: (32, 16), ZPB: 2' -> ['M: (32, 16)', 'ZPB: 2']
+        key_vals = [
+            (key.strip(), value.strip())
+            for key, value in map(lambda str: str.split(":"), key_vals)
+        ]  # ['M: (32, 16)', 'ZPB: 2'] -> [('M', '(32, 16)'), ('ZPB', '2')]
         for key, value in key_vals:
-            out[key]   = value
+            out[key] = value
 
         return out
 
@@ -469,7 +475,9 @@ class BenchmarkRunner:
 
                 self._print_perf_result(reported_time, test_case)
                 if self.args.output_json:
-                    perf_list.append(self._perf_result_to_dict(reported_time, test_case))
+                    perf_list.append(
+                        self._perf_result_to_dict(reported_time, test_case)
+                    )
 
         if self.args.output_json:
             with open(self.args.output_json, "w") as f:
