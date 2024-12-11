@@ -19,20 +19,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def _contextmanager(func):
-    # Copied from CPython! Behave exactly as contextlib.contextmanager but do not
-    # wraps func. It is used internally in a few tests to check if the context
-    # manager support in dynamo is correct. We can't use the original implementation
-    # as it can lead to graph breaks in some unrelated cases because it wraps(func)
-    from contextlib import _GeneratorContextManager
-
-    # @wraps(func)
-    def helper(*args, **kwds):
-        return _GeneratorContextManager(func, args, kwds)
-
-    return helper
-
-
 z_glb = 0
 k_glb = 0
 
@@ -1869,7 +1855,7 @@ class GraphModule(torch.nn.Module):
         def create_ctx():
             @contextmanager
             def ctx(x):
-                global z_glb, k_glb
+                global k_glb
                 try:
                     k_glb = 100
                     yield x.sin()
@@ -1952,9 +1938,30 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    def test_raise_stopiteration_pep0479(self):
+        def whoo():
+            raise StopIteration
+            yield 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                gen = whoo()
+                return next(gen)
+            except RuntimeError:
+                # converts the StopIteration into a RuntimeError
+                # https://peps.python.org/pep-0479/
+                return 1
+            except StopIteration:
+                return 2
+
+        t = torch.tensor([1.0])
+        y = fn(t)
+        self.assertEqual(y, 1)
+
     def test_change_parent_1(self):
         def create_ctx(x):
-            @_contextmanager
+            @contextlib.contextmanager
             def ctx():
                 try:
                     yield x.sin()
