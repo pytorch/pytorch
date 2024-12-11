@@ -1277,10 +1277,11 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
-            if re.match(r"[a-zA-Z0-9_]+", base):
-                if re.match(r"^\d+$", base):
+            is_valid = torch._C._dynamo.is_valid_var_name(base)
+            if is_valid:
+                if is_valid == 2:
                     log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
