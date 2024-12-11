@@ -189,16 +189,16 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
-        self.debug_device_str: Callable[
-            [BaseSchedulerNode], List[str]
-        ] = lambda *args, **kwargs: []
+        self.debug_device_str: Callable[[BaseSchedulerNode], List[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
         self.ancestors: OrderedSet[str] = OrderedSet()
-        self.last_usage: OrderedSet[
-            str
-        ] = OrderedSet()  # buffers that won't be used after this kernel
+        self.last_usage: OrderedSet[str] = (
+            OrderedSet()
+        )  # buffers that won't be used after this kernel
         self.written = False
         self.outputs: List[SchedulerBuffer] = [
             SchedulerBuffer(
@@ -505,9 +505,9 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
-                        V.kernel.inplace_update_buffers[
-                            buf.get_name()
-                        ] = input_buf.get_name()
+                        V.kernel.inplace_update_buffers[buf.get_name()] = (
+                            input_buf.get_name()
+                        )
                         break
 
     def codegen_originating_info(
@@ -1872,9 +1872,9 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_donated_buffer: Dict[
-            str, SchedulerDonatedBuffer
-        ] = self.get_donated_buffers()
+        self.name_to_donated_buffer: Dict[str, SchedulerDonatedBuffer] = (
+            self.get_donated_buffers()
+        )
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -1900,16 +1900,17 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: Dict[str, str] = {}
 
-        self.compute_dependencies()
-        self.nodes = self.topological_sort_schedule(self.nodes)
-        self.dead_node_elimination()
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        self.compute_ancestors()
+        # Must run first before compute_dependencies
         self.nodes = comms.decide_global_ordering_of_comms(
             self.nodes,
             self.name_to_buf,
             self.name_to_fused_node,
         )
+        self.compute_dependencies()
+        self.nodes = self.topological_sort_schedule(self.nodes)
+        self.dead_node_elimination()
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1920,6 +1921,13 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        self.merge_loops()
+        self.finalize_multi_template_buffers()
+        if config.combo_kernels:
+            self.create_combo_kernel_nodes(num_ck_nodes=None)
+
+        # Peak memory pass and overlap pass must run last, otherwise
+        # other reordering passes could undo their effects.
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
 
@@ -1930,12 +1938,8 @@ class Scheduler:
                 set(V.graph.graph_inputs.keys()),
                 set(V.graph.get_output_names()),
             )
-        self.merge_loops()
-        self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
-        if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
         self.process_grouped_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -2201,9 +2205,9 @@ class Scheduler:
                 for alt_name in buf.get_mutations():
                     self.mutation_renames[rename(alt_name)] = buf.get_name()
                     self.mutation_renames[alt_name] = buf.get_name()
-                    self.mutation_real_name[
-                        buf.get_name()
-                    ] = self.mutation_real_name.get(alt_name, alt_name)
+                    self.mutation_real_name[buf.get_name()] = (
+                        self.mutation_real_name.get(alt_name, alt_name)
+                    )
 
         # make sure outputs aren't dead-code-eliminated
         for buf_name in V.graph.get_output_names():
@@ -3005,9 +3009,9 @@ class Scheduler:
             rhs_dep = node2_name2dep[buf_name]
 
             if lhs_dep.get_numel() != rhs_dep.get_numel():
-                reasons[
-                    buf_name
-                ] = f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                reasons[buf_name] = (
+                    f"different numel: {lhs_dep.get_numel()} v.s. {rhs_dep.get_numel()}"
+                )
                 continue
 
             # same numel but different MemoryDep.size. Should be broadcasting
@@ -3016,9 +3020,9 @@ class Scheduler:
                 continue
 
             if not isinstance(lhs_dep, MemoryDep) or not isinstance(rhs_dep, MemoryDep):
-                reasons[
-                    buf_name
-                ] = f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                reasons[buf_name] = (
+                    f"not MemoryDep: {type(lhs_dep)} v.s. {type(rhs_dep)}"
+                )
                 continue
 
             lhs_off = lhs_dep.get_offset()
@@ -3038,9 +3042,9 @@ class Scheduler:
                 continue
 
             # Add more rules here
-            reasons[
-                buf_name
-            ] = f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            reasons[buf_name] = (
+                f"Unknown reason: {lhs_dep} v.s. {rhs_dep}. Layout: {buf.layout}"
+            )
 
         return str(reasons)
 
