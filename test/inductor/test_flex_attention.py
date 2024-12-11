@@ -3046,7 +3046,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
-    def test_dynamic_shapes_bug(self):
+    def test_dynamic_shapes_bug_dynamic_batch(self):
         # Define attention mask function inline
         def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
             padding_condition = (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
@@ -3075,7 +3075,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                         _flex_attention_mask,
                         input_lengths=input_lengths,
                     ),
-                    B=len(input_lengths),
+                    B=input_lengths.size(0),
                     H=None,
                     Q_LEN=max_time,
                     KV_LEN=max_time,

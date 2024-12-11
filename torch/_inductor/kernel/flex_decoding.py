@@ -298,7 +298,7 @@ def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     # Defaults to two splits if symbolic
-    bh = V.graph.sizevars.size_hint(bh, fallback=2)
+    assert isinstance(bh, int), "B and H must be concrete integers"
     split_k = SM // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
 
