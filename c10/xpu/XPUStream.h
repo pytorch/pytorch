@@ -168,8 +168,8 @@ getStreamFromPool(const int priority, DeviceIndex device = -1);
  * NOTE: It is the user's responsibility to ensure that the referenced SYCL
  * queue remains alive while the corresponding XPUStream, or any c10::Stream
  * derived from it, is in use. The different SYCL queue pointers will result in
- * distinct XPUStream objects, even if they reference the same underlying SYCL
- * queue object.
+ * distinct XPUStream instances, even if the SYCL queues they dereference are
+ * equivalent.
  */
 C10_XPU_API XPUStream
 getStreamFromExternal(sycl::queue* ext_queue, DeviceIndex device_index);

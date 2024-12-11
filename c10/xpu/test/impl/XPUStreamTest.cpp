@@ -249,3 +249,26 @@ TEST(XPUStreamTest, ExternalMultiDeviceTest) {
   delete stream_0;
   delete stream_1;
 }
+
+TEST(XPUStreamTest, ExternalStreamDifferentPointersTest) {
+  if (!has_xpu()) {
+    return;
+  }
+
+  sycl::queue ext_queue = sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
+      {sycl::property::queue::in_order(), queue::priority_normal()});
+
+  // Ponters to queue and its copies will lead to distinct external XPUStreams.
+  auto queue_ptr1 = std::make_unique<sycl::queue> sycl::queue(ext_queue);
+  auto queue_ptr2 = std::make_unique<sycl::queue> sycl::queue(ext_queue);
+
+  at::xpu::XPUStream myStream1 =
+      at::xpu::getStreamFromExternal(queue_ptr1.get(), 0);
+  at::xpu::XPUStream myStream2 =
+      at::xpu::getStreamFromExternal(queue_ptr2.get(), 0);
+
+  EXPECT_NE(myStream1, myStream2);
+}

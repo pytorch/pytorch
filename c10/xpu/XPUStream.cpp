@@ -48,7 +48,8 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 //
 // For external stream, StreamID is a sycl::queue* pointer. This means that last
 // bit will always be 0. So when constructing StreamId for a native stream we
-// set last bit to 1 to distinguish between native and external streams.
+// set last bit to 1 to distinguish between native and external streams. For
+// more details, see Note [External XPU Stream].
 //
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on StreamIdIndex and StreamIdType being non-negative;
@@ -272,8 +273,8 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
  *
  * However, this approach introduces the following limitations:
  *
- *   1. Different SYCL queue pointers will result in distinct XPUStream objects,
- * even if they reference the same underlying SYCL queue object.
+ *   1. Different SYCL queue pointers will result in distinct XPUStream
+ * instances, even if the SYCL queues they dereference are equivalent.
  *   2. Memory blocks allocated by one external XPUStream CANNOT be reused by
  * other non-equivalent XPUStreams, even if they originate from the same SYCL
  * queue object.
