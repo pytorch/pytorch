@@ -2712,6 +2712,14 @@ class AOTInductorTestsTemplate:
         inputs = (torch.tensor([0], dtype=torch.bool, device=self.device),)
         self.check_model(Model(), inputs)
 
+    def test_symfloat_item(self):
+        class Model(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        inputs = (torch.tensor([3.14], dtype=torch.float, device=self.device),)
+        self.check_model(Model(), inputs)
+
     def test_constant_original_fqn_and_dtype(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -4014,6 +4022,51 @@ class AOTInductorTestsTemplate:
             torch.tensor([True]).to(self.device),
             torch.tensor([1, 2, 3]).to(self.device),
         )
+        self.check_model(Model(), example_inputs)
+
+    def test_misaligned_input_1(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA test only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.cos()
+
+        N = 64 * 64 * 64 + 64
+        arg = torch.randn(N, device=self.device)
+        example_inputs = (arg,)
+        model = Model()
+        expected = model(*example_inputs)
+        so_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = AOTIRunnerUtil.load(self.device, so_path)
+
+        misaligned_arg = torch.zeros(N + 1, device=self.device)
+        misaligned_arg = misaligned_arg[1:]
+        misaligned_arg.copy_(arg)
+        # If the model is compiled with aligned inputs, the generated
+        # code will check inputs alignment at runtime, and throws an
+        # error if any alignment assumption is violated.
+        msg = ".* API call failed at .*"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            actual = optimized(misaligned_arg)
+            torch.testing.assert_close(actual, expected)
+
+    def test_misaligned_input_2(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA test only")
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.sin() + x.cos()
+
+        N = 64 * 64 * 64 + 64
+        arg = torch.randn(N, device=self.device)
+        misaligned_arg = torch.zeros(N + 1, device=self.device)
+        misaligned_arg = misaligned_arg[1:]
+        misaligned_arg.copy_(arg)
+        example_inputs = (misaligned_arg,)
+        # If the model is already compiled with a misaligned input, the
+        # generated code should NOT contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
 
 

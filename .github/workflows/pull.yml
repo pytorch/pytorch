@@ -461,21 +461,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
-    uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
-    with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
-      cuda-version: "12.4"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
   linux-jammy-py3_9-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml

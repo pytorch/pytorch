@@ -3,7 +3,19 @@
 import itertools
 from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, NewType, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NewType,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+)
 from unittest.mock import patch
 
 import torch
@@ -21,7 +33,8 @@ from torch._dynamo.utils import (
     preserve_rng_state,
 )
 from torch._guards import detect_fake_mode
-from torch._inductor.utils import BoxedBool
+from torch._inductor.output_code import OutputCode
+from torch._inductor.utils import BoxedBool, InputType
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -433,6 +446,47 @@ AOT_COUNTER = itertools.count()
 aot_autograd_decompositions = {}
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", List[Any])
+
+
+TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
+
+
+class AOTDispatchCompiler(Protocol):
+    """
+    Represents a fw or bw_compiler passed to AOTAutograd.
+    """
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> Any:
+        ...
+
+
+# TODO: bikeshed on this name
+class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
+    """
+    Represents an AOTDispatchCompiler that returns an OutputCode, and is
+    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
+    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
+    the kwargs in _CompileFxKwargs.
+    """
+
+    def __init__(
+        self,
+        output_code_ty: Type[TOutputCode],
+        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
+    ):
+        self.output_code_ty = output_code_ty
+        self.compiler_fn = compiler_fn
+
+    def __call__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[InputType],
+    ) -> OutputCode:
+        return self.compiler_fn(gm, example_inputs)
 
 
 def process_inputs(
@@ -953,12 +1007,12 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 def aot_module_simplified(
     mod: nn.Module,
     args,
-    fw_compiler: Callable,
-    bw_compiler: Optional[Callable] = None,
+    fw_compiler: AOTDispatchCompiler,
+    bw_compiler: Optional[AOTDispatchCompiler] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
-    inference_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
 ) -> nn.Module:
     """
@@ -1086,8 +1140,8 @@ def aot_module_simplified(
     # Autograd cache stuff
     remote = should_use_remote_autograd_cache()
     local = should_use_local_autograd_cache()
-
-    if local or remote:
+    # We only care if the forward will return an OutputCode.
+    if (local or remote) and isinstance(fw_compiler, SerializableAOTDispatchCompiler):
         compiled_fn = AOTAutogradCache.load(
             dispatch_and_compile,
             mod,
