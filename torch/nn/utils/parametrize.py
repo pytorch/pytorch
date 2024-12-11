@@ -160,7 +160,7 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     try:
-                        new = module.right_inverse(new)
+                        new = module.right_inverse(new)  # type: ignore[operator]
                     except NotImplementedError:
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
@@ -247,7 +247,7 @@ class ParametrizationList(ModuleList):
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    value = module.right_inverse(value)
+                    value = module.right_inverse(value)  # type: ignore[operator]
                 else:
                     raise RuntimeError(
                         f"parametrization {type(module).__name__} does not implement "

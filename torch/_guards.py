@@ -12,6 +12,7 @@ import unittest.mock
 import weakref
 from abc import abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -52,17 +53,27 @@ and no guard installation notions here.
 """
 
 
-class CompileId(NamedTuple):
-    frame_id: int
+# TODO: mark as kw_only=True once we drop support for <Python 3.10
+@dataclass(frozen=True)
+class CompileId:
+    frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: int
+    frame_compile_id: Optional[int]
     # TODO: consider also tracking the recompilation count
+    compiled_autograd_id: Optional[int] = None
 
     def __str__(self):
-        return f"{self.frame_id}/{self.frame_compile_id}"
+        if self.compiled_autograd_id is not None:
+            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            return f"{self.compiled_autograd_id}/{self.frame_id}/{self.frame_compile_id}".replace(
+                "None", "-"
+            )
+        else:
+            assert self.frame_id is not None and self.frame_compile_id is not None
+            return f"{self.frame_id}/{self.frame_compile_id}"
 
 
 class TraceId(NamedTuple):

@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
@@ -245,6 +246,25 @@ class DistributedState:
     all_states: Optional[List[LocalState]] = None
 
 
+class TensorifyState:
+    # These are the set of string symfloats names (eg. "zf0") that we collect
+    # from the tensorify_python_scalars.py joint fx pass to inform us about
+    # which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[str] = set()
+
+    @classmethod
+    def specialize(cls, index: str) -> None:
+        cls.force_specializations.add(index)
+
+    @classmethod
+    def should_specialize(cls, index: str) -> bool:
+        return index in cls.force_specializations
+
+    @classmethod
+    def clear(cls) -> None:
+        cls.force_specializations.clear()
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -415,7 +435,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
             user_stack_trace,
-            exc_info=exc_info,
         )
     else:
         # This log line MUST not contain the string "Graph break in user code",
@@ -943,6 +962,8 @@ class InstructionTranslatorBase(
         try:
             self.dispatch_table[inst.opcode](self, inst)
             return not self.output.should_exit
+        except TensorifyScalarRestartAnalysis:
+            raise
         except exc.ObservedException as e:
             self.exception_handler(e)
             return True
@@ -1031,6 +1052,8 @@ class InstructionTranslatorBase(
                 self.output.push_tx(self)
                 while self.step():
                     pass
+            except TensorifyScalarRestartAnalysis:
+                raise
             except BackendCompilerFailed:
                 raise
             except Exception as e:
