@@ -295,20 +295,20 @@ typedef struct {
       at::DeviceIndex deviceIndex,
       ncclConfig_t& config);
   std::shared_ptr<NCCLComm> (*split)(
-      std::shared_ptr<NCCLComm>& source,
+      std::shared_ptr<NCCLComm> source,
       int color_id,
       int rank,
       ncclConfig_t& config,
       std::vector<uint64_t>& ranks_ull);
-  void (*finalize)(std::shared_ptr<NCCLComm>& comm);
-  void (*destroy)(std::shared_ptr<NCCLComm>& comm);
+  void (*finalize)(std::shared_ptr<NCCLComm> comm);
+  void (*destroy)(std::shared_ptr<NCCLComm> comm);
   void (*abort)(
-      std::shared_ptr<NCCLComm>& comm,
+      std::shared_ptr<NCCLComm> comm,
       std::optional<std::string> commFailureReason);
-  void (*regMem)(std::shared_ptr<NCCLComm>&, void* ptr, size_t size);
-  void (*deregMem)(std::shared_ptr<NCCLComm>&, void* mhandle);
+  void (*regMem)(std::shared_ptr<NCCLComm>, void* ptr, size_t size);
+  void (*deregMem)(std::shared_ptr<NCCLComm>, void* mhandle);
   void (*dump)(
-      std::shared_ptr<NCCLComm>&,
+      std::shared_ptr<NCCLComm>,
       std::unordered_map<std::string, std::string>& dump);
 } commImpl_t;
 

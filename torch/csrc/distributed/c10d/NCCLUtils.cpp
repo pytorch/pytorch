@@ -169,7 +169,8 @@ std::shared_ptr<NCCLComm> createWithConfig(
 // last argument to split() API is not used to support
 // multiple implementations
 std::shared_ptr<NCCLComm> split(
-    std::shared_ptr<NCCLComm>& source,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::shared_ptr<NCCLComm> source,
     int color_id,
     int rank,
     ncclConfig_t& config,
@@ -232,7 +233,8 @@ std::shared_ptr<NCCLComm> split(
 #endif
 }
 
-void finalize(std::shared_ptr<NCCLComm>& comm) {
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+void finalize(std::shared_ptr<NCCLComm> comm) {
   LockType lock(comm->mutex_);
   if (comm->aborted_) {
     LOG(INFO) << "Rank " << comm->rank_
@@ -244,7 +246,8 @@ void finalize(std::shared_ptr<NCCLComm>& comm) {
   C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(ncomm), std::nullopt);
 }
 
-void destroy(std::shared_ptr<NCCLComm>& comm) {
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+void destroy(std::shared_ptr<NCCLComm> comm) {
   LockType lock(comm->mutex_);
   if (comm->aborted_) {
     LOG(INFO) << "Rank " << comm->rank_
@@ -259,7 +262,8 @@ void destroy(std::shared_ptr<NCCLComm>& comm) {
 }
 
 void abort(
-    std::shared_ptr<NCCLComm>& comm,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::shared_ptr<NCCLComm> comm,
     std::optional<std::string> commFailureReason) {
   LockType lock(comm->mutex_);
   at::cuda::OptionalCUDAGuard gpuGuard(comm->deviceIndex_);
@@ -310,7 +314,8 @@ void abort(
 #endif
 }
 
-void regMem(std::shared_ptr<NCCLComm>& comm, void* ptr, size_t size) {
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+void regMem(std::shared_ptr<NCCLComm> comm, void* ptr, size_t size) {
   LockType lock(comm->mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   // We register only segments from cache allocator
@@ -342,7 +347,8 @@ void regMem(std::shared_ptr<NCCLComm>& comm, void* ptr, size_t size) {
 #endif
 }
 
-void deregMem(std::shared_ptr<NCCLComm>& comm, void* ptr) {
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+void deregMem(std::shared_ptr<NCCLComm> comm, void* ptr) {
   LockType lock(comm->mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
   TORCH_CHECK(
@@ -371,7 +377,8 @@ void deregMem(std::shared_ptr<NCCLComm>& comm, void* ptr) {
 }
 
 void dump(
-    std::shared_ptr<NCCLComm>& comm,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::shared_ptr<NCCLComm> comm,
     std::unordered_map<std::string, std::string>& dump) {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   if (comm->isAborted()) {
