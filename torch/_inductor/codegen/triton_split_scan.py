@@ -139,7 +139,7 @@ class TritonSplitScanKernel(TritonKernel):
             dtype=dtype,
         )
 
-        combine_helper_fn = self._lift_helper(combine_fn, 1)
+        combine_helper_fn = self._lift_helper(combine_fn, 1, (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 

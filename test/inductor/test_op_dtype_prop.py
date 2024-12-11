@@ -231,6 +231,16 @@ class TestCase(InductorTestCase):
         out, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(fn(x), out)
 
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_assoc_scan(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        x = torch.randn(10, device="cuda")
+        # dtype check correctly
+        associative_scan(
+            lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
+        )
+
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
 
