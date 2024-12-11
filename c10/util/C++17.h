@@ -45,39 +45,10 @@ constexpr bool is_pod_v = is_pod<T>::value;
 
 namespace guts {
 
-#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
-
 template <class F, class Tuple>
 C10_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
-
-#else
-
-// Implementation from http://en.cppreference.com/w/cpp/utility/apply (but
-// modified)
-// TODO This is an incomplete implementation of std::apply, not working for
-// member functions.
-namespace detail {
-template <class F, class Tuple, std::size_t... INDEX>
-C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
-    F&& f,
-    Tuple&& t,
-    std::index_sequence<INDEX...>) {
-  return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
-}
-} // namespace detail
-
-template <class F, class Tuple>
-C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return detail::apply_impl(
-      std::forward<F>(f),
-      std::forward<Tuple>(t),
-      std::make_index_sequence<
-          std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
-}
-
-#endif
 
 } // namespace guts
 
