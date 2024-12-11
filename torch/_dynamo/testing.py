@@ -193,7 +193,7 @@ def debug_insert_nops(
     return GuardedCode(
         code,
         CheckFunctionManager(graph).guard_manager,  # type: ignore[arg-type]
-        CompileId(compiled_autograd_id=None, frame_id=0, frame_compile_id=0),
+        CompileId(frame_id=0, frame_compile_id=0),
     )
 
 
