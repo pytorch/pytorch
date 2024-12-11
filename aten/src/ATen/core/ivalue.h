@@ -1546,11 +1546,11 @@ struct WeakOrStrongCompilationUnit {
   }
 
   bool holdingStrongRef() const {
-    return strong_ptr_ != std::nullopt;
+    return strong_ptr_.has_value();
   }
 
   bool holdingEmptyStrongRef() const {
-    return holdingStrongRef() && *strong_ptr_ == nullptr;
+    return strong_ptr_ == nullptr;
   }
 
   std::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;

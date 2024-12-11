@@ -9,7 +9,7 @@
 
 namespace at::functorch {
 
-Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim) {
+Tensor moveBatchDimToFront(Tensor tensor, std::optional<int64_t> maybe_batch_dim) {
   if (!maybe_batch_dim.has_value()) {
     return tensor;
   }

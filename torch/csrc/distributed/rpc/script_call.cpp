@@ -23,10 +23,11 @@ ScriptCall::ScriptCall(
       isAsyncExecution_(isAsyncExecution) {}
 
 bool ScriptCall::hasOp() const {
-  return op_ ? true : false;
+  return op_.has_value();
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return op_.value();
 }
 
@@ -35,6 +36,7 @@ bool ScriptCall::hasQualifiedName() const {
 }
 
 const c10::QualifiedName& ScriptCall::qualifiedName() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return qualifiedName_.value();
 }
 
@@ -51,7 +53,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     ivalues.push_back(value);
   }
 
-  if (hasOp()) {
+  if (op_.has_value()) {
     TORCH_CHECK(
         !hasQualifiedName(),
         "It is builtin operator call, qualifiedName_ should not be set.");

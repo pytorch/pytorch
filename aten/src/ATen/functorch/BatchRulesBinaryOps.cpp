@@ -54,6 +54,7 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
     auto maybe_layer = maybeCurrentDynamicLayer();
+    TORCH_INTERNAL_ASSERT(maybe_layer.has_value())
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
 

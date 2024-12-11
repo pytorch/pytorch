@@ -61,8 +61,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     } else {
       out << "Tensor";
     }
-    if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info = *ndim > 0 &&
+    if (auto ndim = value->sizes().size(); ndim.has_value()) {
+      bool has_valid_strides_info = ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           if (i > 0) {
             out << ", ";
           }
-          out << *value->strides()[i];
+          out << value->strides()[i].value();
         }
         out << "]";
       }

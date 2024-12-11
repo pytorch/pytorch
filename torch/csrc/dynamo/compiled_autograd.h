@@ -324,6 +324,7 @@ class CompiledNodeArgs {
   template <typename T>
   void collect(const std::optional<T>& t) {
     if (cond(t.has_value())) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       collect(*t);
     }
   }
