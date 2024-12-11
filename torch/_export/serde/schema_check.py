@@ -550,9 +550,9 @@ def update_schema():
         assert match is not None
         checksum_head = match.group(1)
 
-        thrift_content = importlib.resources.read_text(__package__, "schema.thrift")
+        thrift_content = importlib.resources.read_text(__package__, "export_schema.thrift")
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
-        _check(match is not None, "checksum not found in schema.thrift")
+        _check(match is not None, "checksum not found in export_schema.thrift")
         assert match is not None
         thrift_checksum_head = match.group(1)
         thrift_content = thrift_content.splitlines()
@@ -573,7 +573,7 @@ def update_schema():
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
-    thrift_schema_path = __package__.replace(".", "/") + "/schema.thrift"
+    thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check
     assert thrift_schema_path.startswith(torch_prefix)  # sanity check
