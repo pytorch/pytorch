@@ -6,9 +6,8 @@ from torch.utils import _pytree as pytree
 
 
 class CachedTensor(torch.Tensor):
-    metadata: Dict[str, torch.Tensor]
+    metadata: Dict[str, Optional[torch.Tensor]]
     source_field: str
-    all_fields: Tuple[str, ...]
 
     # Tensor subclass wrapping a dict of tensors, whose shape, dtype, device, etc.
     # is determined by a "source" tensor in the dict (specified by the user
@@ -31,11 +30,11 @@ class CachedTensor(torch.Tensor):
     @torch._disable_dynamo  # type: ignore[misc]
     def __new__(
         cls,
-        metadata: Dict[str, torch.Tensor],
+        metadata: Dict[str, Optional[torch.Tensor]],
         source_field: str,
-        all_fields: Tuple[str, ...],
     ) -> "CachedTensor":
-        source = metadata[source_field]
+        source = metadata.get(source_field)
+        assert source is not None
         shape = source.shape
         kwargs = {}
         kwargs["strides"] = source.stride()
@@ -48,35 +47,31 @@ class CachedTensor(torch.Tensor):
 
         out.metadata = metadata
         out.source_field = source_field
-        out.all_fields = all_fields
         return out
 
     def __repr__(self) -> str:  # type: ignore[override]
         return f"CachedTensor({repr(self.metadata[self.source_field])})"
 
     def __getattr__(self, name: str) -> Optional[torch.Tensor]:
-        if name not in self.all_fields:
+        if name not in self.metadata:
             raise AttributeError(
                 f"{type(self).__name__} object has no attribute '{name}'"
             )
-        return self.metadata.get(name)
+        return self.metadata[name]
 
     def __tensor_flatten__(self) -> Tuple[List[str], Dict[str, Any]]:
         ctx = {
             "source_field": self.source_field,
-            "all_fields": self.all_fields,
+            "all_fields": list(self.metadata.keys()),
         }
-        return list(self.metadata.keys()), ctx
+        return [k for k, v in self.metadata.items() if v is not None], ctx
 
     @staticmethod
     def __tensor_unflatten__(
         inner_tensors: Dict, meta: Dict, outer_size: Any, outer_stride: Any
     ) -> "CachedTensor":
-        return CachedTensor(
-            inner_tensors,
-            source_field=meta["source_field"],
-            all_fields=meta["all_fields"],
-        )
+        inner_tensors = {k: inner_tensors.get(k) for k in meta["all_fields"]}
+        return CachedTensor(inner_tensors, source_field=meta["source_field"])
 
     @classmethod
     def __torch_dispatch__(
