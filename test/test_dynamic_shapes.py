@@ -372,6 +372,7 @@ class TestPySymInt(TestCase):
         z = y.expand((y.shape[1],))
         z = y.expand(y.shape[1])
 
+    @torch.fx.experimental._config.patch(symbolic_bitwise_and_or=True)
     def test_symint_bitwise_and(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 0b1100)
@@ -394,6 +395,7 @@ class TestPySymInt(TestCase):
         b3 = create_symbool(shape_env, True)
         self.assertEqual(a3 & b3, True)
 
+    @torch.fx.experimental._config.patch(symbolic_bitwise_and_or=True)
     def test_symint_bitwise_or(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 0b1100)
@@ -1324,6 +1326,7 @@ class TestSymNumberMagicMethods(TestCase):
         with self.subTest(fn=fn, inp1=inp1, inp2=inp2, is_unary_fn=is_unary_fn):
             return self._do_test2(fn, inp1, inp2, shape_env, is_unary_fn)
 
+    @torch.fx.experimental._config.patch(symbolic_bitwise_and_or=True)
     def _do_test2(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
         # NB: don't use one as that will get specialized

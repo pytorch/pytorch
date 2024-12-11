@@ -33,6 +33,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 import torch._functorch.config
+import torch.fx.experimental._config
 import torch.library
 import torch.utils._pytree as pytree
 from torch import nn
@@ -6382,6 +6383,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = f(t, [1, 2])
         self.assertEqual(t + 1, res)
 
+    @torch.fx.experimental._config.patch(symbolic_bitwise_and_or=True)
     def test_symint_bitwise(self):
         def fn(x):
             z = x.shape[0]
@@ -6394,6 +6396,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             return y, z
 
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_symint_bitwise_breaks(self):
+        def fn(x):
+            z = x.shape[0]
+            z |= z >> 1
+            z |= z << 1
+            z &= z | (z > 1)
+            y = (z > 1) | (z <= 1)
+            # test composition with non-bitwise ops
+            z = (z | z) % 6
+            return y, z
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=True)
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
@@ -6418,6 +6435,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             out = f_compiled(x, s0, s1, s2)
             self.assertEqual(out_ref, out)
 
+    @torch.fx.experimental._config.patch(symbolic_bitwise_and_or=True)
     def test_bitwise_op_guard(self):
         # attempt evaluating a guard with BitwiseFn_bitwise_[and/or]
         def fn(x):

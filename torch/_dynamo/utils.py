@@ -63,6 +63,7 @@ from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
+import torch.fx.experimental._config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -2461,6 +2462,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
             else arg
             for arg in args
+        )
+
+    if (
+        op == "call_function"
+        and node.target in (operator.and_, operator.or_)
+        and any(isinstance(a, torch.SymInt) for a in args)
+        and not torch.fx.experimental._config.symbolic_bitwise_and_or
+    ):
+        unimplemented(
+            "symbolic bitwise and/or on symbolic integers currently disabled, "
+            "to enable set torch.fx.experimental._config.symbolic_bitwise_and_or = True"
         )
 
     try:

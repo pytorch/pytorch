@@ -82,6 +82,10 @@ symbol_guard_limit_before_specialize: Optional[int] = None
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True
 
+# Experimental support for bitwise and/or.  This seems to trigger latent
+# symbolic shapes bugs, so it is currently disabled by default
+symbolic_bitwise_and_or = False
+
 from torch.utils._config_module import install_config_module
 
 

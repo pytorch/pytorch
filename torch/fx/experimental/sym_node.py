@@ -23,6 +23,7 @@ from functools import lru_cache, update_wrapper
 from typing import Optional, Type, TYPE_CHECKING, Union
 
 import torch
+import torch.fx.experimental._config as config
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -1223,6 +1224,14 @@ def _make_node_magic(method, func):
             get_proxy_mode,
             handle_sym_dispatch,
         )
+
+        if not config.symbolic_bitwise_and_or and method in (
+            "bitwise_and",
+            "bitwise_or",
+        ):
+            raise TypeError(
+                f"unsupported operand type(s) for {method}: 'SymInt' and 'SymInt'"
+            )
 
         op = method_to_operator(method)
 
