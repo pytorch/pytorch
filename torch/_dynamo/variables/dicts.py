@@ -89,7 +89,7 @@ class ConstDictVariable(VariableTracker):
                 Hashable = ConstDictVariable._HashableTracker
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
-                return self.vt.module
+                return self.vt.value
             elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
@@ -277,14 +277,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import (
-            BuiltinVariable,
-            ConstantVariable,
-            ListIteratorVariable,
-            ListVariable,
-            TupleVariable,
-            UserDefinedObjectVariable,
-        )
+        from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -344,33 +337,25 @@ class ConstDictVariable(VariableTracker):
             self.items.clear()
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
-            is_args_supported = len(args) == 1 and isinstance(
-                args[0],
-                (
-                    ConstDictVariable,
-                    ListVariable,
-                    TupleVariable,
-                    ListIteratorVariable,
-                    variables.IteratorVariable,
-                    UserDefinedObjectVariable,
-                ),
-            )
-
-            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
-
-            if is_args_supported or is_kwargs_supported:
+            # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
+            # Either `b` or the kwargs is omittable, but not both.
+            has_arg = len(args) == 1
+            has_kwargs = len(kwargs) > 0
+            if has_arg or has_kwargs:
                 tx.output.side_effects.mutation(self)
-                if len(args) == 1:
+                if has_arg:
                     if isinstance(args[0], ConstDictVariable):
                         dict_vt = args[0]
                     else:
                         dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
                     self.items.update(dict_vt.items)
-                # Wrap strings
-                kwargs = {
-                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-                }
-                self.items.update(kwargs)
+                if has_kwargs:
+                    # Handle kwargs
+                    kwargs = {
+                        Hashable(ConstantVariable.create(k)): v
+                        for k, v in kwargs.items()
+                    }
+                    self.items.update(kwargs)
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
