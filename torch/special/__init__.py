@@ -513,6 +513,214 @@ Example::
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
 """.format(**common_args))
 
+betainc = _add_docstr(_special.special_betainc,
+                      r"""
+betainc(input, a, b, out=None) -> Tensor
+Computes the regularized incomplete Beta function (as defined below)
+for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
+.. math::
+    \frac{1}{\Beta(a,b)} \int_0^x t^{a-1}\,(1-t)^{b-1}\,dt
+
+Similar to SciPy's `scipy.special.betainc`.
+""" + r"""
+Args:
+    input (Tensor) : the upper limit of integration (:attr:`0 < input < 1`)
+    a (Number or Tensor) : (:attr:`a > 0`)
+    b (Number or Tensor) : (:attr:`b > 0`)
+
+Keyword args:
+    {out}
+
+Example::
+    >>> x = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.special.betainc(x, 1, 2)
+    tensor([nan, 0., 1., nan, nan])
+    >>> x = torch.tensor([0.15, 0.34, 0.99])
+    >>> a = torch.tensor([1, 2, 3.1])
+    >>> b = torch.tensor([2, 4, 1.4])
+    >>> torch.special.betainc(x, a, b)
+    tensor([0.2775, 0.5522, 0.9933])
+    >>> torch.special.betainc(x, a, 2)
+    tensor([0.2775, 0.2682, 0.9994])
+    >>> torch.special.betainc(x, 2, b)
+    tensor([0.0608, 0.5522, 0.9962])
+    >>> torch.special.betainc(x, 2, 1)
+    tensor([0.0225, 0.1156, 0.9801])
+""".format(**common_args))
+
+def betaincc(x, a, b):
+    r"""
+    betaincc(input, a, b, out=None) -> Tensor
+    Computes the complement of the regularized incomplete Beta function (as defined below)
+    for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
+    .. math::
+        1 - \frac{1}{\Beta(a,b)} \int_0^x t^{a-1}\,(1-t)^{b-1}\,dt
+
+    Similar to SciPy's `scipy.special.betaincc`.
+    """ + r"""
+    Args:
+        input (Tensor) : the upper limit of integration (:attr:`0 < input < 1`)
+        a (Number or Tensor) : (:attr:`a > 0`)
+        b (Number or Tensor) : (:attr:`b > 0`)
+
+    Keyword args:
+        {out}
+
+    Example::
+        >>> x = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+        >>> torch.special.betaincc(x, 1, 2)
+        tensor([nan, 1., 0., nan, nan])
+        >>> x = torch.tensor([0.15, 0.34, 0.99])
+        >>> a = torch.tensor([1, 2, 3.1])
+        >>> b = torch.tensor([2, 4, 1.4])
+        >>> torch.special.betaincc(x, a, b)
+        tensor([0.7225, 0.4478, 0.0067])
+        >>> torch.special.betaincc(x, a, 2)
+        tensor([7.2250e-01, 7.3181e-01, 6.2662e-04])
+        >>> torch.special.betaincc(x, 2, b)
+        tensor([0.9392, 0.4478, 0.0038])
+        >>> torch.special.betaincc(x, 2, 1)
+        tensor([0.9775, 0.8844, 0.0199])
+    """
+    return  1 - torch.special.betainc(x, a, b)
+
+betaincinv = _add_docstr(_special.special_betaincinv,
+                         r"""
+betaincinv(input, a, b, out=None) -> Tensor
+Computes the inverse of the regularized incomplete Beta function (as defined below)
+for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+The inverse of the regularized incomplete Beta function is defined in the range :math:`(0, 1)` as:
+
+.. math::
+    \mathrm{betaincinv}(\mathrm{betainc}(x, a, b), a, b) = x
+
+Similar to SciPy's `scipy.special.betaincinv`.
+""" + r"""
+Args:
+    input (Tensor) : Real-valued input (:attr:`0 < input < 1`)
+    a (Number or Tensor) : (:attr:`a > 0`)
+    b (Number or Tensor) : (:attr:`b > 0`)
+
+Keyword args:
+    {out}
+
+Example::
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.special.betaincinv(y, 1, 2)
+    tensor([nan, 0., 1., nan, nan])
+    >>> a = torch.tensor([1, 2, 3.1])
+    >>> b = torch.tensor([2, 4, 1.4])
+    >>> y = torch.tensor([0.2775, 0.5522, 0.9933])
+    >>> torch.special.betaincinv(y, a, b)
+    tensor([0.1500, 0.3400, 0.9900])
+    >>> y = torch.tensor([0.2775, 0.2682, 0.9994])
+    >>> torch.special.betaincinv(y, a, 2)
+    tensor([0.1500, 0.3400, 0.9902])
+    >>> y = torch.tensor([0.0608, 0.5522, 0.9962])
+    >>> torch.special.betaincinv(y, 2, b)
+    tensor([0.1501, 0.3400, 0.9900])
+    >>> y = torch.tensor([0.0225, 0.1156, 0.9801])
+    >>> torch.special.betaincinv(y, 2, 1)
+    tensor([0.1500, 0.3400, 0.9900])
+""".format(**common_args))
+
+def betainccinv(y, a, b):
+    r"""
+    betainccinv(input, a, b, out=None) -> Tensor
+    Computes the inverse of the complement of the regularized incomplete Beta function (as defined below)
+    The inverse of the complement of the regularized incomplete Beta function is defined in the range :math:`(0, 1)` as:
+    for each element of :attr:`input`,  :attr:`a`, :attr:`b`.
+
+    .. math::
+        \mathrm{betainccinv}(\mathrm{betaincc}(x, a, b), a, b) = x
+
+    Similar to SciPy's `scipy.special.betainccinv`.
+    """ + r"""
+    Args:
+        input (Tensor) : Real-valued input (:attr:`0 < input < 1`)
+        a (Number or Tensor) : (:attr:`a > 0`)
+        b (Number or Tensor) : (:attr:`b > 0`)
+
+    Keyword args:
+        {out}
+
+    Example::
+        >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+        >>> torch.special.betainccinv(y, 1, 2)
+        tensor([nan, 1., 0., nan, nan])
+        >>> a = torch.tensor([1, 2, 3.1])
+        >>> b = torch.tensor([2, 4, 1.4])
+        >>> y = torch.tensor([0.7225, 0.4478, 0.0067])
+        >>> torch.special.betainccinv(y, a, b)
+        tensor([0.1500, 0.3400, 0.9900])
+        >>> y = torch.tensor([7.2250e-01, 7.3181e-01, 6.2662e-04])
+        >>> torch.special.betainccinv(y, a, 2)
+        tensor([0.1500, 0.3400, 0.9900])
+        >>> y = torch.tensor([0.9392, 0.4478, 0.0038])
+        >>> torch.special.betainccinv(y, 2, b)
+        tensor([0.1501, 0.3400, 0.9900])
+        >>> y = torch.tensor([0.9775, 0.8844, 0.0199])
+        >>> torch.special.betainccinv(y, 2, 1)
+        tensor([0.1500, 0.3400, 0.9900])
+    """
+    return torch.special.betaincinv(1 - y, a, b)
+
+betaln = _add_docstr(_special.special_betaln,
+                     r"""
+betaln(a, b, out=None) -> Tensor
+Computes the natural logarithm of absolute value of Beta function (as defined below)
+for each element of :attr:`a`, :attr:`b`.
+
+.. math::
+    \log\,|\,\Beta(a,b)\,|
+
+Similar to SciPy's `scipy.special.betaln`.
+""" + r"""
+Args:
+    a (Tensor) : (:attr:`a > 0`)
+    b (Tensor) : (:attr:`b > 0`)
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.betaln( torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+    tensor([    inf,     inf, -2.1972,     nan,     nan])
+    >>> torch.special.betaln(torch.tensor([2., 4., 5.]), torch.tensor(9.))
+    tensor([-4.4998, -7.5909, -8.7695])
+    >>> torch.special.betaln(torch.tensor(9.), torch.tensor(9.))
+    tensor(-12.2959)
+""".format(**common_args))
+
+def beta(a, b):
+    r"""
+    beta(a, b, out=None) -> Tensor
+    Computes the Beta function (as defined below)
+    for each element of :attr:`a`, :attr:`b`.
+    .. math::
+        \frac{\Gamma(a) * \Gamma(b)}{\Gamma(a + b)}
+
+    Similar to SciPy's `scipy.special.beta`.
+    """ + r"""
+    Args:
+        a (Tensor) : (:attr:`a > 0`)
+        b (Tensor) : (:attr:`b > 0`)
+
+    Keyword args:
+        {out}
+
+    Example::
+        >>> torch.special.beta(torch.tensor([-1, 0, 1, float('inf'), float('nan')]), torch.tensor(9))
+        tensor([   inf,    inf, 0.1111,    nan,    nan])
+        >>> torch.special.beta(torch.tensor([2., 4., 5.]), torch.tensor(9.))
+        tensor([0.0111, 0.0005, 0.0002])
+        >>> torch.special.beta(torch.tensor(9.), torch.tensor(9.))
+        tensor(4.5706e-06)
+    """
+    return torch.exp(torch.special.betaln(a, b))
+
 i1 = _add_docstr(_special.special_i1,
                  r"""
 i1(input, *, out=None) -> Tensor
