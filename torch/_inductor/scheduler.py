@@ -1844,17 +1844,16 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: Dict[str, str] = {}
 
+        self.nodes = comms.decide_global_ordering_of_comms(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+        )
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
-        if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.decide_global_ordering_of_comms(
-                self.nodes,
-                self.name_to_buf,
-                self.name_to_fused_node,
-            )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1865,6 +1864,12 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        self.merge_loops()
+        self.finalize_multi_template_buffers()
+        if config.combo_kernels:
+            self.create_combo_kernel_nodes(num_ck_nodes=None)
+
+        # Peak memory and overlap passes should always run last
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
 
@@ -1875,12 +1880,8 @@ class Scheduler:
                 set(V.graph.graph_inputs.keys()),
                 set(V.graph.get_output_names()),
             )
-        self.merge_loops()
-        self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
-        if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
         self.process_grouped_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)

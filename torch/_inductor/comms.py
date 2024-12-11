@@ -7,7 +7,11 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Dict, List, Set, TYPE_CHECKING, Union, Callable, cast, Tuple, Any, Optional
+import math
+from torch._dispatch.python import enable_python_dispatcher
+from .virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -231,18 +235,18 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    # # If FSDP2 is used, we apply FSDP-specific passes.
+    # if any(
+    #     is_fallback_op(
+    #         x.node,
+    #         {
+    #             torch.ops.fsdp.all_gather_copy_in.default,
+    #             torch.ops.fsdp.chunk_cat.default,
+    #         },
+    #     )
+    #     for x in nodes
+    # ):
+    #     nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
@@ -336,6 +340,508 @@ def reorder_compute_and_comm_for_overlap(
             except Exception as e:
                 overlap_log.debug(str(e))
     return order
+
+
+def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_cap_mb: float) -> None:
+    def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        )
+    
+    def is_wait_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.wait_tensor.default
+        )
+
+    def is_graph_input(node: torch.fx.Node) -> bool:
+        return node.op == "placeholder"
+
+    node_list = gm.graph.nodes
+
+    # Prerequisite: Check if there is any all_gather node
+    found_all_gather = False
+    for node in node_list:
+        if is_all_gather_into_tensor(node):
+            found_all_gather = True
+            break
+    if not found_all_gather:
+        return
+
+    ag_nodes: List[torch.fx.Node] = []
+    ag_node_to_wait_node: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Step 1: Find all all_gather nodes
+    for node in node_list:
+        if (
+            is_wait_tensor(node)
+            and is_all_gather_into_tensor(node.args[0])
+        ):
+            ag_wait_node = node
+            ag_node = node.args[0]
+            assert is_graph_input(ag_node.args[0]) or (
+                ag_node.args[0].op == "call_function"
+                and ag_node.args[0].target == torch.ops.prims.convert_element_type.default
+                and is_graph_input(ag_node.args[0].args[0])
+            ), f"Assume all_gather_into_tensor input is either graph input or dtype conversion of graph input, but got {ag_node.args[0]}"
+            ag_nodes.append(ag_node)
+            ag_node_to_wait_node[ag_node] = ag_wait_node
+    
+    # Step 2: Put all_gather nodes into buckets
+    ag_buckets: List[List[torch.fx.Node]] = []
+    ag_node_to_bucket_id = {}
+    bucket_id_to_actual_bucket_size = {}
+    cur_bucket: List[torch.fx.Node] = []
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    # Convert MiB to bytes
+    all_gather_bucket_size_bytes = int(all_gather_bucket_cap_mb * 1024 * 1024)
+    for ag_node in ag_nodes:
+        assert is_all_gather_into_tensor(ag_node)
+        assert "val" in ag_node.meta
+        ag_output_size_bytes = ag_node.meta["val"].numel() * torch.finfo(ag_node.meta["val"].dtype).bits // 8 
+        if cur_bucket_size_bytes + ag_output_size_bytes > all_gather_bucket_size_bytes and cur_bucket:
+            # Current bucket is full, create new bucket
+            ag_buckets.append(cur_bucket)
+            for n in cur_bucket:
+                ag_node_to_bucket_id[n] = cur_bucket_id
+            bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+        cur_bucket_size_bytes += ag_output_size_bytes
+        cur_bucket.append(ag_node)
+    if cur_bucket:
+        # add remaining nodes in the last bucket
+        ag_buckets.append(cur_bucket)
+        for n in cur_bucket:
+            ag_node_to_bucket_id[n] = cur_bucket_id
+        bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+
+    assert len(ag_buckets) > 0
+    # for bucket_id, ag_bucket in enumerate(ag_buckets):
+    #     log.warning(f"AG Bucket {bucket_id}: size: {bucket_id_to_actual_bucket_size[bucket_id]}, # AG nodes: {len(ag_bucket)}, AG nodes: {ag_bucket}")
+
+    # Step 3: Create new (bucketed) all_gather nodes
+    bucket_id_to_bucketed_op_info = {}
+    bucket_id_is_scheduled = {}
+    for bucket_id, ag_bucket in enumerate(ag_buckets):
+        _, group_size, group_name = list(ag_node_to_wait_node.keys())[0].args
+        ag_input_nodes = []
+        wait_nodes = []
+        for ag_node in ag_bucket:
+            assert ag_node in ag_node_to_wait_node and ag_node.args[1] == group_size and ag_node.args[2] == group_name
+            ag_input_nodes.append(ag_node.args[0])
+            wait_nodes.append(ag_node_to_wait_node[ag_node])
+        bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_nodes, group_size, group_name, wait_nodes)
+
+    ag_wait_nodes = list(ag_node_to_wait_node.values())
+    ag_and_wait_nodes = OrderedSet(ag_nodes + ag_wait_nodes)
+    new_graph: torch.fx.Graph = torch.fx.Graph()
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def env_lookup(x: torch.fx.Node, node_user: Union[torch.fx.Node, str]) -> torch.fx.Node:
+        assert x in env, f"Dependent node {x} not in env when creating downstream node {node_user}"
+        return env[x]
+
+    def node_copy(node: torch.fx.Node, arg_transform: Callable[[torch.fx.Node], "Argument"]) -> torch.fx.Node:
+        if node not in env:
+            new_node = new_graph.node_copy(node, arg_transform=arg_transform)
+            env[node] = new_node
+        else:
+            new_node = env[node]
+        return new_node
+
+    def new_graph_call_function(
+        target: Callable[..., Any],
+        args: Optional[Tuple["Argument", ...]] = None,
+        kwargs: Optional[Dict[str, "Argument"]] = None,
+        type_expr: Optional[Any] = None,
+    ) -> torch.fx.Node:
+        from torch.utils._pytree import tree_map_only
+        new_node = new_graph.call_function(target, args, kwargs)
+        args_val = tree_map_only(
+            torch.fx.Node, lambda x: x.meta["val"], args
+        )
+        kwargs_val = tree_map_only(
+            torch.fx.Node, lambda x: x.meta["val"], kwargs
+        )
+        with V.fake_mode, enable_python_dispatcher():
+            new_fake_tensor = target(*args_val, **kwargs_val)
+        new_node.meta["val"] = new_fake_tensor
+        return new_node
+
+    for node in node_list:
+        if node not in ag_and_wait_nodes:
+            # not all_gather or its wait_tensor - schedule it normally
+            node_copy(node, lambda x: env_lookup(x, node))
+        elif node in ag_node_to_wait_node:
+            assert node in ag_node_to_bucket_id
+            bucket_id = ag_node_to_bucket_id[node]
+            if bucket_id not in bucket_id_is_scheduled:
+                ag_input_nodes, group_size, group_name, orig_wait_nodes = bucket_id_to_bucketed_op_info[bucket_id]
+                device = ag_input_nodes[0].meta["val"].device
+                rank = device.index
+                dtype = ag_input_nodes[0].meta["val"].dtype
+                # TODO(yf225): if we want to support mixed dtype in the same bucket, we need to first view all all_gather inputs as uint8 (common denominator),
+                # then do the all_gather, then view the output back to the original dtype. Look at FSDP2 to see how to do this.
+                assert all(n.meta["val"].dtype == dtype for n in ag_input_nodes), "All all_gather inputs in the same bucket must have the same dtype"
+                # must schedule all the all_gather input nodes first, before the bucketed all_gather node
+                param_all_gather_inputs_orig = [
+                    node_copy(ag_input_node, lambda x: env_lookup(x, ag_input_node))
+                    for ag_input_node in ag_input_nodes
+                ]
+                # schedule the bucketed all_gather node
+                param_all_gather_inputs_flattened = [
+                    new_graph_call_function(
+                        torch.ops.aten.reshape.default,
+                        (n, [-1]),
+                        {}
+                    )
+                    for n in param_all_gather_inputs_orig
+                ]
+                inp_split_sizes = [n.meta["val"].numel() for n in param_all_gather_inputs_orig]
+                param_all_gather_outputs = [
+                    new_graph_call_function(
+                        torch.ops.aten.empty.memory_format,
+                        ([n.meta["val"].numel() * group_size],),
+                        {
+                            "dtype": n.meta["val"].dtype,
+                            "device": n.meta["val"].device,
+                            "pin_memory": False,
+                        },
+                    )
+                    for n in param_all_gather_inputs_orig
+                ]
+                # TODO(yf225): This assumes dim-0 sharding.
+                # If we need to support sharding on another dim, we should look at how FSDP2 does it (e.g. search for `shard_dim` in FSDP2 codebase)
+                param_all_gather_outputs_shape_orig = [
+                    (n.meta["val"].shape[0] * group_size,) + n.meta["val"].shape[1:] for n in param_all_gather_inputs_orig
+                ]
+                all_gather_input_numel = sum(inp_split_sizes)
+                all_gather_copy_in = new_graph_call_function(
+                    torch.ops.fsdp.all_gather_copy_in.default,
+                    (
+                        param_all_gather_inputs_flattened,
+                        inp_split_sizes,
+                        all_gather_input_numel,
+                        group_size,
+                        rank,
+                        dtype,
+                        device,
+                    ),
+                    {},
+                )
+                all_gather_input = new_graph_call_function(
+                    operator.getitem,
+                    (all_gather_copy_in, 0),
+                    {},
+                )
+                all_gather_output = new_graph_call_function(
+                    operator.getitem,
+                    (all_gather_copy_in, 1),
+                    {},
+                )
+                all_gather_into_tensor_out = new_graph_call_function(
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    (all_gather_input, group_size, group_name),
+                    {"out": all_gather_output},
+                )
+                wait_tensor = new_graph_call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    (all_gather_into_tensor_out,),
+                    {},
+                )
+                all_gather_output_reshaped = new_graph_call_function(
+                    torch.ops.aten.reshape.default,
+                    (wait_tensor, [group_size, -1]),
+                    {},
+                )
+                outs_flattened = [new_graph_call_function(
+                    torch.ops.aten.reshape.default,
+                    (n, [group_size, -1]),
+                    {},
+                ) for n in param_all_gather_outputs]
+                split_with_sizes_copy = new_graph_call_function(
+                    torch.ops.fsdp.split_with_sizes_copy.default,
+                    (all_gather_output_reshaped, inp_split_sizes),
+                    {
+                        "dim": 1, "out": outs_flattened
+                    },
+                )
+                outs = [new_graph_call_function(
+                    torch.ops.aten.reshape.default,
+                    (n, orig_shape),
+                    {},
+                ) for n, orig_shape in zip(outs_flattened, param_all_gather_outputs_shape_orig)]
+                assert len(orig_wait_nodes) == len(outs), f"len(orig_wait_nodes)={len(orig_wait_nodes)}, len(outs)={len(outs)}, orig_wait_nodes={orig_wait_nodes}, outs={outs}"
+                assert len(orig_wait_nodes) > 0
+                for orig_wait_node, out in zip(orig_wait_nodes, outs):
+                    env[orig_wait_node] = out
+                bucket_id_is_scheduled[bucket_id] = True
+        else:
+            continue
+    gm.graph = new_graph
+
+
+def bucket_fsdp_reduce_scatter_concat(gm: torch.fx.GraphModule, reduce_scatter_bucket_cap_mb: float) -> None:
+    def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default
+        )
+    
+    def is_wait_tensor(node: torch.fx.Node) -> bool:
+        return (
+            node.op == "call_function"
+            and node.target == torch.ops._c10d_functional.wait_tensor.default
+        )
+
+    def find_recursive_users_of_fx_node(
+        node, collected_node_set, criteria_cb=None
+    ):
+        if criteria_cb and criteria_cb(node):
+            return
+        for user_node in node.users:
+            if user_node in collected_node_set:
+                continue
+            collected_node_set.add(user_node)
+            find_recursive_users_of_fx_node(
+                user_node,
+                collected_node_set,
+                criteria_cb=criteria_cb,
+            )
+
+    node_list = list(gm.graph.nodes)
+
+    # Prerequisite: Check if there is any reduce_scatter node
+    found_reduce_scatter = False
+    for node in node_list:
+        if is_reduce_scatter_tensor(node):
+            found_reduce_scatter = True
+            break
+    if not found_reduce_scatter:
+        return
+
+    rs_nodes: List[torch.fx.Node] = []
+    rs_node_to_wait_node: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Step 1: Find all reduce_scatter nodes
+    for node in node_list:
+        if (
+            is_wait_tensor(node)
+            and is_reduce_scatter_tensor(node.args[0])
+        ):
+            rs_wait_node = node
+            rs_node = node.args[0]
+            rs_nodes.append(rs_node)
+            rs_node_to_wait_node[rs_node] = rs_wait_node
+    
+    # Step 2: Put reduce_scatter nodes into buckets
+    rs_buckets: List[List[torch.fx.Node]] = []
+    rs_node_to_bucket_id = {}
+    bucket_id_to_actual_bucket_size = {}
+    cur_bucket: List[torch.fx.Node] = []
+    cur_bucket_size_bytes: int = 0
+    cur_bucket_id: int = 0
+    # Convert MiB to bytes
+    reduce_scatter_bucket_size_bytes = int(reduce_scatter_bucket_cap_mb * 1024 * 1024)
+    for rs_node in rs_nodes:
+        assert is_reduce_scatter_tensor(rs_node)
+        rs_input = rs_node.args[0]
+        assert "val" in rs_input.meta
+        rs_input_size_bytes = rs_input.meta["val"].numel() * torch.finfo(rs_input.meta["val"].dtype).bits // 8 
+        if cur_bucket_size_bytes + rs_input_size_bytes > reduce_scatter_bucket_size_bytes and cur_bucket:
+            # Current bucket is full, create new bucket
+            rs_buckets.append(cur_bucket)
+            for n in cur_bucket:
+                rs_node_to_bucket_id[n] = cur_bucket_id
+            bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+            cur_bucket = []
+            cur_bucket_size_bytes = 0
+            cur_bucket_id += 1
+        cur_bucket_size_bytes += rs_input_size_bytes
+        cur_bucket.append(rs_node)
+    if cur_bucket:
+        # add remaining nodes in the last bucket
+        rs_buckets.append(cur_bucket)
+        for n in cur_bucket:
+            rs_node_to_bucket_id[n] = cur_bucket_id
+        bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
+
+    assert len(rs_buckets) > 0
+    # for bucket_id, rs_bucket in enumerate(rs_buckets):
+    #     log.warning(f"RS Bucket {bucket_id}: size: {bucket_id_to_actual_bucket_size[bucket_id]}, # RS nodes: {len(rs_bucket)}, RS nodes: {rs_bucket}")
+
+    # Step 3: Create new (bucketed) reduce_scatter nodes
+    order = {x: i for i, x in enumerate(node_list)}
+    rs_wait_nodes = list(rs_node_to_wait_node.values())
+    for n in rs_wait_nodes:
+        assert len(n.users) == 1, f"Expect only one user for {n}, but got {n.users}"
+    rs_and_its_recursive_users = OrderedSet(rs_nodes + rs_wait_nodes)
+    
+    bucket_id_to_bucketed_op_info = {}
+    bucket_id_is_scheduled = {}
+    for bucket_id, rs_bucket in enumerate(rs_buckets):
+        _, reduce_op, group_size, group_name = list(rs_node_to_wait_node.keys())[0].args
+        rs_input_nodes = []
+        wait_nodes = []
+        wait_node_recursive_users = OrderedSet()
+        for rs_node in rs_bucket:
+            assert rs_node in rs_node_to_wait_node and rs_node.args[1] == reduce_op and rs_node.args[2] == group_size and rs_node.args[3] == group_name
+            rs_input_nodes.append(rs_node.args[0])
+            wait_node = rs_node_to_wait_node[rs_node]
+            wait_nodes.append(wait_node)
+            find_recursive_users_of_fx_node(wait_node, wait_node_recursive_users)
+            rs_and_its_recursive_users |= wait_node_recursive_users
+        bucket_id_to_bucketed_op_info[bucket_id] = (rs_input_nodes, reduce_op, group_size, group_name, wait_nodes, wait_node_recursive_users)
+
+    new_graph: torch.fx.Graph = torch.fx.Graph()
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def env_lookup(x: torch.fx.Node, node_user: Union[torch.fx.Node, str]) -> torch.fx.Node:
+        assert x in env, f"Dependent node {x} not in env when creating downstream node {node_user}"
+        return env[x]
+
+    def node_copy(node: torch.fx.Node, arg_transform: Callable[[torch.fx.Node], "Argument"]) -> torch.fx.Node:
+        new_node = new_graph.node_copy(node, arg_transform=arg_transform)
+        env[node] = new_node
+        return new_node
+
+    def new_graph_call_function(
+        target: Callable[..., Any],
+        args: Optional[Tuple["Argument", ...]] = None,
+        kwargs: Optional[Dict[str, "Argument"]] = None,
+        type_expr: Optional[Any] = None,
+    ) -> torch.fx.Node:
+        from torch.utils._pytree import tree_map_only
+        new_node = new_graph.call_function(target, args, kwargs)
+        args_val = tree_map_only(
+            torch.fx.Node, lambda x: x.meta["val"], args
+        )
+        kwargs_val = tree_map_only(
+            torch.fx.Node, lambda x: x.meta["val"], kwargs
+        )
+        with V.fake_mode, enable_python_dispatcher():
+            new_fake_tensor = target(*args_val, **kwargs_val)
+        new_node.meta["val"] = new_fake_tensor
+        return new_node
+
+    for node in node_list:
+        if node not in rs_and_its_recursive_users:
+            # not reduce_scatter or its (recursive) users - schedule it normally
+            node_copy(node, lambda x: env_lookup(x, node))
+        elif node in rs_node_to_wait_node:
+            assert node in rs_node_to_bucket_id
+            bucket_id = rs_node_to_bucket_id[node]
+            if bucket_id not in bucket_id_is_scheduled and rs_buckets[bucket_id][-1] == node:
+                # If we are at the last node in the bucket, we can start to schedule the bucketed reduce_scatter node
+                rs_input_nodes, reduce_op, group_size, group_name, orig_wait_nodes, orig_wait_node_recursive_users = bucket_id_to_bucketed_op_info[bucket_id]
+                unsharded_grads = [
+                    node_copy(rs_input_node, lambda x: env_lookup(x, rs_input_node))
+                    for rs_input_node in rs_input_nodes
+                ]
+                reduce_dtype = unsharded_grads[0].meta["val"].dtype
+                # Only float32 and bfloat16 are supported for now.
+                # To support fp16, please see FSDP2 `_get_gradient_divide_factors`.
+                assert reduce_dtype in (torch.float32, torch.bfloat16), f"reduce_dtype {reduce_dtype} is not supported"
+                assert all(grad.meta["val"].dtype == reduce_dtype for grad in unsharded_grads)
+                device = unsharded_grads[0].meta["val"].device
+                rank = device.index
+                # TODO(yf225): need more work if we want to support non-dim-0 sharding (e.g. search for `shard_dim` in FSDP2 codebase)
+                shard_dim = 0
+
+                def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
+                    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+                    return cast(torch.Size, torch.Size([padded_dim0]) + tensor_size[1:])
+
+                padded_unsharded_sizes = tuple(
+                    _get_dim0_padded_size(grad.meta["val"].size(), group_size) for grad in unsharded_grads
+                )
+                reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
+                reduce_scatter_input = new_graph_call_function(
+                    torch.ops.aten.empty.memory_format,
+                    ([reduce_scatter_input_numel],),
+                    {
+                        "dtype": reduce_dtype,
+                        "device": device,
+                        "pin_memory": False,
+                    }
+                )
+                reduce_scatter_input_reshaped = new_graph_call_function(
+                    torch.ops.aten.reshape.default,
+                    (reduce_scatter_input, [group_size, -1]),
+                    {},
+                )
+                chunk_cat = new_graph_call_function(
+                    torch.ops.fsdp.chunk_cat.default,
+                    (unsharded_grads,),
+                    {
+                        "dim": 0,
+                        "num_chunks": group_size,
+                        "out": reduce_scatter_input_reshaped,
+                    }
+                )
+                reduce_scatter_tensor = new_graph_call_function(
+                    torch.ops._c10d_functional.reduce_scatter_tensor.default,
+                    (reduce_scatter_input, reduce_op, group_size, group_name),
+                    {},
+                )
+                wait_tensor = new_graph_call_function(
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    (reduce_scatter_tensor,),
+                    {},
+                )
+
+                def _chunk_with_empty(
+                    tensor: torch.Tensor, num_chunks: int, dim: int
+                ) -> List[torch.Tensor]:
+                    chunks = list(torch.chunk(tensor, num_chunks, dim=dim))
+                    while len(chunks) < num_chunks:
+                        chunks.append(chunks[0].new_empty(0))
+                    return chunks
+
+                reduce_output = wait_tensor
+                # View out and accumulate sharded gradients
+                new_sharded_grads = []
+                flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
+                for padded_unsharded_size, unsharded_grad in zip(
+                    padded_unsharded_sizes, unsharded_grads
+                ):
+                    # NOTE: we only care about the shape of tensors in `chunks`, so using meta tensor here
+                    chunks = _chunk_with_empty(torch.empty_like(unsharded_grad.meta["val"], device="meta"), group_size, dim=shard_dim)
+                    sharded_param = chunks[rank]
+                    sharded_size = sharded_param.size()
+                    contiguous_sharded_stride = torch._prims_common.make_contiguous_strides_for(sharded_size)
+                    # Assume even sharding for Shard(i), i > 0; otherwise would require
+                    # copy-out for contiguous strides
+                    new_sharded_grad = new_graph_call_function(
+                        torch.ops.aten.as_strided.default,
+                        (reduce_output,),
+                        {
+                            "size": sharded_size,
+                            "stride": contiguous_sharded_stride,
+                            "storage_offset": flat_grad_offset,
+                        },
+                    )
+                    new_sharded_grads.append(new_sharded_grad)
+                    padded_sharded_numel = padded_unsharded_size.numel() // group_size
+                    flat_grad_offset += padded_sharded_numel
+                assert len(orig_wait_nodes) == len(new_sharded_grads), f"len(orig_wait_nodes)={len(orig_wait_nodes)}, len(new_sharded_grads)={len(new_sharded_grads)}, orig_wait_nodes={orig_wait_nodes}, new_sharded_grads={new_sharded_grads}"
+                assert len(orig_wait_nodes) > 0
+                for orig_wait_node, new_sharded_grad in zip(orig_wait_nodes, new_sharded_grads):
+                    env[orig_wait_node] = new_sharded_grad
+                for user in sorted(orig_wait_node_recursive_users, key=lambda x: order[x]):
+                    if user.op != "output":
+                        node_copy(user, lambda x: env_lookup(x, user))
+                bucket_id_is_scheduled[bucket_id] = True
+        else:
+            continue
+    assert node_list[-1].op == "output"
+    output_node = node_list[-1]
+    node_copy(output_node, lambda x: env_lookup(x, output_node))
+    gm.graph = new_graph
 
 
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
