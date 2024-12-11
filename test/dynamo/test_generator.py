@@ -5,6 +5,7 @@ from collections import OrderedDict
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -197,19 +198,19 @@ class GraphModule(torch.nn.Module):
         next(ctx)
         y = fn(t, ctx)
         self.assertEqual(y, t + 2)
-        self.assertEqual(len(eager.graphs), 0)
-        if False:
+        # self.assertEqual(len(eager.graphs), 0)
+        if True:
             self.assertEqual(len(eager.graphs), 1)
             self.assertExpectedInline(
                 normalize_gm(eager.graphs[0].print_readable(False)),
                 """\
-    class GraphModule(torch.nn.Module):
-        def forward(self, L_t_: "f32[2]"):
-            l_t_ = L_t_
+class GraphModule(torch.nn.Module):
+    def forward(self, L_t_: "f32[2]"):
+        l_t_ = L_t_
 
-            add: "f32[2]" = l_t_ + 2;  l_t_ = None
-            return (add,)
-    """,
+        add: "f32[2]" = l_t_ + 2;  l_t_ = None
+        return (add,)
+""",
             )
 
     def test_generator_as_argument_2(self):
@@ -226,22 +227,59 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         ctx = whoo(t)
         next(ctx)
-        y = fn(t, ctx)
-        self.assertEqual(y, t + t.cos())
-        self.assertEqual(len(eager.graphs), 0)
-        if False:
-            self.assertEqual(len(eager.graphs), 1)
-            self.assertExpectedInline(
-                normalize_gm(eager.graphs[0].print_readable(False)),
-                """\
-    class GraphModule(torch.nn.Module):
-        def forward(self, L_t_: "f32[2]"):
-            l_t_ = L_t_
+        with self.assertRaisesRegex(
+            Unsupported, "Generator as graph argument is not supported"
+        ):
+            fn(t, ctx)
 
-            add: "f32[2]" = l_t_ + l_t_.cos();  l_t_ = None
-            return (add,)
-    """,
-            )
+    def test_generator_as_argument_3(self):
+        # The inline tracer needs to be kept in sync if an already advanced generator
+        # is given to a compiled function.
+        def whoo():
+            yield 1
+            yield 2
+            yield 3
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn(t, ctx):
+            return t + next(ctx)
+
+        t = torch.randn(2)
+        ctx = whoo()
+        y = fn(t, ctx)
+        self.assertEqual(y, t + 1)
+        self.assertEqual(len(eager.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_t_: "f32[2]"):
+        l_t_ = L_t_
+
+        add: "f32[2]" = l_t_ + 1;  l_t_ = None
+        return (add,)
+""",
+        )
+
+    def test_generator_as_argument_4(self):
+        def whoo(x):
+            yield x.sin()
+            yield x.cos()
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn(t, ctx):
+            return t + next(ctx)
+
+        t = torch.randn(2)
+        ctx = whoo(t)
+        with self.assertRaisesRegex(
+            Unsupported, "Generator as graph argument is not supported"
+        ):
+            fn(t, ctx)
 
     def test_send(self):
         def double():
@@ -275,6 +313,42 @@ class GraphModule(torch.nn.Module):
         def whoo(t):
             yield t + 1
             yield t + 2
+            yield t + 3
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return zip(range(3), whoo(t))
+
+        t = torch.randn(3)
+        y = fn(t)
+        expected = list(zip(range(3), whoo(t)))
+        self.assertEqual(expected, list(y))
+
+    def test_zip_generator_2(self):
+        def bar(t, i):
+            return t + i
+
+        def whoo(t):
+            yield bar(t, 1)
+            yield bar(t, 2)
+            yield bar(t, 3)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            return zip(range(3), whoo(t))
+
+        t = torch.randn(3)
+        y = fn(t)
+        expected = list(zip(range(3), whoo(t)))
+        self.assertEqual(expected, list(y))
+
+    def test_zip_subgenerator(self):
+        def subgen(t):
+            yield t + 1
+            yield t + 2
+
+        def whoo(t):
+            yield from subgen(t)
             yield t + 3
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -504,6 +578,37 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
         self.assertEqual(i, 3)
 
+    def test_subgenerator_with_side_effects(self):
+        i = 0
+
+        def subgen(t):
+            nonlocal i
+            i += 1
+            yield t
+            i += 1
+            yield t + 1
+
+        def whoo(t):
+            nonlocal i
+            yield from subgen(t)
+            i += 1
+            yield t + 2
+            i += 1
+            yield t + 3
+            i += 1
+            yield t + 4
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            return zip(range(3), gen)
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(i, 0)
+        self.assertEqual(list(y), [(0, t), (1, t + 1), (2, t + 2)])
+        self.assertEqual(i, 3)
+
     def test_generator_with_side_effects_graph_break(self):
         i = 0
 
@@ -549,6 +654,8 @@ class GeneratorTestsOldBehavior(GeneratorTests):
     expected_failures = [
         "test_generator_as_argument",
         "test_generator_as_argument_2",
+        "test_generator_as_argument_3",
+        "test_generator_as_argument_4",
         "test_infinite_generator",
         "test_infinite_generator_2",
         "test_infinite_generator_3",
@@ -557,6 +664,7 @@ class GeneratorTestsOldBehavior(GeneratorTests):
         "test_zip_infinite_generator",
         "test_generator_with_side_effects",
         "test_generator_with_side_effects_graph_break",
+        "test_subgenerator_with_side_effects",
         "test_send",
     ]
 
