@@ -3703,11 +3703,9 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     if (!PyDict_Check(obj)) {
-      // This should not be the reason for the guard failure.
-      // If this error is encountered, it probably means
-      // we did not convert FrameLocalsMapping properly.
-      throw std::runtime_error(
-          "FrameLocalsGuardAccessor check expected dict() input");
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, "FrameLocalsGuardAccessor check expected dict() input", 0);
     }
     PyObject* x = PyDict_GetItem(obj, _key); // borrowed ref
     if (x == nullptr) {

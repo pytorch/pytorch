@@ -30,7 +30,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
     return;
   }
 
-  auto update_fastlocals = [&](int i, PyObject* value) {
+  auto update_framelocals = [&](int i, PyObject* value) {
     _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
 
     if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
@@ -54,12 +54,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
   for (int i = 0; i < offset; i++) {
-    update_fastlocals(i, frame->localsplus[i]);
+    update_framelocals(i, frame->localsplus[i]);
   }
   // Get references to closure variables
   PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
-  for (int i = 0; i < co->co_nfreevars; ++i) {
-    update_fastlocals(offset + i, PyTuple_GET_ITEM(closure, i));
+  for (int i = 0; i < co->co_nfreevars; i++) {
+    update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
   }
 
   // NOTE no need to move the instruction pointer to after COPY_FREE_VARS
@@ -99,7 +99,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
   _framelocals.resize(co->co_nlocals + ncells + nfree, nullptr);
 
-  auto update_fastlocals = [&](int i, bool deref) {
+  auto update_framelocals = [&](int i, bool deref) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = frame->f_localsplus[i];
     if (deref) {
@@ -111,18 +111,18 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
   // locals
   for (int i = 0; i < nlocals; i++) {
-    update_fastlocals(i, false);
+    update_framelocals(i, false);
   }
 
   // cellvars
   for (int i = 0; i < ncells; i++) {
-    update_fastlocals(co->co_nlocals + i, true);
+    update_framelocals(co->co_nlocals + i, true);
   }
 
   // freevars
   if (co->co_flags & CO_OPTIMIZED) {
     for (int i = 0; i < nfree; i++) {
-      update_fastlocals(co->co_nlocals + ncells + i, true);
+      update_framelocals(co->co_nlocals + ncells + i, true);
     }
   }
 }
