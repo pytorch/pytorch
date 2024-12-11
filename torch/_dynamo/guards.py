@@ -443,7 +443,10 @@ def _ast_unparse(node: ast.AST) -> str:
     return ast.unparse(node).replace("\n", "")
 
 
-def strip_function_call(name):
+strip_function_call = torch._C._dynamo.strip_function_call
+
+
+def _strip_function_call(name):  # .781!
     """
     "___odict_getitem(a, 1)" => "a"
     "a.layers[slice(2)][0]._xyz" ==> "a"
