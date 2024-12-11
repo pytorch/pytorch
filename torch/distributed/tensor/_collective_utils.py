@@ -35,9 +35,11 @@ if not torch._running_with_deploy():
         group = _resolve_process_group(group_name)
         group_rank = get_group_rank(group, get_rank())
 
-        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)[
-            group_rank
-        ]
+        return (
+            torch.cat(stacked_list, dim=gather_dim)
+            .chunk(group_size, dim=shard_dim)[group_rank]
+            .contiguous()
+        )
 
 else:
     import warnings
@@ -62,7 +64,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
-        return out.contiguous() if not out.is_contiguous() else out
+        return out.contiguous()
 
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
@@ -195,8 +197,7 @@ def fill_empty_tensor_to_shards(
         size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
     ]
     tensor = shards[0].new_zeros(tensor_size)
-    for _ in range(num_empty_tensors):
-        shards.append(tensor)
+    shards.extend(tensor for _ in range(num_empty_tensors))
     return shards
 
 

@@ -25,7 +25,9 @@ jobs:
           stable-branch: viable/strict
           requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
-          rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
+          clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
+          clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
+          clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
 
       - name: Authenticate to AWS with OIDC
         uses: aws-actions/configure-aws-credentials@v4

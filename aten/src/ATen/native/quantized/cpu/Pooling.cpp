@@ -29,8 +29,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 DEFINE_DISPATCH(qmaxpool_3d_nthwc_stub);
@@ -478,6 +477,8 @@ void check_maxpool2d_params(
               "Expected 1d or 2d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 void check_maxpool3d_params(
@@ -490,6 +491,8 @@ void check_maxpool3d_params(
               "Expected no strides or 3d strides, got", stride.size());
   TORCH_CHECK(padding.size() == 3, "Expected 3d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 3, "Expected 1d or 3d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -759,5 +762,4 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

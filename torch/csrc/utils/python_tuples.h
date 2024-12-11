@@ -19,7 +19,7 @@ inline void THPUtils_packInt64Array(
 }
 
 inline PyObject* THPUtils_packInt64Array(size_t size, const int64_t* sizes) {
-  THPObjectPtr tuple(PyTuple_New(size));
+  THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(size)));
   if (!tuple)
     throw python_error();
   THPUtils_packInt64Array(tuple.get(), size, sizes);

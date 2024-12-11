@@ -10,7 +10,6 @@
 #include <torch/enum.h>
 #include <torch/fft.h>
 #include <torch/jit.h>
-#include <torch/linalg.h>
 #include <torch/mps.h>
 #include <torch/nested.h>
 #include <torch/nn.h>

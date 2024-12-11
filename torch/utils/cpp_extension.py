@@ -4,6 +4,7 @@ import glob
 import importlib
 import importlib.abc
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -994,7 +995,7 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
-    if IS_WINDOWS:
+    if IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -1400,10 +1401,10 @@ def check_compiler_is_gcc(compiler):
     env['LC_ALL'] = 'C'  # Don't localize output
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
+    except Exception:
         try:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
+        except Exception:
             return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -1990,10 +1991,12 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
+        ('Blackwell', '10.0+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a',
+                        '10.0']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -2039,7 +2042,10 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         if arch not in valid_arch_strings:
             raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
-            num = arch[0] + arch[2:].split("+")[0]
+            # Handle both single and double-digit architecture versions
+            version = arch.split('+')[0]  # Remove "+PTX" if present
+            major, minor = version.split('.')
+            num = f"{major}{minor}"
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
@@ -2074,7 +2080,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
+                  f'cu{torch.version.cuda.replace(".", "")}')
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
@@ -2108,6 +2114,15 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
     return None
 
 
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils
+        return distutils._msvccompiler._get_vc_env(vc_arch)
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler
+        return _msvccompiler._get_vc_env(vc_arch)
+
+
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
     command = ['ninja', '-v']
     num_workers = _get_num_workers(verbose)
@@ -2120,9 +2135,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
 
         plat_name = distutils.util.get_platform()
         plat_spec = PLAT_TO_VCVARS[plat_name]
-
-        vc_env = distutils._msvccompiler._get_vc_env(plat_spec)
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
+        vc_env = {k.upper(): v for k, v in _get_vc_env(plat_spec).items()}
         for k, v in env.items():
             uk = k.upper()
             if uk not in vc_env:
