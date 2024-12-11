@@ -43,6 +43,8 @@ LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 TRACE_ENV_VAR = "TORCH_TRACE"
 
+LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
+
 
 @dataclass
 class LogRegistry:
@@ -238,6 +240,7 @@ def set_logs(
     compiled_autograd_verbose: bool = False,
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
+    graph_region_expansion: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -414,6 +417,9 @@ def set_logs(
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
+        graph_region_expansion (:class:`bool`):
+            Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
+
 
     Example::
 
@@ -512,6 +518,7 @@ def set_logs(
         compiled_autograd_verbose=compiled_autograd_verbose,
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
+        graph_region_expansion=graph_region_expansion,
     )
 
 
@@ -972,12 +979,14 @@ def _init_logs(log_file_name=None):
     # initializing it until we actually need to log anything.  This is
     # important because JK initializes a C++ singleton, which will pork our
     # process if we subsequently fork.
-    handler = LazyTraceHandler(trace_dir_name)
+    global LOG_TRACE_HANDLER
+    if LOG_TRACE_HANDLER is None:
+        LOG_TRACE_HANDLER = LazyTraceHandler(trace_dir_name)
     # This log is ALWAYS at debug level.  We will additionally test if there
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
-    trace_log_handler = _track_handler(handler)
+    trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
 
@@ -1017,10 +1026,8 @@ class LazyTraceHandler(logging.StreamHandler):
 
     def emit(self, record):
         if self.stream is None:
-            ok = False
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
-                open_func = self._builtin_open
 
                 import torch.version as torch_version
 
@@ -1095,7 +1102,6 @@ class LazyString:
 structured_logging_overhead: Dict[str, float] = defaultdict(float)
 
 
-# Same principle as add_remote_cache_time_saved, but do it for structured logging
 def add_structured_logging_overhead(time_spent: float) -> None:
     global structured_logging_overhead
     key = None
@@ -1126,6 +1132,21 @@ def get_structured_logging_overhead() -> Optional[float]:
         return None
 
 
+def trace_structured_artifact(
+    name: str,  # this will go in metadata
+    encoding: str,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+) -> None:
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": name,
+            "encoding": encoding,
+        },
+        payload_fn=payload_fn,
+    )
+
+
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
@@ -1136,7 +1157,7 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-):
+) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
     too long (e.g., less than 1MB)
@@ -1197,6 +1218,35 @@ def trace_structured(
             # Convert to seconds from nanoseconds, add it to the frame compile total
             structured_logging_overhead_s = (time.time_ns() - start_time) / 1e9
             add_structured_logging_overhead(structured_logging_overhead_s)
+
+
+GET_DTRACE_STRUCTURED = False
+
+
+def dtrace_structured(
+    name: str,
+    # NB: metadata expected to be dict so adding more info is forward compatible
+    # Tuple[str, int] is a special case for string interning
+    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    *,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    suppress_context: bool = False,
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+):
+    """
+    For logging more detailed information used for debugging. This may result in
+    the program becoming slow.
+    """
+    if GET_DTRACE_STRUCTURED:
+        trace_structured(
+            name,
+            metadata_fn,
+            payload_fn=payload_fn,
+            suppress_context=suppress_context,
+            expect_trace_id=expect_trace_id,
+            record_logging_overhead=record_logging_overhead,
+        )
 
 
 import torch._guards

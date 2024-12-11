@@ -33,7 +33,7 @@ struct RpcMetricsConfig {
 
 // A registry for different implementations of RpcMetricsHandler. Classes
 // implementing the above interface should use this to register implementations.
-C10_DECLARE_REGISTRY(
+TORCH_DECLARE_REGISTRY(
     RpcMetricsHandlerRegistry,
     torch::distributed::rpc::RpcMetricsHandler);
 

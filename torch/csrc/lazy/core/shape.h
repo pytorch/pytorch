@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 
-C10_DECLARE_bool(ltc_enable_symbolic_shapes);
+TORCH_DECLARE_bool(ltc_enable_symbolic_shapes);
 
 namespace torch::lazy {
 
@@ -30,7 +30,7 @@ class TORCH_API Shape {
   }
 
   int64_t dim() const {
-    return sizes_.size();
+    return static_cast<int64_t>(sizes_.size());
   }
   c10::ArrayRef<int64_t> sizes() const {
     return sizes_;

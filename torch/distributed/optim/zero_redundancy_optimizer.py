@@ -781,15 +781,15 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 self.process_group, rank
             )
             for param_group in param_groups:
-                for param in param_group["params"]:
-                    handles.append(
-                        dist.broadcast(
-                            tensor=param.data,
-                            src=global_rank,
-                            group=self.process_group,
-                            async_op=True,
-                        )
+                handles.extend(
+                    dist.broadcast(
+                        tensor=param.data,
+                        src=global_rank,
+                        group=self.process_group,
+                        async_op=True,
                     )
+                    for param in param_group["params"]
+                )
         return handles
 
     def _sync_params(self):

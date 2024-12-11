@@ -108,7 +108,7 @@ struct TORCH_API Object {
     if (auto method = find_method(name)) {
       return *method;
     }
-    AT_ERROR("Method '", name, "' is not defined.");
+    TORCH_CHECK(false, "Method '", name, "' is not defined.");
   }
 
   const std::vector<Method> get_methods() const {
@@ -137,7 +137,7 @@ struct TORCH_API Object {
             prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
       }
     }
-    AT_ERROR("Property '", name, "' is not defined.");
+    TORCH_CHECK(false, "Property '", name, "' is not defined.");
   }
 
   const std::vector<Property> get_properties() const {
