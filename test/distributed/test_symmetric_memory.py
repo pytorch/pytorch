@@ -23,6 +23,7 @@ from torch.distributed._symmetric_memory import (
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    requires_multicast_support,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -57,17 +58,6 @@ def requires_cuda_p2p_access():
     )
 
 
-def requires_multicast_support():
-    has_multicast_support = (
-        torch.cuda.is_available()
-        and _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
-    )
-    return skip_but_pass_in_sandcastle_if(
-        not has_multicast_support,
-        "multicast support is not available",
-    )
-
-
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmetricMemoryTest(MultiProcessTestCase):
@@ -93,6 +83,11 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             store=store,
         )
         torch.manual_seed(42 + self.rank)
+
+    def test_has_multicast_support(self) -> None:
+        # validate that has_multicast_support() returns "false" instead of throwing
+        self.assertFalse(_SymmetricMemory.has_multicast_support(DeviceType.CPU, 0))
+        # NOTE: DeviceType.CUDA is implicitly tested through @requires_multicast_support
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -226,7 +221,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         # Sanity check that writes to buffer doesn't corrupt signal_pad
         t = symm_mem.empty(0, device="cuda")
-        symm_mem_hdl = symm_mem.rendezvous(t)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
         signal_pad.fill_(42)
         t.fill_(0)
@@ -240,7 +235,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self._init_process()
 
         t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t, group=dist.group.WORLD)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
             with self.assertRaises(RuntimeError):
@@ -261,7 +256,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self._init_process()
 
         t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t, group=dist.group.WORLD)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
             with self.assertRaises(RuntimeError):
@@ -285,7 +280,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         self._init_process()
 
         t = symm_mem.empty(1, device="cuda")
-        symm_mem_hdl = _SymmetricMemory.rendezvous(t, group=dist.group.WORLD)
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
             with self.assertRaises(RuntimeError):
@@ -311,23 +306,14 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
+        t = symm_mem.empty(64, device="cuda:0")
+        symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
-        t = _SymmetricMemory.empty_strided_p2p(
-            (64,),
-            (1,),
-            dtype=torch.uint32,
-            device=torch.device("cuda:0"),
-            group_name=group_name,
-        ).fill_(0)
-        symm_mem_handle = _SymmetricMemory.rendezvous(t)
-
-        self.assertEqual(symm_mem_handle.rank, self.rank)
-        self.assertEqual(symm_mem_handle.world_size, self.world_size)
+        self.assertEqual(symm_mem_hdl.rank, self.rank)
+        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
         for rank in range(self.world_size):
-            buf = symm_mem_handle.get_buffer(rank, (64,), torch.float32)
+            buf = symm_mem_hdl.get_buffer(rank, (64,), torch.float32)
             if rank == self.rank:
                 self.assertEqual(buf.data_ptr(), t.data_ptr())
             else:
@@ -759,7 +745,6 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
 
     @skip_if_lt_x_gpu(4)
@@ -773,13 +758,8 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        t = _SymmetricMemory.empty_strided_p2p(
-            size=(16384,),
-            stride=(1,),
-            dtype=dtype,
-            device=self.device,
-            group_name=group_name,
-        ).fill_(0)
+        t = symm_mem.empty((16384), dtype=dtype, device=self.device)
+        symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         self.assertTrue(t.data_ptr() % 16 == 0)
         self.assertTrue(align_bytes % t.element_size() == 0)
@@ -811,13 +791,10 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        inp = _SymmetricMemory.empty_strided_p2p(
-            size=(size_bytes,),
-            stride=(1,),
-            dtype=dtype,
-            device=self.device,
-            group_name=group_name,
+        inp = symm_mem.empty(
+            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
         ).normal_()
+        symm_mem.rendezvous(inp, group=group_name)
 
         res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
 
@@ -840,13 +817,10 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        inp = _SymmetricMemory.empty_strided_p2p(
-            size=(size_bytes,),
-            stride=(1,),
-            dtype=dtype,
-            device=self.device,
-            group_name=group_name,
+        inp = symm_mem.empty(
+            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
         ).normal_()
+        symm_mem.rendezvous(inp, group=group_name)
 
         res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
         self._verify_all_reduce_result(inp, res)
@@ -863,13 +837,8 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         self._init_process()
         group_name = dist.group.WORLD.group_name
 
-        t = _SymmetricMemory.empty_strided_p2p(
-            size=(16384,),
-            stride=(1,),
-            dtype=dtype,
-            device=self.device,
-            group_name=group_name,
-        ).fill_(0)
+        t = symm_mem.empty(16384, dtype=dtype, device=self.device).fill_(0)
+        symm_mem.rendezvous(t, group=group_name)
 
         self.assertTrue(t.data_ptr() % 16 == 0)
         self.assertTrue(align_bytes % t.element_size() == 0)

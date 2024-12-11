@@ -52,8 +52,7 @@ jobs:
           { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "${{ needs.get-test-label-type.outputs.label-type }}linux.gcp.a100" },
           { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "${{ needs.get-test-label-type.outputs.label-type }}linux.gcp.a100" },
         ]}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
     name: cuda12.1-py3.10-gcc9-sm80
@@ -64,5 +63,6 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit
