@@ -1902,6 +1902,10 @@ TORCH_IMPL_FUNC(scatter_add)
   if (index.numel() == 0) return;
 
   // See Note [Enabling Deterministic Operations]
+#if (defined(USE_ROCM))
+  //For MI300, sort implementation is faster, enforce this path
+    _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
+#else
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
   if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
@@ -1912,6 +1916,7 @@ TORCH_IMPL_FUNC(scatter_add)
       scatter_add_stub(self.device().type(), mut_out, dim, index, src);
     }
   }
+#endif
 }
 
 TORCH_IMPL_FUNC(scatter_reduce_two)
