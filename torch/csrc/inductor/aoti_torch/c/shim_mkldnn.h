@@ -10,6 +10,20 @@ extern "C" {
 #endif
 
 AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu_mkldnn_max_pool2d(
+    AtenTensorHandle input,
+    const int64_t* kernel_size,
+    int64_t kernel_len_,
+    const int64_t* stride,
+    int64_t stride_len_,
+    const int64_t* padding,
+    int64_t padding_len_,
+    const int64_t* dilation,
+    int64_t dilation_len_,
+    bool ceil_mode,
+    AtenTensorHandle* ret0);
+
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
