@@ -260,8 +260,6 @@ class _AutotuneCacheBundlerImpl:
             # store local cache values.
             return False
 
-        cache_dir = torch._inductor.runtime.runtime_utils.cache_dir()
-
         # Go through the entries we got from the cache and save them locally.
         time_saved_ns = 0
         for basename, data in entries.items():
