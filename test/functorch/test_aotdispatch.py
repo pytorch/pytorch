@@ -85,6 +85,7 @@ from torch.testing._internal.optests import (
 )
 from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 USE_TORCHVISION = False
@@ -6331,6 +6332,69 @@ metadata incorrectly.
         self.assertEqual(ref_out, out)
         out.sum().backward()
         self.assertEqual(ref_x.grad, x.grad)
+
+    def test_unwrap_subclass_parameters_with_unused_callable_arg_in_ctor(self):
+        def _test_callable(x):
+            return x
+
+        class SC(WrapperSubclass):
+            @staticmethod
+            def __new__(cls, a, fn, outer_size=None, outer_stride=None):
+                return WrapperSubclass.__new__(cls, a, outer_size, outer_stride)
+
+            def __init__(self, a, fn, outer_size=None, outer_stride=None):
+                self.a = a
+                self.fn = fn
+
+            def __tensor_flatten__(self):
+                return ["a"], [self.fn]
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+                a = inner_tensors["a"]
+                fn = meta[0]
+                return SC(a, fn, outer_size, outer_stride)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                args_a = pytree.tree_map_only(cls, lambda x: x.a, args)
+                kwargs_a = pytree.tree_map_only(cls, lambda x: x.a, kwargs)
+
+                out_a = func(*args_a, **kwargs_a)
+                out_a_flat, spec = pytree.tree_flatten(out_a)
+                out_flat = [
+                    cls(o_a, _test_callable) if isinstance(o_a, torch.Tensor) else o_a
+                    for o_a in out_a_flat
+                ]
+                out = pytree.tree_unflatten(out_flat, spec)
+                from torch._higher_order_ops.cond import cond_op
+
+                if func is cond_op:
+                    return out
+                else:
+                    return return_and_correct_aliasing(func, args, kwargs, out)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(SC(torch.ones(3, 4), _test_callable))
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = M()
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+
+        x = torch.randn(3, 4)
+        comp_fn = torch.compile(m, backend="aot_eager", fullgraph=True)
+        out = comp_fn(x)
 
     def test_rrelu_with_noise_mutation(self):
         def fn_functional(x):
