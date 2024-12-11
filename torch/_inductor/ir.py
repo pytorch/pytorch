@@ -4181,7 +4181,18 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):  # type: ignore[no-untyped-def]
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
         return deps
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -4214,6 +4225,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -4243,8 +4255,15 @@ class TritonTemplateBuffer(TemplateBuffer):
                 for buf in mutated_inputs
             ]
 
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
+
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
+
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -4322,8 +4341,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
     ) -> None:
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=None,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
@@ -6470,23 +6495,17 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
-            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
-            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
-            # fix would require changing all the uses of self.mutation_outputs.
+            # NOTE: [special handling of all_reduce_coalesced_'s return value]
+            # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
+            outputs = self.outputs if self.outputs else self.mutation_outputs
             return_type = returns[0].real_type
-            output_arguments = [
-                handle_single_output(
-                    return_type, [*self.outputs, *self.mutation_outputs]
-                )
-            ]
+            output_arguments = [handle_single_output(return_type, outputs)]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(
-                    returns, [*self.outputs, *self.mutation_outputs]
-                )
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -6541,7 +6560,8 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.op_overload,
                 exported_args,
-                [*self.outputs, *self.mutation_outputs],
+                # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
             self.codegen_comment(wrapper)
