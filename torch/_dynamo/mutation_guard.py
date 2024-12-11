@@ -6,7 +6,7 @@ import torch.nn
 from torch.nn import Module
 
 from . import config
-from .utils import ExactWeakKeyDictionary, is_lazy_module, nn_module_has_global_hooks
+from .utils import ExactWeakKeyDictionary, nn_module_has_global_hooks
 
 
 unpatched_nn_module_init = torch.nn.Module.__init__
@@ -99,8 +99,6 @@ def is_dynamic_nn_module(obj: Any, is_export: bool) -> bool:
         return True
     if hasattr(obj, "torchdynamo_force_dynamic"):
         return obj.torchdynamo_force_dynamic
-    if is_lazy_module(obj):
-        return False
     # For export, we will have to fix
     # 1) Input signature problem because params are lifted as inputs
     # 2) nn module stack info changes

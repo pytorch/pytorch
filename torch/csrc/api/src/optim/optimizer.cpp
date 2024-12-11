@@ -7,8 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 bool OptimizerParamGroup::has_options() const {
   return options_ != nullptr;
@@ -16,12 +15,12 @@ bool OptimizerParamGroup::has_options() const {
 
 OptimizerOptions& OptimizerParamGroup::options() {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 const OptimizerOptions& OptimizerParamGroup::options() const {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 void OptimizerParamGroup::set_options(
@@ -154,11 +153,11 @@ size_t Optimizer::size() const noexcept {
 }
 
 OptimizerOptions& Optimizer::defaults() noexcept {
-  return *defaults_.get();
+  return *defaults_;
 }
 
 const OptimizerOptions& Optimizer::defaults() const noexcept {
-  return *defaults_.get();
+  return *defaults_;
 }
 
 std::vector<OptimizerParamGroup>& Optimizer::param_groups() noexcept {
@@ -199,5 +198,4 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

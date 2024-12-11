@@ -93,8 +93,7 @@ void onednn_matmul_i8i8i32(
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static bool use_onednn_bf16_matmul() {
   return at::globalContext().userEnabledOnednn() && onednn_bf16_device_check();
@@ -513,7 +512,6 @@ void onednn_matmul_i8i8i32(
   }
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED

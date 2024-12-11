@@ -522,7 +522,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
-  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
+  [[nodiscard]] ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double) {
@@ -690,7 +690,7 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(c10::string_view v) : IValue(std::string(v)){};
+  IValue(std::string_view v) : IValue(std::string(v)){}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -699,7 +699,7 @@ struct TORCH_API IValue final {
   const std::string& toStringRef() const;
   std::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
-  c10::string_view toStringView() const;
+  std::string_view toStringView() const;
 
   // DoubleList
   bool isDoubleList() const;
@@ -1163,7 +1163,7 @@ struct TORCH_API IValue final {
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
   // is a particular type. Instead we want clients to use the `isX` methods when
-  // possible. If for perf. reasons you really, absolutely, must have a jump
+  // possible. If for performance reasons you really, absolutely, must have a jump
   // table, then we can revisit this.
   enum class Tag : uint32_t {
 #define DEFINE_TAG(x) x,
@@ -1352,8 +1352,14 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
     } u;
+    static_assert(std::is_trivially_copyable_v<TriviallyCopyablePayload>);
     at::Tensor as_tensor;
     Payload() : u() {}
+    Payload(const Payload&) = delete;
+    Payload(Payload&&) = delete;
+    Payload& operator=(const Payload&) = delete;
+    Payload& operator=(Payload&&) = delete;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~Payload() {}
   };
 
@@ -1530,12 +1536,12 @@ struct WeakOrStrongCompilationUnit {
       : strong_ptr_(std::nullopt), weak_ptr_(std::move(weak_cu)) {}
 
   std::shared_ptr<torch::jit::CompilationUnit> getStrongRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(strong_ptr_ != std::nullopt);
+    TORCH_INTERNAL_ASSERT(strong_ptr_.has_value());
     return *strong_ptr_;
   }
 
   std::weak_ptr<torch::jit::CompilationUnit> getWeakRefOrThrow() const {
-    TORCH_INTERNAL_ASSERT(weak_ptr_ != std::nullopt);
+    TORCH_INTERNAL_ASSERT(weak_ptr_.has_value());
     return *weak_ptr_;
   }
 

@@ -645,7 +645,7 @@ void nansum_kernel_impl(TensorIterator &iter) {
 // nansum on Float16 has poor accuracy with AVX2, and more so with AVX512.
 // So until it's fixed, it won't be dispatched with AVX512. GH issue 59415.
 // Besides, these kernels are slower with AVX512 than with AVX2.
-REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl)
+REGISTER_DISPATCH(sum_stub, &sum_kernel_impl)
 
 }  // namespace at::native

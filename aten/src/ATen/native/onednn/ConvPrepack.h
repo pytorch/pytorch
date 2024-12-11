@@ -6,11 +6,7 @@
 
 #if AT_ONEDNN_ENABLED()
 
-namespace at {
-namespace native {
-namespace onednn {
-namespace internal {
-namespace convolution {
+namespace at::native::onednn::internal::convolution {
 
 c10::intrusive_ptr<onednn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
@@ -40,10 +36,6 @@ Tensor run(ContextConv& context, const Tensor& input);
 
 void run(ContextConv& context, const Tensor& input, void* output);
 
-} // namespace convolution
-} // namespace internal
-} // namespace onednn
-} // namespace native
 } // namespace at
 
 #endif // AT_ONEDNN_ENABLED()

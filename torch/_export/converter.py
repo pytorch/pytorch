@@ -51,7 +51,7 @@ def _trace_and_get_graph_from_model(model, args):
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
-    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
+    trace_graph, torch_out, _inputs_states = torch.jit._get_trace_graph(
         model,
         args,
         strict=False,
@@ -161,7 +161,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
         return sym_size_int // scale
 
-    replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
 def is_valid_for_codegen(name):
@@ -833,9 +833,7 @@ class TS2FXGraphConverter:
         self._convert_prim_iterator(node)
 
     def _convert_prim_iterator(self, node: torch._C.Node):
-        output_list = []
-        for inp in node.inputs():
-            output_list.append(self.get_fx_value_by_ir_value(inp))
+        output_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
@@ -967,7 +965,7 @@ class TS2FXGraphConverter:
 
     def convert_aten_to(self, node: torch._C.Node):
         target = get_op_overload(node)
-        args, kwargs = self.get_args_kwargs(node, target._schema)
+        args, _kwargs = self.get_args_kwargs(node, target._schema)
 
         # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
         # coz aten.to + inplace_mutation_op pattern would trigger
@@ -1017,7 +1015,7 @@ class TS2FXGraphConverter:
         if target == torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
-            args, kwargs = self.get_args_kwargs(node, target._schema)
+            args, _kwargs = self.get_args_kwargs(node, target._schema)
             output_name = node.output().debugName()
             self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
         else:
@@ -1198,7 +1196,7 @@ class TS2FXGraphConverter:
         target = get_op_overload(node)
         schema = target._schema
 
-        args, kwargs = self.get_args_kwargs(node, schema)
+        args, _kwargs = self.get_args_kwargs(node, schema)
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
@@ -1376,7 +1374,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def convert_node(self, node):
         try:
             super().convert_node(node)
-        except Exception as e:
+        except Exception:
             self.unsupported_node_list.append(node)
 
 
@@ -1534,7 +1532,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
 
-        for i, spec in enumerate(ep.graph_signature.input_specs):
+        for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
                 assert isinstance(

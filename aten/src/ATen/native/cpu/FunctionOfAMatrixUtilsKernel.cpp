@@ -30,7 +30,7 @@ void _compute_linear_combination_cpu_kernel(
         auto* RESTRICT in_ptr = data[1];
         auto* RESTRICT coeff_ptr = data[2];
 
-        for (const auto elem C10_UNUSED : c10::irange(n)) {
+        for ([[maybe_unused]] const auto elem : c10::irange(n)) {
           auto* RESTRICT out_data = reinterpret_cast<scalar_t*>(out_ptr);
           auto* RESTRICT in_data = reinterpret_cast<scalar_t*>(in_ptr);
           using primitive_t = typename scalar_value_type<scalar_t>::type;
@@ -52,6 +52,6 @@ void _compute_linear_combination_cpu_kernel(
 
 }
 
-REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cpu_kernel);
+REGISTER_DISPATCH(_compute_linear_combination_stub, &_compute_linear_combination_cpu_kernel)
 
 } // namespace at::native

@@ -55,7 +55,7 @@ struct Dropout {
                 // We're exploiting the fact that floating point comparison is equivalent to integer
                 // comparison, since we're comparing unsigned integers whose top 8-bits are zero.
                 if (!encode_dropout_in_sign_bit
-                    && (std::is_same<T, cutlass::half_t>::value || std::is_same<T, cutlass::bfloat16_t>::value)) {
+                    && (std::is_same_v<T, cutlass::half_t> || std::is_same_v<T, cutlass::bfloat16_t>)) {
                     uint16_t rnd_16[16];
                     #pragma unroll
                     for (int i = 0; i < 16; i++) { rnd_16[i] = uint16_t(rnd_8[i]); }
