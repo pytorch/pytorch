@@ -96,6 +96,8 @@ C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
 
+C10_EXPORT bool has_allocator(c10::DeviceType device_type);
+
 C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);
 
