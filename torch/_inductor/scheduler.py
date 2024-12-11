@@ -428,12 +428,7 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-        fused_nodes = {
-            node.get_name()
-            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
-        }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
             self.ancestors
@@ -575,6 +570,16 @@ class BaseSchedulerNode:
     def get_read_write_buffers_sizes_impl(
         self, include_reads: bool, include_writes: bool
     ) -> int:
+        return sum(
+            self.get_read_write_buffer_accesses(
+                include_reads=include_reads, include_writes=include_writes
+            ).values(),
+            start=0,
+        )
+
+    def get_read_write_buffer_accesses(
+        self, include_reads: bool, include_writes: bool
+    ) -> Dict[str, int]:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -596,14 +601,16 @@ class BaseSchedulerNode:
 
         1. Numel in ranges multiplied by number of deps the buffer has
         2. The buffer size
+
+        Returns memory accesses per buffer.
         """
         if isinstance(self, NopKernelSchedulerNode):
-            return 0
+            return {}
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
-            return 0
+            return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -647,7 +654,8 @@ class BaseSchedulerNode:
             )
             writes = writes - removed_buffers
             reads = reads - removed_buffers
-        node_bytes = 0
+
+        buf_byte_accesses: Dict[str, int] = {}
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
@@ -689,9 +697,13 @@ class BaseSchedulerNode:
                         buf_accessed_elems, buf_elems
                     )
 
-            node_bytes += get_buf_bytes(buf)
+            buf_bytes = get_buf_bytes(buf)
+            if buf_name not in buf_byte_accesses:
+                buf_byte_accesses[buf_name] = buf_bytes
+            else:
+                buf_byte_accesses[buf_name] += buf_bytes
 
-        return node_bytes
+        return buf_byte_accesses
 
     @cache_on_self
     def get_estimated_runtime(self) -> float:
@@ -712,6 +724,10 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
+                log.info(e)
+                return 0
+            except TypeError as e:
+                # this happens when the collective is not of type ir._CollectiveKernel
                 log.info(e)
                 return 0
 
@@ -1901,12 +1917,11 @@ class Scheduler:
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
-        if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.decide_global_ordering_of_comms(
-                self.nodes,
-                self.name_to_buf,
-                self.name_to_fused_node,
-            )
+        self.nodes = comms.decide_global_ordering_of_comms(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+        )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -3088,7 +3103,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3218,8 +3233,34 @@ class Scheduler:
             # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
             # allowing gathers by allowing increasing write_bytes by small factor
             # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-            if read_bytes > (write_bytes * 1.1):
+
+            BYTES_THRESHOLD_MULTIPLIER = 1.1
+            if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
                 why("prologue fusion will not increase amount of bytes read in kernel")
+                return False
+
+            unaligned_reads = 0
+            unaligned_writes = 0
+
+            buf_accesses = node1.get_read_write_buffer_accesses(
+                include_reads=True, include_writes=True
+            )
+            for buf_name, mem in buf_accesses.items():
+                aligned = ir.is_aligned_realized_tensor(
+                    V.graph.get_buffer(buf_name), alignment=8
+                )
+                if aligned:
+                    continue
+
+                if buf_name in node1.get_buffer_names():
+                    unaligned_writes += mem
+                else:
+                    unaligned_reads += mem
+
+            if unaligned_reads >= (unaligned_writes * BYTES_THRESHOLD_MULTIPLIER):
+                why(
+                    "prologue fusion will not increase amount of unaligned bytes read in kernel"
+                )
                 return False
 
         if node1.is_template() and (
@@ -3629,7 +3670,7 @@ class Scheduler:
                         node.get_name(),
                         node.get_estimated_runtime(),
                     )
-                except Exception as e:
+                except Exception:
                     log.debug(
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
@@ -3763,7 +3804,7 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):

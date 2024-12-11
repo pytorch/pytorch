@@ -130,9 +130,10 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(tuple(output_args))
-        new_output.meta.update(output_node.meta)
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
+        new_output.name = output_node.name
+        new_output.meta.update(output_node.meta)
 
 
 def _get_codegen(
@@ -212,7 +213,6 @@ def _register_attrs_to_new_gm(
     constants: Dict[str, Any],
 ) -> None:
     non_persistent_buffers = set(graph_signature.non_persistent_buffers)
-    registered_params_buffers = set()
     for name in graph_signature.buffers:
         if name in non_persistent_buffers:
             persistent = False
@@ -223,8 +223,6 @@ def _register_attrs_to_new_gm(
         _assign_attr(
             value, new_gm, name, attr_kind=_AttrKind.BUFFER, persistent=persistent
         )
-        registered_params_buffers.add(name)
-
     for name in graph_signature.parameters:
         value = state_dict[name]
         _assign_attr(
@@ -233,20 +231,6 @@ def _register_attrs_to_new_gm(
             name,
             attr_kind=_AttrKind.PARAMETER,
         )
-        registered_params_buffers.add(name)
-
-    for name, val in state_dict.items():
-        if name in registered_params_buffers:
-            continue
-        if isinstance(val, torch.nn.Parameter):
-            _assign_attr(
-                val,
-                new_gm,
-                name,
-                attr_kind=_AttrKind.PARAMETER,
-            )
-        else:
-            _assign_attr(val, new_gm, name, attr_kind=_AttrKind.BUFFER, persistent=True)
 
     # Technically this doesn't account for the aliased multiple constants but
     # it is ok because we have a seperate pass later in the stack that populates
@@ -377,37 +361,6 @@ def _create_stateful_graph_module(
             buffer,
             attr_kind=_AttrKind.BUFFER,
             persistent=False,
-        )
-
-    # Original fx.graph_module constructor doesn't register duplicate parameters
-    # when copying from another graph module. So we do that here.
-    # TODO Remove this after we root cause https://github.com/pytorch/pytorch/issues/142176
-    registered_params = [
-        name for name, _ in stateful_gm.named_parameters(remove_duplicate=False)
-    ]
-    registered_buffers = [
-        name for name, _ in stateful_gm.named_buffers(remove_duplicate=False)
-    ]
-
-    for name, buffer in plain_graph_module.named_buffers(remove_duplicate=False):
-        if name in registered_buffers:
-            continue
-        _assign_attr(
-            buffer,
-            stateful_gm,
-            name,
-            attr_kind=_AttrKind.BUFFER,
-            persistent=True,
-        )
-
-    for name, parameter in plain_graph_module.named_parameters(remove_duplicate=False):
-        if name in registered_params:
-            continue
-        _assign_attr(
-            parameter,
-            stateful_gm,
-            name,
-            attr_kind=_AttrKind.PARAMETER,
         )
 
     return stateful_gm

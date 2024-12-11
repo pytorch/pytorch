@@ -8964,6 +8964,7 @@ def forward(self, x, b_t, y):
         ][0]
         self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
+    @testing.expectedFailureRetraceability
     def test_layer_sharing(self):
         N, C, H, W = 1, 2, 2, 3
 
@@ -9896,6 +9897,7 @@ def forward(self, x, y):
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(m1(*inps), unflattened(*inps)))
 
+    @testing.expectedFailureRetraceability
     def test_unused_aliases(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:

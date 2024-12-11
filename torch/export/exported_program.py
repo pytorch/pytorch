@@ -363,7 +363,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
     from torch.export._trace import (
         _export_to_aten_ir,
         _fakify_params_buffers,
-        _get_original_state_dict,
         _ignore_backend_decomps,
         _verify_nn_module_stack,
         _verify_placeholder_names,
@@ -380,6 +379,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
 
+        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
         from torch._functorch._aot_autograd.subclass_parametrization import (
             unwrap_tensor_subclass_parameters,
         )
@@ -393,6 +394,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # This is fine because run_decompositions is supposed to specialize to post-autograd
         # graph where the subclass desugaring is supposed to happen.
         unwrap_tensor_subclass_parameters(mod)
+        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
 
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
@@ -505,7 +507,23 @@ def _decompose_and_get_gm_with_new_signature_constants(
             gm, new_graph_signature
         )
 
-        return gm, new_graph_signature, _get_original_state_dict(mod)
+        # When we apply parameterixzation rule to unwrap
+        # subclasses, the state dict will now have different
+        # desugared parameters. We need to manually filter those
+        # and update the ep.state_dict. Ideally, we should just return
+        # the state dict of ep.module but ep.module only stores params
+        # buffers that participate in forward. If we undo this behaviour,
+        # it would break some downstream users.
+        for name, p in unwrapped_params.items():
+            if name not in wrapped_params:
+                ep.state_dict[name] = p
+
+        for name, p in wrapped_params.items():
+            assert name in ep.state_dict
+            if name not in unwrapped_params:
+                ep.state_dict.pop(name)
+
+        return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
