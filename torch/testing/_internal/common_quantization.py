@@ -4,6 +4,8 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+from functorch.experimental import control_flow
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1333,7 +1335,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         m = convert_pt2e(m)
         return m
 
-    def _get_pt2e_quantized_linear(self, is_per_channel=False, quantizer=None) -> torch.fx.GraphModule:
+    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1341,10 +1343,10 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
             def forward(self, x):
                 return self.linear(x)
-        if quantizer is None:
-            quantizer = XNNPACKQuantizer()
-            operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
-            quantizer.set_global(operator_config)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+        quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
         return self._quantize(m, quantizer, example_inputs)
@@ -2677,6 +2679,44 @@ class SparseNNModel(nn.Module):
         return out
 
 class TestHelperModules:
+    class ControlFlow(torch.nn.Module):
+        def forward(
+            self,
+            xs: torch.Tensor,
+            pred1: torch.Tensor,
+            pred2: torch.Tensor,
+            y: torch.Tensor,
+        ) -> torch.Tensor:
+
+            def true_nested(y: torch.Tensor) -> torch.Tensor:
+                y = y + y
+                y = torch.mm(y, y)
+                return y
+
+            def false_nested(y: torch.Tensor) -> torch.Tensor:
+                return torch.mm(y, y)
+
+            def true_fn(x: torch.Tensor, pred2: torch.Tensor) -> torch.Tensor:
+                z = control_flow.cond(pred2, true_nested, false_nested, [x])
+                return x + z
+
+            def false_fn(x: torch.Tensor, _) -> torch.Tensor:
+                return x.cos()
+
+            def map_fn(
+                x: torch.Tensor, pred1: torch.Tensor, pred2: torch.Tensor, y: torch.Tensor
+            ) -> torch.Tensor:
+                x = x.cos()
+                y = control_flow.cond(pred1, true_fn, false_fn, [y, pred2])
+                x = x + y
+                return x.sin()
+
+            y = torch.mm(y, y)
+            return control_flow.map(map_fn, xs, pred1, pred2, y)
+
+        def example_inputs(self):
+            return (torch.ones(2, 2), torch.tensor([False]), torch.tensor([False]), torch.ones(2, 2),)
+
     class Conv2dPropAnnotaton(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
