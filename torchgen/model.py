@@ -340,6 +340,17 @@ def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
     }
 
 
+def is_mps_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.MPS,
+        DispatchKey.QuantizedMPS,
+        DispatchKey.SparseMPS,
+        DispatchKey.SparseCsrMPS,
+        DispatchKey.NestedTensorMPS,
+        DispatchKey.AutogradMPS,
+    }
+
+
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
