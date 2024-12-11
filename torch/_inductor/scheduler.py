@@ -3643,7 +3643,7 @@ class Scheduler:
             import torch._dynamo.convert_frame
 
             stack = traceback.extract_stack()
-            seen = OrderedSet[tuple[str, int | None]]()
+            seen: OrderedSet[tuple[str, int | None]] = OrderedSet()
             for frame in reversed(stack):
                 # This is where maybe_cprofile is
                 if (
