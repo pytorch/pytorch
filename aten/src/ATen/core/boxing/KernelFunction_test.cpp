@@ -353,7 +353,7 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
 
-  auto [t1_out, t2_out] = func.call<
+  const auto [t1_out, t2_out] = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
   >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
