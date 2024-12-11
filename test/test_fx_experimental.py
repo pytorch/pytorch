@@ -893,6 +893,34 @@ terrible spacing
         x = torch.randn(50, 512)
         torch.testing.assert_close(split(x), traced(x))
 
+    def test_split_module_keep_original_order_and_noop_graph(self):
+        # Verify that split_module returns a similar no-op graph
+        # for `keep_original_order={True|False}`.
+        def fn(x):
+            return (x,)
+
+        g = make_fx(fn, tracing_mode="fake")(torch.randn(3, 3))
+
+        # g.graph.print_tabular()
+        # opcode       name    target    args       kwargs
+        # -----------  ------  --------  ---------  --------
+        # placeholder  x_1     x_1       ()         {}
+        # output       output  output    ((x_1,),)  {}
+
+        def _test_split_graph(split_gm):
+            # Verify that the split_gm has same structure as original
+            self.assertEqual(len(split_gm.graph.nodes), 2)
+
+            nodes = list(split_gm.graph.nodes)
+            self.assertEqual(nodes[0].op, "placeholder")
+            self.assertEqual(nodes[1].op, "output")
+
+        # `keep_original_order=False`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=False))
+
+        # `keep_original_order=True`
+        _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=True))
+
     def test_normalize_binary_operators(self):
         ops_to_test = {
             torch.add,
