@@ -807,13 +807,19 @@ from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 from ..codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 
 
-def check_cpu_vectorization_ability():
+def check_cpu_supported():
     import os
+    import sys
 
     requires_avx2_on_cpu = (
         torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
     )
-    return requires_avx2_on_cpu
+    supported = (
+        requires_avx2_on_cpu
+        and not torch.xpu.is_available()
+        and not sys.platform == "darwin"
+    )
+    return supported
 
 
 def lower_cpu(
@@ -847,9 +853,9 @@ def lower_cpu(
         raise NotImplementedError(
             "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
         )
-    if not check_cpu_vectorization_ability():
+    if not check_cpu_supported():
         raise NotImplementedError(
-            "torch.compile on CPU currently requires at least `avx2` support."
+            "torch.compile on current platform is not supported for CPU."
         )
 
     fake_buffers: List[Buffer] = []  # noqa: F821
@@ -2142,7 +2148,6 @@ def flex_attention_backward(*args, **kwargs):
     assert V.graph.sizevars.evaluate_expr(
         sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    B = Bq
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
