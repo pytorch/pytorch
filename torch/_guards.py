@@ -28,6 +28,7 @@ from typing import (
 )
 
 from torch.utils import _pytree as pytree
+from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -169,6 +170,7 @@ class ShapeGuard(NamedTuple):
     sloc: SLoc
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to
