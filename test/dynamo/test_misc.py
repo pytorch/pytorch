@@ -89,8 +89,7 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.logging_utils import logs_to_string
 
 
-HAS_OPTREE = python_pytree._cxx_pytree_exists
-if HAS_OPTREE:
+if python_pytree._cxx_pytree_dynamo_traceable:
     import torch.utils._cxx_pytree as cxx_pytree
 else:
     cxx_pytree = None
@@ -293,7 +292,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
-    @unittest.skipIf(not HAS_OPTREE, "missing optree package")
+    @unittest.skipIf(not python_pytree._cxx_pytree_exists, "missing optree package")
     def test_optree_graph_break_message(self):
         import optree
 
@@ -1730,6 +1729,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, packed)
         self.assertTrue(same(ref, res))
 
+    def test_namedtuple_with_custom_getitem(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(my_tuple):
+            return my_tuple.a + 1
+
+        class MyTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+            def __getitem__(self, index):
+                return MyTuple(a[index], b[index])
+
+        a = torch.randn(2)
+        b = torch.randn(2)
+
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
+        # Test guard evaluation in the second call
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
@@ -2993,6 +3014,45 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Different order recompiles
         self.assertEqual(fn(args2, x), opt_fn(args2, x))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_mutable_mapping_multiple_inheritance(self):
+        class MyWeirdDict(collections.abc.MutableMapping, torch.nn.Module):
+            def __init__(self, **kwargs):
+                super().__init__()
+                self._items = kwargs
+
+            def keys(self):
+                return self._items.keys()
+
+            def __getitem__(self, item):
+                return self._items[item]
+
+            def __setitem__(self, key, value):
+                self._items[key] = value
+
+            def __delitem__(self, item):
+                del self._items[item]
+
+            def __len__(self):
+                return len(self._items)
+
+            def __iter__(self):
+                yield from self._items
+
+            def __hash__(self):
+                return hash(id(self))
+
+            def items(self):
+                for k, v in self._items.items():
+                    yield (k, v)
+
+        @torch.compile(fullgraph=True)
+        def to_weird_dict(td):
+            return MyWeirdDict(**td)
+
+        d = MyWeirdDict(a=1, b=2, c=3)
+        res = to_weird_dict(d)
+        self.assertEqual(tuple(d.items()), tuple(res.items()))
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
@@ -5712,154 +5772,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
-    def test_nonzero_static(self):
-        # invalid size
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
-        ):
-            torch.nonzero_static(torch.tensor([8]), size=-2)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
-        ):
-            torch.nonzero_static(torch.tensor([8]), size=-2, out=torch.tensor(0))
-
-        # nonzero_static.out: out dtype mismatch
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((static_size, input_tensor.dim()), dtype=torch.float)
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: Expected out tensor to have scalar type Long"
-        ):
-            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor)
-
-        # nonzero_static.out: out resize (shrink)
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
-                torch.tensor([0]),
-            )
-        )
-        self.assertTrue(
-            same(
-                out_tensor,
-                torch.tensor([0]),
-            )
-        )
-
-        # nonzero_static.out: out resize (enlarge)
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((0), dtype=torch.long)
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
-                torch.tensor([0]),
-            )
-        )
-        self.assertTrue(
-            same(
-                out_tensor,
-                torch.tensor([0]),
-            )
-        )
-
-        # 0 rank
-        input_tensor = torch.tensor(6)
-        static_size = 2
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
-            )
-        )
-
-        # 0 size
-        input_tensor = torch.tensor([[[1]]])
-        static_size = 0
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
-            )
-        )
-
-        # 1D input
-        input_tensor = torch.tensor([0, 8])
-        static_size = 1
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.tensor([1]),
-            )
-        )
-
-        input_tensor = torch.tensor([8, 0])
-        static_size = 2
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.tensor([[0], [-1]]),  # padded with default fill_value "-1"
-            )
-        )
-
-        # 2D input
-        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
-        static_size = 5
-        fill_value = -100
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor, size=static_size, fill_value=fill_value
-                ),
-                torch.tensor(
-                    [
-                        [0, 0],
-                        [1, 0],
-                        [1, 1],
-                        [fill_value, fill_value],
-                        [fill_value, fill_value],
-                    ]
-                ),
-            )
-        )
-        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
-        static_size = 2
-        fill_value = -100
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor, size=static_size, fill_value=fill_value
-                ),
-                torch.tensor([[0, 0], [1, 0]]),
-            )
-        )
-
-        # 3D input
-        input_tensor = torch.tensor([[[0, 0], [0, -3]], [[0, 0], [5, 0]]])
-        static_size = 4
-        fill_value = -999
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor,
-                    size=static_size,
-                    fill_value=fill_value,
-                ),
-                torch.tensor(
-                    [
-                        [0, 1, 1],
-                        [1, 1, 0],
-                        [fill_value, fill_value, fill_value],
-                        [fill_value, fill_value, fill_value],
-                    ]
-                ),
-            )
-        )
-
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
 
@@ -6090,6 +6002,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(backend="eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    def test_enum_method(self):
+        class Bool(enum.IntEnum):
+            TRUE = enum.auto()
+            FALSE = enum.auto()
+
+            def is_true(self, x):
+                # Return `x + 1` to make sure Dynamo actually traced into this,
+                # rather than invoking it.
+                return self == Bool.TRUE, x + 1
+
+        def f(x, e):
+            cond, y = e.is_true(x)
+            if cond:
+                return y + 2
+            else:
+                return y - 2
+
+        opt_f = torch.compile(fullgraph=True)(f)
+        args = [torch.zeros(1), Bool.TRUE]
+        ref_out = f(*args)
+        opt_out = opt_f(*args)
+        self.assertTrue(same(ref_out, opt_out))
 
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
@@ -12098,6 +12033,48 @@ fn
         res = run(torch.ones(1), s, foo)
         self.assertTrue(same(res[0], torch.ones(1) + 1))
         self.assertEqual(res[1], 1)
+
+    def test_ne_operator_with_custom_eq(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def run(x):
+            f1 = Foo(0)
+            f2 = Foo(0)
+            # `x + 1` prevents Dynamo from skipping this frame.
+            return x + 1, f1 != f2
+
+        _, ne = run(torch.ones(1))
+        self.assertFalse(ne)
+
+    def test_ne_operator_with_custom_graphbreak_eq(self):
+        counters.clear()
+
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                # This allows us to check that Dynamo actually traced into the
+                # custom eq method.
+                torch._dynamo.graph_break()
+                return self.x == other.x
+
+        @torch.compile(backend="eager")
+        def run(x):
+            f1 = Foo(0)
+            f2 = Foo(0)
+            # `x + 1` prevents Dynamo from skipping this frame.
+            return x + 1, f1 != f2
+
+        _, ne = run(torch.ones(1))
+        self.assertFalse(ne)
+        self.assertEqual(len(counters["graph_break"]), 1)
 
 
 class TestTracer(JitTestCase):
