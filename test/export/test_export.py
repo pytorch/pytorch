@@ -1112,7 +1112,9 @@ graph():
         class Problem1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.blocks = torch.nn.ModuleDict({f"{i}": Block(64, 64) for i in range(5)})
+                self.blocks = torch.nn.ModuleDict(
+                    {f"{i}": Block(64, 64) for i in range(5)}
+                )
 
             def forward(self, x):
                 for k, m in self.blocks.items():
