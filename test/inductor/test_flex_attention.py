@@ -3047,14 +3047,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_dynamic_shapes_bug_dynamic_batch(self):
-        # Define attention mask function inline
         def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
             padding_condition = (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
             return padding_condition
 
         counter = CompileCounterWithBackend("inductor")
 
-        # Define model inline
         class Model(torch.nn.Module):
             def __init__(self, dim=1024):
                 super().__init__()
@@ -3091,7 +3089,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 return x
 
-        # Create test inputs
         model = Model(128).cuda()
         B, F, T = 16, 256, 12
         for _ in range(5):
@@ -3099,7 +3096,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             l = torch.randint(0, T, (B,), device="cuda")
             model(x, l)
 
-        # Assert we only got one graph
         assert (
             counter.frame_count == 1
         ), f"Expected 1 graph, but got {counter.frame_count} graphs"
