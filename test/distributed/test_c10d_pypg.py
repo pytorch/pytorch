@@ -156,6 +156,15 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
             pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True
         )
 
+    def test_ddp_no_init_sync(self):
+        pg = self._get_process_group()
+
+        model = nn.Sequential(nn.Linear(2, 2), nn.ReLU())
+        model = DDP(model, process_group=pg, init_sync=False)
+
+        self.assertEqual(pg.wait_count, 0)
+        self.assertEqual(pg.get_future_count, 0)
+
 
 class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiThreadedTestCase):
     @property
