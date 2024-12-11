@@ -238,6 +238,7 @@ auto PyNode::defer_to_dynamo(
       "indices should already be set by compiled_args, called before apply_with_saved");
   TORCH_INTERNAL_ASSERT(!_backward_state_idx.has_value());
   THPObjectPtr r(PyObject_CallMethod(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       compiler.value(),
       "proxy_call_backward",
       "OOOi",

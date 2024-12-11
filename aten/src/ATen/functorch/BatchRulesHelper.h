@@ -30,7 +30,7 @@ TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
 TORCH_API Tensor reshape_dim_outof_symint(int64_t src, const c10::SymInt& size1, const Tensor& x);
 
-Tensor moveBatchDimToFront(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
+Tensor moveBatchDimToFront(Tensor tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 int64_t numelWithoutBatchDim(const Tensor& tensor, std::optional<int64_t> maybe_batch_dim);
 std::optional<int64_t> valIfNonempty(std::optional<int64_t> maybe_empty, int64_t new_val);

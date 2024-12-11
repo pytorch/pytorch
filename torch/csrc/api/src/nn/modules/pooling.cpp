@@ -293,6 +293,7 @@ void FractionalMaxPool2dImpl::reset() {
   }
   if (options.output_ratio().has_value()) {
     at::ArrayRef<double> output_ratio =
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
           output_ratio[1] < 1)) {
@@ -351,6 +352,7 @@ void FractionalMaxPool3dImpl::reset() {
   }
   if (options.output_ratio().has_value()) {
     at::ArrayRef<double> output_ratio =
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         at::ArrayRef<double>(options.output_ratio().value());
     if (!(0 < output_ratio[0] && output_ratio[0] < 1 && 0 < output_ratio[1] &&
           output_ratio[1] < 1 && 0 < output_ratio[2] && output_ratio[2] < 1)) {
