@@ -39,10 +39,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import (
-    can_codegen_without_upcasts,
-    prologue_preserves_zero_mask,
-)
+from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -1437,15 +1434,9 @@ class SIMDScheduling(BaseScheduling):
                 if prologue_group := buf_name_to_prologue_group.get(
                     buffer.get_name(), []
                 ):
-                    can_codegen_without_upcast = all(
-                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
-                    )
-
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
+                    with config.patch("triton.codegen_upcast_to_fp32", False):
                         with kernel.set_subgraph_body(subgraph_name):
                             for prologue_node in prologue_group:
                                 if (
