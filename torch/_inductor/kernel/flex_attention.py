@@ -640,8 +640,8 @@ def _use_flex_decoding(query, kernel_options):
         sympy.Lt(query.get_size()[-2], 128)
     )
     V.graph.sizevars.statically_known_equals
-    static_batch = not isinstance(query.get_size()[0], Expr)
-    static_num_heads = not isinstance(query.get_size()[1], Expr)
+    static_batch = isinstance(query.get_size()[0], int)
+    static_num_heads = isinstance(query.get_size()[1], int)
     return not force_flex and short_query_length and static_batch and static_num_heads
 
 
@@ -2053,7 +2053,6 @@ def flex_attention_backward(*args, **kwargs):
         "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
     )
 
-    # Should this just override the kernel options in the forward so we dont need to do it twice?
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
