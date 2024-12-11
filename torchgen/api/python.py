@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
@@ -18,6 +18,10 @@ from torchgen.model import (
     Type,
     Variant,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -551,9 +555,9 @@ class PythonSignatureGroup:
 
         # Out overloads in C++ don't have TensorOptions arguments,
         # so take these from the functional variant
-        signature_kwargs[
-            "tensor_options_args"
-        ] = functional.signature.tensor_options_args
+        signature_kwargs["tensor_options_args"] = (
+            functional.signature.tensor_options_args
+        )
 
         return PythonSignatureGroup(
             signature=type(out.signature)(**signature_kwargs),
@@ -673,7 +677,6 @@ def argument_type_str(
             BaseTy.MemoryFormat,
             BaseTy.Dimname,
             BaseTy.Stream,
-            BaseTy.ConstQuantizerPtr,
             BaseTy.SymInt,
         ]:
             # These python schema type names line up with their function schema names
@@ -952,14 +955,13 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "Union[_int, _size]" if t.size is not None else "_size"
         elif t.is_tensor_like():
             # TODO: this doesn't seem right...
-            # Tensor?[] currently translates to Optional[Union[Tuple[Tensor, ...], List[Tensor]]]
-            # It should probably translate to   Union[Tuple[Optional[Tensor], ...], List[Optional[Tensor]]]
-            if isinstance(t.elem, OptionalType):
-                add_optional = True
+            # Tensor?[] currently translates to Optional[Union[tuple[Tensor, ...], list[Tensor]]]
+            # It should probably translate to   Union[tuple[Optional[Tensor], ...], list[Optional[Tensor]]]
+            add_optional = True
             ret = (
-                "Union[Tensor, Tuple[Tensor, ...], List[Tensor]]"
+                "Union[Tensor, tuple[Tensor, ...], list[Tensor]]"
                 if t.size is not None
-                else "Union[Tuple[Tensor, ...], List[Tensor]]"
+                else "Union[tuple[Tensor, ...], list[Tensor]]"
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
@@ -991,13 +993,13 @@ def return_type_str_pyi(t: Type) -> str:
         if t.name == BaseTy.Device:
             return "_device"
         elif t.name == BaseTy.Dimname:
-            ret = "Optional[str]"
+            return "Optional[str]"
         else:
             return argument_type_str_pyi(t)
 
     if isinstance(t, ListType):
         inner = return_type_str_pyi(t.elem)
-        return f"Tuple[{inner}, ...]"
+        return f"tuple[{inner}, ...]"
 
     return argument_type_str_pyi(t)
 
@@ -1010,7 +1012,7 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         # These types are structseq objects which act like named NamedTuples, but
         # the constructor acts like the constructor of tuple. Using typing.NamedTuple
         # does not allow us to override __init__.
-        seq_type = f"Tuple[{', '.join(python_returns)}]"
+        seq_type = f"tuple[{', '.join(python_returns)}]"
         structseq_def_lines = [
             f"class {structseq_name}({seq_type}):",
         ]
@@ -1034,12 +1036,12 @@ def returns_structseq_pyi(signature: PythonSignature) -> tuple[str, str] | None:
         structseq_def = "\n".join(structseq_def_lines)
         # Example:
         # structseq_def = (
-        #     "class max(Tuple[Tensor, Tensor]):\n"
+        #     "class max(tuple[Tensor, Tensor]):\n"
         #     "    @property\n"
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __new__(cls, sequence: Tuple[Tensor, Tensor]): ...\n"
+        #     "    def __new__(cls, sequence: tuple[Tensor, Tensor]): ...\n"
         #     "    n_fields: _int = 2",
         #     "    n_sequeunce_fields: _int = 2",
         #     "    n_unnamed_fields: _int = 0",
@@ -1056,7 +1058,7 @@ def returns_str_pyi(signature: PythonSignature) -> str:
 
     python_returns = [return_type_str_pyi(r.type) for r in signature.returns.returns]
     if len(python_returns) > 1:
-        return "Tuple[" + ", ".join(python_returns) + "]"
+        return "tuple[" + ", ".join(python_returns) + "]"
     if len(python_returns) == 1:
         return python_returns[0]
     return "None"
