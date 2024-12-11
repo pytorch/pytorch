@@ -68,14 +68,22 @@ from .utils import (
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
+    register_op_dtype_propagation_rules,
     sympy_product,
     use_scatter_fallback,
 )
 from .virtualized import ops, V
 
 
+# TODO(jansel): we should implement decomps or lowerings for these
+# https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+    "aten::index_add",
+}
+
 log = logging.getLogger(__name__)
-lowerings: Dict[Callable[..., Any], Callable[..., Any]] = {}
+lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -763,6 +771,14 @@ def register_pointwise(
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
+        register_op_dtype_propagation_rules(
+            "libdevice_" + name, type_promotion_kind, override_return_dtype
+        )
+
+    register_op_dtype_propagation_rules(
+        name, type_promotion_kind, override_return_dtype
+    )
+
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -920,7 +936,10 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (d in dims and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1))):
+        if not (
+            d in dims
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+        ):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -1539,6 +1558,9 @@ def cat(inputs, dim=0):
 
         return False
 
+    if config.force_pointwise_cat:
+        return pointwise_cat(inputs, dim)
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
     if cpu_device:
@@ -1854,8 +1876,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1865,6 +1889,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -2308,13 +2333,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
-
-
-# TODO(jansel): we should implement decomps or lowerings for these
-# https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-}
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -3018,7 +3036,7 @@ def new_constant(fill_value):
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        return _full(fill_value, decode_device(device), dtype, size)
 
     return _new_constant
 
@@ -3030,7 +3048,12 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        None,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
@@ -3044,6 +3067,7 @@ def empty_strided(
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
+    device = decode_device(device)
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
     pointwise.realize()
     buffer = pointwise.data.data
@@ -3074,7 +3098,12 @@ def new_empty_strided(
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        stride,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
