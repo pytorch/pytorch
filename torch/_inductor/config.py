@@ -141,8 +141,11 @@ memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 # codegen benchmark harness
 benchmark_harness = True
 
-# fuse pointwise into templates
+# fuse pointwise into templates epilogues
 epilogue_fusion = True
+
+# fuse pointwise into template prologues
+prologue_fusion = False
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -470,6 +473,9 @@ max_fusion_size = 64
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
 
+# force concat to be generated as a pointwise op with masked loads
+force_pointwise_cat = False
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -764,6 +770,15 @@ check_stack_no_cycles_TESTING_ONLY: bool = False
 # When True, complex_memory_overlap always reports True
 always_complex_memory_overlap_TESTING_ONLY: bool = False
 
+# enable linear binary folding
+enable_linear_binary_folding = (
+    os.environ.get("TORCHINDUCTOR_ENABLE_LINEAR_BINARY_FOLDING", "0") == "1"
+)
+
+
+# Adds NVTX annotations aroung training phases
+annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -1018,6 +1033,12 @@ class triton:
 
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
+
+    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
+    # with a verison of triton new enough to support TMA
+    enable_persistent_tma_matmul = (
+        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
+    )
 
 
 class aot_inductor:
@@ -1341,7 +1362,9 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class test_configs:
-    force_extern_kernel_in_multi_template = False
+    force_extern_kernel_in_multi_template: bool = False
+
+    max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
 
