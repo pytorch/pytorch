@@ -1060,7 +1060,7 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     return example_inputs, example_kwarg_inputs
 
 
-def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
+def _get_original_state_dict(mod: torch.nn.Module) -> Dict[str, Any]:
     # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
     # but the running module state so we can always match by id() the entries here with the graph inputs
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -1071,6 +1071,10 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
 
+    return original_state_dict
+
+
+def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -1082,7 +1086,7 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if isinstance(dynamic_shapes, torch.export.ShapesCollection):
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, original_state_dict, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes
 
 
 def _get_module_call_graph(
@@ -1816,9 +1820,10 @@ def _export_for_training(
         args,
         kwargs,
         orig_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     export_func = (
         functools.partial(
@@ -1980,9 +1985,10 @@ def _export(
         args,
         kwargs,
         original_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
