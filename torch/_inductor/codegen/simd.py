@@ -39,6 +39,10 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
+from ..analyze_preserves_zero_mask import (
+    can_codegen_without_upcasts,
+    prologue_preserves_zero_mask,
+)
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -522,7 +526,7 @@ class SIMDKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -913,7 +917,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
@@ -1207,7 +1211,7 @@ class SIMDScheduling(BaseScheduling):
             )
             return bool(not_ready_yet_nodes)
 
-        for index, node in enumerate(nodes):
+        for node in nodes:
             if node in done:
                 continue
             done.add(node)
@@ -1394,7 +1398,7 @@ class SIMDScheduling(BaseScheduling):
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
-        _, (numel, rnumel) = template_node.group
+        _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
 
@@ -1433,11 +1437,26 @@ class SIMDScheduling(BaseScheduling):
                 if prologue_group := buf_name_to_prologue_group.get(
                     buffer.get_name(), []
                 ):
+                    can_codegen_without_upcast = all(
+                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
+                    )
+
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch("triton.codegen_upcast_to_fp32", False):
+                    with config.patch(
+                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
+                    ):
                         with kernel.set_subgraph_body(subgraph_name):
                             for prologue_node in prologue_group:
+                                if (
+                                    len(prologue_node.get_buffer_names()) == 1
+                                    and len(prologue_group) == 1
+                                ):
+                                    if prologue_preserves_zero_mask(prologue_node):
+                                        kernel.prologue_fused_inputs_preserve_zero |= (
+                                            prologue_node.get_buffer_names()
+                                        )
+
                                 prologue_node.codegen(
                                     kernel.split_and_set_ranges(
                                         prologue_node.get_ranges()
@@ -1700,13 +1719,13 @@ class SIMDScheduling(BaseScheduling):
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 a0, a1 = ranked_tilings[0]
-                b0, b1 = ranked_tilings[i]
+                _b0, b1 = ranked_tilings[i]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     continue
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     a0, a1 = ranked_tilings[i]
-                    b0, b1 = ranked_tilings[0]
+                    _b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     tiling = (a0, FloorDiv(a1, b1), b1)
