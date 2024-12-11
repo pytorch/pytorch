@@ -54,7 +54,7 @@ class CachedTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         return f"CachedTensor({repr(self.metadata[self.source_field])})"
 
-    def __getattr__(self, name: str) -> torch.Tensor:
+    def __getattr__(self, name: str) -> Optional[torch.Tensor]:
         if name not in self.all_fields:
             raise AttributeError(
                 f"{type(self).__name__} object has no attribute '{name}'"
@@ -72,7 +72,11 @@ class CachedTensor(torch.Tensor):
     def __tensor_unflatten__(
         inner_tensors: Dict, meta: Dict, outer_size: Any, outer_stride: Any
     ) -> "CachedTensor":
-        return CachedTensor(inner_tensors, source_field=meta["source_field"], all_fields=meta["all_fields"])
+        return CachedTensor(
+            inner_tensors,
+            source_field=meta["source_field"],
+            all_fields=meta["all_fields"],
+        )
 
     @classmethod
     def __torch_dispatch__(
