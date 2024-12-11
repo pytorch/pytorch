@@ -104,7 +104,11 @@ class AutogradCompilerInstance:
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
         self.compile_context = compile_context(
-            CompileContext(CompileId(self.id, None, None))
+            CompileContext(
+                CompileId(
+                    compiled_autograd_id=self.id, frame_id=None, frame_compile_id=None
+                )
+            )
         )
         self.compile_context.__enter__()
         self.aot_graph_cls_name: Optional[str] = None
