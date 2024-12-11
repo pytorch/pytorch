@@ -359,6 +359,9 @@ def dynamo_timed(
     if dynamo_compile_column_us is not None:
         assert dynamo_compile_column_us.endswith("_us")
 
+    # Only one of these should be set.
+    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
+
     if phase_name:
         event_name = phase_name
         fn_name = key
