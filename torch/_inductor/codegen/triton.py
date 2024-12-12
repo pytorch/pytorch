@@ -102,6 +102,8 @@ from .triton_utils import (
 
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from ..ir import IRNode
 
 log = logging.getLogger(__name__)
@@ -3899,6 +3901,10 @@ class TritonScheduling(SIMDScheduling):
         return kernels
 
     def benchmark_combo_kernel(self, node_list):
+        mod: ModuleType
+        ms: int
+        ms_clone: int
+
         def cache_file_path():
             assert mod.__file__ is not None
             return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
