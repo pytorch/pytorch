@@ -1869,6 +1869,13 @@ class Scheduler:
         if config.combo_kernels:
             self.create_combo_kernel_nodes(num_ck_nodes=None)
 
+        self.nodes = comms.bucket_fsdp_all_gather_concat_on_scheduler_ir(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            all_gather_bucket_cap_mb=100,
+            scheduler=self,
+        )
         # Peak memory and overlap passes should always run last
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
@@ -1880,13 +1887,6 @@ class Scheduler:
                 set(V.graph.graph_inputs.keys()),
                 set(V.graph.get_output_names()),
             )
-        self.nodes = comms.bucket_fsdp_all_gather_concat_on_scheduler_ir(
-            self.nodes,
-            self.name_to_buf,
-            self.name_to_fused_node,
-            all_gather_bucket_cap_mb=100,
-            scheduler=self,
-        )
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()

@@ -270,9 +270,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
-    GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
-        comms.reinplace_fsdp_all_gather
-    )
+    # GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+    #     comms.reinplace_fsdp_all_gather
+    # )
 
     gm_str = gm.print_readable(
         print_output=False, include_stride=True, include_device=True

@@ -1779,7 +1779,7 @@ def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
     return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
 
 
-def find_recursive_deps_of_node(
+def find_recursive_deps_of_snode(
     snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None, allow_weak_dep=True
 ):
     from .dependencies import WeakDep
@@ -1794,7 +1794,7 @@ def find_recursive_deps_of_node(
         )
         if defining_op_for_dep in collected_node_set:
             continue
-        find_recursive_deps_of_node(
+        find_recursive_deps_of_snode(
             defining_op_for_dep,
             collected_node_set,
             name_to_buf,
@@ -1803,7 +1803,7 @@ def find_recursive_deps_of_node(
         )
 
 
-def find_recursive_users_of_node(
+def find_recursive_users_of_snode(
     snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
 ):
     if criteria_cb and criteria_cb(snode):
@@ -1819,7 +1819,7 @@ def find_recursive_users_of_node(
             user_op = name_to_fused_node[user.node.get_name()]
             if user_op in collected_node_set:
                 continue
-            find_recursive_users_of_node(
+            find_recursive_users_of_snode(
                 user_op,
                 collected_node_set,
                 name_to_buf,
