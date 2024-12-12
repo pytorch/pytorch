@@ -315,6 +315,9 @@ static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
+  TORCH_CHECK(
+        !(at::GradMode::is_enabled() && self.requires_grad()),
+        "Can't dispatch a Tensor that requires grad. Use tensor.detach() first.");
   return self.template item<T>();
 }
 
