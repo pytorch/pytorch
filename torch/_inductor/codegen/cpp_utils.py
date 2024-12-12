@@ -494,6 +494,17 @@ def unify_mask_base_type(
     return new_vars
 
 
+def may_unify_binary_op_mask_type(a, b):
+    """
+    Given two cse variables, when dtype is bool, unify them to the same mask dtype and return casted cse variable.
+    """
+    if a.dtype == torch.bool:
+        assert b.dtype == torch.bool
+        mask_dtype = torch.int32
+        return unify_mask_base_type(V.kernel.compute, (a, b), mask_dtype)
+    return a, b
+
+
 def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
     assert is_integer_dtype(offset.dtype)
     code.writeline("[&]()")

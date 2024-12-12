@@ -262,7 +262,6 @@ auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this] { return !heap_.empty(); });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<NodeTask&>(heap_.top()));
   heap_.pop();
   return task;
@@ -735,14 +734,14 @@ void GraphTask::exec_post_processing() {
       // the stashed streams should be enough. If leaf_stream.device_index()
       // happens to be for a new device, operator* on the std::nullopt should
       // throw an error.
-      const auto caller_current_stream =
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          *caller_current_streams_[leaf_stream.device_index()];
+      const auto& caller_current_stream =
+          caller_current_streams_[leaf_stream.device_index()];
 
-      if (caller_current_stream != leaf_stream) {
+      if (caller_current_stream.has_value() &&
+          caller_current_stream != leaf_stream) {
         auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
-        caller_current_stream.wait(event);
+        caller_current_stream->wait(event);
       }
     }
 
@@ -875,6 +874,7 @@ const InputMetadata& get_input_metadata(const T& thing);
 template <>
 const InputMetadata& get_input_metadata<c10::optional<InputMetadata>>(
     const c10::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return thing.value();
 }
 
@@ -1602,6 +1602,7 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
 // Remembers current streams on all devices where a context has been created for
 // This function assumes the accelerator device is available.
 void GraphTask::stash_current_streams() {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto accelerator = at::getAccelerator(true).value();
   const auto guard = c10::impl::VirtualGuardImpl{accelerator};
   auto num_devices = guard.deviceCount();

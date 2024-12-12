@@ -599,6 +599,27 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         # This runs in fullgraph already
         mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
 
+    def test_register_hook(self):
+        import functools
+
+        def my_hook(grad, *, k=0):
+            return grad + k
+
+        hook = functools.partial(my_hook, k=3)
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                x.register_hook(hook)
+                y = x.mul(2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x = torch.ones(4, requires_grad=True)
+
+        with torch.device("cpu"):
+            out = torch.compile(mod, fullgraph=True)(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
