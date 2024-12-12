@@ -8137,7 +8137,22 @@ class TestMPS(TestCaseMPS):
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
 
-    def test_mps_event(self):
+    def test_ageneric_event2(self):
+        event = torch.Event('mps')
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        c = a + b
+        a_acc = a.to("mps", non_blocking=True)
+        b_acc = b.to("mps", non_blocking=True)
+        event.record()
+        event.synchronize()
+        c_acc = a_acc + b_acc
+        event.record()
+        torch.accelerator.synchronize()
+        self.assertTrue(event.query())
+        self.assertEqual(c_acc.cpu(), c)
+
+    def test_amps_event(self):
         event = torch.mps.Event()
         a = torch.randn(1000)
         b = torch.randn(1000)
