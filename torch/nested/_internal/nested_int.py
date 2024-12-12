@@ -53,7 +53,6 @@ def _get_tensor_id(t: torch.Tensor) -> int:
 class NestedIntNode:
     def __init__(self, cache: torch.Tensor, coeff: int):
         self.cache = cache
-        # Wait cache CAN mutate in eager! but t_id should change anyway.
         self.t_id = _get_tensor_id(cache)
         self.coeff = coeff
 

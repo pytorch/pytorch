@@ -3068,6 +3068,32 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn)
 
+    @unittest.expectedFailure
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_in_graph_construction_mixed_4(self):
+        def fn(nt, nt2):
+            # Intermediate offsets has fresh cache
+            intermediate_nt = torch.nested.nested_tensor_from_jagged(
+                nt.values(), nt.offsets()
+            )
+            # This creates a dynamic shapes neq guard
+            if nt2.shape[1] != intermediate_nt.shape[1]:
+                # We should always go here.
+                nt = nt * 2
+            return nt, nt2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets, offsets2=offsets2):
+            # Values is shared, but it shouldn't matter
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets2)
+            return nt, nt2
+
+        self._validate_compile(fn, arg_fn)
+
     @requires_cuda
     @fresh_tensor_registry
     def test_different_devices(self):
@@ -3138,7 +3164,7 @@ class GraphModule(torch.nn.Module):
             "s1": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
             "s2": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
             "s3": "L['a']._base._values.size()[0]",
-            "s4": "torch._nested_int_from_offsets(L['a']._base.size()[1].node.nested_int_cache()._host_offsets)",
+            "s4": "<ephemeral: intermediate_offsets_or_lengths>",
             "s5": "L['a'].size()[1]",
             "s6": "L['a']._values.size()[0]",
             "s7": "L['b']._base.size()[0]",

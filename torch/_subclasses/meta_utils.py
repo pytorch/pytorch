@@ -1847,7 +1847,6 @@ class MetaConverter(Generic[_TensorT]):
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 assert _is_fake_tensor(r)
-                r.source = source
                 r.register_nested_int_id(t.nested_int)
 
             self.set_tensor_memo(t, r)
