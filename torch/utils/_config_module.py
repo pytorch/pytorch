@@ -11,15 +11,34 @@ import unittest
 import warnings
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NoReturn,
+    Optional,
+    Set,
+    TypeVar,
+    Union,
+)
 from typing_extensions import deprecated
 from unittest import mock
 
 from torch._utils_internal import justknobs_check
 
 
+# Types saved/loaded in configs
+CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+# Duplicated, because mypy needs these types statically
+T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict])
+
+
 @dataclass
-class Config:
+class Config(Generic[T]):
     """Represents a config with richer behaviour than just a default value.
     ::
         i.e.
@@ -51,7 +70,7 @@ class Config:
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Any
+    default: T
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
@@ -59,7 +78,7 @@ class Config:
 
     def __init__(
         self,
-        default: Any,
+        default: T,
         justknob: Optional[str] = None,
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
@@ -75,10 +94,6 @@ class Config:
             assert isinstance(
                 self.default, bool
             ), f"justknobs only support booleans, {self.default} is not a boolean"
-
-
-# Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 
 def _read_env_variable(name: str) -> Optional[bool]:
