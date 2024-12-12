@@ -9,7 +9,7 @@ from torch.fx.subgraph_rewriter import replace_pattern
 from torch.testing._internal.common_utils import TestCase
 
 log = logging.getLogger('REWRITE')
-logging.basicConfig(level = logging.INFO)
+# logging.basicConfig(level = logging.INFO)
 
 def to_svg(graph_module, filename: str):
     """

@@ -830,7 +830,7 @@ def _replace_node_literals_with_existing_placeholders(
                 else:
                     ph_node = ph_map[ph_name]
                 new_args.append(ph_node)
-                log.info(f'Matched {arg} to {ph_node} ...')
+                log.debug(f'Matched {arg} to {ph_node} ...')
             # if not, keep the original argument as it is.
             else:
                 new_args.append(arg)
