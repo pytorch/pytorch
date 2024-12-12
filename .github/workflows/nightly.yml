@@ -35,7 +35,6 @@ jobs:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
-    secrets: inherit
 
   docs-push:
     name: docs push

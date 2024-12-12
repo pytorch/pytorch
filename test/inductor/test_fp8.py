@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch import Tensor
-from torch._inductor import config, utils
+from torch._inductor import utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils._triton import has_triton_tma_device
 
 
 torch.set_float32_matmul_precision("high")
@@ -415,16 +414,8 @@ class TestFP8Lowering(TestCase):
     @parametrize("shape", ("16,16,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
-    @parametrize(
-        "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
-    )
     def test_tensorwise_scaling(
-        self,
-        dtype: torch.dtype,
-        shape: str,
-        has_bias: bool,
-        use_fast_accum: bool,
-        persistent_matmul: bool,
+        self, dtype: torch.dtype, shape: str, has_bias: bool, use_fast_accum: bool
     ):
         if dtype is torch.float32 and has_bias:
             self.skipTest("bias is not supported when output dtype is float32")
@@ -468,36 +459,28 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
-            linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
-            )
-            y_compiled = linear_compiled(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
-            self.assertEqual(y_eager.dtype, dtype)
-            self.assertEqual(y_compiled.dtype, dtype)
-            # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
-            # autotuning for the compiled case, the results can be different because of
-            # the way blocks of results are accumulated (float addition not associative), so
-            # setting a small absolute tolerance in these tests
-            torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        self.assertEqual(y_eager.dtype, dtype)
+        self.assertEqual(y_compiled.dtype, dtype)
+        # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
+        # autotuning for the compiled case, the results can be different because of
+        # the way blocks of results are accumulated (float addition not associative), so
+        # setting a small absolute tolerance in these tests
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("shape", ("16,16,32", "1024,1024,512"))
     @parametrize("has_bias", (False, True))
     @parametrize("use_fast_accum", (False, True))
-    @parametrize(
-        "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
-    )
-    def test_rowwise_scaling(
-        self, shape: str, has_bias: bool, use_fast_accum: bool, persistent_matmul: bool
-    ):
+    def test_rowwise_scaling(self, shape: str, has_bias: bool, use_fast_accum: bool):
         # Only bf16 output type is supported for row-wise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         device = "cuda"
@@ -538,10 +521,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
-            linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
-            )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         y_compiled = linear_compiled(
             x_fp8,
             x_inverse_scale,
@@ -558,12 +538,7 @@ class TestFP8Lowering(TestCase):
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 1024))
     @parametrize("N", (16, 2048))
-    @parametrize(
-        "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
-    )
-    def test_tensorwise_scaling_acceptable_input_dims(
-        self, M: int, K: int, N: int, persistent_matmul: bool
-    ):
+    def test_tensorwise_scaling_acceptable_input_dims(self, M: int, K: int, N: int):
         # alignment requirements: K and N divisible by 16
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
@@ -596,17 +571,14 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
-            linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
-            )
-            y_compiled = linear_compiled(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
@@ -616,12 +588,7 @@ class TestFP8Lowering(TestCase):
     @parametrize("M", (1, 3, 33, 257, 1024))
     @parametrize("K", (16, 1024))
     @parametrize("N", (16, 2048))
-    @parametrize(
-        "persistent_matmul", [False, True] if has_triton_tma_device() else [False]
-    )
-    def test_rowwise_scaling_acceptable_input_dims(
-        self, M: int, K: int, N: int, persistent_matmul: bool
-    ):
+    def test_rowwise_scaling_acceptable_input_dims(self, M: int, K: int, N: int):
         dtype: torch.dtype = torch.bfloat16
         use_fast_accum = True
         device = "cuda"
@@ -655,17 +622,14 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
-            linear_compiled = torch.compile(
-                linear, backend="inductor", mode="max-autotune"
-            )
-            y_compiled = linear_compiled(
-                x_fp8,
-                x_inverse_scale,
-                w_t_fp8,
-                w_inverse_scale,
-                bias,
-            )
+        linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
+        y_compiled = linear_compiled(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)

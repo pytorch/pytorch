@@ -72,8 +72,7 @@ def create_subclass_metadata(
         idx = start_idx + 1
         return (
             PlainTensorMeta(
-                idx,
-                memory_format=maybe_suggest_memory_format(a, with_memory_format),
+                idx, memory_format=maybe_suggest_memory_format(a, with_memory_format)
             ),
             idx,
         )

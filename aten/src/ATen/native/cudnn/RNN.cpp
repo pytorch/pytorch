@@ -2560,10 +2560,9 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       dropout_state.buffer);
 
   return {
-      std::move(std::get<0>(cudnn_output)),
+      std::get<0>(cudnn_output),
       pack_hidden<hidden_type>(
-          std::move(std::get<1>(cudnn_output)),
-          std::move(std::get<2>(cudnn_output)))};
+          std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
 }
 
 template <typename hidden_type>
@@ -2622,10 +2621,9 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       dropout_state.buffer);
 
   return {
-      std::move(std::get<0>(cudnn_output)),
+      std::get<0>(cudnn_output),
       pack_hidden<hidden_type>(
-          std::move(std::get<1>(cudnn_output)),
-          std::move(std::get<2>(cudnn_output)))};
+          std::get<1>(cudnn_output), std::get<2>(cudnn_output))};
 }
 
 #define ONE_HIDDEN_RNN(NAME, MODE)                         \

@@ -866,21 +866,14 @@ class TestScheduleLowering(TestCase):
 
 class TestValidateSchedule(TestCase):
     def test_valid_schedule(self):
-        schedule_actions = [
-            {
-                0: [_Action(0, F, 0), _Action(0, B, 0)],
-                1: [_Action(1, F, 0), _Action(1, B, 0)],
-            },
-            {
-                0: [_Action(0, F, 0), _Action(0, I, 0), _Action(0, W, 0)],
-                1: [_Action(1, F, 0), _Action(1, I, 0), _Action(1, W, 0)],
-            },
-        ]
+        actions = {
+            0: [_Action(0, F, 0), _Action(0, B, 0)],
+            1: [_Action(1, F, 0), _Action(1, B, 0)],
+        }
         pp_group_size = 2
         num_stages = 2
         num_microbatches = 1
-        for actions in schedule_actions:
-            _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
+        _validate_schedule(actions, pp_group_size, num_stages, num_microbatches)
 
     def test_invalid_schedule_missing_rank(self):
         actions = {

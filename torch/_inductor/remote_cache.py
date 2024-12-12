@@ -239,6 +239,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     A Redis implementation of a remote/distributed cache.
     """
 
+    _key_fmt: str
     _redis: Optional[redis.Redis] = None
 
     def __init__(self, cache_id: str) -> None:
@@ -247,10 +248,14 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             # We had trouble importing redis - just skip init.
             return
 
+        self._key_fmt = f"pt2:{cache_id}:{{key}}"
         self._redis = redis.Redis(
             host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
             port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
         )
+
+    def __get_key(self, key: str) -> str:
+        return self._key_fmt.format(key=key)
 
     @override
     def _get(self, key: str) -> Optional[bytes]:
@@ -259,7 +264,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         try:
-            value = self._redis.get(key)
+            value = self._redis.get(self.__get_key(key))
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -277,7 +282,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         try:
-            self._redis.set(key, data)
+            self._redis.set(self.__get_key(key), data)
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -285,31 +290,16 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
 
 
 class RedisRemoteCache(RemoteCache[JsonDataTy]):
-    def __init__(self, cache_id: str) -> None:
+    def __init__(self, key: str) -> None:
         # Special test handling: If we're just going to override the backend
         # anyway don't require redis
         if self.__class__.backend_override_cls:
             # This is totally bogus but it works for now...
             backend = typing.cast(RemoteCacheBackend[bytes], None)
         else:
-            backend = RedisRemoteCacheBackend(cache_id)
+            backend = RedisRemoteCacheBackend(key)
         serde = RemoteCacheJsonSerde()
         super().__init__(backend, serde)
-        version = 1  # consistency between various types of keys
-        self._key_fmt = f"pt2:{cache_id}::{{key}}:c{version}"
-
-    def _get_key(self, key: str) -> str:
-        return self._key_fmt.format(key=key)
-
-    @override
-    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
-        key = self._get_key(key)
-        return super()._get(key, sample)
-
-    @override
-    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
-        key = self._get_key(key)
-        super()._put(key, value, sample)
 
 
 class RemoteAutotuneCache(RedisRemoteCache):

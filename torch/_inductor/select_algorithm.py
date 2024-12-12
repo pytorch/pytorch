@@ -413,7 +413,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta: Dict[str, Any] = {
+        triton_meta = {
             "signature": signature_to_meta(
                 signature, size_dtype=self.index_dtype, argdefs=argdefs
             ),
@@ -774,11 +774,14 @@ class TritonTemplateKernel(TritonKernel):
                 out_indexing = self.indexing(
                     output_index,
                     copy_shape=self.template_out,
-                    override_mask=self.template_mask
+                    override_mask=self.template_mask,
                 )
                 from .codegen.triton import IndexingOptions
-                assert isinstance(out_indexing,  IndexingOptions)
-                output_index_str = f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
+
+                assert isinstance(out_indexing, IndexingOptions)
+                output_index_str = (
+                    f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
+                )
 
             # Generate load code
             load_code = f"{output_name} = tl.load({input_name} + ({output_index_str})"

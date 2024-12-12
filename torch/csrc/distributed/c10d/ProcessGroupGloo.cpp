@@ -426,7 +426,6 @@ void ProcessGroupGloo::AsyncWork::execute(
     work->recordFunctionBeforeCallback_();
   }
   try {
-    at::ThreadLocalStateGuard g(work->getTLS());
     work->run();
   } catch (...) {
     work->finishWorkGlooError(std::current_exception());

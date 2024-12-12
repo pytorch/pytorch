@@ -820,7 +820,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo(bool includeStackTrace = true);
+  bool dumpDebuggingInfo();
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
@@ -979,8 +979,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual void terminateProcess(const std::string& errMsg);
 
   // A helper function to wait for a future to complete or timeout.
-  // Returns true if the future completes before timeout, false otherwise.
-  bool waitForFutureOrTimeout(
+  void waitForFutureOrTimeout(
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
       const std::string& futDescription,

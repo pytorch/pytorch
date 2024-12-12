@@ -1831,6 +1831,8 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
         # module, and then catching it here, and then reraising it, and then
@@ -1838,7 +1840,7 @@ class Module:
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
         # exception.
-        if torch.compiler.is_compiling():
+        if is_compiling():
             return inner()
 
         try:

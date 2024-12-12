@@ -86,7 +86,15 @@ std::vector<at::Tensor> unpack_tensors(
 bool is_default_value(
     const c10::Argument& argument,
     const c10::IValue& ivalue) {
-  return argument.default_value() == ivalue;
+  if (!argument.default_value().has_value()) {
+    return false;
+  }
+  const auto& default_ivalue = *argument.default_value();
+  if (default_ivalue != ivalue) {
+    return false;
+  }
+
+  return true;
 }
 
 std::vector<ParameterMetadata> unpack_input_parameters(
@@ -117,19 +125,18 @@ std::vector<ParameterMetadata> unpack_input_parameters(
       // optional tensor list: std::vector<std::optional<at::Tensor>>
       std::vector<at::Tensor> tensor_list;
       for (const auto& item : stack[idx].toListRef()) {
-        auto e = item.toOptional<at::Tensor>();
-        if (e.has_value()) {
-          tensor_list.emplace_back(std::move(e.value()));
+        if (item.toOptional<at::Tensor>().has_value()) {
+          tensor_list.push_back(item.toOptional<at::Tensor>().value());
         }
       }
-      inputs_metadata.emplace_back(std::move(tensor_list), arg_order);
+      inputs_metadata.emplace_back(tensor_list, arg_order);
     } else if (
         *arguments[idx].real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
       // optional tensor
-      auto t = stack[idx].toOptional<at::Tensor>();
-      if (t.has_value()) {
-        inputs_metadata.emplace_back(std::move(t.value()), arg_order);
+      if (stack[idx].toOptional<at::Tensor>().has_value()) {
+        inputs_metadata.emplace_back(
+            stack[idx].toOptional<at::Tensor>().value(), arg_order);
       }
     } else if (stack[idx].isTensor()) {
       inputs_metadata.emplace_back(stack[idx].toTensor(), arg_order);

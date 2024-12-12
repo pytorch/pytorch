@@ -241,8 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  auto& [out, mean, rstd] = outputs;
-  out = out.view(input_shape);
+  auto out = std::get<0>(outputs).view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
   } else if (weight.defined()) {
@@ -250,6 +249,8 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   } else if (bias.defined()) {
     out = out.add(bias);
   }
+  at::Tensor mean = std::get<1>(outputs);
+  at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -259,7 +260,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return outputs;
+  return std::make_tuple(out, mean, rstd);
 }
 
 Tensor rms_norm_symint(

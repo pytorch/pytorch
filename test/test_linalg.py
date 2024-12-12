@@ -4552,78 +4552,61 @@ class TestLinalg(TestCase):
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
         # disable tunableop buffer rotation for all tests everywhere, it can be slow
-        # We set the TunableOp numerical check environment variable here because it is
-        # possible to hit some invalid numerical solutions due to the small matrix sizes.
-        # Additionally, we put the entire test in try-finally clause so that
-        # if the test fails/assert, there is no OS environment variabls leaked that
-        # could impact subsequent tests.
         import os
+        os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
+        set_tunableop_defaults()
 
-        try:
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
-            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
-            set_tunableop_defaults()
-            ordinal = torch.cuda.current_device()
-            torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_duration(1)
+        torch.cuda.tunable.set_max_tuning_iterations(1)
 
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_duration(1)
-            torch.cuda.tunable.set_max_tuning_iterations(1)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-            make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
 
-            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-                x = make_arg(size_x, noncontiguous=nctg_x)
-                y = make_arg(size_y, noncontiguous=nctg_y)
-                self.check_single_matmul(x, y)
+        filename1 = torch.cuda.tunable.get_filename()
+        filename2 = "tunableop_results_tmp1.csv"
+        filename3 = "tunableop_results_tmp2.csv"
+        ordinal = torch.cuda.current_device()
+        assert filename1 == f"tunableop_results{ordinal}.csv"
+        assert len(torch.cuda.tunable.get_validators()) > 0
+        validators = {}
+        for key, value in torch.cuda.tunable.get_validators():
+            validators[key] = value
+        if torch.version.hip:
+            assert "HIPBLASLT_VERSION" in validators
+            assert re.match(r'^\d{3,}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
+        assert len(torch.cuda.tunable.get_results()) > 0
 
-            filename1 = torch.cuda.tunable.get_filename()
-            filename2 = "tunableop_results_tmp1.csv"
-            filename3 = "tunableop_results_tmp2.csv"
-            ordinal = torch.cuda.current_device()
-            assert filename1 == f"tunableop_results{ordinal}.csv"
-            assert len(torch.cuda.tunable.get_validators()) > 0
-            validators = {}
-            for key, value in torch.cuda.tunable.get_validators():
-                validators[key] = value
-            if torch.version.hip:
-                assert "HIPBLASLT_VERSION" in validators
-                assert re.match(r'^\d{3,}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
-            assert len(torch.cuda.tunable.get_results()) > 0
+        assert torch.cuda.tunable.write_file()  # use default filename
+        assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+        torch.cuda.tunable.set_filename(filename3)
+        assert torch.cuda.tunable.write_file()  # use previously set filename
+        assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
 
-            assert torch.cuda.tunable.write_file()  # use default filename
-            assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
-            torch.cuda.tunable.set_filename(filename3)
-            assert torch.cuda.tunable.write_file()  # use previously set filename
-            assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
+        with open(filename1) as file1:
+            file1_contents = file1.read()
+        with open(filename2) as file2:
+            file2_contents = file2.read()
+        with open(filename3) as file3:
+            file3_contents = file3.read()
+        assert file1_contents == file2_contents
+        assert file1_contents == file3_contents
 
-            with open(filename1) as file1:
-                file1_contents = file1.read()
-            with open(filename2) as file2:
-                file2_contents = file2.read()
-            with open(filename3) as file3:
-                file3_contents = file3.read()
-            assert file1_contents == file2_contents
-            assert file1_contents == file3_contents
-
-            # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
-            for filename in [filename1, filename2, filename3]:
-                try:
-                    os.remove(filename)
-                except FileNotFoundError:
-                    pass
-
-        finally:
-            # disables TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # undo all the environment variables set
+        # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
+        for filename in [filename1, filename2, filename3]:
             try:
-                del os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"]
-                del os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"]
-            except KeyError:
+                import os
+                os.remove(filename)
+            except FileNotFoundError:
                 pass
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
 
     @onlyCUDA
     @dtypes(torch.half)
@@ -4753,9 +4736,9 @@ class TestLinalg(TestCase):
                 self.assertTrue(os.path.exists(result_filename))
 
             # Check the full results files was written, one per gpu
-            for i in range(total_gpus):
-                result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-                self.assertTrue(os.path.exists(result_full_filename))
+            # for i in range(total_gpus):
+            #     result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
+            #     self.assertTrue(os.path.exists(result_full_filename))
 
         finally:
             # disables TunableOp

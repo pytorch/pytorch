@@ -66,7 +66,6 @@ struct TORCH_API EnumType : public NamedType {
   }
 
   const QualifiedName& qualifiedClassName() const {
-    // NOLINTLEXTLINE(bugprone-unchecked-optional-access)
     return name().value();
   }
 
@@ -91,7 +90,8 @@ struct TORCH_API EnumType : public NamedType {
 
   std::string annotation_str_impl(
       [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
-    return qualifiedClassName().qualifiedName();
+    const auto& n = name().value();
+    return n.qualifiedName();
   }
 
   TypePtr value_type_;

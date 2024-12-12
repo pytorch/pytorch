@@ -67,9 +67,8 @@ torch::jit::Value* TSLoweringContext::GetParameter(const BackendDataPtr& data) {
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =
         graph_->addInput(c10::str("p", parameters_.size()));
-    const auto& scalar = ts_data->scalar;
-    if (scalar.has_value()) {
-      auto scalarType = scalar.value().type();
+    if (ts_data->scalar.has_value()) {
+      auto scalarType = ts_data->scalar.value().type();
       if (isFloatingType(scalarType)) {
         param->setType(c10::FloatType::get());
       } else if (isIntegralType(scalarType, /*includeBool=*/true)) {
