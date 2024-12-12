@@ -943,8 +943,9 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
       window_.narrow(0, left, win_length).fill_(1);
     }
   }
-  int64_t n_frames = 1 + (len - n_fft) / hop_length;
+  int64_t n_frames = 1 + (len - win_length) / hop_length;
   // time2col
+  input = at::pad(input, {(n_fft - win_length) / 2, (n_fft - win_length) / 2});
   input = input.as_strided(
     {batch, n_frames, n_fft},
     {input.stride(0), hop_length * input.stride(1), input.stride(1)}
