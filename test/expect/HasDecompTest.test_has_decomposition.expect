@@ -982,10 +982,6 @@ aten::mkldnn_reorder_conv2d_weight
 aten::mkldnn_reorder_conv2d_weight.out
 aten::mkldnn_reorder_conv3d_weight
 aten::mkldnn_reorder_conv3d_weight.out
-aten::mkldnn_rnn_layer
-aten::mkldnn_rnn_layer.out
-aten::mkldnn_rnn_layer_backward
-aten::mkldnn_rnn_layer_backward.out
 aten::mm
 aten::mm.out
 aten::mode
@@ -1014,6 +1010,10 @@ aten::nonzero.out
 aten::nonzero_static
 aten::nonzero_static.out
 aten::normal_functional
+aten::onednn_rnn_layer
+aten::onednn_rnn_layer.out
+aten::onednn_rnn_layer_backward
+aten::onednn_rnn_layer_backward.out
 aten::ones.names
 aten::ones.names_out
 aten::ones.out

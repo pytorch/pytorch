@@ -540,12 +540,12 @@ class CPUReproTests(TestCase):
                 for _flat_weight in _flat_weights:
                     self.assertFalse(torch._is_functional_tensor(_flat_weight))
 
-                self.assertTrue("aten.mkldnn_rnn_layer" in code)
+                self.assertTrue("aten.onednn_rnn_layer" in code)
                 self.assertEqual(fn_opt(*inps), mod(*inps))
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"],
                     num_layers * num_directions
-                    + 2,  # num of mkldnn_rnn_layer call + 2 view call on the concatenated hy, cy.
+                    + 2,  # num of onednn_rnn_layer call + 2 view call on the concatenated hy, cy.
                 )
 
                 # Change input sizes

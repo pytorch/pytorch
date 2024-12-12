@@ -1076,7 +1076,7 @@ Tensor to_sparse_backward(
     const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
-mkldnn_rnn_layer_differentiable_backward(
+onednn_rnn_layer_differentiable_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,

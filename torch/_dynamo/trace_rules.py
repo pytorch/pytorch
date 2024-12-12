@@ -1988,7 +1988,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mkldnn_linear_backward_weights",
         "torch.mkldnn_max_pool2d",
         "torch.mkldnn_max_pool3d",
-        "torch.mkldnn_rnn_layer",
+        "torch.onednn_rnn_layer",
         "torch.mm",
         "torch.mode",
         "torch.moveaxis",

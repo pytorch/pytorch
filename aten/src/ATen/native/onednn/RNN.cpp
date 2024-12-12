@@ -15,8 +15,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/mkldnn_convolution_native.h>
-#include <ATen/ops/mkldnn_rnn_layer_backward_native.h>
-#include <ATen/ops/mkldnn_rnn_layer_native.h>
+#include <ATen/ops/onednn_rnn_layer_backward_native.h>
+#include <ATen/ops/onednn_rnn_layer_native.h>
 #endif
 
 #if !AT_ONEDNN_ENABLED()
@@ -24,7 +24,7 @@
 namespace at::native {
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
+std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(
 const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
@@ -41,10 +41,30 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      TORCH_CHECK(false, "mkldnn_rnn_layer: ATen not compiled with ONEDNN support");
+      TORCH_CHECK(false, "onednn_rnn_layer: ATen not compiled with ONEDNN support");
   }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
+  std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
+      const Tensor& input,
+      const Tensor& w0,
+      const Tensor& w1,
+      const Tensor& w2,
+      const Tensor& w3,
+      const Tensor& hx_,
+      const Tensor& cx_,
+      bool reverse,
+      IntArrayRef batch_sizes,
+      int64_t mode,
+      int64_t hidden_size,
+      int64_t num_layers,
+      bool has_biases,
+      bool bidirectional,
+      bool batch_first,
+      bool train) {
+    TORCH_CHECK(false, "mkldnn_rnn_layer: ATen not compiled with ONEDNN support");
+  }
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,
@@ -68,6 +88,34 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
+      TORCH_CHECK(false, "onednn_rnn_layer_backward: ATen not compiled with ONEDNN support");
+    }
+
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+    mkldnn_rnn_layer_backward(
+        const Tensor& input,
+        const Tensor& weight0,
+        const Tensor& weight1,
+        const Tensor& weight2,
+        const Tensor& weight3,
+        const Tensor& hx_,
+        const Tensor& cx_tmp,
+        const Tensor& output,
+        const Tensor& hy_,
+        const Tensor& cy_,
+        const std::optional<Tensor>& grad_output_r_opt,
+        const std::optional<Tensor>& grad_hy_r_opt,
+        const std::optional<Tensor>& grad_cy_r_opt,
+        bool reverse,
+        int64_t mode,
+        int64_t hidden_size,
+        int64_t num_layers,
+        bool has_biases,
+        bool train,
+        bool bidirectional,
+        at::IntArrayRef batch_sizes,
+        bool batch_first,
+        const at::Tensor& workspace) {
       TORCH_CHECK(false, "mkldnn_rnn_layer_backward: ATen not compiled with ONEDNN support");
     }
 
@@ -213,7 +261,7 @@ static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_
   return bias_ih + bias_hh;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
+std::tuple<Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer(const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
     const Tensor& w2,
@@ -291,7 +339,43 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   }
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(
+    const Tensor& input,
+    const Tensor& w0,
+    const Tensor& w1,
+    const Tensor& w2,
+    const Tensor& w3,
+    const Tensor& hx_,
+    const Tensor& cx_,
+    bool reverse,
+    IntArrayRef batch_sizes,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool bidirectional,
+    bool batch_first,
+    bool train) {
+  return at::native::onednn_rnn_layer(
+      input,
+      w0,
+      w1,
+      w2,
+      w3,
+      hx_,
+      cx_,
+      reverse,
+      batch_sizes,
+      mode,
+      hidden_size,
+      num_layers,
+      has_biases,
+      bidirectional,
+      batch_first,
+      train);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> onednn_rnn_layer_backward(
     const Tensor& input,
     const Tensor& weight0,
     const Tensor& weight1,
@@ -435,6 +519,57 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   return std::make_tuple(diff_x_, diff_w1_, diff_w2_, diff_b_, diff_b2_, diff_hx_, diff_cx_);
 }
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+mkldnn_rnn_layer_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const std::optional<Tensor>& grad_output_r_opt,
+    const std::optional<Tensor>& grad_hy_r_opt,
+    const std::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace) {
+  return at::native::onednn_rnn_layer_backward(
+      input,
+      weight0,
+      weight1,
+      weight2,
+      weight3,
+      hx_,
+      cx_tmp,
+      output,
+      hy_,
+      cy_,
+      grad_output_r_opt,
+      grad_hy_r_opt,
+      grad_cy_r_opt,
+      reverse,
+      mode,
+      hidden_size,
+      num_layers,
+      has_biases,
+      train,
+      bidirectional,
+      batch_sizes,
+      batch_first,
+      workspace);
+}
+
 // ONEDNN RNN integration notes:
 // I. Memory Formats
 //   a. onednn will use plain formats for input, hx/cx, output, hy/cy
@@ -492,7 +627,7 @@ static std::tuple<Tensor, Tensor, Tensor> onednn_rnn(
           layer_hy[index],
           layer_cy[index],
           std::ignore) =
-          at::mkldnn_rnn_layer(
+          at::onednn_rnn_layer(
               layer_input,
               layer_weights[0],
               layer_weights[1],
