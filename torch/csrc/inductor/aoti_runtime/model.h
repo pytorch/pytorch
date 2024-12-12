@@ -101,8 +101,10 @@ inline void parse_device_str(
     device_type = aoti_torch_device_type_cpu();
   } else if (sm[1].str() == "cuda") {
     device_type = aoti_torch_device_type_cuda();
+#ifdef USE_XPU
   } else if (sm[1].str() == "xpu") {
     device_type = aoti_torch_device_type_xpu();
+#endif
   } else {
     AOTI_RUNTIME_CHECK(false, "Invalid device: " + device_str);
   }

@@ -293,6 +293,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -2925,8 +2926,9 @@ def get_tensor_method():
         ):
             s.add(method)
 
-    # mlazos: this is a function which we handle specially in TensorVariable
+    # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
+    s.add(torch.Tensor.register_hook)  # type: ignore[arg-type]
     return frozenset(s)
 
 
