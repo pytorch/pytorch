@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
+
 #include <optional>
 
 #include <thread>
@@ -177,4 +180,71 @@ TEST(XPUStreamTest, StreamFunction) {
 
   validateHostData(hostData, numel);
   sycl::free(deviceData, c10::xpu::get_device_context());
+}
+
+// Verifies external streams can be created and used
+TEST(XPUStreamTest, ExternalTest) {
+  if (!has_xpu()) {
+    return;
+  }
+
+  c10::DeviceGuard device_guard(c10::Device(c10::DeviceType::XPU, 0));
+
+  using namespace sycl::ext::oneapi::property;
+  sycl::queue* stream = new sycl::queue(
+      c10::xpu::get_device_context(),
+      c10::xpu::get_raw_device(0),
+      c10::xpu::asyncHandler,
+      {sycl::property::queue::in_order(), queue::priority_normal()});
+
+  at::xpu::XPUStream myStream = at::xpu::getStreamFromExternal(stream, 0);
+
+  at::xpu::setCurrentXPUStream(myStream);
+  at::xpu::XPUStream curStream = at::xpu::getCurrentXPUStream();
+
+  ASSERT_TRUE(curStream == myStream);
+  ASSERT_TRUE(&(curStream.queue()) == stream);
+
+  delete stream;
+}
+
+// Verifies different external streams can be used for different devices at the
+// same time
+TEST(XPUStreamTest, ExternalMultiDeviceTest) {
+  if (!has_xpu()) {
+    return;
+  }
+  if (c10::xpu::device_count() < 2)
+    return;
+  sycl::queue* stream_0 = nullptr;
+  sycl::queue* stream_1 = nullptr;
+
+  using namespace sycl::ext::oneapi::property;
+  {
+    c10::DeviceGuard device_guard(c10::Device(c10::DeviceType::XPU, 0));
+    stream_0 = new sycl::queue(
+        c10::xpu::get_device_context(),
+        c10::xpu::get_raw_device(0),
+        c10::xpu::asyncHandler,
+        {sycl::property::queue::in_order(), queue::priority_normal()});
+  }
+  {
+    c10::DeviceGuard device_guard(c10::Device(c10::DeviceType::XPU, 1));
+    stream_0 = new sycl::queue(
+        c10::xpu::get_device_context(),
+        c10::xpu::get_raw_device(1),
+        c10::xpu::asyncHandler,
+        {sycl::property::queue::in_order(), queue::priority_normal()});
+  }
+  at::xpu::XPUStream myStream0 = at::xpu::getStreamFromExternal(stream_0, 0);
+  at::xpu::XPUStream myStream1 = at::xpu::getStreamFromExternal(stream_1, 1);
+
+  at::xpu::setCurrentXPUStream(myStream0);
+  ASSERT_TRUE(at::xpu::getCurrentXPUStream(0) == myStream0);
+  at::xpu::setCurrentXPUStream(myStream1);
+  ASSERT_TRUE(at::xpu::getCurrentXPUStream(0) == myStream0);
+  ASSERT_TRUE(at::xpu::getCurrentXPUStream(1) == myStream1);
+
+  delete stream_0;
+  delete stream_1;
 }

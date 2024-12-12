@@ -726,6 +726,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   const ViewInfo& get_backward_view() const {
     TORCH_CHECK(
         has_bw_view(), "backward view info can only exist for backward views.");
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return backward_info_.value();
   }
 
@@ -763,6 +764,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     TORCH_CHECK(
         !shared_view_info_ || has_bw_view(),
         "forward view info can only exist for forward views.");
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return shared_view_info_ ? backward_info_.value() : forward_info_.value();
   }
 
@@ -881,7 +883,7 @@ inline Variable make_variable(
       } else {
         data_impl_copy->set_autograd_meta(nullptr);
       }
-      return Variable(data_impl_copy);
+      return Variable(std::move(data_impl_copy));
     }
   }
   return Variable();
