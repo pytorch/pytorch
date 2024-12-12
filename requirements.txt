@@ -1,6 +1,6 @@
 # Python dependencies required for development
 astunparse
-expecttest>=0.2.1
+expecttest>=0.3.0
 hypothesis
 numpy
 psutil
@@ -14,7 +14,7 @@ filelock
 networkx
 jinja2
 fsspec
-lintrunner
+lintrunner ; platform_machine != "s390x"
 ninja
 packaging
 optree>=0.13.0

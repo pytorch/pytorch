@@ -66,6 +66,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
+from torch.compiler import config as cconfig
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -782,6 +783,7 @@ class FxGraphHashDetails:
     ) -> None:
         self.gm = gm
         self.example_inputs = example_inputs
+        self.cache_key_tag = cconfig.cache_key_tag
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
