@@ -194,9 +194,7 @@ def compare_tensor_meta(
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
-        same_strides, idx = check_significant_strides(
-            a, b, allow_rhs_unbacked=allow_rhs_unbacked
-        )
+        same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
             msg = f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
             raise MetadataMismatchError(msg)
@@ -218,12 +216,7 @@ def compare_tensor_meta(
 
 
 def _check_strides_helper(
-    a: TensorLikeType,
-    b: TensorLikeType,
-    *,
-    only_cuda=True,
-    significant_only=True,
-    allow_rhs_unbacked=False,
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
 ) -> Tuple[bool, Optional[int]]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
@@ -234,9 +227,6 @@ def _check_strides_helper(
     ) and a.numel() > 0:
         for idx in range(a.ndim):
             check = not significant_only or a.shape[idx] > 1
-            # TODO: Check the symbols are consistent with each other
-            if isinstance(b.stride()[idx], torch.SymInt):
-                continue
             if a.stride()[idx] != b.stride()[idx] and check:
                 return False, idx
 
@@ -244,15 +234,9 @@ def _check_strides_helper(
 
 
 def check_significant_strides(
-    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, allow_rhs_unbacked=False
+    a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
 ) -> Tuple[bool, Optional[int]]:
-    return _check_strides_helper(
-        a,
-        b,
-        only_cuda=only_cuda,
-        significant_only=True,
-        allow_rhs_unbacked=allow_rhs_unbacked,
-    )
+    return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
 
 
 def check_all_strides(
