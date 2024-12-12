@@ -33,13 +33,13 @@ def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
         from . import onednn_ir
 
-        aten_mkldnn_linear_unary = ExternKernelChoice(
+        aten_onednn_linear_unary = ExternKernelChoice(
             torch.ops.onednn._linear_pointwise,
             "onednn::_linear_pointwise",
             has_out_variant=False,
             kernel_creator=onednn_ir.LinearUnary.create,
         )
-        aten_mkldnn_linear_binary = ExternKernelChoice(
+        aten_onednn_linear_binary = ExternKernelChoice(
             torch.ops.onednn._linear_pointwise.binary,
             "onednn::_linear_pointwise",
             has_out_variant=False,
@@ -207,7 +207,7 @@ def register_onednn_fusion_ops():
                 if b is None:
                     kwargs["B"] = None
                 choices.append(
-                    aten_mkldnn_linear_unary.bind(
+                    aten_onednn_linear_unary.bind(
                         [x, w] if b is None else [x, w, b],
                         layout,
                         **kwargs,
@@ -269,7 +269,7 @@ def register_onednn_fusion_ops():
                 if b is None:
                     kwargs["B"] = None
                 choices.append(
-                    aten_mkldnn_linear_binary.bind(
+                    aten_onednn_linear_binary.bind(
                         [x, y, w] if b is None else [x, y, w, b],
                         layout,
                         **kwargs,
