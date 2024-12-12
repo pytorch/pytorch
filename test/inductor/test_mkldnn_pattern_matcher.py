@@ -662,6 +662,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(
                 mod, v, dtype, dim
             )
+            # TODO: Removeme, when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            if TEST_ACL and dtype == torch.bfloat16 and memory_format != torch.contiguous_format:
+                continue
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
