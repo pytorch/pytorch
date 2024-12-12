@@ -66,7 +66,7 @@ from ..utils import (
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
-from ..wrapper_benchmark import get_kernel_category_by_source_code
+from ..wrapper_benchmark import KernelCategory
 from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
@@ -3580,10 +3580,18 @@ class TritonScheduling(SIMDScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
-            kernel_name = "_".join(
-                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
-            )
+            kernel_category = KernelCategory.from_source_code(src_code)
+            if kernel_category == KernelCategory.TEMPLATE:
+                kernel_name = "_".join([kernel.kernel_name])
+            else:
+                kernel_name = "_".join(
+                    [
+                        "triton",
+                        kernel_category.value[:3],
+                        fused_name,
+                        wrapper.next_kernel_suffix(),
+                    ]
+                )
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
