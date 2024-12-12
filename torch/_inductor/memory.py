@@ -433,7 +433,7 @@ def topological_sort_lpmf(
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
     num_iters: int = 0
-    size_threshold = percentile([node.mpi_node.size for node in nodes], 95)
+    size_threshold = percentile([node.mpi_node.size for node in nodes], 75)
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
         if min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold:
