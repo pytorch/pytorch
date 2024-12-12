@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/TensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
