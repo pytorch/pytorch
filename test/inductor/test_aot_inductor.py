@@ -29,7 +29,10 @@ from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
@@ -4099,6 +4102,62 @@ class AOTInductorTestsTemplate:
         # If the model is already compiled with a misaligned input, the
         # generated code should NOT contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
+
+    def test_conv3d(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        if not _has_sufficient_memory(self.device, 2**35):
+            raise unittest.SkipTest("insufficient memory")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(
+                self,
+                convert_element_type_1271,
+                convert_element_type_1272,
+                convert_element_type_1273,
+            ):
+                return torch.ops.aten.convolution.default(
+                    convert_element_type_1271,
+                    convert_element_type_1272,
+                    convert_element_type_1273,
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                )
+
+        example_inputs = (
+            torch.randn(1, 64, 5160, 5160, device=self.device),
+            torch.randn(3, 64, 3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+        dynamic_shapes = {
+            "convert_element_type_1271": {
+                3: torch.export.Dim.DYNAMIC,
+                4: torch.export.Dim.DYNAMIC,
+            },
+            "convert_element_type_1272": None,
+            "convert_element_type_1273": None,
+        }
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_conv_backends": "TRITON",
+            }
+        ):
+            self.check_model(
+                Model(),
+                example_inputs,
+                atol=0.1,
+                rtol=1e-3,
+                dynamic_shapes=dynamic_shapes,
+            )
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
