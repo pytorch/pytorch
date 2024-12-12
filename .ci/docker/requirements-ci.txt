@@ -30,10 +30,10 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.2.1
+expecttest==0.3.0
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.2.1
+#Pinned versions: 0.3.0
 #test that import:
 
 fbscribelogger==0.1.7
@@ -280,9 +280,9 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.5
+lintrunner==0.12.7
 #Description: all about linters!
-#Pinned versions: 0.12.5
+#Pinned versions: 0.12.7
 #test that import:
 
 redis>=4.0.0
