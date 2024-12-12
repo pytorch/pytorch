@@ -612,6 +612,8 @@ def _compile_fx_inner(
             **graph_kwargs,
         )
 
+    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
+
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
@@ -810,6 +812,7 @@ class _InProcessFxCompile(FxCompile):
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
         aot_mode: bool = graph_kwargs.get("aot_mode", False)
         is_inference: bool = graph_kwargs.get("is_inference", False)
+        layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
         extern_node_serializer: Optional[
             Callable[[List[ExternKernelNode]], Any]
         ] = graph_kwargs.get("extern_node_serializer", None)
@@ -1416,6 +1419,7 @@ def fw_compiler_freezing(
     ]
 
     static_input_idxs = list(range(num_fixed))
+    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]

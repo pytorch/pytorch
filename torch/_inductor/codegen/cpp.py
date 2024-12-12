@@ -4795,12 +4795,10 @@ class CppScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
-        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
         """
-        assert not prologue_nodes
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4916,7 +4914,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
