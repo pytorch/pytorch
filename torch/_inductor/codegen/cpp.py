@@ -1401,7 +1401,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        return f"{x}.asinh()"
+        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
 
     @staticmethod
     def acosh(x):
