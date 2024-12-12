@@ -410,9 +410,9 @@
 
 - name: CPU inductor
   patterns:
-  - torch/_inductor/mkldnn_ir.py
-  - torch/_inductor/mkldnn_lowerings.py
-  - torch/_inductor/fx_passes/mkldnn_fusion.py
+  - torch/_inductor/onednn_ir.py
+  - torch/_inductor/onednn_lowerings.py
+  - torch/_inductor/fx_passes/onednn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
   - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py

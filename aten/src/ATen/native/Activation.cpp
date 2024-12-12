@@ -16,7 +16,7 @@
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 #endif
 

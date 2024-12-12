@@ -191,7 +191,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
 namespace at::native {

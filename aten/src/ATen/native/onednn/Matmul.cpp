@@ -90,7 +90,7 @@ void mkldnn_matmul_i8i8i32(
 
 #else // AT_MKLDNN_ENABLED
 
-#include <ATen/native/onednn/MKLDNNCommon.h>
+#include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
 
 namespace at::native {
