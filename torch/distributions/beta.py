@@ -14,7 +14,7 @@ __all__ = ["Beta"]
 
 class Beta(ExponentialFamily):
     r"""
-    Beta distribution parameterized by :attr:`concentration1` and :attr:`concentration0`.
+    Beta distribution parameterized by :attr:`concentration1` and :attr:`concentration0` on t.
 
     Example::
 
@@ -28,15 +28,22 @@ class Beta(ExponentialFamily):
             (often referred to as alpha)
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
+        low (float or Tensor): lower range.
+        high (float or Tensor): upper range.
     """
+
     arg_constraints = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
+        "low": constraints.dependent(is_discrete=False, event_dim=0),
+        "high": constraints.dependent(is_discrete=False, event_dim=0),
     }
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self, concentration1, concentration0, low=0.0, high=1.0, validate_args=None
+    ):
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
@@ -51,6 +58,8 @@ class Beta(ExponentialFamily):
         self._dirichlet = Dirichlet(
             concentration1_concentration0, validate_args=validate_args
         )
+        self.scale = high - low
+        self.location = low
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -63,28 +72,38 @@ class Beta(ExponentialFamily):
 
     @property
     def mean(self):
-        return self.concentration1 / (self.concentration1 + self.concentration0)
+        return self.location + self.scale * (
+            self.concentration1 / (self.concentration1 + self.concentration0)
+        )
 
     @property
     def mode(self):
-        return self._dirichlet.mode[..., 0]
+        return self.location + self.scale * self._dirichlet.mode[..., 0]
 
     @property
     def variance(self):
         total = self.concentration1 + self.concentration0
-        return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
+        return (
+            self.scale.pow(2)
+            * self.concentration1
+            * self.concentration0
+            / (total.pow(2) * (total + 1))
+        )
 
-    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
-        return self._dirichlet.rsample(sample_shape).select(-1, 0)
+    def rsample(self, sample_shape=()):
+        sample = self._dirichlet.rsample(sample_shape).select(-1, 0)
+        scaled_sample = self.location + self.scale * sample
+        return scaled_sample
 
     def log_prob(self, value):
+        scaled_value = (value - self.location) / self.scale
         if self._validate_args:
-            self._validate_sample(value)
-        heads_tails = torch.stack([value, 1.0 - value], -1)
+            self._validate_sample(scaled_value)
+        heads_tails = torch.stack([scaled_value, 1.0 - scaled_value], -1)
         return self._dirichlet.log_prob(heads_tails)
 
     def entropy(self):
-        return self._dirichlet.entropy()
+        return self._dirichlet.entropy() + torch.log(self.scale)
 
     @property
     def concentration1(self):
@@ -106,5 +125,10 @@ class Beta(ExponentialFamily):
     def _natural_params(self):
         return (self.concentration1, self.concentration0)
 
-    def _log_normalizer(self, x, y):
-        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
+    def _log_normalizer(self, x, y, high=1.0, low=0.0):
+        return (
+            torch.lgamma(x)
+            + torch.lgamma(y)
+            - torch.lgamma(x + y)
+            + torch.log(high - low)
+        )
