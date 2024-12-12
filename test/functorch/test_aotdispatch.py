@@ -6334,8 +6334,9 @@ metadata incorrectly.
         self.assertEqual(ref_x.grad, x.grad)
 
     def test_unwrap_subclass_parameters_with_unused_callable_arg_in_ctor(self):
-        def _test_callable(x):
-            return x
+        from torch.testing._utils import _dummy_test_fn_with_module
+
+        _test_fn = _dummy_test_fn_with_module
 
         class SC(WrapperSubclass):
             @staticmethod
@@ -6365,7 +6366,7 @@ metadata incorrectly.
                 out_a = func(*args_a, **kwargs_a)
                 out_a_flat, spec = pytree.tree_flatten(out_a)
                 out_flat = [
-                    cls(o_a, _test_callable) if isinstance(o_a, torch.Tensor) else o_a
+                    cls(o_a, _test_fn) if isinstance(o_a, torch.Tensor) else o_a
                     for o_a in out_a_flat
                 ]
                 out = pytree.tree_unflatten(out_flat, spec)
@@ -6380,7 +6381,7 @@ metadata incorrectly.
             def __init__(self):
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
-                self.p2 = torch.nn.Parameter(SC(torch.ones(3, 4), _test_callable))
+                self.p2 = torch.nn.Parameter(SC(torch.ones(3, 4), _test_fn))
 
             def forward(self, x):
                 return x + 2 * self.p1 + self.p2

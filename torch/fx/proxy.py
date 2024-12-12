@@ -348,7 +348,7 @@ class TracerBase:
         elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
 
-        elif callable(a):
+        elif inspect.isfunction(a):
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")

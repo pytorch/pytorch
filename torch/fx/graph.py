@@ -549,7 +549,7 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
-            elif callable(arg):
+            elif inspect.isfunction(arg):
                 return f"{arg.__module__}.{arg.__name__}"
             else:
                 return blue(repr(arg))

@@ -172,6 +172,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().as_python_constant()
 
     def as_proxy(self):
+        if self.fn.__module__ in ("__main__"):
+            raise Unsupported("Local function can not be put in the graph")
         return self.fn
 
     def self_args(self):
