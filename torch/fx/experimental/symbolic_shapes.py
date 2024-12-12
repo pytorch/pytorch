@@ -3870,9 +3870,24 @@ class ShapeEnv:
             ex_size, source, symbolic_context
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
+        contiguous_striding = True
+        numel = math.prod(size)
+        if isinstance(numel, int) and numel < 2:
+            contiguous_striding = False
+        for i in range(len(size) - 2, -1, -1):
+            # Even though a tensor is contiguous, it may not
+            # conform to stride[i] = size[i+1] * stride[i+1]
+            contiguous_stride = ex_stride[i + 1] * ex_size[i + 1]
+            if (
+                not isinstance(contiguous_stride, sympy.Symbol)
+                and ex_stride[i] != contiguous_stride
+            ):
+                contiguous_striding = False
+
+        if not contiguous_striding:
+            for i, val in enumerate(ex_stride):
+                if val in (0, 1):
+                    stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
@@ -3896,28 +3911,42 @@ class ShapeEnv:
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
 
             if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [
-                        (ex_stride[i], i)
+                if contiguous_striding:
+                    if stride[-1] is None:
+                        val, i = 1, len(size) - 1
+                    else:
+                        i, val = max(
+                            ((i, stride[i + 1] * size[i + 1])
+                            for i in range(len(stride))
+                            if stride[i] is None),
+                            key=_nested_int_aware_sort,
+                        )
+                else:
+                    # Bind the smallest unbound stride to a new variable
+                    val, i = min(
+                        ((ex_stride[i], i)
                         for i in range(len(stride))
-                        if stride[i] is None
-                    ],
-                    key=_nested_int_aware_sort,
-                )
+                        if stride[i] is None),
+                        key=_nested_int_aware_sort,
+                    )
+
+
                 # Set INFER_STRIDE to STATIC or DUCK depending on sizes
                 dyn_stride = dynamic_strides[i]
                 if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
                     dyn_stride = (
                         DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                     )
-                stride[i] = self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dyn_stride,
-                    constraint_dim=constraint_strides[i],
-                    symbolic_context=symbolic_context,
-                )
+                if isinstance(val, sympy.Symbol):
+                    stride[i] = val
+                else:
+                    stride[i] = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
+                    )
         assert all(x is not None for x in stride)
 
         sym_sizes = [
