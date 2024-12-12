@@ -256,6 +256,8 @@ def mark_nodes_dislike_padding(
             else None
         )
 
+    output_node = g.find_nodes(op="output")[0]
+
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
         if not op:
