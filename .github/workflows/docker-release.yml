@@ -165,7 +165,7 @@ jobs:
 
   validate:
     needs: build
-    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@release/2.6
+    uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@release/2.6
     with:
       channel: test
       ref: main
