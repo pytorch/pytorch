@@ -1241,7 +1241,13 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
     padding_idx = maybe_wrap_dim(padding_idx, weight.size(0));
   }
   std::tuple<Tensor, Tensor, Tensor, Tensor> out;
-  if (!weight.requires_grad() && !weight._fw_grad(/*level=*/0).defined()) {
+  bool needs_grad_path = weight.requires_grad() ||
+                      weight._fw_grad(/*level=*/0).defined() ||
+                      (per_sample_weights_opt.has_value() &&
+                       per_sample_weights_opt.value().defined() &&
+                       per_sample_weights_opt.value().requires_grad());
+
+  if (!needs_grad_path) {
     out = at::_embedding_bag_forward_only(
       weight, indices.contiguous(), offsets.contiguous(), scale_grad_by_freq,
       mode, sparse, per_sample_weights, include_last_offset, padding_idx);
@@ -1502,7 +1508,7 @@ template <typename scalar_t>
 void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
-    const Tensor& offset2bag__,
+    const Tensor& offset2bag_,
     const Tensor& bag_size_,
     int64_t num_weights,
     bool scale_grad_by_freq,
@@ -1511,12 +1517,9 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     Tensor& index_grad_weight,
     int64_t padding_idx) {
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  Tensor &offset2bag_ = const_cast<Tensor &>(offset2bag__);
-
   auto ind_sort_ = indices_.sort();
-  auto indices = std::get<0>(ind_sort_);
-  auto ind_sort = std::get<1>(ind_sort_);
+  auto const& indices = std::get<0>(ind_sort_);
+  auto const& ind_sort = std::get<1>(ind_sort_);
   auto offset2bag = offset2bag_.index_select(0, ind_sort);
 
   std::optional<Tensor> per_sample_weights;
@@ -1759,8 +1762,6 @@ Tensor _embedding_bag_sparse_backward_symint(
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
 
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);
 
   index_grad = apply_bag_size_backward(mode, index_grad, offset2bag, bag_size_);

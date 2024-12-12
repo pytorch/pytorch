@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import functools
 import inspect
 import operator
 import types
@@ -18,7 +17,6 @@ from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
-    is_namedtuple,
     istype,
     iter_contains,
     Lit,
@@ -40,8 +38,6 @@ if TYPE_CHECKING:
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for_instance(obj):
-        if is_namedtuple(obj):
-            return functools.partial(NamedTupleVariable, tuple_cls=type(obj))
         return BaseListVariable.cls_for(type(obj))
 
     @staticmethod
@@ -835,7 +831,9 @@ class NamedTupleVariable(TupleVariable):
         #   NamedTupleType._make(iterable)
         create_fn = self.tuple_cls if self.is_structseq() else self.tuple_cls._make
         codegen.add_push_null(
-            lambda: codegen.append_output(codegen._create_load_const(create_fn))
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(create_fn)
+            )
         )
         codegen.foreach(self.items)
         codegen.extend_output(

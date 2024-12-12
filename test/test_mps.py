@@ -760,12 +760,8 @@ def mps_ops_modifier(ops):
         'pca_lowrank': None,
         'qr': None,
         'rsub': None,
-        'scatter_reduceamax': None,
-        'scatter_reduceamin': None,
-        'scatter_reducemin': None,
-        'scatter_reducemean': None,
-        'scatter_reduceprod': None,
-        'scatter_reducesum': None,
+        'scatter_reduceamax': [torch.int32, torch.int64] if MACOS_VERSION < 15.0 else [torch.int64],
+        'scatter_reduceamin': [torch.int32, torch.int64] if MACOS_VERSION < 15.0 else [torch.int64],
         'segment_reduce': None,
         '_segment.reduce': None,
         'segment.reduce': None,
@@ -1221,6 +1217,23 @@ class TestAutocastMPS(TestCase):
                          output_tensor.to(torch.float16),
                          f"Autocast & non-autocast tensors did not match, \
                          got:\n{autocast_output_tensor} \n{output_tensor.to(torch.float16)}")
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/141774
+    def test_scaled_dot_product_attention_autocast(self):
+        # TODO(hvaara): Parameterize the dtypes for cleaner code and better failure debugability
+        dtypes = [torch.float16] if MACOS_VERSION < 14.0 else [torch.bfloat16, torch.float16]
+
+        for dtype in dtypes:
+            query = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+            key = torch.rand(4, 1, 16, 8, dtype=torch.float32, device="mps")
+            value = torch.rand(4, 1, 16, 8, dtype=dtype, device="mps")
+
+            with torch.amp.autocast(device_type="mps"):
+                y_autocast = F.scaled_dot_product_attention(query, key, value)
+
+            y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
+            self.assertEqual(y.to(y_autocast.dtype), y_autocast)
+
 
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
@@ -8112,6 +8125,18 @@ class TestMPS(TestCaseMPS):
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
 
+    def test_generic_event(self):
+        startEvent = torch.Event('mps', enable_timing=True)
+        startEvent.record()
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        endEvent = torch.Event('mps', enable_timing=True)
+        endEvent.record()
+        elapsedTime = startEvent.elapsed_time(endEvent)
+        self.assertGreater(elapsedTime, 0.0)
+
     def test_jit_save_load(self):
         m = torch.nn.Module()
         m.x = torch.rand(3, 3, device='mps')
@@ -9040,6 +9065,19 @@ class TestNNMPS(NNTestCase):
         y1.sum().backward()
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/141471
+    def test_conv3d_channels_last_3d(self):
+        m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
+        m_mps = copy.deepcopy(m_cpu).to("mps")
+
+        x_cpu = torch.randn(20, 16, 10, 50, 100, device="cpu").to(memory_format=torch.channels_last_3d)
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        res_cpu = m_cpu(x_cpu)
+        res_mps = m_mps(x_mps)
+
+        self.assertEqual(res_cpu, res_mps)
 
     def test_gemm_permute_transpose(self):
         batch_size = 32
@@ -12453,6 +12491,89 @@ class TestCommon(TestCase):
             mps_tensor = ones(device)
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
+
+class TestMetalLibrary(TestCaseMPS):
+    def test_metal_arange(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) {
+              x[idx] = idx;
+            }
+        """)
+        lib.arange(x)
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+
+    def test_metal_dispatch_3d(self):
+        x = torch.empty(12, device="mps")
+        y = torch.empty_like(x)
+        z = torch.empty_like(x)
+        lib = torch.mps._compile_shader("""
+            kernel void arange_x(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.x;
+            }
+
+            kernel void arange_y(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.y;
+            }
+
+            kernel void arange_z(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.z;
+            }
+        """)
+
+        # Check that one can enumerate all shaders
+        self.assertEqual(set(dir(lib)), {f"arange_{i}" for i in ["x", "y", "z"]})
+
+        lib.arange_x(x)
+        lib.arange_y(y, threads=(1, y.numel()))
+        lib.arange_z(z, threads=(1, 1, z.numel()))
+
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
+        self.assertEqual(x, z)
+
+    def test_metal_arange_with_arg(self):
+        x = torch.zeros(12, device="mps")
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device float* x, constant float& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
+        """)
+        lib.arange(x, 3.14, .5)
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_cast(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        y = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange_all_half(device half* x, constant half2& start_step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start_step.x + idx * start_step.y;
+            }
+
+            kernel void arange_half_float(device half* x, constant half& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
+        """)
+        lib.arange_all_half(x, [3.14, .5], arg_casts="fp16")
+        lib.arange_half_float(y, 3.14, .5, arg_casts={1: "fp16"})
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
+
+    def test_metal_error_checking(self):
+        # Syntax error asserts
+        self.assertRaises(RuntimeError, lambda: torch.mps._compile_shader("Syntax error"))
+        cpu_tensor = torch.rand(3)
+        mps_tensor = torch.rand(3, device="mps")
+        lib = torch.mps._compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
+        # Passing CPU tensor asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(cpu_tensor))
+        # Passing invalid shader name asserts
+        self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
+        # Passing no tensors asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(12))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

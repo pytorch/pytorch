@@ -68,11 +68,19 @@ from .utils import (
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
+    register_op_dtype_propagation_rules,
     sympy_product,
     use_scatter_fallback,
 )
 from .virtualized import ops, V
 
+
+# TODO(jansel): we should implement decomps or lowerings for these
+# https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+    "aten::index_add",
+}
 
 log = logging.getLogger(__name__)
 lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
@@ -763,6 +771,14 @@ def register_pointwise(
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
+        register_op_dtype_propagation_rules(
+            "libdevice_" + name, type_promotion_kind, override_return_dtype
+        )
+
+    register_op_dtype_propagation_rules(
+        name, type_promotion_kind, override_return_dtype
+    )
+
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -920,7 +936,10 @@ def squeeze(x, dim=None):
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
-        if not (d in dims and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1))):
+        if not (
+            d in dims
+            and V.graph.sizevars.evaluate_expr(sympy.Eq(s, 1, size_oblivious=True))
+        ):
             new_shape.append(s)
 
     # squeeze does nothing if the size isn't 1
@@ -1539,6 +1558,9 @@ def cat(inputs, dim=0):
 
         return False
 
+    if config.force_pointwise_cat:
+        return pointwise_cat(inputs, dim)
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
     if cpu_device:
@@ -1854,8 +1876,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1865,6 +1889,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -2310,13 +2335,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
-# TODO(jansel): we should implement decomps or lowerings for these
-# https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-}
-
-
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
@@ -2356,23 +2374,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def is_aligned_realized_tensor(x):
-            aligned_strides = all(
-                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
-                for i in range(len(x.get_stride()) - 1)
-            )
-            # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-            )
-            return aligned_last_dim and aligned_strides
-
-        if (
-            isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
-        ):
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return V.graph.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride
             )
@@ -3018,7 +3020,7 @@ def new_constant(fill_value):
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
-        return _full(fill_value, device, dtype, size)
+        return _full(fill_value, decode_device(device), dtype, size)
 
     return _new_constant
 
@@ -3030,7 +3032,12 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        None,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
@@ -3044,6 +3051,7 @@ def empty_strided(
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
+    device = decode_device(device)
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
     pointwise.realize()
     buffer = pointwise.data.data
@@ -3074,7 +3082,12 @@ def new_empty_strided(
     if device is None:
         device = x.get_device()
     return empty_strided(
-        size, stride, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+        size,
+        stride,
+        dtype=dtype,
+        layout=layout,
+        device=decode_device(device),
+        pin_memory=pin_memory,
     )
 
 
@@ -3895,7 +3908,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds_precomp):
+        for idx, (low, _high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)
@@ -4182,7 +4195,7 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
-    *batch, height, width = x.get_size()
+    *_batch, _height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
 
     indices_loader = indices.make_loader()
@@ -4280,7 +4293,6 @@ def max_pool2d_with_indices_backward(
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
-    *_, h, w = x.get_size()
     x_loader = x.make_loader()
 
     def load(prefix, increments, start_indices, end_indices):
@@ -4674,11 +4686,11 @@ def upsample_nearest2d_backward(
 ):
     x.realize_hint()
 
-    *batch, inp_h, inp_w = x.get_size()
+    *_batch, inp_h, inp_w = x.get_size()
     inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
     inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
-    *batch, out_h, out_w = input_size
+    *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
         return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
@@ -4856,7 +4868,6 @@ def _avg_poolnd(
     else:
 
         def fn(idx):
-            prefix = idx[:-dim]
             bh = idx[-dim:]
 
             divide_factors = []
@@ -4912,10 +4923,12 @@ def avg_pool2d_backward(
 
     grad_output.realize_hint()  # we will read this many times, so make sure it is computed
 
-    *batch, height, width = x.get_size()
+    *_, height, width = x.get_size()
 
-    h_out, ceil_mode1 = pooling_size(height, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
+    _h_out, ceil_mode1 = pooling_size(
+        height, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
 
     grad_loader = grad_output.make_loader()
 
@@ -5081,13 +5094,17 @@ def avg_pool3d_backward(
 
     grad_output.realize_hint()
 
-    *batch, depth, height, width = x.get_size()
+    *_batch, depth, height, width = x.get_size()
 
-    d_out, ceil_mode_d = pooling_size(depth, 0, kernel_size, stride, padding, ceil_mode)
-    h_out, ceil_mode_h = pooling_size(
+    _d_out, ceil_mode_d = pooling_size(
+        depth, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _h_out, ceil_mode_h = pooling_size(
         height, 1, kernel_size, stride, padding, ceil_mode
     )
-    w_out, ceil_mode_w = pooling_size(width, 2, kernel_size, stride, padding, ceil_mode)
+    _w_out, ceil_mode_w = pooling_size(
+        width, 2, kernel_size, stride, padding, ceil_mode
+    )
 
     grad_loader = grad_output.make_loader()
     had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
@@ -5340,7 +5357,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
-    size = x.get_size()
     axis = _validate_dim(x, axis)
 
     return dict(
@@ -5832,16 +5848,6 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5860,16 +5866,6 @@ def cummin(x, axis=None):
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
         "argmin", dtype=dtype, arg_break_ties_left=False
-    )
-
-    max_value = (
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
     )
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
